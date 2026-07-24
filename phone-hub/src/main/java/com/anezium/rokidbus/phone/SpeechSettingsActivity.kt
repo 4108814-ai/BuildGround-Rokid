@@ -73,7 +73,7 @@ class SpeechSettingsActivity : Activity() {
             addView(languageGrid(), NexusUi.block())
             settings.selectedLanguage().uiNote?.let { note ->
                 addView(BusTheme.gap(this@SpeechSettingsActivity, 8))
-                addView(NexusUi.rowSub(this@SpeechSettingsActivity, note).apply { maxLines = 2 }, NexusUi.block())
+                addView(NexusUi.rowSub(this@SpeechSettingsActivity, note).apply { maxLines = 3 }, NexusUi.block())
             }
 
             addView(BusTheme.gap(this@SpeechSettingsActivity, 28))
