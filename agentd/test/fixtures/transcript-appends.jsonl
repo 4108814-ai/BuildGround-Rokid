@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-07-24T10:00:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"I am checking the build output now."},{"type":"tool_use","name":"Bash","input":{"command":"npm test"}}]}}
+{"type":"api_error","timestamp":"2026-07-24T10:00:02.000Z","is_error":true,"error":{"message":"API request failed while reading the response"}}

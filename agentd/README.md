@@ -1,0 +1,86 @@
+# nexus-agentd
+
+`nexus-agentd` is the Windows PC-side monitor for Nexus Agents mission control. It receives
+Claude Code lifecycle hooks on loopback, tails active Claude transcript JSONL files, and
+publishes authenticated session snapshots and ordered deltas to the Nexus Agents Android
+plugin.
+
+Phase 1 is monitoring only. The daemon does not approve or deny requests, block Claude
+hooks, accept voice commands, provide TLS, or install itself as a Windows service.
+
+## Requirements and setup
+
+- Windows 11
+- Node.js 20 or newer
+- A Tailscale connection between the PC and the Android device
+
+```powershell
+cd agentd
+npm install
+npm run build
+node dist/cli.js install-hooks
+node dist/cli.js run
+```
+
+`run` is the default command, so `node dist/cli.js` is equivalent. If installed through
+`npm link` or as a package, use `agentd` in place of `node dist/cli.js`.
+
+Claude Code hooks post only to `127.0.0.1:8791`; this listener never accepts remote
+connections. Plugin WebSockets listen on `0.0.0.0:8792` and require the pairing token.
+Allow inbound TCP 8792 through Windows Firewall:
+
+```powershell
+netsh advfirewall firewall add rule name="nexus-agentd" dir=in action=allow protocol=TCP localport=8792
+```
+
+Port 8792 carries an authenticated but unencrypted WebSocket in Phase 1. Expose it only
+over the user's trusted Tailscale tailnet, not through router port forwarding or a public
+interface.
+
+## Pair the plugin
+
+```powershell
+node dist/cli.js pair
+```
+
+The command prints a one-line JSON pairing payload and a terminal QR code. It prefers the
+first IPv4 address on an interface whose name contains `Tailscale`. The Android plugin can
+scan the QR code or accept the printed JSON pasted directly.
+
+The token, stable machine ID, ports, and machine name live in
+`~/.nexus-agentd/config.json`. Treat this file and pairing payload as credentials.
+Runtime logs are appended to `~/.nexus-agentd/agentd.log`; at 5 MB the daemon rotates the
+file to `agentd.log.old`.
+
+## Hook management
+
+```powershell
+node dist/cli.js install-hooks
+node dist/cli.js uninstall-hooks
+```
+
+Both commands merge `~/.claude/settings.json` without replacing unrelated settings or
+hooks. Before changing an existing settings file, they create a timestamped
+`settings.json.agentd-backup-*` copy. Reinstalling is idempotent. Malformed JSON aborts
+without writing.
+
+The generated hook forwarder always exits successfully and silently. If the daemon is
+down or unreachable, it gives up within two seconds so Claude Code can continue.
+
+## Operations and verification
+
+```powershell
+node dist/cli.js status
+npm test
+npm run smoke
+```
+
+`status` checks the loopback health endpoint and prints whether the daemon is running plus
+its session count. `npm test` uses Node's built-in test runner. `npm run smoke` starts an
+isolated daemon, sends `SessionStart` and `UserPromptSubmit` with `curl`, authenticates a
+WebSocket client, verifies `hello_ack`, `snapshot`, and ordered `session_upsert` frames,
+prints those frames, and shuts the daemon down.
+
+On startup, recent transcripts under `~/.claude/projects/*/*.jsonl` are shown as stale
+idle sessions. They are not tailed until a hook references them. Completed sessions remain
+available for 30 minutes.
