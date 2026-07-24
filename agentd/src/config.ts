@@ -1,0 +1,96 @@
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import os from "node:os";
+import path from "node:path";
+import type { AgentConfig } from "./types";
+
+const DEFAULT_HTTP_PORT = 8791;
+const DEFAULT_WS_PORT = 8792;
+
+export function defaultStateDir(): string {
+  return process.env.NEXUS_AGENTD_STATE_DIR || path.join(homedir(), ".nexus-agentd");
+}
+
+export function configPath(stateDir = defaultStateDir()): string {
+  return path.join(stateDir, "config.json");
+}
+
+function newConfig(): AgentConfig {
+  return {
+    token: randomBytes(32).toString("base64url"),
+    wsPort: DEFAULT_WS_PORT,
+    httpPort: DEFAULT_HTTP_PORT,
+    machineId: randomBytes(16).toString("base64url"),
+    machineName: os.hostname(),
+  };
+}
+
+function isPort(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) > 0 && Number(value) <= 65_535;
+}
+
+function parseConfig(raw: string, filePath: string): {
+  config: AgentConfig;
+  upgraded: boolean;
+} {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`Cannot parse ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid nexus-agentd config at ${filePath}`);
+  }
+
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.token !== "string" ||
+    record.token.length === 0 ||
+    !isPort(record.wsPort) ||
+    !isPort(record.httpPort) ||
+    typeof record.machineName !== "string" ||
+    record.machineName.length === 0
+  ) {
+    throw new Error(`Invalid nexus-agentd config at ${filePath}`);
+  }
+
+  const upgraded = typeof record.machineId !== "string" || record.machineId.length === 0;
+  return {
+    config: {
+      token: record.token,
+      wsPort: record.wsPort,
+      httpPort: record.httpPort,
+      machineId: upgraded ? randomBytes(16).toString("base64url") : record.machineId as string,
+      machineName: record.machineName,
+    },
+    upgraded,
+  };
+}
+
+function writeConfig(filePath: string, config: AgentConfig): void {
+  const tempPath = `${filePath}.${process.pid}.tmp`;
+  writeFileSync(tempPath, `${JSON.stringify(config, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  renameSync(tempPath, filePath);
+}
+
+export function ensureConfig(stateDir = defaultStateDir()): AgentConfig {
+  mkdirSync(stateDir, { recursive: true });
+  const filePath = configPath(stateDir);
+  if (!existsSync(filePath)) {
+    const config = newConfig();
+    writeConfig(filePath, config);
+    return config;
+  }
+
+  const parsed = parseConfig(readFileSync(filePath, "utf8"), filePath);
+  if (parsed.upgraded) {
+    writeConfig(filePath, parsed.config);
+  }
+  return parsed.config;
+}
