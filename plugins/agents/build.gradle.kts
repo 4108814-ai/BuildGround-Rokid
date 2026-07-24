@@ -4,6 +4,10 @@ plugins {
 
 apply(from = rootProject.file("../../gradle/plugin-release-signing.gradle"))
 
+subprojects {
+    layout.buildDirectory.set(rootProject.layout.buildDirectory.dir("dependencies/$name"))
+}
+
 android {
     namespace = "com.anezium.rokidbus.plugin.agents"
     compileSdk = 36

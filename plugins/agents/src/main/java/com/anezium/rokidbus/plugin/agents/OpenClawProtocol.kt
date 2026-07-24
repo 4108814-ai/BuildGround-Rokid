@@ -65,8 +65,8 @@ object OpenClawProtocol {
         val signaturePayload = listOf(
             "v3",
             identity.deviceId,
-            "openclaw-android",
-            "ui",
+            "gateway-client",
+            "backend",
             "operator",
             scopes.joinToString(","),
             signedAtMs.toString(),
@@ -82,12 +82,12 @@ object OpenClawProtocol {
             .put(
                 "client",
                 JSONObject()
-                    .put("id", "openclaw-android")
+                    .put("id", "gateway-client")
                     .put("displayName", "Nexus Agents")
                     .put("version", versionName)
                     .put("platform", "android")
                     .put("deviceFamily", "phone")
-                    .put("mode", "ui"),
+                    .put("mode", "backend"),
             )
             .put("caps", JSONArray().put("exec-approvals"))
             .put("role", "operator")

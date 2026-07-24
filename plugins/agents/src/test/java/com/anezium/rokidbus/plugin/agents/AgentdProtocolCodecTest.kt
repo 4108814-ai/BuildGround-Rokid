@@ -19,6 +19,10 @@ class AgentdProtocolCodecTest {
     @Test
     fun snapshotUpsertAndRemovedAreParsed() {
         val codec = AgentdProtocolCodec()
+        val helloAck = codec.parse(
+            """{"type":"hello_ack","v":1,"server":{"name":"nexus-agentd","version":"1.0.0","machineId":"pc-1","machineName":"Desk"}}""",
+        ) as AgentdAction.HelloAcknowledged
+        assertEquals("Desk", helloAck.machineName)
         val snapshot = codec.parse(
             """{"type":"snapshot","seq":7,"sessions":[{"id":"s1","provider":"claude","status":"idle","title":"One"}]}""",
         ) as AgentdAction.Snapshot

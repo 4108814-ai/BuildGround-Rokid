@@ -69,5 +69,13 @@ class OpenClawProtocolTest {
                 JSONObject("""{"type":"event","event":"sessions.changed","payload":{"sessionKey":"agent:main:one","reason":"run"}}"""),
             ) is OpenClawEvent.SessionsChanged,
         )
+        assertEquals(
+            OpenClawEvent.ApprovalResolved("approval-1"),
+            OpenClawProtocol.parseEvent(
+                JSONObject(
+                    """{"type":"event","event":"exec.approval.resolved","payload":{"id":"approval-1","decision":"allow-once","resolvedAtMs":2000}}""",
+                ),
+            ),
+        )
     }
 }

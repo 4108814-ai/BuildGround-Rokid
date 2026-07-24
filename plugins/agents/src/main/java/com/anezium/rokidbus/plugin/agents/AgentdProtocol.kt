@@ -15,11 +15,13 @@ sealed interface AgentdAction {
 class AgentdProtocolCodec {
     private var lastSeq: Long? = null
     private var awaitingSnapshot = true
+    private var refreshRequested = false
 
     @Synchronized
     fun reset() {
         lastSeq = null
         awaitingSnapshot = true
+        refreshRequested = false
     }
 
     fun hello(token: String, versionName: String): String = JSONObject()
@@ -49,6 +51,7 @@ class AgentdProtocolCodec {
                 val sessions = json.optJSONArray("sessions").toSessions()
                 lastSeq = seq
                 awaitingSnapshot = false
+                refreshRequested = false
                 AgentdAction.Snapshot(seq, sessions)
             }
             "session_upsert" -> {
@@ -80,14 +83,15 @@ class AgentdProtocolCodec {
         !awaitingSnapshot && lastSeq?.let { seq == it + 1L } == true
 
     private fun gapAction(): AgentdAction {
-        if (awaitingSnapshot && lastSeq == null) {
-            return AgentdAction.Send(REFRESH)
-        }
         if (!awaitingSnapshot) {
             awaitingSnapshot = true
-            return AgentdAction.Send(REFRESH)
         }
-        return AgentdAction.Ignore
+        return if (!refreshRequested) {
+            refreshRequested = true
+            AgentdAction.Send(REFRESH)
+        } else {
+            AgentdAction.Ignore
+        }
     }
 
     companion object {
