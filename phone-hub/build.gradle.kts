@@ -44,6 +44,7 @@ dependencies {
     implementation("androidx.activity:activity:1.10.1")
     implementation("com.example.cxrglobal:lib:0.2.0")
     implementation("com.flyfishxu:kadb:2.1.1")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

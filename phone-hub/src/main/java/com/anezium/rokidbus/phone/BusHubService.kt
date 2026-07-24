@@ -45,6 +45,15 @@ import com.anezium.rokidbus.shared.PhoneHubCapabilitiesContract
 import com.anezium.rokidbus.shared.plugin.PathRules
 import com.anezium.rokidbus.shared.plugin.PluginCapability
 import com.anezium.rokidbus.shared.plugin.PluginCapability.Companion.serialize
+import com.anezium.rokidbus.phone.speech.HubSecretStore
+import com.anezium.rokidbus.phone.speech.InternalAudioAccess
+import com.anezium.rokidbus.phone.speech.InternalAudioAcquireResult
+import com.anezium.rokidbus.phone.speech.InternalAudioConsumer
+import com.anezium.rokidbus.phone.speech.InternalAudioStopReason
+import com.anezium.rokidbus.phone.speech.SpeechSessionManager
+import com.anezium.rokidbus.phone.speech.SpeechSettingsStore
+import com.anezium.rokidbus.phone.speech.SpeechStartResult
+import com.anezium.rokidbus.phone.speech.SpeechUtteranceListener
 import com.example.cxrglobal.CXRLink
 import com.example.cxrglobal.CxrDefs
 import com.example.cxrglobal.GlassInfo
@@ -62,7 +71,9 @@ import java.net.URL
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.FutureTask
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -126,13 +137,15 @@ class BusHubService : Service() {
         val principal: PhonePluginPrincipal? = null,
     )
 
-    private enum class AudioLeaseSide { LOCAL, REMOTE }
+    private enum class AudioLeaseSide { LOCAL, REMOTE, INTERNAL }
 
     private data class AudioLease(
         val leaseId: String,
         val side: AudioLeaseSide,
         val localCallbackBinder: IBinder?,
         val holderPluginId: String?,
+        val internalTag: String? = null,
+        val internalConsumer: InternalAudioConsumer? = null,
         var seq: Long = 0L,
     )
 
@@ -156,14 +169,13 @@ class BusHubService : Service() {
     private val imageSurfaceRateLimiter = ImageSurfaceRateLimiter()
     private val pluginBusJournal = busJournal
     private val sppLoopStarted = AtomicBoolean(false)
-    private val audioLeaseLock = Any()
+    private val audioLeaseArbitrator = SingleAudioLeaseArbitrator<AudioLease>()
     private val glassesAppOperationLock = Any()
     private val glassesAppStateLock = Any()
     private val glassesAppReleaseLock = Any()
     @Volatile private var sppLoopStop = false
     @Volatile private var hubEnabled = true
     @Volatile private var startupBlockedByBluetoothPermission = false
-    @Volatile private var audioLease: AudioLease? = null
     private val writeLock = Any()
     private var socket: BluetoothSocket? = null
     private var output: OutputStream? = null
@@ -180,6 +192,7 @@ class BusHubService : Service() {
     private lateinit var cameraCompanionController: CameraCompanionController
     private lateinit var manualPairingEngine: GlassesManualPairingEngine
     private lateinit var transitLegacyStateExporter: TransitLegacyStateExporter
+    private lateinit var speechSessionManager: SpeechSessionManager
     @Volatile private var cxrConnected = false
     @Volatile private var glassBtConnected = false
     @Volatile private var glassesWorn = false
@@ -468,6 +481,22 @@ class BusHubService : Service() {
         transitLegacyStateExporter = TransitLegacyStateExporter(
             AndroidTransitLegacyStateStorage(applicationContext),
         )
+        speechSessionManager = SpeechSessionManager(
+            context = applicationContext,
+            settings = SpeechSettingsStore(applicationContext),
+            secrets = HubSecretStore(applicationContext),
+            internalAudio = object : InternalAudioAccess {
+                override fun acquireInternalAudio(
+                    tag: String,
+                    consumer: InternalAudioConsumer,
+                ): InternalAudioAcquireResult =
+                    this@BusHubService.acquireInternalAudio(tag, consumer)
+
+                override fun releaseInternalAudio(tag: String) {
+                    this@BusHubService.releaseInternalAudio(tag)
+                }
+            },
+        )
         val externalRuntime = AndroidExternalPluginRuntime(
             context = applicationContext,
             isRegisteredCallback = ::isExternalPrincipalRegistered,
@@ -621,7 +650,8 @@ class BusHubService : Service() {
     private fun stopHub() {
         prefs().edit().putBoolean(PREF_ENABLED, false).apply()
         hubEnabled = false
-        stopAudioLease()
+        if (::speechSessionManager.isInitialized) speechSessionManager.cancel()
+        stopAudioLease(InternalAudioStopReason.HUB_STOPPED)
         runCatching { cxrLink?.disconnect() }
         cxrLink = null
         cxrConnected = false
@@ -642,7 +672,8 @@ class BusHubService : Service() {
     override fun onDestroy() {
         stopPeriodicUpdateChecks()
         sppLoopStop = true
-        stopAudioLease()
+        if (::speechSessionManager.isInitialized) speechSessionManager.close()
+        stopAudioLease(InternalAudioStopReason.HUB_STOPPED)
         runCatching { cxrLink?.disconnect() }
         closeSocket()
         PhoneClientSupervisor.detach(applicationContext, this)
@@ -1456,7 +1487,7 @@ class BusHubService : Service() {
                 ?.id
         }
         val link = cxrLink
-        if (audioLease != null) {
+        if (audioLeaseArbitrator.snapshot() != null) {
             replyToAudioRequest(envelope, replyRemote, JSONObject().put("granted", false).put("reason", "BUSY"), replyBinder, holderPluginId)
             return
         }
@@ -1472,12 +1503,9 @@ class BusHubService : Service() {
             localCallbackBinder = holderBinder,
             holderPluginId = holderPluginId,
         )
-        synchronized(audioLeaseLock) {
-            if (audioLease != null) {
-                replyToAudioRequest(envelope, replyRemote, JSONObject().put("granted", false).put("reason", "BUSY"), replyBinder, holderPluginId)
-                return
-            }
-            audioLease = lease
+        if (!audioLeaseArbitrator.tryAcquire(lease)) {
+            replyToAudioRequest(envelope, replyRemote, JSONObject().put("granted", false).put("reason", "BUSY"), replyBinder, holderPluginId)
+            return
         }
 
         audioHandler.post {
@@ -1492,14 +1520,12 @@ class BusHubService : Service() {
                 false
             }
             if (!started) {
-                synchronized(audioLeaseLock) {
-                    if (audioLease?.leaseId == lease.leaseId) audioLease = null
-                }
+                audioLeaseArbitrator.clearIf { it.leaseId == lease.leaseId }
                 stopAudioStreamQuietly()
                 replyToAudioRequest(envelope, replyRemote, JSONObject().put("granted", false).put("reason", "START_FAILED"), replyBinder, holderPluginId)
                 return@post
             }
-            if (synchronized(audioLeaseLock) { audioLease?.leaseId != lease.leaseId }) {
+            if (audioLeaseArbitrator.snapshot()?.leaseId != lease.leaseId) {
                 // A concurrent revoke may have run stopAudioStreamQuietly() before our
                 // startAudioStream() landed; stop again so no orphan stream survives.
                 stopAudioStreamQuietly()
@@ -1523,30 +1549,70 @@ class BusHubService : Service() {
         }
     }
 
-    private fun releaseAudioLease(envelope: BusEnvelope, replyRemote: Boolean, replyBinder: IBinder?) {
-        val leaseId = envelope.payload.optString("leaseId")
-        val leaseToStop = synchronized(audioLeaseLock) {
-            val current = audioLease
-            if (current != null && current.leaseId == leaseId) {
-                audioLease = null
-                current
+    private fun acquireInternalAudio(
+        tag: String,
+        consumer: InternalAudioConsumer,
+    ): InternalAudioAcquireResult {
+        val link = cxrLink
+        if (audioLeaseArbitrator.snapshot() != null) return InternalAudioAcquireResult.BUSY
+        if (link == null || !isCxrUp()) return InternalAudioAcquireResult.NO_LINK
+        val lease = AudioLease(
+            leaseId = UUID.randomUUID().toString(),
+            side = AudioLeaseSide.INTERNAL,
+            localCallbackBinder = null,
+            holderPluginId = null,
+            internalTag = tag,
+            internalConsumer = consumer,
+        )
+        if (!audioLeaseArbitrator.tryAcquire(lease)) return InternalAudioAcquireResult.BUSY
+
+        val result = runOnAudioMain {
+            val started = runCatching {
+                link.setInterruptAiWake(true)
+                link.setCXRAudioCbk(audioCallback)
+                link.startAudioStream(CXR_AUDIO_PCM)
+            }.getOrDefault(false)
+            if (!started) {
+                audioLeaseArbitrator.clearIf { it.leaseId == lease.leaseId }
+                stopAudioStreamQuietly()
+                InternalAudioAcquireResult.START_FAILED
+            } else if (audioLeaseArbitrator.snapshot()?.leaseId != lease.leaseId) {
+                // Match plugin acquisition's post-start double check so a concurrent link
+                // revoke cannot leave an orphan stream running.
+                stopAudioStreamQuietly()
+                if (isCxrUp()) {
+                    InternalAudioAcquireResult.START_FAILED
+                } else {
+                    InternalAudioAcquireResult.NO_LINK
+                }
             } else {
-                null
+                InternalAudioAcquireResult.OK
             }
         }
+        if (result != null) return result
+
+        audioLeaseArbitrator.clearIf { it.leaseId == lease.leaseId }
+        stopAudioStreamQuietly()
+        return InternalAudioAcquireResult.START_FAILED
+    }
+
+    private fun releaseInternalAudio(tag: String) {
+        val leaseToStop = audioLeaseArbitrator.clearIf {
+            it.side == AudioLeaseSide.INTERNAL && it.internalTag == tag
+        }
+        if (leaseToStop != null) stopAudioStreamQuietly()
+    }
+
+    private fun releaseAudioLease(envelope: BusEnvelope, replyRemote: Boolean, replyBinder: IBinder?) {
+        val leaseId = envelope.payload.optString("leaseId")
+        val leaseToStop = audioLeaseArbitrator.clearIf { it.leaseId == leaseId }
         if (leaseToStop != null) stopAudioStreamQuietly()
         replyToAudioRequest(envelope, replyRemote, JSONObject().put("released", true), replyBinder, leaseToStop?.holderPluginId)
     }
 
     private fun releaseAudioLeaseForLocalBinder(callbackBinder: IBinder, reason: String) {
-        val leaseToStop = synchronized(audioLeaseLock) {
-            val current = audioLease
-            if (current?.side == AudioLeaseSide.LOCAL && current.localCallbackBinder == callbackBinder) {
-                audioLease = null
-                current
-            } else {
-                null
-            }
+        val leaseToStop = audioLeaseArbitrator.clearIf { current ->
+            current.side == AudioLeaseSide.LOCAL && current.localCallbackBinder == callbackBinder
         }
         if (leaseToStop != null) {
             log("Audio lease ${leaseToStop.leaseId} released after $reason")
@@ -1555,12 +1621,12 @@ class BusHubService : Service() {
     }
 
     private fun revokeAudioLease(reason: String) {
-        val leaseToRevoke = synchronized(audioLeaseLock) {
-            val current = audioLease ?: return
-            audioLease = null
-            current
-        }
+        val leaseToRevoke = audioLeaseArbitrator.clear() ?: return
         stopAudioStreamQuietly()
+        if (leaseToRevoke.side == AudioLeaseSide.INTERNAL) {
+            leaseToRevoke.internalConsumer?.onStopped(InternalAudioStopReason.LINK_LOST)
+            return
+        }
         val revoked = BusEnvelope(
             path = AUDIO_LEASE_REVOKED,
             id = leaseToRevoke.leaseId,
@@ -1576,13 +1642,27 @@ class BusHubService : Service() {
         deliverAudioToHolder(leaseToRevoke, revoked)
     }
 
-    private fun stopAudioLease() {
-        val leaseToStop = synchronized(audioLeaseLock) {
-            val current = audioLease
-            audioLease = null
-            current
+    private fun stopAudioLease(internalReason: InternalAudioStopReason) {
+        val leaseToStop = audioLeaseArbitrator.clear()
+        if (leaseToStop != null) {
+            stopAudioStreamQuietly()
+            if (leaseToStop.side == AudioLeaseSide.INTERNAL) {
+                leaseToStop.internalConsumer?.onStopped(internalReason)
+            }
         }
-        if (leaseToStop != null) stopAudioStreamQuietly()
+    }
+
+    private fun <T> runOnAudioMain(block: () -> T): T? {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            return runCatching(block).getOrNull()
+        }
+        val task = FutureTask<T> { block() }
+        if (!audioHandler.post(task)) return null
+        return runCatching {
+            task.get(INTERNAL_AUDIO_START_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        }.onFailure {
+            task.cancel(false)
+        }.getOrNull()
     }
 
     private fun stopAudioStreamQuietly() {
@@ -1602,20 +1682,30 @@ class BusHubService : Service() {
         val safeOffset = offset.coerceIn(0, data.size)
         val safeLength = length.coerceAtMost(data.size - safeOffset)
         if (safeLength <= 0) return
-        val chunk = data.copyOfRange(safeOffset, safeOffset + safeLength)
-        val leaseSnapshot = synchronized(audioLeaseLock) {
-            val current = audioLease ?: return
+        val leaseSnapshot = audioLeaseArbitrator.withActive { current ->
             val seq = current.seq
             current.seq += 1
             current.copy(seq = seq)
+        } ?: return
+        if (leaseSnapshot.side == AudioLeaseSide.INTERNAL) {
+            leaseSnapshot.internalConsumer?.onPcm(
+                data = data,
+                offset = safeOffset,
+                length = safeLength,
+                seq = leaseSnapshot.seq,
+                elapsedRealtimeMs = SystemClock.elapsedRealtime(),
+            )
+            return
         }
+        val chunk = data.copyOfRange(safeOffset, safeOffset + safeLength)
+        val elapsedRealtime = SystemClock.elapsedRealtime()
         val frame = BusEnvelope(
             path = AUDIO_FRAMES,
             id = "${leaseSnapshot.leaseId}:${leaseSnapshot.seq}",
             payload = JSONObject()
                 .put("leaseId", leaseSnapshot.leaseId)
                 .put("seq", leaseSnapshot.seq)
-                .put("elapsedRealtime", SystemClock.elapsedRealtime())
+                .put("elapsedRealtime", elapsedRealtime)
                 .apply {
                     if (leaseSnapshot.side == AudioLeaseSide.LOCAL) {
                         leaseSnapshot.holderPluginId?.let { put("pluginId", it) }
@@ -1630,6 +1720,7 @@ class BusHubService : Service() {
         when (lease.side) {
             AudioLeaseSide.LOCAL -> lease.localCallbackBinder?.let { deliverLocal(envelope, targetBinder = it) }
             AudioLeaseSide.REMOTE -> sendRemote(envelope)
+            AudioLeaseSide.INTERNAL -> Unit
         }
     }
 
@@ -2912,6 +3003,32 @@ class BusHubService : Service() {
         internal fun manualPairingEngine(): GlassesManualPairingEngine? =
             activeInstance?.manualPairingEngine
 
+        /**
+         * Same-process hook for the future non-exported Speech settings activity. Transcript
+         * callbacks are delivered directly and never enter the app's log broadcast.
+         */
+        internal fun startSpeechDictationTest(
+            listener: SpeechUtteranceListener,
+        ): SpeechStartResult =
+            activeInstance
+                ?.takeIf { it::speechSessionManager.isInitialized }
+                ?.speechSessionManager
+                ?.startUtterance(listener)
+                ?: SpeechStartResult.NO_LINK
+
+        internal fun cancelSpeechDictationTest() {
+            activeInstance
+                ?.takeIf { it::speechSessionManager.isInitialized }
+                ?.speechSessionManager
+                ?.cancel()
+        }
+
+        internal fun isSpeechDictationTestActive(): Boolean =
+            activeInstance
+                ?.takeIf { it::speechSessionManager.isInitialized }
+                ?.speechSessionManager
+                ?.isActive == true
+
         fun startWithToken(context: android.content.Context, token: String) {
             if (!canRunHub(context)) {
                 Log.i(TAG, "startWithToken skipped: BLUETOOTH_CONNECT permission not granted")
@@ -2985,5 +3102,7 @@ class BusHubService : Service() {
             Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
                 context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) ==
                 PackageManager.PERMISSION_GRANTED
+
+        private const val INTERNAL_AUDIO_START_TIMEOUT_SECONDS = 10L
     }
 }

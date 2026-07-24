@@ -1,0 +1,185 @@
+package com.anezium.rokidbus.phone.speech
+
+import android.content.Context
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+
+@RunWith(RobolectricTestRunner::class)
+class SpeechSessionManagerTest {
+    private val context: Context = RuntimeEnvironment.getApplication()
+    private lateinit var settings: SpeechSettingsStore
+    private lateinit var secrets: HubSecretStore
+
+    @Before
+    fun setUp() {
+        context.getSharedPreferences(SpeechSettingsStore.PREFERENCES_FILE, Context.MODE_PRIVATE)
+            .edit()
+            .clear()
+            .commit()
+        settings = SpeechSettingsStore(context).apply {
+            selectedEngineId = SpeechEngine.OPENAI_GPT_REALTIME_WHISPER.id
+            selectedLanguageId = TranscriptionLanguage.AUTO.id
+        }
+        secrets = HubSecretStore(context)
+    }
+
+    @Test
+    fun cancelWhileAcquireIsBlockedReleasesLeaseAfterAcquireCompletes() {
+        val audio = BlockingAudioAccess()
+        val engine = RecordingSession()
+        val listener = RecordingUtteranceListener()
+        val manager = manager(audio, engine, AtomicLong(1_000L))
+        var result: SpeechStartResult? = null
+        val startThread = Thread {
+            result = manager.startUtterance(listener)
+        }.apply { start() }
+
+        assertTrue(audio.acquireEntered.await(2, TimeUnit.SECONDS))
+        manager.cancel()
+        assertTrue(listener.ended.await(2, TimeUnit.SECONDS))
+        audio.allowAcquire.countDown()
+        startThread.join(2_000L)
+
+        assertEquals(SpeechStartResult.OK, result)
+        assertTrue(audio.released.await(2, TimeUnit.SECONDS))
+        assertEquals(1, audio.releaseCalls.get())
+        manager.close()
+    }
+
+    @Test
+    fun noSpeechSessionUploadsNeitherAudioNorCommit() {
+        val audio = ImmediateAudioAccess()
+        val engine = RecordingSession()
+        val listener = RecordingUtteranceListener()
+        val clock = AtomicLong(1_000L)
+        val manager = manager(audio, engine, clock)
+
+        assertEquals(SpeechStartResult.OK, manager.startUtterance(listener))
+        assertTrue(engine.started.await(2, TimeUnit.SECONDS))
+        audio.consumer!!.onPcm(ByteArray(3_200), 0, 3_200, 0L, 1_010L)
+        clock.set(10_000L)
+
+        assertTrue(listener.ended.await(2, TimeUnit.SECONDS))
+        assertEquals(SpeechEndReason.NO_SPEECH, listener.reason)
+        assertEquals(0, engine.acceptCalls.get())
+        assertEquals(0, engine.finishCalls.get())
+        assertTrue(engine.cancelCalls.get() > 0)
+        assertEquals(1, audio.releaseCalls.get())
+        manager.close()
+    }
+
+    private fun manager(
+        audio: InternalAudioAccess,
+        recordingSession: RecordingSession,
+        clock: AtomicLong,
+    ): SpeechSessionManager =
+        SpeechSessionManager(
+            context = context,
+            settings = settings,
+            secrets = secrets,
+            internalAudio = audio,
+            sessionFactory = object : SpeechSttSessionFactory {
+                override fun create(
+                    engine: SpeechEngine,
+                    language: TranscriptionLanguage,
+                    phoneLanguageTag: String,
+                    listener: SttSessionListener,
+                ): SttSession = recordingSession.apply { this.listener = listener }
+            },
+            mainPoster = MainThreadPoster { task -> task() },
+            elapsedRealtime = clock::get,
+            audioExecutor = ScheduledThreadPoolExecutor(1).apply {
+                removeOnCancelPolicy = true
+            },
+            diagnostic = {},
+            readinessProvider = { SpeechReadiness.READY },
+        )
+
+    private class RecordingSession : SttSession {
+        lateinit var listener: SttSessionListener
+        val started = CountDownLatch(1)
+        val acceptCalls = AtomicInteger()
+        val finishCalls = AtomicInteger()
+        val cancelCalls = AtomicInteger()
+
+        override fun start(): Boolean {
+            listener.onReady()
+            started.countDown()
+            return true
+        }
+
+        override fun acceptPcm(data: ByteArray, offset: Int, length: Int) {
+            acceptCalls.incrementAndGet()
+        }
+
+        override fun finishAudio() {
+            finishCalls.incrementAndGet()
+        }
+
+        override fun cancel() {
+            cancelCalls.incrementAndGet()
+        }
+    }
+
+    private class RecordingUtteranceListener : SpeechUtteranceListener {
+        val ended = CountDownLatch(1)
+        @Volatile var reason: SpeechEndReason? = null
+
+        override fun onState(state: SpeechSessionState) = Unit
+        override fun onPartial(text: String) = Unit
+        override fun onFinal(text: String) = Unit
+
+        override fun onEnded(reason: SpeechEndReason, error: SttError?) {
+            this.reason = reason
+            ended.countDown()
+        }
+    }
+
+    private class BlockingAudioAccess : InternalAudioAccess {
+        val acquireEntered = CountDownLatch(1)
+        val allowAcquire = CountDownLatch(1)
+        val released = CountDownLatch(1)
+        val releaseCalls = AtomicInteger()
+
+        override fun acquireInternalAudio(
+            tag: String,
+            consumer: InternalAudioConsumer,
+        ): InternalAudioAcquireResult {
+            acquireEntered.countDown()
+            allowAcquire.await(2, TimeUnit.SECONDS)
+            return InternalAudioAcquireResult.OK
+        }
+
+        override fun releaseInternalAudio(tag: String) {
+            releaseCalls.incrementAndGet()
+            released.countDown()
+        }
+    }
+
+    private class ImmediateAudioAccess : InternalAudioAccess {
+        var consumer: InternalAudioConsumer? = null
+        val releaseCalls = AtomicInteger()
+
+        override fun acquireInternalAudio(
+            tag: String,
+            consumer: InternalAudioConsumer,
+        ): InternalAudioAcquireResult {
+            this.consumer = consumer
+            return InternalAudioAcquireResult.OK
+        }
+
+        override fun releaseInternalAudio(tag: String) {
+            releaseCalls.incrementAndGet()
+        }
+    }
+}
