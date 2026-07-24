@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+
+    <queries>
+        <intent>
+            <action android:name="com.anezium.rokidbus.action.HUB" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/ic_agents"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Agents"
+        android:usesCleartextTraffic="true">
+
+        <activity
+            android:name=".AgentsSettingsActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize" />
+
+        <service
+            android:name=".AgentsMonitorService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="agent-session-monitoring" />
+        </service>
+
+        <service
+            android:name=".AgentsPluginService"
+            android:exported="true"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="glasses-session" />
+            <intent-filter>
+                <action android:name="com.anezium.rokidbus.action.PLUGIN" />
+            </intent-filter>
+            <meta-data
+                android:name="com.anezium.rokidbus.plugin.ID"
+                android:value="agents" />
+            <meta-data
+                android:name="com.anezium.rokidbus.plugin.DISPLAY_NAME"
+                android:value="Agents" />
+            <meta-data
+                android:name="com.anezium.rokidbus.plugin.ICON"
+                android:value="terminal" />
+            <meta-data
+                android:name="com.anezium.rokidbus.plugin.API_VERSION"
+                android:value="3" />
+            <meta-data
+                android:name="com.anezium.rokidbus.plugin.CAPABILITIES"
+                android:value="surfaces" />
+            <meta-data
+                android:name="com.anezium.rokidbus.plugin.RECEIVE_PREFIXES"
+                android:value="/plugin/agents,/system/plugin" />
+            <meta-data
+                android:name="com.anezium.rokidbus.plugin.SETTINGS_ACTIVITY"
+                android:value=".AgentsSettingsActivity" />
+            <meta-data
+                android:name="com.anezium.rokidbus.plugin.LAUNCHABLE"
+                android:value="true" />
+        </service>
+    </application>
+</manifest>
