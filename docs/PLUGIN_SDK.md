@@ -114,7 +114,7 @@ declared receive prefixes: `onNexusMessage` (JSON envelopes) and
 `onNexusBinaryMessage` (binary frames with their metadata). Hub state rides the
 additive capabilities contracts in `shared`: the phone announces `features`
 plus the camera consumer display name (`PhoneHubCapabilitiesContract`), the
-glasses announce renderer features, image-surface limits, their app version,
+glasses announce renderer features, image/pin surface versions and image limits, their app version,
 and onboarding completion (`GlassesHubCapabilitiesContract`); unknown fields
 stay ignorable in both directions.
 
@@ -166,6 +166,40 @@ frames for the same surface. A faster frame is rejected with `/error` code
 `IMAGE_RATE_LIMITED`; the SDK preflight returns
 `NexusSdkResult.IMAGE_RATE_LIMITED` immediately. Plugins should not build
 animation loops around v1.
+
+### Persistent pins
+
+Pins reuse the existing `surfaces` grant and API version 3. They occupy one
+global last-writer-wins slot, are independent from `NexusSurfaceSession`, and
+remain visible across normal surface and launcher changes until hidden,
+replaced, expired, or the owning plugin disconnects. For that reason
+`showPin`/`hidePin` live on `NexusPluginClient`, not a surface session.
+
+Check the live `supportsPinSurface` value immediately before use. Both methods
+return `CAPABILITY_NOT_AVAILABLE` without sending unless the glasses announced
+pin v1 and SPP is live. Old glasses therefore continue to work without a
+plugin API bump.
+
+```kotlin
+val result = nexusClient?.showPin(
+    NexusPin(
+        title = "AB-123-CD",                 // optional, max 24 trimmed chars
+        lines = listOf("Grey Toyota Prius"), // 0..2, max 28 trimmed chars each
+        position = NexusPinPosition.TOP_RIGHT,
+        ttlMs = 30 * 60 * 1000L,             // optional; clamped to 1 s..24 h
+    ),
+)
+
+// Later; only the current owner can clear the slot.
+nexusClient?.hidePin()
+```
+
+At least one title or line must be non-empty after trimming. Typed-model cap
+violations throw `IllegalArgumentException`. The hub rejects malformed raw
+traffic with `INVALID_PIN` and accepts at most one `/pin/show` per plugin every
+500 ms (`PIN_RATE_LIMITED`). The glasses overlay is text-only and has no input.
+The sample plugin toggles `NEXUS PIN` / `sample overlay` from its existing tap
+action for on-device validation.
 
 ### 3.1 Microphone (audio lease)
 

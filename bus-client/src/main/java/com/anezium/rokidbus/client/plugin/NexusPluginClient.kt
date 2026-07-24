@@ -6,11 +6,14 @@ import com.anezium.rokidbus.client.PluginRegistrationResult
 import com.anezium.rokidbus.shared.BusCapabilityBits
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.LinkStateBits
+import com.anezium.rokidbus.shared.PinSurfaceContract
+import com.anezium.rokidbus.shared.PinSurfaceValidationResult
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
 import com.anezium.rokidbus.shared.plugin.CapabilityParseResult
 import com.anezium.rokidbus.shared.plugin.PluginCapability
 import org.json.JSONObject
 import java.util.ArrayDeque
+import java.util.UUID
 
 class NexusPluginClient internal constructor(
     private val pluginId: String,
@@ -41,6 +44,38 @@ class NexusPluginClient internal constructor(
     val supportsImageSurface: Boolean
         get() = currentLinkState and LinkStateBits.SPP_DATA_UP != 0 &&
             hubCapabilities and BusCapabilityBits.IMAGE_SURFACE != 0
+
+    val supportsPinSurface: Boolean
+        get() = currentLinkState and LinkStateBits.SPP_DATA_UP != 0 &&
+            hubCapabilities and BusCapabilityBits.PIN_SURFACE != 0
+
+    fun showPin(pin: NexusPin): NexusSdkResult {
+        pinPreflight()?.let { return it }
+        val payload = pin.toPayload()
+        if (PinSurfaceContract.validateShow(payload) !is PinSurfaceValidationResult.Valid) {
+            return NexusSdkResult.INVALID_PAYLOAD
+        }
+        return if (send(BusPaths.PIN_SHOW, UUID.randomUUID().toString(), payload)) {
+            NexusSdkResult.SENT
+        } else {
+            NexusSdkResult.NOT_REGISTERED
+        }
+    }
+
+    fun hidePin(): NexusSdkResult {
+        pinPreflight()?.let { return it }
+        return if (
+            send(
+                BusPaths.PIN_HIDE,
+                UUID.randomUUID().toString(),
+                JSONObject().put("surfaceId", PinSurfaceContract.LOCAL_SURFACE_ID),
+            )
+        ) {
+            NexusSdkResult.SENT
+        } else {
+            NexusSdkResult.NOT_REGISTERED
+        }
+    }
 
     fun connect() {
         check(!closed) { "NexusPluginClient is closed" }
@@ -349,6 +384,13 @@ class NexusPluginClient internal constructor(
             seenEventIdSet.remove(seenEventIds.removeFirst())
         }
         return true
+    }
+
+    private fun pinPreflight(): NexusSdkResult? = when {
+        !isApproved -> NexusSdkResult.NOT_REGISTERED
+        !hasCapability(PluginCapability.SURFACES) -> NexusSdkResult.CAPABILITY_NOT_GRANTED
+        !supportsPinSurface -> NexusSdkResult.CAPABILITY_NOT_AVAILABLE
+        else -> null
     }
 
     companion object {

@@ -2,10 +2,14 @@ package com.anezium.rokidbus.client.plugin
 
 import com.anezium.rokidbus.client.PluginRegistrationResult
 import com.anezium.rokidbus.shared.BusPaths
+import com.anezium.rokidbus.shared.BusCapabilityBits
+import com.anezium.rokidbus.shared.LinkStateBits
+import com.anezium.rokidbus.shared.PinSurfaceContract
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -14,6 +18,7 @@ class NexusPluginClientTest {
         lateinit var listener: NexusPluginTransport.Listener
         var connected = false
         var closeCount = 0
+        var featureBits = 0
         val sends = mutableListOf<Pair<String, JSONObject>>()
         override fun connect(listener: NexusPluginTransport.Listener) {
             this.listener = listener
@@ -24,7 +29,7 @@ class NexusPluginClientTest {
             return true
         }
         override fun sendBinary(path: String, id: String, payload: JSONObject, data: ByteArray) = true
-        override fun capabilities(): Int = 0
+        override fun capabilities(): Int = featureBits
         override fun close() { closeCount += 1 }
     }
 
@@ -173,5 +178,88 @@ class NexusPluginClientTest {
             callbacks.events,
         )
         client.close()
+    }
+
+    @Test
+    fun `pin show and hide use the client scoped paths and capped payload`() {
+        val (client, transport, _) = fixture()
+        transport.featureBits = BusCapabilityBits.PIN_SURFACE
+        transport.listener.onMessage(
+            BusPaths.PLUGIN_REGISTRATION,
+            "pin-registration",
+            payload()
+                .put("result", PluginRegistrationResult.APPROVED)
+                .put("capabilities", "surfaces"),
+        )
+        transport.listener.onLinkState(LinkStateBits.SPP_DATA_UP)
+
+        assertEquals(
+            NexusSdkResult.SENT,
+            client.showPin(
+                NexusPin(
+                    title = "  NEXUS PIN ",
+                    lines = listOf(" sample overlay "),
+                    ttlMs = 1L,
+                ),
+            ),
+        )
+        assertEquals(NexusSdkResult.SENT, client.hidePin())
+
+        val shown = transport.sends[0]
+        assertEquals(BusPaths.PIN_SHOW, shown.first)
+        assertEquals(PinSurfaceContract.LOCAL_SURFACE_ID, shown.second.getString("surfaceId"))
+        assertEquals("NEXUS PIN", shown.second.getString("title"))
+        assertEquals("sample overlay", shown.second.getJSONArray("lines").getString(0))
+        assertEquals(PinSurfaceContract.MIN_TTL_MS, shown.second.getLong("ttlMs"))
+        assertEquals(BusPaths.PIN_HIDE, transport.sends[1].first)
+    }
+
+    @Test
+    fun `pin calls require approval grant live spp and feature bit`() {
+        val (unapproved, _, _) = fixture()
+        assertEquals(NexusSdkResult.NOT_REGISTERED, unapproved.showPin(NexusPin(title = "pin")))
+
+        val (client, transport, _) = fixture()
+        transport.listener.onMessage(
+            BusPaths.PLUGIN_REGISTRATION,
+            "pin-no-grant",
+            payload()
+                .put("result", PluginRegistrationResult.APPROVED)
+                .put("capabilities", "http_proxy"),
+        )
+        transport.featureBits = BusCapabilityBits.PIN_SURFACE
+        transport.listener.onLinkState(LinkStateBits.SPP_DATA_UP)
+        assertEquals(NexusSdkResult.CAPABILITY_NOT_GRANTED, client.hidePin())
+
+        transport.listener.onMessage(
+            BusPaths.PLUGIN_REGISTRATION,
+            "pin-granted",
+            payload()
+                .put("result", PluginRegistrationResult.APPROVED)
+                .put("capabilities", "surfaces"),
+        )
+        transport.featureBits = 0
+        transport.listener.onLinkState(LinkStateBits.SPP_DATA_UP)
+        assertEquals(NexusSdkResult.CAPABILITY_NOT_AVAILABLE, client.showPin(NexusPin(title = "pin")))
+
+        transport.featureBits = BusCapabilityBits.PIN_SURFACE
+        transport.listener.onLinkState(LinkStateBits.CXR_CONTROL_UP)
+        assertEquals(NexusSdkResult.CAPABILITY_NOT_AVAILABLE, client.hidePin())
+    }
+
+    @Test
+    fun `pin model enforces title line and content caps`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusPin(title = "x".repeat(PinSurfaceContract.MAX_TITLE_CHARS + 1))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusPin(lines = listOf("x".repeat(PinSurfaceContract.MAX_LINE_CHARS + 1)))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusPin(lines = listOf("a", "b", "c"))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusPin(title = " ", lines = listOf(" "))
+        }
     }
 }

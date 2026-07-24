@@ -42,6 +42,8 @@ import com.anezium.rokidbus.shared.LinkStateBits
 import com.anezium.rokidbus.shared.MediaArtworkContract
 import com.anezium.rokidbus.shared.PhoneHubCapabilities
 import com.anezium.rokidbus.shared.PhoneHubCapabilitiesContract
+import com.anezium.rokidbus.shared.PinSurfaceContract
+import com.anezium.rokidbus.shared.PinSurfaceValidationResult
 import com.anezium.rokidbus.shared.plugin.PathRules
 import com.anezium.rokidbus.shared.plugin.PluginCapability
 import com.anezium.rokidbus.shared.plugin.PluginCapability.Companion.serialize
@@ -171,6 +173,9 @@ class BusHubService : Service() {
     private val executor = Executors.newCachedThreadPool()
     private val speechBusExecutor = SerialExecutor(executor)
     private val audioHandler = Handler(Looper.getMainLooper())
+    private val pinHandler = Handler(Looper.getMainLooper())
+    private val phonePinState = PhonePinState(nowMs = { SystemClock.elapsedRealtime() })
+    private val pinExpiryTick = Runnable(::expireCanonicalPin)
     private val updateCheckHandler = Handler(Looper.getMainLooper())
     @Volatile private var updateCheckLoopStopped = true
     private val updateCheckTick = object : Runnable {
@@ -229,6 +234,7 @@ class BusHubService : Service() {
     @Volatile private var lastAnnouncedPhoneCapabilities: PhoneHubCapabilities? = null
     @Volatile private var lastNotifiedStatus: String? = null
     @Volatile private var remoteImageSurfaceVersion = 0
+    @Volatile private var remotePinSurfaceVersion = 0
     @Volatile private var remoteMaxImageBytes = 0
     @Volatile private var remoteGlassesVersionName: String? = null
     @Volatile private var remoteGlassesSetupComplete = false
@@ -709,6 +715,7 @@ class BusHubService : Service() {
 
     override fun onDestroy() {
         stopPeriodicUpdateChecks()
+        pinHandler.removeCallbacks(pinExpiryTick)
         sppLoopStop = true
         if (::speechSessionManager.isInitialized) speechSessionManager.close()
         stopAudioLease(InternalAudioStopReason.HUB_STOPPED)
@@ -766,14 +773,42 @@ class BusHubService : Service() {
             deliverError(sender.replyBinder, envelope.id, decision.code)
             return
         }
+        if (
+            envelope.path == BusPaths.PIN_SHOW || envelope.path == BusPaths.PIN_HIDE
+        ) {
+            val invalidPin = envelope.binary != null ||
+                envelope.payload.optString("surfaceId") != PinSurfaceContract.LOCAL_SURFACE_ID ||
+                (
+                    envelope.path == BusPaths.PIN_SHOW &&
+                        PinSurfaceContract.validateShow(envelope.payload) !is PinSurfaceValidationResult.Valid
+                    )
+            if (invalidPin) {
+                recordLocalRoute(
+                    envelope,
+                    senderUid,
+                    sender,
+                    PluginBusJournal.Verdict.REJECTED,
+                    PinSurfaceContract.ERROR_INVALID_PIN,
+                )
+                deliverError(sender.replyBinder, envelope.id, PinSurfaceContract.ERROR_INVALID_PIN)
+                return
+            }
+        }
         val ownedEnvelope = if (
             sender.principal != null &&
             PathRules.requiredCapability(envelope.path) == PluginCapability.SURFACES
         ) {
             val payload = PluginRoutePolicy.injectSurfaceOwner(sender.principal.descriptor.id, envelope.payload)
             if (payload == null) {
-                recordLocalRoute(envelope, senderUid, sender, PluginBusJournal.Verdict.REJECTED, "INVALID_SURFACE_ID")
-                deliverError(sender.replyBinder, envelope.id, "INVALID_SURFACE_ID")
+                val error = if (
+                    envelope.path == BusPaths.PIN_SHOW || envelope.path == BusPaths.PIN_HIDE
+                ) {
+                    PinSurfaceContract.ERROR_INVALID_PIN
+                } else {
+                    "INVALID_SURFACE_ID"
+                }
+                recordLocalRoute(envelope, senderUid, sender, PluginBusJournal.Verdict.REJECTED, error)
+                deliverError(sender.replyBinder, envelope.id, error)
                 return
             }
             envelope.copy(payload = payload)
@@ -787,6 +822,10 @@ class BusHubService : Service() {
                 deliverError(sender.replyBinder, ownedEnvelope.id, imageError)
                 return
             }
+        }
+        if (ownedEnvelope.path == BusPaths.PIN_SHOW || ownedEnvelope.path == BusPaths.PIN_HIDE) {
+            handleLocalPin(ownedEnvelope, senderUid, sender)
+            return
         }
         if (
             sender.principal != null &&
@@ -808,7 +847,11 @@ class BusHubService : Service() {
         }
         val authorizedEnvelope = if (
             sender.principal != null &&
-            PathRules.requiredCapability(ownedEnvelope.path) == PluginCapability.SURFACES
+            ownedEnvelope.path in setOf(
+                BusPaths.SURFACE_SHOW,
+                BusPaths.SURFACE_UPDATE,
+                BusPaths.SURFACE_HIDE,
+            )
         ) {
             val payload = ownedEnvelope.payload
             val wireSurfaceId = payload.getString("surfaceId")
@@ -1073,12 +1116,107 @@ class BusHubService : Service() {
     }
 
     private fun journalCategory(path: String, hasBinary: Boolean): PluginBusJournal.Category = when (path) {
-        BusPaths.SURFACE_SHOW, BusPaths.SURFACE_UPDATE, BusPaths.SURFACE_HIDE -> PluginBusJournal.Category.SURFACE
+        BusPaths.SURFACE_SHOW, BusPaths.SURFACE_UPDATE, BusPaths.SURFACE_HIDE,
+        BusPaths.PIN_SHOW, BusPaths.PIN_HIDE,
+        -> PluginBusJournal.Category.SURFACE
         BusPaths.SURFACE_INPUT, BusPaths.PLUGIN_INPUT -> PluginBusJournal.Category.INPUT
         BusPaths.PLUGIN_OPEN, BusPaths.PLUGIN_CLOSE -> PluginBusJournal.Category.LIFECYCLE
         BusPaths.PLUGIN_REGISTRATION -> PluginBusJournal.Category.REGISTRATION
         BusPaths.LAUNCHER_LIST, BusPaths.LAUNCHER_OPEN -> PluginBusJournal.Category.LAUNCHER
         else -> if (hasBinary) PluginBusJournal.Category.BINARY else PluginBusJournal.Category.TRANSPORT
+    }
+
+    private fun handleLocalPin(
+        envelope: BusEnvelope,
+        senderUid: Int,
+        sender: AuthorizedSender,
+    ) {
+        val principal = sender.principal
+        if (principal == null || envelope.binary != null) {
+            recordLocalRoute(
+                envelope,
+                senderUid,
+                sender,
+                PluginBusJournal.Verdict.REJECTED,
+                PinSurfaceContract.ERROR_INVALID_PIN,
+            )
+            deliverError(sender.replyBinder, envelope.id, PinSurfaceContract.ERROR_INVALID_PIN)
+            return
+        }
+        if (capabilities() and BusCapabilityBits.PIN_SURFACE == 0) {
+            recordLocalRoute(
+                envelope,
+                senderUid,
+                sender,
+                PluginBusJournal.Verdict.REJECTED,
+                PinSurfaceContract.ERROR_CAPABILITY_NOT_AVAILABLE,
+            )
+            deliverError(
+                sender.replyBinder,
+                envelope.id,
+                PinSurfaceContract.ERROR_CAPABILITY_NOT_AVAILABLE,
+            )
+            return
+        }
+
+        val pluginId = principal.descriptor.id
+        when (envelope.path) {
+            BusPaths.PIN_SHOW -> when (val result = phonePinState.show(pluginId, envelope.payload)) {
+                is PhonePinShowResult.Rejected -> {
+                    recordLocalRoute(
+                        envelope,
+                        senderUid,
+                        sender,
+                        PluginBusJournal.Verdict.REJECTED,
+                        result.code,
+                    )
+                    deliverError(sender.replyBinder, envelope.id, result.code)
+                }
+                is PhonePinShowResult.Accepted -> {
+                    schedulePinExpiry()
+                    result.replacedOwnerPluginId?.let { previous ->
+                        log("pin replaced owner=$previous by=$pluginId")
+                    }
+                    val forwarded = envelope.copy(payload = result.pin.payload)
+                    recordLocalRoute(forwarded, senderUid, sender, PluginBusJournal.Verdict.OK)
+                    sendRemote(forwarded)?.let { deliverError(sender.replyBinder, envelope.id, it) }
+                }
+            }
+            BusPaths.PIN_HIDE -> {
+                val expectedId = "$pluginId:${PinSurfaceContract.LOCAL_SURFACE_ID}"
+                if (envelope.payload.optString("surfaceId") != expectedId ||
+                    envelope.payload.optString("localSurfaceId") != PinSurfaceContract.LOCAL_SURFACE_ID
+                ) {
+                    recordLocalRoute(
+                        envelope,
+                        senderUid,
+                        sender,
+                        PluginBusJournal.Verdict.REJECTED,
+                        PinSurfaceContract.ERROR_INVALID_PIN,
+                    )
+                    deliverError(sender.replyBinder, envelope.id, PinSurfaceContract.ERROR_INVALID_PIN)
+                    return
+                }
+                when (val result = phonePinState.hide(pluginId)) {
+                    PhonePinClearResult.Ignored -> {
+                        recordLocalRoute(
+                            envelope,
+                            senderUid,
+                            sender,
+                            PluginBusJournal.Verdict.OK,
+                            "PIN_HIDE_IGNORED_NOT_OWNER",
+                        )
+                        log("pin hide ignored plugin=$pluginId reason=not_owner")
+                    }
+                    is PhonePinClearResult.Cleared -> {
+                        schedulePinExpiry()
+                        val forwarded = envelope.copy(payload = result.payload)
+                        recordLocalRoute(forwarded, senderUid, sender, PluginBusJournal.Verdict.OK)
+                        sendRemote(forwarded)?.let { deliverError(sender.replyBinder, envelope.id, it) }
+                    }
+                }
+            }
+        }
     }
 
     private fun handleHubPath(
@@ -1386,6 +1524,12 @@ class BusHubService : Service() {
         runCatching { registration.callbackBinder.unlinkToDeath(registration.deathRecipient, 0) }
         releaseAudioLeaseForLocalBinder(registration.callbackBinder, reason)
         releaseSpeechSessionForLocalBinder(registration, reason)
+        registration.principal?.descriptor?.id?.let { pluginId ->
+            val stillRegistered = registrations.any {
+                it.principal?.descriptor?.id == pluginId
+            }
+            if (!stillRegistered) clearPinForDisconnectedOwner(pluginId, reason)
+        }
         if (reason in setOf("binderDied", "dead callback", "unregister")) {
             registration.principal?.let { principal ->
                 if (::externalPluginController.isInitialized) {
@@ -1905,6 +2049,56 @@ class BusHubService : Service() {
                     "DEAD_CALLBACK",
                 )
             }
+        }
+    }
+
+    private fun schedulePinExpiry() {
+        pinHandler.removeCallbacks(pinExpiryTick)
+        val deadline = phonePinState.expiryDeadlineMs() ?: return
+        val delay = (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+        pinHandler.postDelayed(pinExpiryTick, delay)
+    }
+
+    private fun expireCanonicalPin() {
+        when (val result = phonePinState.expireIfDue()) {
+            PhonePinClearResult.Ignored -> schedulePinExpiry()
+            is PhonePinClearResult.Cleared -> {
+                pinHandler.removeCallbacks(pinExpiryTick)
+                log("pin expired owner=${result.payload.optString("ownerPluginId")}")
+                if (linkState() and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) != 0) {
+                    sendRemote(BusEnvelope(path = BusPaths.PIN_HIDE, payload = result.payload))
+                }
+            }
+        }
+    }
+
+    private fun clearPinForDisconnectedOwner(pluginId: String, reason: String) {
+        val result = phonePinState.ownerDisconnected(pluginId)
+        if (result !is PhonePinClearResult.Cleared) return
+        pinHandler.removeCallbacks(pinExpiryTick)
+        log("pin cleared owner=$pluginId reason=$reason")
+        if (linkState() and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) != 0) {
+            sendRemote(BusEnvelope(path = BusPaths.PIN_HIDE, payload = result.payload))
+        }
+    }
+
+    private fun resendCanonicalPinIfAvailable() {
+        if (capabilities() and BusCapabilityBits.PIN_SURFACE == 0) return
+        expireCanonicalPin()
+        val payload = phonePinState.payloadForResend()
+        if (payload == null) {
+            // Assert the empty slot too: a pin cleared while the links were down
+            // never produced a delivered hide, and the glasses would keep it forever.
+            phonePinState.emptySlotHidePayload()?.let { hide ->
+                sendRemote(BusEnvelope(path = BusPaths.PIN_HIDE, payload = hide))
+            }
+            return
+        }
+        val error = sendRemote(BusEnvelope(path = BusPaths.PIN_SHOW, payload = payload))
+        if (error == null) {
+            log("pin resent owner=${payload.optString("ownerPluginId")} seq=${payload.optLong("seq")}")
+        } else {
+            log("pin resend failed code=$error")
         }
     }
 
@@ -3258,6 +3452,7 @@ class BusHubService : Service() {
         if (state and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) == 0) {
             if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.onLinkLost()
             remoteImageSurfaceVersion = 0
+            remotePinSurfaceVersion = 0
             remoteMaxImageBytes = 0
             // Keep the last-known setup state across link drops: powered-off glasses must
             // not re-open the setup step. Only a live announcement may report false.
@@ -3288,7 +3483,7 @@ class BusHubService : Service() {
     /** The glasses learn phone-side feature bits (camera readiness) only through this. */
     private fun announcePhoneCapabilities() {
         val announced = PhoneHubCapabilitiesContract.create(
-            features = capabilities(),
+            features = phoneCameraCapabilities(),
             cameraConsumerName = cameraConsumerReadiness.resolveApproved()?.descriptor?.displayName,
         )
         if (announced == lastAnnouncedPhoneCapabilities) return
@@ -3311,6 +3506,22 @@ class BusHubService : Service() {
         )
 
     private fun capabilities(): Int {
+        var capabilities = baseCameraCapabilities()
+        if (remoteImageSurfaceVersion == ImageSurfaceContract.VERSION &&
+            remoteMaxImageBytes >= ImageSurfaceContract.MAX_IMAGE_BYTES &&
+            linkState() and LinkStateBits.SPP_DATA_UP != 0
+        ) {
+            capabilities = capabilities or BusCapabilityBits.IMAGE_SURFACE
+        }
+        if (remotePinSurfaceVersion == PinSurfaceContract.VERSION &&
+            linkState() and LinkStateBits.SPP_DATA_UP != 0
+        ) {
+            capabilities = capabilities or BusCapabilityBits.PIN_SURFACE
+        }
+        return capabilities
+    }
+
+    private fun baseCameraCapabilities(): Int {
         var capabilities = 0
         if (::cameraConsumerReadiness.isInitialized && cameraConsumerReadiness.isReady()) {
             capabilities = capabilities or BusCapabilityBits.CAMERA_CONSUMER_READY
@@ -3321,26 +3532,28 @@ class BusHubService : Service() {
                 capabilities = capabilities or BusCapabilityBits.CAMERA_FROZEN_SPP
             }
         }
-        if (remoteImageSurfaceVersion == ImageSurfaceContract.VERSION &&
-            remoteMaxImageBytes >= ImageSurfaceContract.MAX_IMAGE_BYTES &&
-            linkState() and LinkStateBits.SPP_DATA_UP != 0
-        ) {
-            capabilities = capabilities or BusCapabilityBits.IMAGE_SURFACE
-        }
+        return capabilities
+    }
+
+    private fun phoneCameraCapabilities(): Int {
         val wifiEnabled = runCatching {
             getSystemService(WifiManager::class.java)?.isWifiEnabled
         }.getOrNull()
-        return PhoneHubCameraCapabilityPolicy.applyLohsRequirement(capabilities, wifiEnabled)
+        return PhoneHubCameraCapabilityPolicy.applyLohsRequirement(baseCameraCapabilities(), wifiEnabled)
     }
 
     private fun updateRemoteCapabilities(payload: JSONObject) {
         val advertised = GlassesHubCapabilitiesContract.parse(payload)
-        val supported = advertised.protocolVersion == GlassesHubCapabilitiesContract.VERSION &&
+        val imageSupported = advertised.protocolVersion == GlassesHubCapabilitiesContract.VERSION &&
             advertised.features and BusCapabilityBits.IMAGE_SURFACE != 0 &&
             advertised.imageSurfaceVersion == ImageSurfaceContract.VERSION &&
             advertised.maxImageBytes >= ImageSurfaceContract.MAX_IMAGE_BYTES
-        remoteImageSurfaceVersion = if (supported) ImageSurfaceContract.VERSION else 0
-        remoteMaxImageBytes = if (supported) advertised.maxImageBytes else 0
+        val pinSupported = advertised.protocolVersion == GlassesHubCapabilitiesContract.VERSION &&
+            advertised.features and BusCapabilityBits.PIN_SURFACE != 0 &&
+            advertised.pinSurfaceVersion == PinSurfaceContract.VERSION
+        remoteImageSurfaceVersion = if (imageSupported) ImageSurfaceContract.VERSION else 0
+        remotePinSurfaceVersion = if (pinSupported) PinSurfaceContract.VERSION else 0
+        remoteMaxImageBytes = if (imageSupported) advertised.maxImageBytes else 0
         updateRemoteGlassesAppState(
             advertised.versionName,
             advertised.setupComplete,
@@ -3350,9 +3563,13 @@ class BusHubService : Service() {
         if (::manualPairingEngine.isInitialized) {
             manualPairingEngine.onGlassesSetupReported(advertised.setupComplete)
         }
-        log("renderer capabilities image=$supported maxImageBytes=$remoteMaxImageBytes")
+        log(
+            "renderer capabilities image=$imageSupported pin=$pinSupported " +
+                "maxImageBytes=$remoteMaxImageBytes",
+        )
         // Link bits may be unchanged; repeat the callback so clients refresh capabilities().
         notifyLinkState()
+        if (pinSupported) resendCanonicalPinIfAvailable()
     }
 
     private fun validateImageEnvelope(envelope: BusEnvelope): String? {

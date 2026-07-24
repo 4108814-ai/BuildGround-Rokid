@@ -23,6 +23,7 @@ import com.anezium.rokidbus.shared.ImageSurfaceContract
 import com.anezium.rokidbus.shared.LinkStateBits
 import com.anezium.rokidbus.shared.PhoneHubCapabilities
 import com.anezium.rokidbus.shared.PhoneHubCapabilitiesContract
+import com.anezium.rokidbus.shared.PinSurfaceContract
 import com.anezium.rokidbus.shared.plugin.PathRules
 import org.json.JSONArray
 import org.json.JSONObject
@@ -174,6 +175,7 @@ object GlassesHub {
             return
         }
         appContext?.let { context ->
+            if (PinController.handlePinEnvelope(envelope)) return
             if (SurfaceController.handleSurfaceEnvelope(context, envelope)) return
         }
         if (envelope.path == BusPaths.LAUNCHER_LIST) {
@@ -261,8 +263,9 @@ object GlassesHub {
         val context = appContext ?: return
         val onboarding = SelfArmOnboardingStore.snapshot(context)
         val capabilities = GlassesHubCapabilitiesContract.create(
-            features = BusCapabilityBits.IMAGE_SURFACE,
+            features = BusCapabilityBits.IMAGE_SURFACE or BusCapabilityBits.PIN_SURFACE,
             imageSurfaceVersion = ImageSurfaceContract.VERSION,
+            pinSurfaceVersion = PinSurfaceContract.VERSION,
             maxImageBytes = ImageSurfaceContract.MAX_IMAGE_BYTES,
             versionName = BuildConfig.VERSION_NAME,
             setupComplete = SelfArmOnboardingStateMachine.evaluate(
@@ -278,7 +281,10 @@ object GlassesHub {
             ),
         )
         if (error == null) {
-            log("renderer capabilities announced imageVersion=${ImageSurfaceContract.VERSION}")
+            log(
+                "renderer capabilities announced imageVersion=${ImageSurfaceContract.VERSION} " +
+                    "pinVersion=${PinSurfaceContract.VERSION}",
+            )
         } else {
             log("renderer capability announcement failed code=$error")
         }

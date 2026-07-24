@@ -47,6 +47,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
             surfaceActive = SurfaceController.activeSurface() != null,
         )
         SurfaceOverlayRenderer.onServiceConnected(this)
+        PinOverlayRenderer.onServiceConnected(this)
         LauncherOverlayRenderer.onServiceConnected(this)
         GlassesHub.start(applicationContext)
         AccessibilityRearmWatcher.start(applicationContext, "accessibility_service_connected")
@@ -182,6 +183,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
         developerOptionsEnabler = null
         if (liveInstance === this) liveInstance = null
         LauncherOverlayRenderer.onServiceDestroyed(this)
+        PinOverlayRenderer.onServiceDestroyed(this)
         SurfaceOverlayRenderer.onServiceDestroyed(this)
         SurfaceController.cancelRingInput()
         RingFocusBroadcastCoordinator.onServiceDestroyed(this)

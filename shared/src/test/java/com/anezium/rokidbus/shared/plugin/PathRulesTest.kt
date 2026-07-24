@@ -82,4 +82,10 @@ class PathRulesTest {
             PathRules.requiredCapabilityForReceivePrefix("/stt/session/ended"),
         )
     }
+
+    @Test
+    fun `pin routes reuse the surfaces capability`() {
+        assertEquals(PluginCapability.SURFACES, PathRules.requiredCapability("/pin/show"))
+        assertEquals(PluginCapability.SURFACES, PathRules.requiredCapability("/pin/hide"))
+    }
 }

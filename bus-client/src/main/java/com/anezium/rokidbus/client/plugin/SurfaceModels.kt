@@ -4,6 +4,9 @@ import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.ImageSurfaceContract
 import com.anezium.rokidbus.shared.ImageSurfaceValidationResult
 import com.anezium.rokidbus.shared.MediaArtworkContract
+import com.anezium.rokidbus.shared.PinSurfaceContent
+import com.anezium.rokidbus.shared.PinSurfaceContract
+import com.anezium.rokidbus.shared.PinSurfacePosition
 import com.anezium.rokidbus.shared.plugin.PluginCapability
 import org.json.JSONArray
 import org.json.JSONObject
@@ -266,6 +269,45 @@ data class NexusImage(
             footer?.let { put("footer", it) }
             if (handlesBack) put("handlesBack", true)
         }
+}
+
+enum class NexusPinPosition(internal val wireValue: String) {
+    TOP_LEFT(PinSurfacePosition.TOP_LEFT.wireValue),
+    TOP_RIGHT(PinSurfacePosition.TOP_RIGHT.wireValue),
+    BOTTOM_LEFT(PinSurfacePosition.BOTTOM_LEFT.wireValue),
+    BOTTOM_RIGHT(PinSurfacePosition.BOTTOM_RIGHT.wireValue),
+}
+
+/**
+ * A tiny persistent glasses pin.
+ *
+ * [title] is optional and limited to 24 trimmed characters. [lines] accepts at
+ * most two strings of 28 trimmed characters each, and at least one title or
+ * line must remain non-empty after trimming. [ttlMs] is optional; wire values
+ * are clamped to 1 second through 24 hours.
+ */
+data class NexusPin(
+    val title: String? = null,
+    val lines: List<String> = emptyList(),
+    val position: NexusPinPosition = NexusPinPosition.TOP_RIGHT,
+    val ttlMs: Long? = null,
+) {
+    init {
+        require(title == null || title.trim().length <= PinSurfaceContract.MAX_TITLE_CHARS)
+        require(lines.size <= PinSurfaceContract.MAX_LINES)
+        require(lines.all { it.trim().length <= PinSurfaceContract.MAX_LINE_CHARS })
+        require(!title?.trim().isNullOrEmpty() || lines.any { it.trim().isNotEmpty() })
+    }
+
+    internal fun toPayload(): JSONObject = PinSurfaceContract.toPayload(
+        surfaceId = PinSurfaceContract.LOCAL_SURFACE_ID,
+        content = PinSurfaceContent(
+            title = title?.trim()?.takeIf { it.isNotEmpty() },
+            lines = lines.map(String::trim),
+            position = PinSurfacePosition.fromWireValue(position.wireValue)!!,
+            ttlMs = ttlMs?.coerceIn(PinSurfaceContract.MIN_TTL_MS, PinSurfaceContract.MAX_TTL_MS),
+        ),
+    )
 }
 
 enum class NexusSdkResult {

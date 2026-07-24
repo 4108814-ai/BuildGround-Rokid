@@ -44,6 +44,7 @@ object SurfaceOverlayRenderer {
                 PixelFormat.TRANSLUCENT,
             )
             manager.addView(next, params)
+            PinOverlayRenderer.ensureOnTop()
         }
         currentRoot.render(surface)
         currentRoot.requestFocus()

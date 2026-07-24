@@ -36,6 +36,8 @@ object BusPaths {
     const val SURFACE_UPDATE = "/surface/update"
     const val SURFACE_HIDE = "/surface/hide"
     const val SURFACE_INPUT = "/surface/input"
+    const val PIN_SHOW = "/pin/show"
+    const val PIN_HIDE = "/pin/hide"
     const val LAUNCHER_LIST = "/launcher/list"
     const val LAUNCHER_OPEN = "/launcher/open"
     const val CAMERA_SESSION_STATE = "/camera/session/state"
@@ -117,6 +119,7 @@ object BusCapabilityBits {
     const val CAMERA_CONSUMER_READY = 1 shl 2
     const val CAMERA_FROZEN_SPP = 1 shl 3
     const val CAMERA_LOHS_REVERSE_REQUIRED = 1 shl 4
+    const val PIN_SURFACE = 1 shl 5
 }
 
 object LinkStateBits {

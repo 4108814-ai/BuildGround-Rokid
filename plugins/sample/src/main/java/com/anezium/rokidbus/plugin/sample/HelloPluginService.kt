@@ -3,6 +3,7 @@ package com.anezium.rokidbus.plugin.sample
 import android.view.KeyEvent
 import com.anezium.rokidbus.client.plugin.NexusCard
 import com.anezium.rokidbus.client.plugin.NexusImage
+import com.anezium.rokidbus.client.plugin.NexusPin
 import com.anezium.rokidbus.client.plugin.NexusPluginService
 import com.anezium.rokidbus.client.plugin.NexusSdkResult
 import com.anezium.rokidbus.client.plugin.NexusSpeechCallbacks
@@ -20,6 +21,7 @@ class HelloPluginService : NexusPluginService() {
     private var speech: NexusSpeechSession? = null
     private var stopSpeechWhenStarted = false
     private var showingImage = false
+    private var pinShown = false
     private val speechCallbacks = object : NexusSpeechCallbacks {
         override fun onSpeechStarted(realtime: Boolean) {
             val currentSpeech = speech ?: return
@@ -74,6 +76,7 @@ class HelloPluginService : NexusPluginService() {
         surface?.hide()
         surface = null
         showingImage = false
+        pinShown = false
     }
 
     override fun onNexusInput(event: NexusInputEvent) {
@@ -97,7 +100,7 @@ class HelloPluginService : NexusPluginService() {
             KeyEvent.KEYCODE_ENTER,
             -> {
                 when (state.activate()) {
-                    HelloPluginAction.RENDER -> Unit
+                    HelloPluginAction.RENDER -> toggleDemoPin()
                     HelloPluginAction.START_SPEECH -> startSpeech()
                     HelloPluginAction.STOP_SPEECH -> {
                         stopSpeechWhenStarted = true
@@ -174,6 +177,20 @@ class HelloPluginService : NexusPluginService() {
             handlesBack = presentation.handlesBack,
         )
         if (show) surface?.showCard(card) else surface?.updateCard(card)
+    }
+
+    private fun toggleDemoPin() {
+        val client = nexusClient ?: return
+        pinShown = if (pinShown) {
+            client.hidePin() != NexusSdkResult.SENT
+        } else {
+            client.showPin(
+                NexusPin(
+                    title = "NEXUS PIN",
+                    lines = listOf("sample overlay"),
+                ),
+            ) == NexusSdkResult.SENT
+        }
     }
 
     private companion object {

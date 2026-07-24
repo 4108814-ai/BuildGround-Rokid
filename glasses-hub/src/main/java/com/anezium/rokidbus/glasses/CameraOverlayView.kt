@@ -104,6 +104,16 @@ internal class CameraOverlayView @JvmOverloads constructor(
         invalidate()
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        PinController.setCameraOverlayActive(true)
+    }
+
+    override fun onDetachedFromWindow() {
+        PinController.setCameraOverlayActive(false)
+        super.onDetachedFromWindow()
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         frozenBackground?.takeUnless(Bitmap::isRecycled)?.let { drawFrozenBackground(canvas, it) }

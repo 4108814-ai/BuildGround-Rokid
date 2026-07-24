@@ -6,6 +6,7 @@ data class GlassesHubCapabilities(
     val protocolVersion: Int,
     val features: Int,
     val imageSurfaceVersion: Int,
+    val pinSurfaceVersion: Int,
     val maxImageBytes: Int,
     val versionName: String?,
     val setupComplete: Boolean = false,
@@ -23,6 +24,7 @@ object GlassesHubCapabilitiesContract {
     fun create(
         features: Int,
         imageSurfaceVersion: Int,
+        pinSurfaceVersion: Int = 0,
         maxImageBytes: Int,
         versionName: String?,
         setupComplete: Boolean = false,
@@ -32,6 +34,7 @@ object GlassesHubCapabilitiesContract {
         protocolVersion = VERSION,
         features = features,
         imageSurfaceVersion = imageSurfaceVersion,
+        pinSurfaceVersion = pinSurfaceVersion,
         maxImageBytes = maxImageBytes,
         versionName = normalizeVersionName(versionName),
         setupComplete = setupComplete,
@@ -43,6 +46,7 @@ object GlassesHubCapabilitiesContract {
         .put("version", capabilities.protocolVersion)
         .put("features", capabilities.features)
         .put("imageSurfaceVersion", capabilities.imageSurfaceVersion)
+        .put("pinSurfaceVersion", capabilities.pinSurfaceVersion)
         .put("maxImageBytes", capabilities.maxImageBytes)
         .put("setupComplete", capabilities.setupComplete)
         .put("setupFailureState", capabilities.setupFailureState)
@@ -55,6 +59,7 @@ object GlassesHubCapabilitiesContract {
         protocolVersion = payload.optInt("version", 0),
         features = payload.optInt("features", 0),
         imageSurfaceVersion = payload.optInt("imageSurfaceVersion", 0),
+        pinSurfaceVersion = payload.optInt("pinSurfaceVersion", 0),
         maxImageBytes = payload.optInt("maxImageBytes", 0),
         versionName = normalizeVersionName(payload.optString("versionName", "")),
         setupComplete = payload.optBoolean("setupComplete", false),

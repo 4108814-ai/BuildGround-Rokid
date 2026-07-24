@@ -212,6 +212,58 @@ Stable image error codes returned on `/error` are:
 - `IMAGE_TOO_LARGE`: the compressed body exceeds 65,536 bytes.
 - `IMAGE_RATE_LIMITED`: the per-surface 150 ms interval has not elapsed.
 
+## Pin protocol v1
+
+Pins are a separate persistent text surface, not part of the active
+`/surface/*` lifecycle. A plugin sends `/pin/show` to upsert the single global
+pin slot and `/pin/hide` to clear it. Pins reuse the existing `surfaces` grant;
+there is no pin descriptor capability and the plugin API version remains 3.
+
+The plugin sends local `surfaceId` `pin`. The phone hub injects
+`ownerPluginId`, rewrites the wire id to `<pluginId>:pin`, and assigns a
+monotonic sequence:
+
+```json
+{
+  "surfaceId": "rides:pin",
+  "ownerPluginId": "rides",
+  "seq": 7,
+  "kind": "pin",
+  "title": "AB-123-CD",
+  "lines": ["Grey Toyota Prius"],
+  "position": "top-right",
+  "ttlMs": 1800000
+}
+```
+
+`title` is optional and limited to 24 characters after trimming. `lines` is an
+optional array of zero to two strings, each limited to 28 characters after
+trimming. At least one title or line must be non-empty. `position` is optional
+and is one of `top-left`, `top-right`, `bottom-left`, or `bottom-right`;
+`top-right` is the default. `ttlMs` is optional and is clamped to
+`1,000..86,400,000`; omission means persistent. The glasses drop stale or
+duplicate `seq` values and defensively ellipsize every rendered row.
+
+The slot is last-writer-wins across plugins. A show may replace another
+plugin's pin without an eviction callback. Hide is honored only for the current
+owner; another plugin's hide is logged and ignored without an error. The pin
+survives surface replacement/hide, launcher changes, and foreground native
+apps. It is cleared by an owner hide, replacement, TTL expiry, or owner bus
+disconnect. The phone hub owns canonical state, tracks the TTL deadline, sends
+a synthetic hide for expiry/disconnect while linked, and resends the active
+complete pin after a valid glasses capability re-announcement.
+
+The glasses render the pin in a small independent, non-focusable and
+non-touchable accessibility-overlay window above fullscreen surface and
+launcher windows. It never wakes or keeps the display on. An active camera
+overlay temporarily hides the pin and detaching the camera overlay restores it.
+
+Stable pin errors returned on `/error` are:
+
+- `INVALID_PIN`: field shape, local id, text cap, or enum validation failed.
+- `PIN_RATE_LIMITED`: a plugin's previous accepted show was less than 500 ms ago.
+- `CAPABILITY_NOT_AVAILABLE`: pin v1 was not announced or SPP is down.
+
 Timed-line anchor:
 
 ```json
@@ -391,8 +443,9 @@ forwards the opening state and subsequent offers. The matching close state sends
 binder death, and registration timeout perform the same idempotent teardown.
 Duplicate and stale open/close events are ignored by `sessionId`.
 
-`IBusService.capabilities()` bit `4` is `CAMERA_CONSUMER_READY`, bit `8` is
-`CAMERA_FROZEN_SPP`, and bit `16` is `CAMERA_LOHS_REVERSE_REQUIRED`. The phone
+In the phone-to-glasses capability direction, bit `4` is
+`CAMERA_CONSUMER_READY`, bit `8` is `CAMERA_FROZEN_SPP`, and bit `16` is
+`CAMERA_LOHS_REVERSE_REQUIRED`. The phone
 hub sets readiness while at least one installed camera principal has an
 approved, enabled `camera` grant; it adds `CAMERA_FROZEN_SPP` while that
 consumer receives frozen chunks and SPP is live, and it adds
@@ -550,7 +603,8 @@ Both hubs announce an additive JSON payload on `/system/hub/capabilities`;
 unknown fields are ignorable in both directions, so fields only ever get added.
 
 - Glasses → phone (`GlassesHubCapabilitiesContract`): `version`, renderer
-  `features` bits, `imageSurfaceVersion`, `maxImageBytes`, the glasses app
+  `features` bits, `imageSurfaceVersion`, `pinSurfaceVersion`, `maxImageBytes`,
+  the glasses app
   `versionName` (drives the phone-side glasses update checker), and
   `setupComplete` (self-arm onboarding state; the phone preserves the last
   known value across link loss — only a live announcement can lower it).
@@ -598,23 +652,27 @@ The method order is append-only so transaction codes remain stable. Link-state
 bits are `1 = CXR_CONTROL_UP`, `2 = SPP_DATA_UP`, and
 `4 = GLASSES_BT_BONDED_OR_PHONE_CONNECTED`, and `8 = GLASSES_WORN`.
 
-Hub feature bits are returned by `IBusService.capabilities()`. Bit `2` is
-`IMAGE_SURFACE`, bit `4` is `CAMERA_CONSUMER_READY`, and bit `8` is
-`CAMERA_FROZEN_SPP`. The glasses hub announces its renderer after either remote link
-connects by sending `/system/hub/capabilities` with
-`{"version":1,"features":2,"imageSurfaceVersion":1,"maxImageBytes":65536,"versionName":"1.0.0","setupComplete":true}`.
+Hub feature bits share one value space regardless of direction. Bit `2` is
+`IMAGE_SURFACE`, bit `4` is `CAMERA_CONSUMER_READY`, bit `8` is
+`CAMERA_FROZEN_SPP`, bit `16` is `CAMERA_LOHS_REVERSE_REQUIRED` (sent only in
+phone-to-glasses camera announcements), and bit `32` is `PIN_SURFACE`. The
+phone does not include renderer bits in camera announcements. The glasses hub
+announces its renderer after either remote link connects by sending
+`/system/hub/capabilities` with
+`{"version":1,"features":34,"imageSurfaceVersion":1,"pinSurfaceVersion":1,"maxImageBytes":65536,"versionName":"1.0.0","setupComplete":true}`.
 `versionName` is the optional glasses app `BuildConfig.VERSION_NAME`; older glasses
 omit it and newer phones treat the missing field as an unknown installed version.
 `setupComplete` reports whether the on-device self-arm onboarding state is `COMPLETE`;
 older payloads omit it and newer phones default the missing field to `false`. A glasses
 hub linked during the transition re-announces capabilities so the phone sees it live.
-The phone hub exposes `IMAGE_SURFACE` to local plugins only after receiving a
-valid announcement and only while `SPP_DATA_UP` is live. It clears the remote
+The phone hub exposes `IMAGE_SURFACE` and `PIN_SURFACE` to local plugins only
+after receiving their valid versioned announcements and only while
+`SPP_DATA_UP` is live. It clears the remote
 announcement when all glasses links are down. Capability changes are surfaced by
 another link-state callback so clients refresh `capabilities()`; callers must not
 cache a one-time Binder result. Old glasses hubs do not announce the bit, so the
-plugin API version remains 3 and image calls fail locally with
-`CAPABILITY_NOT_AVAILABLE`. Image rendering remains covered by the existing
+plugin API version remains 3 and image/pin calls fail locally with
+`CAPABILITY_NOT_AVAILABLE`. Image and pin rendering remain covered by the existing
 `surfaces` user grant; it is not a plugin descriptor capability.
 
 Request/response is NOT in AIDL: the `BusClient` wrapper implements it — a request is
@@ -632,6 +690,15 @@ class BusClient(context, clientId, pathPrefixes: List<String>, listener: (BusEve
     fun linkState(): Int
     fun capabilities(): Int
     fun close()
+```
+
+The typed plugin wrapper adds pin methods directly to `NexusPluginClient`,
+because a pin is independent from and may outlive any `NexusSurfaceSession`:
+
+```kotlin
+fun showPin(pin: NexusPin): NexusSdkResult
+fun hidePin(): NexusSdkResult
+val supportsPinSurface: Boolean
 ```
 
 The hub service is discovered by **intent action** `com.anezium.rokidbus.action.HUB`
