@@ -70,6 +70,11 @@ jobs:
               changelog_path="plugins/media/CHANGELOG.md"
               release_name="Media Deck"
               ;;
+            photosync)
+              module_dir="plugins/photosync"
+              changelog_path="plugins/photosync/CHANGELOG.md"
+              release_name="Photo Sync"
+              ;;
             sample)
               module_dir="plugins/sample"
               changelog_path="plugins/sample/CHANGELOG.md"
