@@ -106,6 +106,14 @@ class MediaSyncLinkPoliciesTest {
     }
 
     @Test
+    fun `a P2P framework that never came up reads as waiting for the glasses' Wi-Fi`() {
+        assertEquals(
+            MediaSyncBlocker.GLASSES_WIFI_DIRECT,
+            MediaSyncBlockerMapping.fromGlassesReason("p2p_unavailable"),
+        )
+    }
+
+    @Test
     fun `a denied nearby-devices grant never masquerades as Wi-Fi being off`() {
         assertEquals(
             MediaSyncBlocker.PHONE_WIFI_OFF,

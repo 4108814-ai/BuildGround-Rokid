@@ -23,6 +23,9 @@ enum class MediaSyncBlocker(val wireValue: String) {
     CAMERA_ACTIVE("camera_active"),
     PHONE_WIFI_OFF("phone_wifi_off"),
     PHONE_PERMISSION("phone_permission"),
+
+    /** The glasses' Wi-Fi Direct framework never came up in time (it powers down when idle). */
+    GLASSES_WIFI_DIRECT("glasses_wifi_direct"),
     GLASSES_STORAGE_PERMISSION("glasses_storage_permission"),
     NOTHING_PENDING("nothing_pending"),
     ;

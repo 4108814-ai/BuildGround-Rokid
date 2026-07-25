@@ -465,14 +465,27 @@ Two asymmetries with the camera link are deliberate:
   finds it standing refuses to remove it, reports
   `camera_group_parked` on `/mediasync/state`, and waits for the next trigger.
 
-**Group creation on this ROM.** Config-based `createGroup` (caller-chosen SSID
-and passphrase) is rejected outright — measured on the glasses as
-`reason=0`, with Wi-Fi on, location on and no existing group. Photo sync
-therefore uses the same ladder the camera link already relies on here: one
-configured attempt, then after 150 ms one no-config `createGroup`, taking
-whatever framework-generated credentials come back. The offer always carries
-the group's *actual* credentials, and those are recorded so a later session can
-recognise the group as ours.
+**Group creation on this ROM.** The Wi-Fi Direct *framework* toggles
+independently of station Wi-Fi: it powers up lazily (~288 ms after station
+Wi-Fi, measured) and powers back **down when idle**. A `createGroup` issued off
+a bare `isWifiEnabled` check therefore lands in `P2pDisabledState` and returns
+`reason=0` even with station Wi-Fi on, location on and no existing group — the
+symptom that stalled the first device sessions. Creation must be gated on the
+`WIFI_P2P_STATE_CHANGED_ACTION` → `WIFI_P2P_STATE_ENABLED` broadcast (and/or
+`requestP2pState`), never on station Wi-Fi. `initialize()` nudges the framework
+awake; photo sync then waits for enabled (bounded by the camera link's own
+16 × 750 ms) before it creates, and if a create still returns `reason=0` it
+treats the framework as having dropped and waits for the next enabled signal
+rather than failing. On timeout it reports `p2p_unavailable`. **Any future P2P
+feature on this hardware must gate on the framework-enabled broadcast.**
+
+Config-based `createGroup` (caller-chosen SSID and passphrase) is *also*
+rejected here once the framework is up, again with `reason=0`, so photo sync
+uses the same ladder the camera link relies on: one configured attempt, then
+after 150 ms one no-config `createGroup`, taking whatever framework-generated
+credentials come back. The offer always carries the group's *actual*
+credentials, and those are recorded so a later session can recognise the group
+as ours.
 
 That recognition is the only ownership test there is: with framework-generated
 SSIDs the camera link's parked group is indistinguishable from any stranger's,

@@ -553,10 +553,16 @@ Nothing below is covered by unit tests; all of it needs both devices.
 - After a sync, confirm the glasses release Wi-Fi through the usual ~40 s
   grace-off and that a camera session started inside that window still gets
   Wi-Fi immediately.
-- Group creation: expect `mediaSync group configured create rejected reason=0`
-  followed by `path=legacy` and `group ready ssid=DIRECT-xy-...` on this ROM.
-  A session that logs only the configured rejection and then ends is the
-  fallback failing to arm.
+- Group creation: on a cold trigger (P2P framework idle) expect the group to
+  wait for `WIFI_P2P_STATE_ENABLED` before creating — no `create path=` line
+  should appear while `dumpsys wifip2p` shows `curState=P2pDisabledState`. Then
+  expect `configured create rejected reason=0` → `path=legacy` →
+  `group ready ssid=DIRECT-xy-...`. A session that logs `path=configured`
+  immediately (before the framework is enabled) and dies `group_create_failed_0`
+  is the readiness gate not holding.
+- P2P timeout: with Wi-Fi Direct forced to stay disabled, expect the session to
+  end `p2p_unavailable` after ~12 s (not an instant `reason=0` failure), phone
+  showing "Waiting for the glasses' Wi-Fi".
 - Close the camera, then trigger a sync inside the ~40 s park window: photo
   sync must log `group deferred` and end with `camera_group_parked` — it must
   never log `group removed`/`stale` for a group it did not create, and the next

@@ -1,11 +1,15 @@
 package com.anezium.rokidbus.glasses
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.net.wifi.p2p.WifiP2pConfig
 import android.net.wifi.p2p.WifiP2pGroup
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import com.anezium.rokidbus.shared.MediaSyncStatusContract
 import java.security.SecureRandom
 
@@ -127,6 +131,31 @@ object MediaSyncGroupPolicy {
     }
 }
 
+enum class MediaSyncP2pReadiness {
+    /** The Wi-Fi Direct framework is enabled; a group can be created. */
+    READY,
+
+    /** The framework is disabled or unknown; wait for the enabled broadcast. */
+    WAIT,
+}
+
+/**
+ * Maps a Wi-Fi P2P state int to whether a group may be created.
+ *
+ * This is the crux of the first device sessions: on this ROM the P2P framework powers up ~288 ms
+ * *after* station Wi-Fi and powers back down when idle, so `createGroup` issued off a bare
+ * `isWifiEnabled` check lands in `P2pDisabledState` and returns `reason=0`. Only
+ * `WIFI_P2P_STATE_ENABLED` means "safe to create".
+ */
+object MediaSyncP2pReadinessPolicy {
+    fun readiness(p2pState: Int): MediaSyncP2pReadiness =
+        if (p2pState == WifiP2pManager.WIFI_P2P_STATE_ENABLED) {
+            MediaSyncP2pReadiness.READY
+        } else {
+            MediaSyncP2pReadiness.WAIT
+        }
+}
+
 /**
  * Creates and tears down the autonomous group owner that carries a media-sync session.
  *
@@ -147,6 +176,16 @@ internal class MediaSyncGroup(
     private var configuredAttempted = false
     private var legacyAttempted = false
     private var closed = false
+    private var finished = false
+
+    private var readyCallback: ((Ready) -> Unit)? = null
+    private var failedCallback: ((String) -> Unit)? = null
+    private var receiverRegistered = false
+    private var deadlineMs = 0L
+    private var waitPoll: Runnable? = null
+
+    /** True while a create cycle is in flight, so the state signal does not start a second one. */
+    private var cycleInFlight = false
 
     /**
      * Only ever true once a media-sync group is actually ours. [close] checks it before removing
@@ -154,62 +193,180 @@ internal class MediaSyncGroup(
      */
     private var ownsGroup = false
 
+    /**
+     * The Wi-Fi Direct framework toggles independently of station Wi-Fi on this ROM, so the
+     * enabled broadcast — not `isWifiEnabled` — is the signal that a group can be created.
+     */
+    private val p2pStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION) return
+            onP2pState(intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1))
+        }
+    }
+
     data class Ready(
         val profile: MediaSyncP2pProfile,
         val interfaceName: String,
     )
 
     fun create(onReady: (Ready) -> Unit, onFailed: (String) -> Unit) {
+        readyCallback = onReady
+        failedCallback = onFailed
         val wifiP2pManager = appContext
             .getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
         if (wifiP2pManager == null) {
-            onFailed("no_p2p_service")
+            failOnce("no_p2p_service")
             return
         }
         manager = wifiP2pManager
+        // initialize() also nudges the P2P framework awake; the enabled broadcast follows.
         channel = wifiP2pManager.initialize(appContext, Looper.getMainLooper(), null)
         if (channel == null) {
-            onFailed("no_p2p_channel")
+            failOnce("no_p2p_channel")
             return
         }
         candidate = profileStore.loadOrCreateCandidate()
-        inspectThenCreate(onReady, onFailed)
+        deadlineMs = SystemClock.elapsedRealtime() + P2P_WAIT_ATTEMPTS * P2P_WAIT_INTERVAL_MS
+        registerReceiver()
+        // The receiver reacts to future transitions; probe the current state to start now if the
+        // framework is already up.
+        queryP2pState()
+    }
+
+    private fun registerReceiver() {
+        if (receiverRegistered) return
+        runCatching {
+            appContext.registerReceiver(
+                p2pStateReceiver,
+                IntentFilter(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION),
+            )
+            receiverRegistered = true
+        }.onFailure { logger("mediaSync group p2p receiver failed error=${it.message}") }
+    }
+
+    private fun queryP2pState() {
+        if (closed || finished || cycleInFlight) return
+        val manager = manager ?: return
+        val channel = channel ?: return
+        runCatching {
+            manager.requestP2pState(channel) { state -> onP2pState(state) }
+        }.onFailure {
+            // requestP2pState is unavailable; lean on the broadcast and the bounded wait instead.
+            logger("mediaSync group p2p state query failed error=${it.message}")
+            armWait()
+        }
+    }
+
+    private fun onP2pState(p2pState: Int) {
+        if (closed || finished) return
+        if (MediaSyncP2pReadinessPolicy.readiness(p2pState) != MediaSyncP2pReadiness.READY) {
+            armWait()
+            return
+        }
+        if (cycleInFlight) return
+        beginCreateCycle()
+    }
+
+    /**
+     * Bounded wait for the framework to come up. The receiver normally drives creation the moment
+     * it does; this timer is the backstop that re-probes if a broadcast is missed and fails the
+     * session honestly once the budget — the camera link's own 16 x 750 ms — is spent.
+     */
+    private fun armWait() {
+        if (closed || finished || cycleInFlight || waitPoll != null) return
+        if (SystemClock.elapsedRealtime() >= deadlineMs) {
+            failOnce("p2p_unavailable")
+            return
+        }
+        waitPoll = Runnable {
+            waitPoll = null
+            queryP2pState()
+        }.also { handler.postDelayed(it, P2P_WAIT_INTERVAL_MS) }
+    }
+
+    private fun clearWaitPoll() {
+        waitPoll?.let(handler::removeCallbacks)
+        waitPoll = null
+    }
+
+    private fun beginCreateCycle() {
+        if (closed || finished || cycleInFlight) return
+        cycleInFlight = true
+        // Reset the ladder so a cycle that follows a dropped-framework retry can try again.
+        configuredAttempted = false
+        legacyAttempted = false
+        clearWaitPoll()
+        inspectThenCreate()
+    }
+
+    /**
+     * A create that fails while we believed the framework was up means it dropped under us (it
+     * powers down when idle). Only `reason=0` (ERROR / not-ready) is retriable; wait for the next
+     * enabled signal, bounded by the deadline. Any other reason fails fast.
+     */
+    private fun handleCreateNotReady(reason: Int) {
+        if (closed || finished) return
+        cycleInFlight = false
+        if (reason != WifiP2pManager.ERROR) {
+            failOnce("group_create_failed_$reason")
+            return
+        }
+        if (SystemClock.elapsedRealtime() >= deadlineMs) {
+            failOnce("p2p_unavailable")
+            return
+        }
+        logger("mediaSync group create not ready reason=$reason; awaiting p2p enabled")
+        armWait()
+    }
+
+    private fun failOnce(reason: String) {
+        if (finished) return
+        finished = true
+        clearWaitPoll()
+        (failedCallback ?: return).invoke(reason)
+    }
+
+    private fun succeedOnce(ready: Ready) {
+        if (finished) return
+        finished = true
+        clearWaitPoll()
+        (readyCallback ?: return).invoke(ready)
     }
 
     private fun ourNetworkNames(): List<String> =
         listOfNotNull(profileStore.activeNetworkName(), candidate?.networkName)
 
-    private fun inspectThenCreate(onReady: (Ready) -> Unit, onFailed: (String) -> Unit) {
-        val manager = manager ?: return onFailed("no_p2p_service")
-        val channel = channel ?: return onFailed("no_p2p_channel")
+    private fun inspectThenCreate() {
+        val manager = manager ?: return failOnce("no_p2p_service")
+        val channel = channel ?: return failOnce("no_p2p_channel")
         runCatching {
             manager.requestGroupInfo(channel) { group ->
                 if (group == null) {
-                    createConfiguredGroup(onReady, onFailed)
+                    createConfiguredGroup()
                     return@requestGroupInfo
                 }
                 val ownership = MediaSyncGroupPolicy.classify(group.networkName, ourNetworkNames())
                 when (MediaSyncGroupPolicy.action(ownership, isUsable(group))) {
                     MediaSyncGroupAction.REUSE -> {
                         logger("mediaSync group reused ssid=${group.networkName}")
-                        publish(group, onReady, onFailed)
+                        publish(group)
                     }
                     MediaSyncGroupAction.REBUILD -> {
                         logger("mediaSync group stale ssid=${group.networkName}")
-                        removeGroup { createConfiguredGroup(onReady, onFailed) }
+                        removeGroup { createConfiguredGroup() }
                     }
                     MediaSyncGroupAction.DEFER -> {
                         logger(
                             "mediaSync group deferred ssid=${group.networkName} " +
                                 "ownership=$ownership",
                         )
-                        onFailed(MediaSyncStatusContract.REASON_CAMERA_GROUP_PARKED)
+                        failOnce(MediaSyncStatusContract.REASON_CAMERA_GROUP_PARKED)
                     }
                 }
             }
         }.onFailure {
             logger("mediaSync group info failed error=${it.message}")
-            createConfiguredGroup(onReady, onFailed)
+            createConfiguredGroup()
         }
     }
 
@@ -219,11 +376,11 @@ internal class MediaSyncGroup(
             !group.passphrase.isNullOrBlank() &&
             !group.`interface`.isNullOrBlank()
 
-    private fun createConfiguredGroup(onReady: (Ready) -> Unit, onFailed: (String) -> Unit) {
-        if (closed || configuredAttempted) return
-        val manager = manager ?: return onFailed("no_p2p_service")
-        val channel = channel ?: return onFailed("no_p2p_channel")
-        val expected = candidate ?: return onFailed("no_profile")
+    private fun createConfiguredGroup() {
+        if (closed || finished || configuredAttempted) return
+        val manager = manager ?: return failOnce("no_p2p_service")
+        val channel = channel ?: return failOnce("no_p2p_channel")
+        val expected = candidate ?: return failOnce("no_profile")
         configuredAttempted = true
         val config = runCatching {
             WifiP2pConfig.Builder()
@@ -234,7 +391,7 @@ internal class MediaSyncGroup(
                 .build()
         }.getOrElse {
             logger("mediaSync group configured build rejected type=${it.javaClass.simpleName}")
-            scheduleLegacy(onReady, onFailed)
+            scheduleLegacy()
             return
         }
         logger("mediaSync group create path=configured ssid=${expected.networkName}")
@@ -244,7 +401,7 @@ internal class MediaSyncGroup(
                 config,
                 object : WifiP2pManager.ActionListener {
                     override fun onSuccess() {
-                        handler.postDelayed({ resolveGroup(onReady, onFailed) }, GROUP_SETTLE_MS)
+                        handler.postDelayed({ resolveGroup() }, GROUP_SETTLE_MS)
                     }
 
                     override fun onFailure(reason: Int) {
@@ -252,24 +409,24 @@ internal class MediaSyncGroup(
                         // or passphrase. Rotating the profile would change nothing, so go straight
                         // to the overload the framework does honour.
                         logger("mediaSync group configured create rejected reason=$reason")
-                        scheduleLegacy(onReady, onFailed)
+                        scheduleLegacy()
                     }
                 },
             )
         }.onFailure {
             logger("mediaSync group configured create threw error=${it.message}")
-            scheduleLegacy(onReady, onFailed)
+            scheduleLegacy()
         }
     }
 
-    private fun scheduleLegacy(onReady: (Ready) -> Unit, onFailed: (String) -> Unit) {
-        handler.postDelayed({ createLegacyGroup(onReady, onFailed) }, LEGACY_FALLBACK_MS)
+    private fun scheduleLegacy() {
+        handler.postDelayed({ createLegacyGroup() }, LEGACY_FALLBACK_MS)
     }
 
-    private fun createLegacyGroup(onReady: (Ready) -> Unit, onFailed: (String) -> Unit) {
-        if (closed || legacyAttempted) return
-        val manager = manager ?: return onFailed("no_p2p_service")
-        val channel = channel ?: return onFailed("no_p2p_channel")
+    private fun createLegacyGroup() {
+        if (closed || finished || legacyAttempted) return
+        val manager = manager ?: return failOnce("no_p2p_service")
+        val channel = channel ?: return failOnce("no_p2p_channel")
         legacyAttempted = true
         logger("mediaSync group create path=legacy")
         runCatching {
@@ -277,43 +434,41 @@ internal class MediaSyncGroup(
                 channel,
                 object : WifiP2pManager.ActionListener {
                     override fun onSuccess() {
-                        handler.postDelayed({ resolveGroup(onReady, onFailed) }, GROUP_SETTLE_MS)
+                        handler.postDelayed({ resolveGroup() }, GROUP_SETTLE_MS)
                     }
 
                     override fun onFailure(reason: Int) {
+                        // reason=0 here means the framework went back to sleep between the enabled
+                        // signal and this call; wait for it to come back rather than giving up.
                         logger("mediaSync group legacy create failed reason=$reason")
-                        onFailed("group_create_failed_$reason")
+                        handleCreateNotReady(reason)
                     }
                 },
             )
         }.onFailure {
             logger("mediaSync group legacy create threw error=${it.message}")
-            onFailed("group_create_threw")
+            failOnce("group_create_threw")
         }
     }
 
-    private fun resolveGroup(onReady: (Ready) -> Unit, onFailed: (String) -> Unit) {
-        if (closed) return
-        val manager = manager ?: return onFailed("no_p2p_service")
-        val channel = channel ?: return onFailed("no_p2p_channel")
+    private fun resolveGroup() {
+        if (closed || finished) return
+        val manager = manager ?: return failOnce("no_p2p_service")
+        val channel = channel ?: return failOnce("no_p2p_channel")
         runCatching {
             manager.requestGroupInfo(channel) { group ->
-                if (group == null) onFailed("group_missing") else publish(group, onReady, onFailed)
+                if (group == null) failOnce("group_missing") else publish(group)
             }
-        }.onFailure { onFailed("group_info_threw") }
+        }.onFailure { failOnce("group_info_threw") }
     }
 
-    private fun publish(
-        group: WifiP2pGroup,
-        onReady: (Ready) -> Unit,
-        onFailed: (String) -> Unit,
-    ) {
-        if (closed) return
+    private fun publish(group: WifiP2pGroup) {
+        if (closed || finished) return
         val networkName = group.networkName
         val passphrase = group.passphrase
         val interfaceName = group.`interface`
         if (networkName.isNullOrBlank() || passphrase.isNullOrBlank() || interfaceName.isNullOrBlank()) {
-            onFailed("group_incomplete")
+            failOnce("group_incomplete")
             return
         }
         val actual = MediaSyncP2pProfile(networkName, passphrase)
@@ -321,8 +476,9 @@ internal class MediaSyncGroup(
         // is the only thing that lets a later session recognise this group as ours.
         profileStore.rememberActive(actual)
         ownsGroup = true
+        cycleInFlight = false
         logger("mediaSync group ready ssid=$networkName iface=$interfaceName")
-        onReady(Ready(actual, interfaceName))
+        succeedOnce(Ready(actual, interfaceName))
     }
 
     private fun removeGroup(onComplete: () -> Unit) {
@@ -354,6 +510,11 @@ internal class MediaSyncGroup(
     override fun close() {
         if (closed) return
         closed = true
+        clearWaitPoll()
+        if (receiverRegistered) {
+            runCatching { appContext.unregisterReceiver(p2pStateReceiver) }
+            receiverRegistered = false
+        }
         val releaseChannel = {
             runCatching { channel?.close() }
             channel = null
@@ -369,5 +530,9 @@ internal class MediaSyncGroup(
 
         /** The same wait the camera link leaves before its own legacy fallback. */
         const val LEGACY_FALLBACK_MS = 150L
+
+        /** Bounded wait for the P2P framework to enable — the camera link's own 16 x 750 ms. */
+        const val P2P_WAIT_ATTEMPTS = 16
+        const val P2P_WAIT_INTERVAL_MS = 750L
     }
 }

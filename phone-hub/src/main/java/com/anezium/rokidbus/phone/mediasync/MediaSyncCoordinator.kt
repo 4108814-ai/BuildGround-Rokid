@@ -21,6 +21,8 @@ object MediaSyncBlockerMapping {
         // The camera link parks its Wi-Fi Direct group for ~40 s after a session so warm reopens
         // stay fast. Photo sync waits it out rather than stealing the radio back.
         MediaSyncStatusContract.REASON_CAMERA_GROUP_PARKED -> MediaSyncBlocker.CAMERA_ACTIVE
+        // The glasses' Wi-Fi Direct framework did not enable in time — honest about the device.
+        "p2p_unavailable" -> MediaSyncBlocker.GLASSES_WIFI_DIRECT
         "link_down" -> MediaSyncBlocker.LINK_DOWN
         "nothing_pending" -> MediaSyncBlocker.NOTHING_PENDING
         "auto_sync_off" -> MediaSyncBlocker.AUTO_SYNC_OFF
