@@ -55,6 +55,11 @@ object GlassesHub {
     private val registrations = CopyOnWriteArrayList<Registration>()
     private val launcherListeners = CopyOnWriteArrayList<(List<LauncherEntry>) -> Unit>()
     private val wifiOwnership = GlassesWifiOwnership()
+    // A lambda, not a method reference: the :camera process also loads this object, and a
+    // reference would drag MediaSyncEngine's class init (and its executor thread) in with it.
+    private val cameraSessionTracker = CameraSessionTracker { active ->
+        MediaSyncEngine.onCameraSessionChanged(active)
+    }
     private val autoEnrollAttempted = AtomicBoolean(false)
     private val wifiEnableA11yInFlight = AtomicBoolean(false)
     private val wifiEnableReleasePending = AtomicBoolean(false)
@@ -119,6 +124,7 @@ object GlassesHub {
             // update. Every process entry point funnels through here — including the
             // launcher's boot auto-open — making this the reliable re-arm hook.
             AccessibilityRearmWatcher.start(context.applicationContext, "hub_start")
+            MediaSyncEngine.start(context.applicationContext)
         }
     }
 
@@ -150,6 +156,14 @@ object GlassesHub {
         }
         if (envelope.path == BusPaths.GLASSES_SELFARM_MANUAL) {
             handleManualSelfArmRequest(envelope)
+            return
+        }
+        if (envelope.path == BusPaths.MEDIA_SYNC_CONFIG) {
+            MediaSyncEngine.onConfig(envelope.payload)
+            return
+        }
+        if (envelope.path == BusPaths.MEDIA_SYNC_TRIGGER) {
+            MediaSyncEngine.onTriggerRequest()
             return
         }
         appContext?.let { context ->
@@ -273,6 +287,18 @@ object GlassesHub {
         if (BusPaths.isProtectedCameraPath(envelope.path) && !isTrustedUid(senderUid)) {
             log("blocked untrusted protected camera send uid=$senderUid")
             return
+        }
+        if (BusPaths.isProtectedMediaSyncPath(envelope.path) && !isTrustedUid(senderUid)) {
+            log("blocked untrusted protected media sync send uid=$senderUid")
+            return
+        }
+        if (envelope.path == BusPaths.CAMERA_SESSION_STATE) {
+            // The camera session lives in the :camera process; this envelope is the only way the
+            // main process can know a session is live, which photo sync must never fight.
+            cameraSessionTracker.onSessionState(
+                envelope.payload.optString("sessionId"),
+                envelope.payload.optString("state"),
+            )
         }
         if (envelope.path == BusPaths.GLASSES_SELFARM_MANUAL) {
             if (!isTrustedUid(senderUid)) {
@@ -576,11 +602,38 @@ object GlassesHub {
 
     private fun notifyLinkState() {
         val state = linkState()
+        MediaSyncEngine.onLinkStateChanged(phoneConnected)
         registrations.forEach { registration ->
             runCatching { registration.callback.onLinkState(state) }
                 .onFailure { removeRegistration(registration) }
         }
     }
+
+    /**
+     * Wi-Fi acquisition for an in-process hub feature, on the exact path the
+     * `/glasses/wifi/request` bus handler takes: the same executor, the same ownership state
+     * machine and the same ~40 s grace-off, so a media-sync release can never cut the Wi-Fi a
+     * camera session just acquired (the two features are mutually exclusive by design).
+     */
+    internal fun requestHubWifi(enabled: Boolean) {
+        val context = appContext ?: return
+        wifiRequestExecutor.execute {
+            if (enabled) {
+                wifiEnableReleasePending.set(false)
+                wifiDisableFuture?.cancel(false)
+                wifiDisableFuture = null
+                handleGlassesWifiRequest(context, true)
+            } else if (!deferWifiDisableUntilAccessibilityEnableCompletes()) {
+                scheduleGlassesWifiDisable(context)
+            }
+        }
+    }
+
+    /** Hub-to-hub send for in-process features; returns true when the envelope reached a transport. */
+    internal fun sendToPhone(path: String, payload: JSONObject): Boolean =
+        sendRemote(BusEnvelope(path = path, payload = payload)) == null
+
+    internal fun isCameraSessionActive(): Boolean = cameraSessionTracker.isActive()
 
     private fun updateRemotePhoneCapabilities(payload: JSONObject) {
         val advertised = PhoneHubCapabilitiesContract.parse(payload)

@@ -478,11 +478,22 @@ class MainActivity : Activity() {
     }
 
     private fun requestBluetoothConnectIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 10)
+        val missing = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+            // Photo sync reads /sdcard/DCIM/Camera; without this grant the sync engine reports
+            // "storage permission needed" to the phone instead of silently syncing nothing.
+            if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
         }
+        if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), 10)
     }
 
     private fun text(sizeSp: Float, color: Int, bold: Boolean = false): TextView =
