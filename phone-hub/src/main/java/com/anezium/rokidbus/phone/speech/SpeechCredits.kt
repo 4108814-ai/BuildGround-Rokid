@@ -6,7 +6,7 @@ import java.net.URL
 
 /** Provider quota lookups for the Speech settings screen. */
 object SpeechCredits {
-    data class ElevenLabsQuota(val used: Long, val limit: Long) {
+    data class ElevenLabsQuota(val used: Long, val limit: Long, val resetUnixSeconds: Long?) {
         val remaining: Long get() = (limit - used).coerceAtLeast(0L)
     }
 
@@ -30,7 +30,8 @@ object SpeechCredits {
             val json = JSONObject(body)
             val used = json.optLong("character_count", -1L)
             val limit = json.optLong("character_limit", -1L)
-            if (used < 0L || limit <= 0L) null else ElevenLabsQuota(used, limit)
+            val reset = json.optLong("next_character_count_reset_unix", -1L).takeIf { it > 0L }
+            if (used < 0L || limit <= 0L) null else ElevenLabsQuota(used, limit, reset)
         } catch (_: Exception) {
             null
         } finally {

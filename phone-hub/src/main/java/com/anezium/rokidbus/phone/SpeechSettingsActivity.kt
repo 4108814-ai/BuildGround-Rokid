@@ -2,8 +2,12 @@ package com.anezium.rokidbus.phone
 
 import android.app.Activity
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.InputType
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -45,8 +49,13 @@ class SpeechSettingsActivity : Activity() {
     private lateinit var testTranscriptView: TextView
     private lateinit var testButton: Button
     private lateinit var readinessValue: TextView
-    private var creditsView: TextView? = null
+    private var keyEditing = false
     private var creditsGeneration = 0
+    private var creditsMain: TextView? = null
+    private var creditsSub: TextView? = null
+    private var creditsBar: LinearLayout? = null
+    private var creditsBarFill: View? = null
+    private var creditsBarRest: View? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -170,6 +179,7 @@ class SpeechSettingsActivity : Activity() {
     /** Rebuild after a configuration change: stop any running test and recompute guidance. */
     private fun refreshUi() {
         stopDictationIfActive()
+        keyEditing = false
         statusText = null
         transcriptText = null
         transcriptFinal = false
@@ -302,38 +312,110 @@ class SpeechSettingsActivity : Activity() {
 
     private fun credentialCard(): LinearLayout =
         NexusUi.card(this).apply {
-            val kind = shownProvider.credentialKindForUi()
-            val hasKey = secrets.hasCredential(kind)
+            val hasKey = secrets.hasCredential(shownProvider.credentialKindForUi())
+            creditsMain = null
+            creditsSub = null
+            creditsBar = null
+            creditsBarFill = null
+            creditsBarRest = null
+            if (hasKey && !keyEditing) {
+                addView(keyStatusBlock(), NexusUi.block())
+            } else {
+                addView(keyEditBlock(hasKey), NexusUi.block())
+            }
+        }
 
+    /** Saved state: the card is a status — balance first, actions tucked away. */
+    private fun keyStatusBlock(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+
+            val main = TextView(this@SpeechSettingsActivity).apply {
+                textSize = 17f
+                typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
+                setTextColor(NexusUi.INK2)
+            }
+            creditsMain = main
+            addView(main, NexusUi.block())
+
+            if (shownProvider == SpeechProvider.ELEVENLABS) {
+                main.text = "Checking credits…"
+                main.setTextColor(NexusUi.INK3)
+
+                addView(BusTheme.gap(this@SpeechSettingsActivity, 9))
+                val fill = View(this@SpeechSettingsActivity).apply {
+                    background = NexusUi.rounded(this@SpeechSettingsActivity, NexusUi.GREEN_DIM, 2)
+                }
+                val rest = View(this@SpeechSettingsActivity)
+                val bar = LinearLayout(this@SpeechSettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    background = NexusUi.rounded(this@SpeechSettingsActivity, NexusUi.LINE2, 2)
+                    visibility = View.GONE
+                    addView(fill, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+                    addView(rest, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0f))
+                }
+                creditsBar = bar
+                creditsBarFill = fill
+                creditsBarRest = rest
+                addView(
+                    bar,
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        NexusUi.dp(this@SpeechSettingsActivity, 4),
+                    ),
+                )
+
+                addView(BusTheme.gap(this@SpeechSettingsActivity, 8))
+                val sub = NexusUi.metaLabel(this@SpeechSettingsActivity, "", NexusUi.INK4)
+                creditsSub = sub
+                addView(sub, NexusUi.block())
+                fetchCredits()
+            } else {
+                main.text = "Key saved."
+                main.setTextColor(NexusUi.INK)
+                if (shownProvider == SpeechProvider.AZURE) {
+                    addView(BusTheme.gap(this@SpeechSettingsActivity, 6))
+                    val region = secrets.azureRegion().orEmpty()
+                    addView(
+                        NexusUi.metaLabel(
+                            this@SpeechSettingsActivity,
+                            if (region.isBlank()) "No region set" else "Region · $region",
+                            if (region.isBlank()) NexusUi.AMBER else NexusUi.INK4,
+                        ),
+                        NexusUi.block(),
+                    )
+                }
+            }
+
+            addView(NexusUi.divider(this@SpeechSettingsActivity))
             addView(
                 LinearLayout(this@SpeechSettingsActivity).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
+                    isClickable = true
+                    isFocusable = true
+                    background = NexusUi.pressed(this@SpeechSettingsActivity, Color.TRANSPARENT, 10)
+                    setOnClickListener {
+                        keyEditing = true
+                        buildUi()
+                    }
                     addView(
-                        NexusUi.rowLabel(this@SpeechSettingsActivity, "${shownProvider.displayName} key"),
+                        NexusUi.rowLabel(this@SpeechSettingsActivity, "Replace key"),
                         LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
                     )
-                    addView(
-                        NexusUi.metaLabel(
-                            this@SpeechSettingsActivity,
-                            if (hasKey) "Key saved" else "No key",
-                            if (hasKey) NexusUi.GREEN_DIM else NexusUi.INK4,
-                        ),
-                    )
+                    addView(NexusUi.metaLabel(this@SpeechSettingsActivity, "Edit ›", NexusUi.GREEN))
                 },
                 NexusUi.block(),
             )
-            creditsView = null
-            if (shownProvider == SpeechProvider.ELEVENLABS && hasKey) {
-                addView(BusTheme.gap(this@SpeechSettingsActivity, 6))
-                creditsView = NexusUi.metaLabel(this@SpeechSettingsActivity, "Credits —", NexusUi.INK4)
-                addView(creditsView, NexusUi.block())
-                fetchCredits()
-            }
-            addView(BusTheme.gap(this@SpeechSettingsActivity, 10))
+        }
+
+    /** Edit state: field(s) + a full-width Save, quiet secondary actions. */
+    private fun keyEditBlock(hasKey: Boolean): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
 
             val keyField = secretField(
-                if (hasKey) "Paste a new key to replace it" else "Paste your ${shownProvider.displayName} API key",
+                if (hasKey) "Paste a new ${shownProvider.displayName} key" else "Paste your ${shownProvider.displayName} API key",
             )
             addView(keyField, NexusUi.block())
 
@@ -346,30 +428,38 @@ class SpeechSettingsActivity : Activity() {
                 addView(regionField, NexusUi.block())
             }
 
-            addView(BusTheme.gap(this@SpeechSettingsActivity, 10))
+            addView(BusTheme.gap(this@SpeechSettingsActivity, 12))
             addView(
-                LinearLayout(this@SpeechSettingsActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    addView(View(this@SpeechSettingsActivity), LinearLayout.LayoutParams(0, 1, 1f))
-                    if (hasKey) {
-                        addView(
-                            NexusUi.textButton(this@SpeechSettingsActivity, "Clear", danger = true).apply {
-                                setOnClickListener { onClearCredential() }
-                            },
-                        )
-                        addView(View(this@SpeechSettingsActivity), LinearLayout.LayoutParams(NexusUi.dp(this@SpeechSettingsActivity, 8), 1))
-                    }
-                    addView(
-                        NexusUi.pillButton(this@SpeechSettingsActivity, "Save").apply {
-                            minHeight = NexusUi.dp(this@SpeechSettingsActivity, 40)
-                            minimumHeight = NexusUi.dp(this@SpeechSettingsActivity, 40)
-                            setOnClickListener { onSaveCredential(keyField, regionField) }
-                        },
-                    )
+                NexusUi.pillButton(this@SpeechSettingsActivity, "Save").apply {
+                    setOnClickListener { onSaveCredential(keyField, regionField) }
                 },
                 NexusUi.block(),
             )
+
+            if (hasKey) {
+                addView(BusTheme.gap(this@SpeechSettingsActivity, 4))
+                addView(
+                    LinearLayout(this@SpeechSettingsActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(
+                            NexusUi.textButton(this@SpeechSettingsActivity, "Cancel").apply {
+                                setOnClickListener {
+                                    keyEditing = false
+                                    buildUi()
+                                }
+                            },
+                        )
+                        addView(View(this@SpeechSettingsActivity), LinearLayout.LayoutParams(0, 1, 1f))
+                        addView(
+                            NexusUi.textButton(this@SpeechSettingsActivity, "Remove key", danger = true).apply {
+                                setOnClickListener { onClearCredential() }
+                            },
+                        )
+                    },
+                    NexusUi.block(),
+                )
+            }
         }
 
     private fun secretField(hintText: String): EditText =
@@ -429,19 +519,60 @@ class SpeechSettingsActivity : Activity() {
             val quota = key?.let { SpeechCredits.fetchElevenLabs(it) }
             runOnUiThread {
                 if (isFinishing || isDestroyed || generation != creditsGeneration) return@runOnUiThread
-                val view = creditsView ?: return@runOnUiThread
-                if (quota == null) {
-                    view.text = "CREDITS UNAVAILABLE"
-                    view.setTextColor(NexusUi.INK4)
-                } else {
-                    val format = java.text.NumberFormat.getIntegerInstance()
-                    view.text = "${format.format(quota.remaining)} OF ${format.format(quota.limit)} CREDITS LEFT"
-                    view.setTextColor(
-                        if (quota.remaining < quota.limit / 10) NexusUi.AMBER else NexusUi.GREEN_DIM,
-                    )
-                }
+                renderCredits(quota)
             }
         }.apply { isDaemon = true }.start()
+    }
+
+    private fun renderCredits(quota: SpeechCredits.ElevenLabsQuota?) {
+        val main = creditsMain ?: return
+        val sub = creditsSub ?: return
+        if (quota == null) {
+            main.text = "Credits unavailable"
+            main.setTextColor(NexusUi.INK2)
+            sub.text = "ENABLE THE USER READ SCOPE TO SEE CREDITS"
+            creditsBar?.visibility = View.GONE
+            return
+        }
+
+        val low = quota.remaining < quota.limit / 10L
+        val format = java.text.NumberFormat.getIntegerInstance()
+        val remainingText = format.format(quota.remaining)
+        val line = SpannableString("$remainingText credits left")
+        line.setSpan(
+            ForegroundColorSpan(if (low) NexusUi.AMBER else NexusUi.INK),
+            0,
+            remainingText.length,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+        main.setTextColor(NexusUi.INK2)
+        main.text = line
+
+        var subText = "of ${format.format(quota.limit)}"
+        quota.resetUnixSeconds?.let { reset ->
+            val date = java.text.SimpleDateFormat("d MMM", java.util.Locale.US)
+                .format(java.util.Date(reset * 1000L))
+            subText += " · resets $date"
+        }
+        sub.text = subText.uppercase(java.util.Locale.US)
+        sub.setTextColor(NexusUi.INK4)
+
+        creditsBar?.visibility = View.VISIBLE
+        creditsBarFill?.let { fill ->
+            (fill.background as? GradientDrawable)
+                ?.setColor(if (low) NexusUi.AMBER else NexusUi.GREEN_DIM)
+            fill.layoutParams = LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                quota.remaining.toFloat().coerceAtLeast(0f),
+            )
+        }
+        creditsBarRest?.layoutParams = LinearLayout.LayoutParams(
+            0,
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            (quota.limit - quota.remaining).toFloat().coerceAtLeast(0f),
+        )
+        creditsBar?.requestLayout()
     }
 
     // --- Try it ---
