@@ -85,6 +85,38 @@ class PhonePinStateTest {
         assertTrue(afterClear!!.getLong("seq") > cleared.payload.getLong("seq"))
     }
 
+    @Test
+    fun `size and line emphasis survive the normalized payload rebuild`() {
+        assertRejected(
+            owned("alpha").put("lines", JSONArray().put("a").put("b").put("c")),
+            "alpha",
+            PinSurfaceContract.ERROR_INVALID_PIN,
+        )
+
+        val accepted = state.show("alpha", medium("alpha")) as PhonePinShowResult.Accepted
+        val normalized = accepted.pin.payload
+        assertEquals("medium", normalized.getString("size"))
+        val lines = normalized.getJSONArray("lines")
+        assertEquals("arrives in 4 min", lines.getJSONObject(0).getString("text"))
+        assertEquals("bright", lines.getJSONObject(0).getString("emphasis"))
+        assertEquals("route 42", lines.getString(1))
+        assertEquals("dim", lines.getJSONObject(2).getString("emphasis"))
+
+        val resend = state.payloadForResend()
+        assertEquals("medium", resend?.getString("size"))
+        assertEquals("bright", resend?.getJSONArray("lines")?.getJSONObject(0)?.getString("emphasis"))
+    }
+
+    private fun medium(pluginId: String) = owned(pluginId)
+        .put("size", "medium")
+        .put(
+            "lines",
+            JSONArray()
+                .put(JSONObject().put("text", " arrives in 4 min ").put("emphasis", "bright"))
+                .put("route 42")
+                .put(JSONObject().put("text", "platform 2").put("emphasis", "dim")),
+        )
+
     private fun owned(pluginId: String) = JSONObject()
         .put("surfaceId", "$pluginId:pin")
         .put("localSurfaceId", "pin")

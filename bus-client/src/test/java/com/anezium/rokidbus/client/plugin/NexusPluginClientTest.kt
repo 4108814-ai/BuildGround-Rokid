@@ -5,6 +5,7 @@ import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.BusCapabilityBits
 import com.anezium.rokidbus.shared.LinkStateBits
 import com.anezium.rokidbus.shared.PinSurfaceContract
+import com.anezium.rokidbus.shared.PinSurfaceSize
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -211,7 +212,45 @@ class NexusPluginClientTest {
         assertEquals("NEXUS PIN", shown.second.getString("title"))
         assertEquals("sample overlay", shown.second.getJSONArray("lines").getString(0))
         assertEquals(PinSurfaceContract.MIN_TTL_MS, shown.second.getLong("ttlMs"))
+        assertFalse(shown.second.has("size"))
         assertEquals(BusPaths.PIN_HIDE, transport.sends[1].first)
+    }
+
+    @Test
+    fun `medium pins carry the size tier and per line emphasis`() {
+        val (client, transport, _) = fixture()
+        transport.featureBits = BusCapabilityBits.PIN_SURFACE
+        transport.listener.onMessage(
+            BusPaths.PLUGIN_REGISTRATION,
+            "pin-medium-registration",
+            payload()
+                .put("result", PluginRegistrationResult.APPROVED)
+                .put("capabilities", "surfaces"),
+        )
+        transport.listener.onLinkState(LinkStateBits.SPP_DATA_UP)
+
+        assertEquals(
+            NexusSdkResult.SENT,
+            client.showPin(
+                NexusPin(
+                    title = "NEXUS PIN · MEDIUM",
+                    size = NexusPinSize.MEDIUM,
+                    richLines = listOf(
+                        NexusPinLine("bright headline row", NexusPinEmphasis.BRIGHT),
+                        NexusPinLine("  default body row  "),
+                        NexusPinLine("dim footnote row", NexusPinEmphasis.DIM),
+                    ),
+                ),
+            ),
+        )
+
+        val shown = transport.sends[0].second
+        assertEquals("medium", shown.getString("size"))
+        val lines = shown.getJSONArray("lines")
+        assertEquals("bright", lines.getJSONObject(0).getString("emphasis"))
+        assertEquals("bright headline row", lines.getJSONObject(0).getString("text"))
+        assertEquals("default body row", lines.getString(1))
+        assertEquals("dim", lines.getJSONObject(2).getString("emphasis"))
     }
 
     @Test
@@ -260,6 +299,42 @@ class NexusPluginClientTest {
         }
         assertThrows(IllegalArgumentException::class.java) {
             NexusPin(title = " ", lines = listOf(" "))
+        }
+    }
+
+    @Test
+    fun `pin caps follow the size tier and reject mixed line channels`() {
+        // Allowed only because the medium tier raises the caps.
+        NexusPin(
+            title = "x".repeat(PinSurfaceSize.MEDIUM.maxTitleChars),
+            lines = listOf("a", "b", "x".repeat(PinSurfaceSize.MEDIUM.maxLineChars)),
+            size = NexusPinSize.MEDIUM,
+        )
+
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusPin(
+                title = "x".repeat(PinSurfaceSize.MEDIUM.maxTitleChars + 1),
+                size = NexusPinSize.MEDIUM,
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusPin(lines = listOf("a", "b", "c", "d"), size = NexusPinSize.MEDIUM)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusPin(
+                size = NexusPinSize.MEDIUM,
+                richLines = listOf(NexusPinLine("x".repeat(PinSurfaceSize.MEDIUM.maxLineChars + 1))),
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            // Small keeps the original caps even when rich lines are used.
+            NexusPin(richLines = listOf(NexusPinLine("x".repeat(PinSurfaceContract.MAX_LINE_CHARS + 1))))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusPin(lines = listOf("plain"), richLines = listOf(NexusPinLine("rich")))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusPin(richLines = listOf(NexusPinLine(" ", NexusPinEmphasis.BRIGHT)))
         }
     }
 }

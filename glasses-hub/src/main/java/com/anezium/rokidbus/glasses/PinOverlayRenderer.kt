@@ -12,7 +12,9 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
+import com.anezium.rokidbus.shared.PinSurfaceEmphasis
 import com.anezium.rokidbus.shared.PinSurfacePosition
+import com.anezium.rokidbus.shared.PinSurfaceSize
 
 object PinOverlayRenderer {
     private var service: AccessibilityService? = null
@@ -101,8 +103,8 @@ object PinOverlayRenderer {
     }
 
     private class PinPanelView(context: Context) : LinearLayout(context) {
-        private val title = row(13f, BusTheme.phosphor, bold = true)
-        private val lines = List(2) { row(11f, BusTheme.muted) }
+        private val title = row(bold = true)
+        private val lines = List(MAX_LINE_SLOTS) { row() }
 
         init {
             orientation = VERTICAL
@@ -130,19 +132,33 @@ object PinOverlayRenderer {
 
         fun render(pin: NexusPinSurface?) {
             val content = pin?.content
+            val size = content?.size ?: PinSurfaceSize.SMALL
+            val medium = size == PinSurfaceSize.MEDIUM
+            val maxWidthPx = (
+                resources.displayMetrics.widthPixels *
+                    if (medium) MEDIUM_SCREEN_WIDTH_FRACTION else SMALL_SCREEN_WIDTH_FRACTION
+                ).toInt()
+
+            title.textSize = if (medium) MEDIUM_TITLE_SP else SMALL_TITLE_SP
+            title.maxWidth = maxWidthPx
             title.text = content?.title.orEmpty()
             title.visibility = visibleIf(!content?.title.isNullOrEmpty())
+
             lines.forEachIndexed { index, view ->
-                val text = content?.lines?.getOrNull(index).orEmpty()
-                view.text = text
-                view.visibility = visibleIf(text.isNotEmpty())
+                val line = content?.lines?.getOrNull(index)?.takeIf { index < size.maxLines }
+                view.textSize = if (medium) MEDIUM_LINE_SP else SMALL_LINE_SP
+                view.maxWidth = maxWidthPx
+                view.setTextColor(
+                    if (line?.emphasis == PinSurfaceEmphasis.BRIGHT) BusTheme.phosphor else BusTheme.muted,
+                )
+                view.text = line?.text.orEmpty()
+                view.visibility = visibleIf(!line?.text.isNullOrEmpty())
             }
         }
 
-        private fun row(sizeSp: Float, color: Int, bold: Boolean = false) =
+        private fun row(bold: Boolean = false) =
             TextView(context).apply {
-                textSize = sizeSp
-                setTextColor(color)
+                setTextColor(if (bold) BusTheme.phosphor else BusTheme.muted)
                 typeface = Typeface.create(
                     Typeface.MONOSPACE,
                     if (bold) Typeface.BOLD else Typeface.NORMAL,
@@ -151,7 +167,6 @@ object PinOverlayRenderer {
                 isSingleLine = true
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END
-                maxWidth = (resources.displayMetrics.widthPixels * MAX_SCREEN_WIDTH_FRACTION).toInt()
             }
 
         private fun visibleIf(visible: Boolean): Int =
@@ -159,5 +174,11 @@ object PinOverlayRenderer {
     }
 
     private const val EDGE_MARGIN_DP = 12
-    private const val MAX_SCREEN_WIDTH_FRACTION = 0.45f
+    private const val MAX_LINE_SLOTS = 3
+    private const val SMALL_TITLE_SP = 13f
+    private const val SMALL_LINE_SP = 11f
+    private const val SMALL_SCREEN_WIDTH_FRACTION = 0.45f
+    private const val MEDIUM_TITLE_SP = 15f
+    private const val MEDIUM_LINE_SP = 12f
+    private const val MEDIUM_SCREEN_WIDTH_FRACTION = 0.60f
 }

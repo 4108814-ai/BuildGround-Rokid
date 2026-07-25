@@ -1,7 +1,10 @@
 package com.anezium.rokidbus.glasses
 
 import com.anezium.rokidbus.shared.PinSurfaceContent
+import com.anezium.rokidbus.shared.PinSurfaceEmphasis
+import com.anezium.rokidbus.shared.PinSurfaceLine
 import com.anezium.rokidbus.shared.PinSurfacePosition
+import com.anezium.rokidbus.shared.PinSurfaceSize
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -10,7 +13,7 @@ import org.junit.Test
 class PinControllerTest {
     private val content = PinSurfaceContent(
         title = "NEXUS PIN",
-        lines = listOf("sample overlay"),
+        lines = listOf(PinSurfaceLine("sample overlay")),
         position = PinSurfacePosition.TOP_RIGHT,
         ttlMs = null,
     )
@@ -34,6 +37,35 @@ class PinControllerTest {
         state.show("beta:pin", 2L, content, 1_001L)
         assertEquals("beta:pin", state.activePin()?.surfaceId)
         assertEquals(2L, state.activePin()?.seq)
+    }
+
+    @Test
+    fun `carries the size tier and per line emphasis through to the renderer`() {
+        val medium = PinSurfaceContent(
+            title = "NEXUS PIN · MEDIUM",
+            lines = listOf(
+                PinSurfaceLine("bright headline row", PinSurfaceEmphasis.BRIGHT),
+                PinSurfaceLine("default body row"),
+                PinSurfaceLine("dim footnote row", PinSurfaceEmphasis.DIM),
+            ),
+            position = PinSurfacePosition.TOP_LEFT,
+            ttlMs = null,
+            size = PinSurfaceSize.MEDIUM,
+        )
+
+        val state = PinStateMachine()
+        assertTrue(state.show("alpha:pin", 1L, medium, 1_000L) is PinStateDecision.Applied)
+        val active = state.activePin()?.content
+        assertEquals(PinSurfaceSize.MEDIUM, active?.size)
+        assertEquals(3, active?.lines?.size)
+        assertEquals(PinSurfaceEmphasis.BRIGHT, active?.lines?.get(0)?.emphasis)
+        assertEquals(PinSurfaceEmphasis.DEFAULT, active?.lines?.get(1)?.emphasis)
+        assertEquals(PinSurfaceEmphasis.DIM, active?.lines?.get(2)?.emphasis)
+
+        // Content without the new fields still lands on the small tier defaults.
+        state.show("beta:pin", 2L, content, 1_100L)
+        assertEquals(PinSurfaceSize.SMALL, state.activePin()?.content?.size)
+        assertEquals(PinSurfaceEmphasis.DEFAULT, state.activePin()?.content?.lines?.first()?.emphasis)
     }
 
     @Test

@@ -16,11 +16,53 @@ enum class PinSurfacePosition(val wireValue: String) {
     }
 }
 
+/**
+ * Pin size tier. Each tier carries its own text caps; `small` is the default and
+ * keeps the v1 caps a payload without a `size` field has always had.
+ */
+enum class PinSurfaceSize(
+    val wireValue: String,
+    val maxTitleChars: Int,
+    val maxLines: Int,
+    val maxLineChars: Int,
+) {
+    SMALL("small", maxTitleChars = 24, maxLines = 2, maxLineChars = 28),
+    MEDIUM("medium", maxTitleChars = 28, maxLines = 3, maxLineChars = 32),
+    ;
+
+    companion object {
+        fun fromWireValue(value: String): PinSurfaceSize? =
+            entries.firstOrNull { it.wireValue == value }
+    }
+}
+
+/**
+ * Per-line emphasis. [DEFAULT] has no wire value: a line that carries it is sent
+ * as a plain string, exactly like every pre-emphasis payload.
+ */
+enum class PinSurfaceEmphasis(val wireValue: String?) {
+    DEFAULT(null),
+    BRIGHT("bright"),
+    DIM("dim"),
+    ;
+
+    companion object {
+        fun fromWireValue(value: String): PinSurfaceEmphasis? =
+            entries.firstOrNull { it.wireValue == value }
+    }
+}
+
+data class PinSurfaceLine(
+    val text: String,
+    val emphasis: PinSurfaceEmphasis = PinSurfaceEmphasis.DEFAULT,
+)
+
 data class PinSurfaceContent(
     val title: String?,
-    val lines: List<String>,
+    val lines: List<PinSurfaceLine>,
     val position: PinSurfacePosition,
     val ttlMs: Long?,
+    val size: PinSurfaceSize = PinSurfaceSize.SMALL,
 )
 
 sealed interface PinSurfaceValidationResult {
@@ -33,9 +75,12 @@ object PinSurfaceContract {
     const val KIND = "pin"
     const val VERSION = 1
     const val LOCAL_SURFACE_ID = "pin"
-    const val MAX_TITLE_CHARS = 24
-    const val MAX_LINES = 2
-    const val MAX_LINE_CHARS = 28
+
+    /** Small-tier caps under their historical names; see [PinSurfaceSize] for the per-tier values. */
+    val MAX_TITLE_CHARS = PinSurfaceSize.SMALL.maxTitleChars
+    val MAX_LINES = PinSurfaceSize.SMALL.maxLines
+    val MAX_LINE_CHARS = PinSurfaceSize.SMALL.maxLineChars
+
     const val MIN_TTL_MS = 1_000L
     const val MAX_TTL_MS = 86_400_000L
     const val MIN_SHOW_INTERVAL_MS = 500L
@@ -47,32 +92,49 @@ object PinSurfaceContract {
     fun validateShow(payload: JSONObject): PinSurfaceValidationResult {
         if (payload.opt("kind") != KIND) return invalid("kind must be pin")
 
-        val title = optionalTrimmedString(payload, "title")
-            ?: if (payload.has("title")) return invalid("title must be a string") else null
-        if (title != null && title.length > MAX_TITLE_CHARS) {
-            return invalid("title exceeds $MAX_TITLE_CHARS characters")
+        val size = when (val value = payload.opt("size")) {
+            null -> PinSurfaceSize.SMALL
+            is String -> PinSurfaceSize.fromWireValue(value) ?: return invalid("size is invalid")
+            else -> return invalid("size must be a string")
         }
 
-        val lines: List<String> = when (val value = payload.opt("lines")) {
+        val title = optionalTrimmedString(payload, "title")
+            ?: if (payload.has("title")) return invalid("title must be a string") else null
+        if (title != null && title.length > size.maxTitleChars) {
+            return invalid("title exceeds ${size.maxTitleChars} characters")
+        }
+
+        val lines: List<PinSurfaceLine> = when (val value = payload.opt("lines")) {
             null -> emptyList()
             is JSONArray -> {
-                if (value.length() > MAX_LINES) return invalid("lines exceeds $MAX_LINES entries")
-                buildList<String> {
+                if (value.length() > size.maxLines) return invalid("lines exceeds ${size.maxLines} entries")
+                buildList<PinSurfaceLine> {
                     for (index in 0 until value.length()) {
-                        val line = value.opt(index) as? String
-                            ?: return invalid("lines must contain only strings")
-                        val trimmed = line.trim()
-                        if (trimmed.length > MAX_LINE_CHARS) {
-                            return invalid("line exceeds $MAX_LINE_CHARS characters")
+                        when (val entry = value.opt(index)) {
+                            is String -> add(PinSurfaceLine(entry.trim()))
+                            is JSONObject -> {
+                                val text = (entry.opt("text") as? String)?.trim()
+                                    ?: return invalid("line text must be a string")
+                                val emphasis = when (val raw = entry.opt("emphasis")) {
+                                    null -> PinSurfaceEmphasis.DEFAULT
+                                    is String -> PinSurfaceEmphasis.fromWireValue(raw)
+                                        ?: return invalid("line emphasis is invalid")
+                                    else -> return invalid("line emphasis must be a string")
+                                }
+                                add(PinSurfaceLine(text, emphasis))
+                            }
+                            else -> return invalid("lines must contain strings or objects")
                         }
-                        add(trimmed)
                     }
                 }
             }
             else -> return invalid("lines must be an array")
         }
+        if (lines.any { it.text.length > size.maxLineChars }) {
+            return invalid("line exceeds ${size.maxLineChars} characters")
+        }
 
-        if (title.isNullOrEmpty() && lines.none { it.isNotEmpty() }) {
+        if (title.isNullOrEmpty() && lines.none { it.text.isNotEmpty() }) {
             return invalid("title or lines must contain text")
         }
 
@@ -96,6 +158,7 @@ object PinSurfaceContract {
                 lines = lines,
                 position = position,
                 ttlMs = ttlMs,
+                size = size,
             ),
         )
     }
@@ -103,12 +166,20 @@ object PinSurfaceContract {
     fun toPayload(surfaceId: String, content: PinSurfaceContent): JSONObject = JSONObject()
         .put("surfaceId", surfaceId)
         .put("kind", KIND)
-        .put("lines", JSONArray(content.lines))
+        .put("lines", JSONArray().apply { content.lines.forEach { put(lineJsonValue(it)) } })
         .put("position", content.position.wireValue)
         .apply {
             content.title?.let { put("title", it) }
+            // Omitted for the default tier so pre-size payloads stay byte-identical.
+            if (content.size != PinSurfaceSize.SMALL) put("size", content.size.wireValue)
             content.ttlMs?.let { put("ttlMs", it.coerceIn(MIN_TTL_MS, MAX_TTL_MS)) }
         }
+
+    /** Plain string when nothing but text is set, object otherwise (same shape as card lines). */
+    private fun lineJsonValue(line: PinSurfaceLine): Any {
+        val emphasis = line.emphasis.wireValue ?: return line.text
+        return JSONObject().put("text", line.text).put("emphasis", emphasis)
+    }
 
     private fun optionalTrimmedString(payload: JSONObject, key: String): String? {
         if (!payload.has(key)) return null

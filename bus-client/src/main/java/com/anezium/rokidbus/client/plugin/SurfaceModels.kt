@@ -6,7 +6,10 @@ import com.anezium.rokidbus.shared.ImageSurfaceValidationResult
 import com.anezium.rokidbus.shared.MediaArtworkContract
 import com.anezium.rokidbus.shared.PinSurfaceContent
 import com.anezium.rokidbus.shared.PinSurfaceContract
+import com.anezium.rokidbus.shared.PinSurfaceEmphasis
+import com.anezium.rokidbus.shared.PinSurfaceLine
 import com.anezium.rokidbus.shared.PinSurfacePosition
+import com.anezium.rokidbus.shared.PinSurfaceSize
 import com.anezium.rokidbus.shared.plugin.PluginCapability
 import org.json.JSONArray
 import org.json.JSONObject
@@ -279,33 +282,78 @@ enum class NexusPinPosition(internal val wireValue: String) {
 }
 
 /**
+ * Pin size tier. [SMALL] is the default and keeps the original caps (title of 24
+ * trimmed characters, two lines of 28); [MEDIUM] allows a 28-character title and
+ * three lines of 32 and renders slightly larger and wider.
+ */
+enum class NexusPinSize(internal val contract: PinSurfaceSize) {
+    SMALL(PinSurfaceSize.SMALL),
+    MEDIUM(PinSurfaceSize.MEDIUM),
+}
+
+/**
+ * Per-line emphasis. [DEFAULT] is the muted body tone every pin line has always
+ * used, [BRIGHT] promotes the line to the phosphor title tone, and [DIM] states
+ * the muted tone explicitly. The pin title is always bright.
+ */
+enum class NexusPinEmphasis(internal val contract: PinSurfaceEmphasis) {
+    DEFAULT(PinSurfaceEmphasis.DEFAULT),
+    BRIGHT(PinSurfaceEmphasis.BRIGHT),
+    DIM(PinSurfaceEmphasis.DIM),
+}
+
+/**
+ * One emphasized pin line, passed through [NexusPin.richLines].
+ *
+ * Length caps depend on the pin's size tier, so they are enforced by [NexusPin]
+ * rather than here.
+ */
+data class NexusPinLine(
+    val text: String,
+    val emphasis: NexusPinEmphasis = NexusPinEmphasis.DEFAULT,
+) {
+    internal fun toContent(): PinSurfaceLine =
+        PinSurfaceLine(text = text.trim(), emphasis = emphasis.contract)
+}
+
+/**
  * A tiny persistent glasses pin.
  *
- * [title] is optional and limited to 24 trimmed characters. [lines] accepts at
- * most two strings of 28 trimmed characters each, and at least one title or
- * line must remain non-empty after trimming. [ttlMs] is optional; wire values
- * are clamped to 1 second through 24 hours.
+ * [title] is optional and limited to the tier's title cap (24 trimmed characters
+ * for [NexusPinSize.SMALL], 28 for [NexusPinSize.MEDIUM]). [lines] accepts plain
+ * strings up to the tier's line count and length (2 x 28, or 3 x 32 for medium);
+ * pass [richLines] instead to set per-line emphasis. At least one title or line
+ * must remain non-empty after trimming. [ttlMs] is optional; wire values are
+ * clamped to 1 second through 24 hours.
  */
 data class NexusPin(
     val title: String? = null,
     val lines: List<String> = emptyList(),
     val position: NexusPinPosition = NexusPinPosition.TOP_RIGHT,
     val ttlMs: Long? = null,
+    val size: NexusPinSize = NexusPinSize.SMALL,
+    val richLines: List<NexusPinLine>? = null,
 ) {
     init {
-        require(title == null || title.trim().length <= PinSurfaceContract.MAX_TITLE_CHARS)
-        require(lines.size <= PinSurfaceContract.MAX_LINES)
-        require(lines.all { it.trim().length <= PinSurfaceContract.MAX_LINE_CHARS })
-        require(!title?.trim().isNullOrEmpty() || lines.any { it.trim().isNotEmpty() })
+        val caps = size.contract
+        require(title == null || title.trim().length <= caps.maxTitleChars)
+        require(richLines == null || lines.isEmpty())
+        require(contentLines().size <= caps.maxLines)
+        require(contentLines().all { it.text.trim().length <= caps.maxLineChars })
+        require(!title?.trim().isNullOrEmpty() || contentLines().any { it.text.trim().isNotEmpty() })
     }
+
+    private fun contentLines(): List<NexusPinLine> =
+        richLines ?: lines.map { NexusPinLine(it) }
 
     internal fun toPayload(): JSONObject = PinSurfaceContract.toPayload(
         surfaceId = PinSurfaceContract.LOCAL_SURFACE_ID,
         content = PinSurfaceContent(
             title = title?.trim()?.takeIf { it.isNotEmpty() },
-            lines = lines.map(String::trim),
+            lines = contentLines().map { it.toContent() },
             position = PinSurfacePosition.fromWireValue(position.wireValue)!!,
             ttlMs = ttlMs?.coerceIn(PinSurfaceContract.MIN_TTL_MS, PinSurfaceContract.MAX_TTL_MS),
+            size = size.contract,
         ),
     )
 }

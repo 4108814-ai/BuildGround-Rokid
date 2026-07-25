@@ -194,12 +194,38 @@ val result = nexusClient?.showPin(
 nexusClient?.hidePin()
 ```
 
+A pin has two size tiers. `NexusPinSize.SMALL` is the default and keeps the caps
+above; `NexusPinSize.MEDIUM` allows a 28-character title and three lines of 32
+characters, and renders slightly larger and up to 60% of the screen width
+instead of 45%. Pick the smallest tier that fits: a pin competes with whatever
+the wearer is actually looking at.
+
+Lines can also carry emphasis. Pass `richLines` instead of `lines` (the two are
+mutually exclusive, exactly like `NexusCard.richLines`): `NexusPinEmphasis.BRIGHT`
+promotes a line to the phosphor title tone and `DIM` states the muted body tone
+explicitly. The title is always bright.
+
+```kotlin
+nexusClient?.showPin(
+    NexusPin(
+        title = "Bus 42 · Central",
+        size = NexusPinSize.MEDIUM,
+        richLines = listOf(
+            NexusPinLine("arrives in 4 min", NexusPinEmphasis.BRIGHT),
+            NexusPinLine("then 11 min · 26 min"),
+            NexusPinLine("platform 2", NexusPinEmphasis.DIM),
+        ),
+    ),
+)
+```
+
 At least one title or line must be non-empty after trimming. Typed-model cap
-violations throw `IllegalArgumentException`. The hub rejects malformed raw
-traffic with `INVALID_PIN` and accepts at most one `/pin/show` per plugin every
-500 ms (`PIN_RATE_LIMITED`). The glasses overlay is text-only and has no input.
-The sample plugin toggles `NEXUS PIN` / `sample overlay` from its existing tap
-action for on-device validation.
+violations throw `IllegalArgumentException`, and the caps checked are the ones
+for the tier you passed. The hub rejects malformed raw traffic with
+`INVALID_PIN` and accepts at most one `/pin/show` per plugin every 500 ms
+(`PIN_RATE_LIMITED`). The glasses overlay is text-only and has no input. The
+sample plugin cycles small pin, medium pin, hidden from its existing tap action
+for on-device validation.
 
 ### 3.1 Microphone (audio lease)
 

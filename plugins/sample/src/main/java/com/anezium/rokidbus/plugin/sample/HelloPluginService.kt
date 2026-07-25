@@ -4,6 +4,9 @@ import android.view.KeyEvent
 import com.anezium.rokidbus.client.plugin.NexusCard
 import com.anezium.rokidbus.client.plugin.NexusImage
 import com.anezium.rokidbus.client.plugin.NexusPin
+import com.anezium.rokidbus.client.plugin.NexusPinEmphasis
+import com.anezium.rokidbus.client.plugin.NexusPinLine
+import com.anezium.rokidbus.client.plugin.NexusPinSize
 import com.anezium.rokidbus.client.plugin.NexusPluginService
 import com.anezium.rokidbus.client.plugin.NexusSdkResult
 import com.anezium.rokidbus.client.plugin.NexusSpeechCallbacks
@@ -21,7 +24,7 @@ class HelloPluginService : NexusPluginService() {
     private var speech: NexusSpeechSession? = null
     private var stopSpeechWhenStarted = false
     private var showingImage = false
-    private var pinShown = false
+    private var pinStep = PIN_HIDDEN
     private val speechCallbacks = object : NexusSpeechCallbacks {
         override fun onSpeechStarted(realtime: Boolean) {
             val currentSpeech = speech ?: return
@@ -76,7 +79,7 @@ class HelloPluginService : NexusPluginService() {
         surface?.hide()
         surface = null
         showingImage = false
-        pinShown = false
+        pinStep = PIN_HIDDEN
     }
 
     override fun onNexusInput(event: NexusInputEvent) {
@@ -100,7 +103,7 @@ class HelloPluginService : NexusPluginService() {
             KeyEvent.KEYCODE_ENTER,
             -> {
                 when (state.activate()) {
-                    HelloPluginAction.RENDER -> toggleDemoPin()
+                    HelloPluginAction.RENDER -> cycleDemoPin()
                     HelloPluginAction.START_SPEECH -> startSpeech()
                     HelloPluginAction.STOP_SPEECH -> {
                         stopSpeechWhenStarted = true
@@ -179,21 +182,37 @@ class HelloPluginService : NexusPluginService() {
         if (show) surface?.showCard(card) else surface?.updateCard(card)
     }
 
-    private fun toggleDemoPin() {
+    /** Cycles the demo pin through its two size tiers before hiding it again. */
+    private fun cycleDemoPin() {
         val client = nexusClient ?: return
-        pinShown = if (pinShown) {
-            client.hidePin() != NexusSdkResult.SENT
-        } else {
-            client.showPin(
-                NexusPin(
-                    title = "NEXUS PIN",
-                    lines = listOf("sample overlay"),
-                ),
-            ) == NexusSdkResult.SENT
-        }
+        val next = (pinStep + 1) % 3
+        val sent = when (next) {
+            PIN_SMALL -> client.showPin(SMALL_PIN)
+            PIN_MEDIUM -> client.showPin(MEDIUM_PIN)
+            else -> client.hidePin()
+        } == NexusSdkResult.SENT
+        if (sent) pinStep = next
     }
 
     private companion object {
         const val SURFACE_ID = "main"
+        const val PIN_HIDDEN = 0
+        const val PIN_SMALL = 1
+        const val PIN_MEDIUM = 2
+
+        val SMALL_PIN = NexusPin(
+            title = "NEXUS PIN",
+            lines = listOf("sample overlay"),
+        )
+
+        val MEDIUM_PIN = NexusPin(
+            title = "NEXUS PIN · MEDIUM",
+            size = NexusPinSize.MEDIUM,
+            richLines = listOf(
+                NexusPinLine("bright headline row", NexusPinEmphasis.BRIGHT),
+                NexusPinLine("default body row"),
+                NexusPinLine("dim footnote row", NexusPinEmphasis.DIM),
+            ),
+        )
     }
 }

@@ -236,13 +236,45 @@ monotonic sequence:
 }
 ```
 
-`title` is optional and limited to 24 characters after trimming. `lines` is an
-optional array of zero to two strings, each limited to 28 characters after
-trimming. At least one title or line must be non-empty. `position` is optional
-and is one of `top-left`, `top-right`, `bottom-left`, or `bottom-right`;
-`top-right` is the default. `ttlMs` is optional and is clamped to
-`1,000..86,400,000`; omission means persistent. The glasses drop stale or
-duplicate `seq` values and defensively ellipsize every rendered row.
+`size` is optional and is one of `small` or `medium`; `small` is the default and
+is what a payload without the field has always meant. The tier sets every text
+cap: `small` allows a 24-character title and up to two lines of 28 characters,
+`medium` a 28-character title and up to three lines of 32 characters. Every cap
+is measured after trimming, and a payload that exceeds its tier is rejected
+rather than truncated.
+
+`title` is optional. `lines` is an optional array whose entries are either a
+plain string or an object `{"text": "…", "emphasis": "bright" | "dim"}`, the
+same string-or-object shape card rows use. Omitted emphasis keeps the default
+tone: the title renders in the bright phosphor colour and lines render muted.
+`bright` promotes a line to the title colour, `dim` states the muted tone
+explicitly, and the title is always bright. At least one title or line must be
+non-empty. `position` is optional and is one of `top-left`, `top-right`,
+`bottom-left`, or `bottom-right`; `top-right` is the default. `ttlMs` is
+optional and is clamped to `1,000..86,400,000`; omission means persistent. The
+glasses drop stale or duplicate `seq` values and defensively ellipsize every
+rendered row.
+
+The hub normalizes an accepted pin before forwarding it: trimmed text, the
+resolved `position`, `size` only when it is not `small`, and each line back to a
+plain string unless it carries an emphasis. A medium pin therefore looks like:
+
+```json
+{
+  "surfaceId": "transit:pin",
+  "ownerPluginId": "transit",
+  "seq": 8,
+  "kind": "pin",
+  "size": "medium",
+  "title": "Bus 42 · Central",
+  "lines": [
+    { "text": "arrives in 4 min", "emphasis": "bright" },
+    "then 11 min · 26 min",
+    { "text": "platform 2", "emphasis": "dim" }
+  ],
+  "position": "top-right"
+}
+```
 
 The slot is last-writer-wins across plugins. A show may replace another
 plugin's pin without an eviction callback. Hide is honored only for the current
@@ -255,12 +287,16 @@ complete pin after a valid glasses capability re-announcement.
 
 The glasses render the pin in a small independent, non-focusable and
 non-touchable accessibility-overlay window above fullscreen surface and
-launcher windows. It never wakes or keeps the display on. An active camera
-overlay temporarily hides the pin and detaching the camera overlay restores it.
+launcher windows. A `small` pin uses a 13sp title over 11sp lines and never
+exceeds 45% of the screen width; a `medium` pin uses 15sp over 12sp with three
+line slots and never exceeds 60%. It never wakes or keeps the display on. An
+active camera overlay temporarily hides the pin and detaching the camera
+overlay restores it.
 
 Stable pin errors returned on `/error` are:
 
-- `INVALID_PIN`: field shape, local id, text cap, or enum validation failed.
+- `INVALID_PIN`: field shape, local id, per-tier text cap, or enum validation
+  (`position`, `size`, `emphasis`) failed.
 - `PIN_RATE_LIMITED`: a plugin's previous accepted show was less than 500 ms ago.
 - `CAPABILITY_NOT_AVAILABLE`: pin v1 was not announced or SPP is down.
 
