@@ -1,5 +1,29 @@
 # Changelog
 
+## SDK 0.3.0
+
+- New speech session API: plugins holding the new `stt` capability can start hub
+  speech sessions and receive live state, partial and final transcript callbacks,
+  without ever touching raw microphone audio or provider credentials. See the
+  "Speech to text" section of the plugin SDK guide.
+
+## 1.0.42
+
+### Speech to text
+
+- The hub now runs cloud speech engines against the glasses microphone: pick
+  OpenAI, ElevenLabs or Azure, paste your provider key, and dictation works end
+  to end from the new Speech settings screen — with live partial text on
+  realtime engines and on-phone voice-activity endpointing.
+- Twelve transcription languages with provider-tuned handling, including
+  Cantonese and both Chinese scripts.
+- ElevenLabs keys show the remaining credit balance with a usage gauge that
+  refreshes after every dictation.
+- Plugins can request the new "Speech to text" capability to receive transcripts
+  through the SDK. The grant is separate from the raw microphone grant and is
+  managed from the phone permissions screen; provider keys never leave the hub.
+- Provider keys are stored encrypted with the phone's hardware keystore.
+
 ## SDK 0.2.1
 
 - Restore JitPack distribution after the `sdk-v0.2.0` build failed while
