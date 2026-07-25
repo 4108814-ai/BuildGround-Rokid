@@ -47,8 +47,10 @@ class SpeechSettingsActivity : Activity() {
 
     private lateinit var testStatusView: TextView
     private lateinit var testTranscriptView: TextView
-    private lateinit var testButton: Button
+    private lateinit var testCard: LinearLayout
+    private lateinit var testActionMeta: TextView
     private lateinit var readinessValue: TextView
+    private var contentScroll: ScrollView? = null
     private var keyEditing = false
     private var creditsGeneration = 0
     private var creditsMain: TextView? = null
@@ -71,6 +73,7 @@ class SpeechSettingsActivity : Activity() {
     private fun buildUi() {
         window.statusBarColor = NexusUi.BG
         window.navigationBarColor = NexusUi.BG
+        val savedScrollY = contentScroll?.scrollY ?: 0
 
         val content = NexusUi.contentColumn(this).apply {
             addView(NexusUi.sectionRow(this@SpeechSettingsActivity, "Engine", shownProvider.displayName), NexusUi.block())
@@ -124,6 +127,7 @@ class SpeechSettingsActivity : Activity() {
                 ),
             )
         }
+        contentScroll = scroll
 
         val root = NexusUi.fixedRoot(this).apply {
             addView(titleHeader("Speech"), NexusUi.block())
@@ -136,6 +140,7 @@ class SpeechSettingsActivity : Activity() {
         renderReadiness()
         renderDictation()
         setContentView(root)
+        if (savedScrollY > 0) scroll.post { scroll.scrollTo(0, savedScrollY) }
     }
 
     // --- Engine ---
@@ -530,7 +535,9 @@ class SpeechSettingsActivity : Activity() {
         if (quota == null) {
             main.text = "Credits unavailable"
             main.setTextColor(NexusUi.INK2)
+            sub.visibility = View.VISIBLE
             sub.text = "ENABLE THE USER READ SCOPE TO SEE CREDITS"
+            sub.setTextColor(NexusUi.INK4)
             creditsBar?.visibility = View.GONE
             return
         }
@@ -548,14 +555,16 @@ class SpeechSettingsActivity : Activity() {
         main.setTextColor(NexusUi.INK2)
         main.text = line
 
-        var subText = "of ${format.format(quota.limit)}"
-        quota.resetUnixSeconds?.let { reset ->
+        val reset = quota.resetUnixSeconds
+        if (reset == null) {
+            sub.visibility = View.GONE
+        } else {
             val date = java.text.SimpleDateFormat("d MMM", java.util.Locale.US)
                 .format(java.util.Date(reset * 1000L))
-            subText += " · resets $date"
+            sub.visibility = View.VISIBLE
+            sub.text = "resets $date".uppercase(java.util.Locale.US)
+            sub.setTextColor(NexusUi.INK4)
         }
-        sub.text = subText.uppercase(java.util.Locale.US)
-        sub.setTextColor(NexusUi.INK4)
 
         creditsBar?.visibility = View.VISIBLE
         creditsBarFill?.let { fill ->
@@ -577,21 +586,42 @@ class SpeechSettingsActivity : Activity() {
 
     // --- Try it ---
 
+    /** The whole card is the control: tap to dictate, tap again to stop. */
     private fun dictationCard(): LinearLayout =
-        NexusUi.card(this).apply {
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = NexusUi.pressedBordered(this@SpeechSettingsActivity, NexusUi.PANEL, 15)
+            setPadding(
+                NexusUi.dp(this@SpeechSettingsActivity, 15),
+                NexusUi.dp(this@SpeechSettingsActivity, 14),
+                NexusUi.dp(this@SpeechSettingsActivity, 15),
+                NexusUi.dp(this@SpeechSettingsActivity, 14),
+            )
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onDictationButton() }
+            testCard = this
+
             testStatusView = NexusUi.statusLine(this@SpeechSettingsActivity)
             testTranscriptView = NexusUi.cardBody(this@SpeechSettingsActivity, "").apply {
                 textSize = 15f
-                minHeight = NexusUi.dp(this@SpeechSettingsActivity, 64)
+                minHeight = NexusUi.dp(this@SpeechSettingsActivity, 56)
             }
-            testButton = NexusUi.pillButton(this@SpeechSettingsActivity, "Start dictation").apply {
-                setOnClickListener { onDictationButton() }
-            }
+            testActionMeta = NexusUi.metaLabel(this@SpeechSettingsActivity, "", NexusUi.GREEN)
+
             addView(testStatusView, NexusUi.block())
             addView(BusTheme.gap(this@SpeechSettingsActivity, 10))
             addView(testTranscriptView, NexusUi.block())
-            addView(BusTheme.gap(this@SpeechSettingsActivity, 12))
-            addView(testButton, NexusUi.block())
+            addView(BusTheme.gap(this@SpeechSettingsActivity, 10))
+            addView(
+                LinearLayout(this@SpeechSettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(View(this@SpeechSettingsActivity), LinearLayout.LayoutParams(0, 1, 1f))
+                    addView(testActionMeta)
+                },
+                NexusUi.block(),
+            )
         }
 
     private fun onDictationButton() {
@@ -696,7 +726,7 @@ class SpeechSettingsActivity : Activity() {
     }
 
     private fun renderDictation() {
-        if (!::testButton.isInitialized) return
+        if (!::testActionMeta.isInitialized) return
         testStatusView.text = statusText.orEmpty()
         testStatusView.setTextColor(statusColor)
         val transcript = transcriptText
@@ -707,15 +737,29 @@ class SpeechSettingsActivity : Activity() {
             testTranscriptView.text = transcript
             testTranscriptView.setTextColor(if (transcriptFinal) NexusUi.INK else NexusUi.INK2)
         }
-        testButton.text = if (testActive) "Stop" else "Start dictation"
-        if (testActive) {
-            NexusUi.stylePillAsDanger(this, testButton)
-        } else {
-            NexusUi.stylePillAsPrimary(this, testButton)
-        }
         val ready = settings.readiness(secrets) == SpeechReadiness.READY
-        testButton.isEnabled = testActive || ready
-        testButton.alpha = if (testButton.isEnabled) 1f else 0.55f
+        when {
+            testActive -> {
+                testActionMeta.text = "STOP"
+                testActionMeta.setTextColor(NexusUi.DANGER)
+                testCard.background = NexusUi.bordered(
+                    this,
+                    NexusUi.alpha(NexusUi.GREEN, 0x0A),
+                    NexusUi.alpha(NexusUi.GREEN, 0x45),
+                    15,
+                )
+            }
+            ready -> {
+                testActionMeta.text = "DICTATE ›"
+                testActionMeta.setTextColor(NexusUi.GREEN)
+                testCard.background = NexusUi.pressedBordered(this, NexusUi.PANEL, 15)
+            }
+            else -> {
+                testActionMeta.text = "SET UP ABOVE"
+                testActionMeta.setTextColor(NexusUi.INK4)
+                testCard.background = NexusUi.pressedBordered(this, NexusUi.PANEL, 15)
+            }
+        }
     }
 
     private fun setStatus(text: String, color: Int) {
