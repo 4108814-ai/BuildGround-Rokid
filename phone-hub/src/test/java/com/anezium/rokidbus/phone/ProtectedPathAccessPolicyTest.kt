@@ -76,4 +76,69 @@ class ProtectedPathAccessPolicyTest {
         )
         assertTrue(ProtectedPathAccessPolicy.isAllowed("/plugin/camera.one", false, unsignedOther, null))
     }
+
+    @Test
+    fun `an approved media sync plugin drives sync but cannot forge hub traffic`() {
+        val store = PluginGrantStore(MemoryStorage())
+        val photosync = mediaSyncPrincipal("dev.photosync", "photosync")
+        store.approve(photosync, setOf(PluginCapability.MEDIA_SYNC))
+        val state = store.stateFor(photosync)
+
+        listOf(BusPaths.MEDIA_SYNC_SETTINGS, BusPaths.MEDIA_SYNC_NOW).forEach { path ->
+            assertTrue(ProtectedPathAccessPolicy.isAllowed(path, false, photosync, state))
+        }
+        listOf(
+            BusPaths.MEDIA_SYNC_STATUS,
+            BusPaths.MEDIA_SYNC_LINK_OFFER,
+            BusPaths.MEDIA_SYNC_CONFIG,
+            BusPaths.MEDIA_SYNC_TRIGGER,
+            BusPaths.MEDIA_SYNC_STATE,
+        ).forEach { path ->
+            assertFalse(ProtectedPathAccessPolicy.isAllowed(path, false, photosync, state))
+            assertTrue(ProtectedPathAccessPolicy.isAllowed(path, true, null, null))
+        }
+    }
+
+    @Test
+    fun `status delivery needs the grant but is allowed in the receive direction`() {
+        val store = PluginGrantStore(MemoryStorage())
+        val photosync = mediaSyncPrincipal("dev.photosync", "photosync")
+        val other = principal("dev.other", "camera.other")
+        store.approve(photosync, setOf(PluginCapability.MEDIA_SYNC))
+
+        assertTrue(
+            ProtectedPathAccessPolicy.isAllowed(
+                BusPaths.MEDIA_SYNC_STATUS,
+                false,
+                photosync,
+                store.stateFor(photosync),
+                ProtectedPathDirection.RECEIVE,
+            ),
+        )
+        assertFalse(
+            ProtectedPathAccessPolicy.isAllowed(
+                BusPaths.MEDIA_SYNC_STATUS,
+                false,
+                other,
+                store.stateFor(other),
+                ProtectedPathDirection.RECEIVE,
+            ),
+        )
+    }
+
+    private fun mediaSyncPrincipal(packageName: String, pluginId: String) = PhonePluginPrincipal(
+        packageName,
+        ComponentName(packageName, "$packageName.Service"),
+        10002,
+        "same-signer",
+        PluginDescriptor(
+            pluginId,
+            pluginId,
+            3,
+            setOf(PluginCapability.MEDIA_SYNC),
+            listOf("/system/plugin", "/mediasync/status"),
+            null,
+            false,
+        ),
+    )
 }

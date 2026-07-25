@@ -53,6 +53,7 @@ import com.example.cxrglobal.callbacks.ICXRLinkCbk
 import com.example.cxrglobal.callbacks.ICustomCmdCbk
 import com.example.cxrglobal.callbacks.IGlassAppCbk
 import com.rokid.cxr.Caps
+import com.anezium.rokidbus.phone.mediasync.MediaSyncCoordinator
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -178,6 +179,7 @@ class BusHubService : Service() {
     private lateinit var externalPluginController: ExternalPluginController
     private lateinit var cameraConsumerReadiness: CameraConsumerReadiness
     private lateinit var cameraCompanionController: CameraCompanionController
+    private lateinit var mediaSyncCoordinator: MediaSyncCoordinator
     private lateinit var manualPairingEngine: GlassesManualPairingEngine
     private lateinit var transitLegacyStateExporter: TransitLegacyStateExporter
     @Volatile private var cxrConnected = false
@@ -523,6 +525,17 @@ class BusHubService : Service() {
             externalController = externalPluginController,
             journal = pluginBusJournal,
         )
+        mediaSyncCoordinator = MediaSyncCoordinator(
+            context = applicationContext,
+            sendToGlasses = { path, payload ->
+                sendRemote(BusEnvelope(path = path, payload = payload)) == null
+            },
+            publishStatus = { payload ->
+                deliverLocal(BusEnvelope(path = BusPaths.MEDIA_SYNC_STATUS, payload = payload))
+            },
+            logger = ::log,
+        )
+        refreshMediaSyncConsent()
         registerPluginPackageReceiver()
         registerWifiStateReceiver()
         hubEnabled = prefs().getBoolean(PREF_ENABLED, true)
@@ -658,6 +671,7 @@ class BusHubService : Service() {
         developerModeJournalSubscription = null
         if (::pluginRegistry.isInitialized) pluginRegistry.close()
         if (::cameraCompanionController.isInitialized) cameraCompanionController.close()
+        if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.close()
         if (::manualPairingEngine.isInitialized) manualPairingEngine.close()
         registrations.clear()
         if (activeInstance === this) activeInstance = null
@@ -681,8 +695,13 @@ class BusHubService : Service() {
             return
         }
         if (!protectedPathAllowed(envelope.path, senderUid, sender.principal)) {
-            recordLocalRoute(envelope, senderUid, sender, PluginBusJournal.Verdict.REJECTED, "PROTECTED_CAMERA_PATH")
-            deliverError(sender.replyBinder, envelope.id, "PROTECTED_CAMERA_PATH")
+            val code = if (BusPaths.isProtectedMediaSyncPath(envelope.path)) {
+                "PROTECTED_MEDIASYNC_PATH"
+            } else {
+                "PROTECTED_CAMERA_PATH"
+            }
+            recordLocalRoute(envelope, senderUid, sender, PluginBusJournal.Verdict.REJECTED, code)
+            deliverError(sender.replyBinder, envelope.id, code)
             return
         }
         val decision = PluginRoutePolicy.authorize(sender.caller, envelope.path)
@@ -805,6 +824,10 @@ class BusHubService : Service() {
             return
         }
         if (handleManualSelfArmResponse(envelope)) return
+        if (::mediaSyncCoordinator.isInitialized && handleMediaSyncRemote(envelope)) {
+            recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
+            return
+        }
         if (::cameraCompanionController.isInitialized &&
             cameraCompanionController.onRemoteEnvelope(envelope)
         ) {
@@ -1008,6 +1031,14 @@ class BusHubService : Service() {
                 acquireAudioLease(envelope, replyRemote, senderUid, replyBinder)
             }
             AUDIO_LEASE_RELEASE -> executor.execute { releaseAudioLease(envelope, replyRemote, replyBinder) }
+            BusPaths.MEDIA_SYNC_SETTINGS -> executor.execute {
+                if (::mediaSyncCoordinator.isInitialized) {
+                    mediaSyncCoordinator.applySettings(envelope.payload)
+                }
+            }
+            BusPaths.MEDIA_SYNC_NOW -> executor.execute {
+                if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.requestSyncNow()
+            }
             else -> return false
         }
         return true
@@ -1110,7 +1141,13 @@ class BusHubService : Service() {
     }
 
     private fun registrationMatches(registration: Registration, envelope: BusEnvelope): Boolean {
-        if (!protectedPathAllowed(envelope.path, registration.uid, registration.principal)) return false
+        if (!protectedPathAllowed(
+                envelope.path,
+                registration.uid,
+                registration.principal,
+                ProtectedPathDirection.RECEIVE,
+            )
+        ) return false
         if (registration.prefixes.none { PathRules.matchesPrefix(envelope.path, it) }) return false
         val principal = registration.principal ?: return true
         if (PathRules.isPluginPrivate(envelope.path, principal.descriptor.id)) return true
@@ -1124,12 +1161,43 @@ class BusHubService : Service() {
         path: String,
         uid: Int,
         principal: PhonePluginPrincipal?,
+        direction: ProtectedPathDirection = ProtectedPathDirection.SEND,
     ): Boolean = ProtectedPathAccessPolicy.isAllowed(
         path = path,
         isHubUid = uid == Process.myUid(),
         principal = principal,
         grantState = principal?.let(pluginGrantStore::stateFor),
+        direction = direction,
     )
+
+    /** Hub-to-hub photo-sync traffic: the link offer and the glasses engine's state reports. */
+    private fun handleMediaSyncRemote(envelope: BusEnvelope): Boolean = when (envelope.path) {
+        BusPaths.MEDIA_SYNC_LINK_OFFER -> {
+            executor.execute { mediaSyncCoordinator.onLinkOffer(envelope.payload) }
+            true
+        }
+        BusPaths.MEDIA_SYNC_STATE -> {
+            executor.execute { mediaSyncCoordinator.onGlassesState(envelope.payload) }
+            true
+        }
+        else -> false
+    }
+
+    /**
+     * Photo sync stays dormant until the wearer approves a `mediasync` plugin: the capability
+     * grant is the consent, so the hub never moves private captures on its own initiative.
+     */
+    private fun refreshMediaSyncConsent() {
+        if (!::mediaSyncCoordinator.isInitialized || !::pluginGrantReconciler.isInitialized) return
+        val consented = runCatching {
+            pluginGrantReconciler.reconcile().validPrincipals.any { principal ->
+                val state = pluginGrantStore.stateFor(principal)
+                state is PluginGrantState.Approved &&
+                    PluginCapability.MEDIA_SYNC in state.capabilities
+            }
+        }.getOrDefault(false)
+        mediaSyncCoordinator.onConsentChanged(consented)
+    }
 
     private fun resolveSender(senderUid: Int): AuthorizedSender {
         if (senderUid == Process.myUid()) return AuthorizedSender(PluginRouteCaller.Internal, null)
@@ -1235,6 +1303,7 @@ class BusHubService : Service() {
     private fun authorizationChanged(key: PluginGrantKey) {
         revokePrincipal(key)
         cameraConsumerReadiness.recompute()
+        refreshMediaSyncConsent()
         notifyLinkState()
     }
 
@@ -1270,6 +1339,7 @@ class BusHubService : Service() {
         val validPrincipals = reconciliation.validPrincipals
         handleSideloadNotification(packageName, action, replacing, reconciliation.candidates)
         cameraConsumerReadiness.recompute()
+        refreshMediaSyncConsent()
         val available = validPrincipals.any { principal ->
             principal.packageName == packageName &&
                 pluginGrantStore.stateFor(principal) is PluginGrantState.Approved
@@ -2669,6 +2739,12 @@ class BusHubService : Service() {
             // not re-open the setup step. Only a live announcement may report false.
             updateRemoteGlassesAppState(null, setupComplete = remoteGlassesSetupComplete)
             imageSurfaceRateLimiter.clear()
+        }
+        if (::mediaSyncCoordinator.isInitialized &&
+            state and LinkStateBits.CXR_CONTROL_UP != 0 &&
+            previousTransportState and LinkStateBits.CXR_CONTROL_UP == 0
+        ) {
+            mediaSyncCoordinator.onLinkUp()
         }
         updateStatusNotification(state)
         registrations.forEach { registration ->
