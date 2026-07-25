@@ -18,6 +18,7 @@ import com.anezium.rokidbus.client.ui.BusTheme
 import com.anezium.rokidbus.client.ui.NexusUi
 import com.anezium.rokidbus.phone.speech.HubSecretStore
 import com.anezium.rokidbus.phone.speech.SpeechCredentialKind
+import com.anezium.rokidbus.phone.speech.SpeechCredits
 import com.anezium.rokidbus.phone.speech.SpeechEngine
 import com.anezium.rokidbus.phone.speech.SpeechProvider
 import com.anezium.rokidbus.phone.speech.SpeechReadiness
@@ -44,6 +45,8 @@ class SpeechSettingsActivity : Activity() {
     private lateinit var testTranscriptView: TextView
     private lateinit var testButton: Button
     private lateinit var readinessValue: TextView
+    private var creditsView: TextView? = null
+    private var creditsGeneration = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -320,6 +323,13 @@ class SpeechSettingsActivity : Activity() {
                 },
                 NexusUi.block(),
             )
+            creditsView = null
+            if (shownProvider == SpeechProvider.ELEVENLABS && hasKey) {
+                addView(BusTheme.gap(this@SpeechSettingsActivity, 6))
+                creditsView = NexusUi.metaLabel(this@SpeechSettingsActivity, "Credits —", NexusUi.INK4)
+                addView(creditsView, NexusUi.block())
+                fetchCredits()
+            }
             addView(BusTheme.gap(this@SpeechSettingsActivity, 10))
 
             val keyField = secretField(
@@ -411,6 +421,29 @@ class SpeechSettingsActivity : Activity() {
         refreshUi()
     }
 
+    /** Async ElevenLabs quota refresh; the generation counter drops stale results. */
+    private fun fetchCredits() {
+        val generation = ++creditsGeneration
+        Thread {
+            val key = secrets.apiKey(SpeechCredentialKind.ELEVENLABS)
+            val quota = key?.let { SpeechCredits.fetchElevenLabs(it) }
+            runOnUiThread {
+                if (isFinishing || isDestroyed || generation != creditsGeneration) return@runOnUiThread
+                val view = creditsView ?: return@runOnUiThread
+                if (quota == null) {
+                    view.text = "CREDITS UNAVAILABLE"
+                    view.setTextColor(NexusUi.INK4)
+                } else {
+                    val format = java.text.NumberFormat.getIntegerInstance()
+                    view.text = "${format.format(quota.remaining)} OF ${format.format(quota.limit)} CREDITS LEFT"
+                    view.setTextColor(
+                        if (quota.remaining < quota.limit / 10) NexusUi.AMBER else NexusUi.GREEN_DIM,
+                    )
+                }
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
     // --- Try it ---
 
     private fun dictationCard(): LinearLayout =
@@ -485,6 +518,9 @@ class SpeechSettingsActivity : Activity() {
         override fun onEnded(reason: SpeechEndReason, error: SttError?) {
             if (isFinishing || isDestroyed) return
             testActive = false
+            if (reason == SpeechEndReason.COMPLETED && shownProvider == SpeechProvider.ELEVENLABS) {
+                fetchCredits()
+            }
             when (reason) {
                 SpeechEndReason.COMPLETED -> setStatus("Done.", NexusUi.GREEN_DIM)
                 SpeechEndReason.CANCELLED -> setStatus("Stopped.", NexusUi.INK3)
