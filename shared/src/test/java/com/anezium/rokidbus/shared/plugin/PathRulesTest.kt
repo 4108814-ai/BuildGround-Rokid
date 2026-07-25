@@ -51,4 +51,20 @@ class PathRulesTest {
         assertEquals(PluginCapability.CAMERA, PathRules.requiredCapability("/camera/link/offer"))
         assertNull(PathRules.requiredCapability("/camera/session/state"))
     }
+
+    @Test
+    fun `media sync exposes status to receive and settings plus trigger to send`() {
+        val mediaSync = setOf(PluginCapability.MEDIA_SYNC)
+        assertTrue(PathRules.isAllowedReceivePrefix("/mediasync/status", "photosync", mediaSync))
+        assertFalse(PathRules.isAllowedReceivePrefix("/mediasync/status", "photosync", emptySet()))
+        assertFalse(PathRules.isAllowedReceivePrefix("/mediasync", "photosync", mediaSync))
+        assertFalse(PathRules.isAllowedReceivePrefix("/mediasync/config", "photosync", mediaSync))
+        assertEquals(
+            PluginCapability.MEDIA_SYNC,
+            PathRules.requiredCapabilityForReceivePrefix("/mediasync/status"),
+        )
+        assertEquals(PluginCapability.MEDIA_SYNC, PathRules.requiredCapability("/mediasync/settings"))
+        assertEquals(PluginCapability.MEDIA_SYNC, PathRules.requiredCapability("/mediasync/now"))
+        assertNull(PathRules.requiredCapability("/mediasync/link/offer"))
+    }
 }

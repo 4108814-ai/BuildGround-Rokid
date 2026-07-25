@@ -44,6 +44,13 @@ object BusPaths {
     const val CAMERA_FREEZE_IMAGE_CHUNK = "/camera/freeze/image/chunk"
     const val CAMERA_FREEZE_IMAGE_ACK = "/camera/freeze/image/ack"
     const val CAMERA_OVERLAY = "/camera/overlay"
+    const val MEDIA_SYNC_STATUS = "/mediasync/status"
+    const val MEDIA_SYNC_SETTINGS = "/mediasync/settings"
+    const val MEDIA_SYNC_NOW = "/mediasync/now"
+    const val MEDIA_SYNC_CONFIG = "/mediasync/config"
+    const val MEDIA_SYNC_TRIGGER = "/mediasync/trigger"
+    const val MEDIA_SYNC_LINK_OFFER = "/mediasync/link/offer"
+    const val MEDIA_SYNC_STATE = "/mediasync/state"
     const val GLASSES_WIFI_REQUEST = "/glasses/wifi/request"
     const val GLASSES_SELFARM_MANUAL = "/glasses/selfarm/manual"
     const val GLASSES_SELFARM_MANUAL_REPLY = "/glasses/selfarm/manual/reply"
@@ -56,6 +63,26 @@ object BusPaths {
     const val PLUGIN_REGISTRATION = "/system/plugin/registration"
     const val HUB_CAPABILITIES = "/system/hub/capabilities"
     const val ERROR = "/error"
+
+    /**
+     * Every `/mediasync/…` path is capability-protected: photo sync moves the wearer's private
+     * captures, so an unapproved plugin must not even observe the traffic.
+     */
+    fun isProtectedMediaSyncPath(path: String): Boolean =
+        path == "/mediasync" || path.startsWith("/mediasync/")
+
+    /**
+     * The media-sync paths that only the two hubs may originate. An approved photo-sync plugin
+     * drives sync through [MEDIA_SYNC_SETTINGS] and [MEDIA_SYNC_NOW]; it can never forge a link
+     * offer, a glasses config push, or a status update.
+     */
+    fun isHubOnlyMediaSyncPath(path: String): Boolean =
+        isProtectedMediaSyncPath(path) &&
+            !matchesMediaSyncPath(path, MEDIA_SYNC_SETTINGS) &&
+            !matchesMediaSyncPath(path, MEDIA_SYNC_NOW)
+
+    private fun matchesMediaSyncPath(path: String, base: String): Boolean =
+        path == base || path.startsWith("$base/")
 
     fun isProtectedCameraPath(path: String): Boolean =
         path == CAMERA_SESSION_STATE || path.startsWith("$CAMERA_SESSION_STATE/") ||

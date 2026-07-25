@@ -17,6 +17,7 @@ object PathRules {
         BusPaths.CAMERA_LINK_OFFER,
         BusPaths.CAMERA_FREEZE_IMAGE_CHUNK,
     )
+    private val mediaSyncReceivePrefixes = setOf(BusPaths.MEDIA_SYNC_STATUS)
 
     fun normalizeAbsolute(path: String): String? {
         val trimmed = path.trim()
@@ -48,6 +49,9 @@ object PathRules {
         BusPaths.CAMERA_FREEZE_RESULT,
         BusPaths.CAMERA_OVERLAY,
         -> PluginCapability.CAMERA
+        BusPaths.MEDIA_SYNC_SETTINGS,
+        BusPaths.MEDIA_SYNC_NOW,
+        -> PluginCapability.MEDIA_SYNC
         else -> null
     }
 
@@ -68,6 +72,9 @@ object PathRules {
         if (PluginCapability.CAMERA in requestedCapabilities &&
             cameraReceivePrefixes.any { matchesPrefix(normalized, it) }
         ) return true
+        if (PluginCapability.MEDIA_SYNC in requestedCapabilities &&
+            mediaSyncReceivePrefixes.any { matchesPrefix(normalized, it) }
+        ) return true
         return false
     }
 
@@ -81,6 +88,9 @@ object PathRules {
         }
         if (cameraReceivePrefixes.any { matchesPrefix(normalized, it) }) {
             return PluginCapability.CAMERA
+        }
+        if (mediaSyncReceivePrefixes.any { matchesPrefix(normalized, it) }) {
+            return PluginCapability.MEDIA_SYNC
         }
         return null
     }
