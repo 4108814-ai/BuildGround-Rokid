@@ -12,7 +12,6 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
-import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -34,25 +33,36 @@ import com.anezium.rokidbus.phone.speech.SpeechEndReason
 import com.anezium.rokidbus.phone.speech.SttError
 import com.anezium.rokidbus.phone.speech.TranscriptionLanguage
 
+/**
+ * The skeleton (header, scroll, section frames) is built once; every state change
+ * re-renders only its own section, so the scroll position never moves and nothing flashes.
+ */
 class SpeechSettingsActivity : Activity() {
     private val settings by lazy { SpeechSettingsStore(this) }
     private val secrets by lazy { HubSecretStore(this) }
 
     private var shownProvider: SpeechProvider = SpeechProvider.OPENAI
+    private var keyEditing = false
     private var testActive = false
     private var statusText: String? = null
     private var statusColor: Int = NexusUi.INK2
     private var transcriptText: String? = null
     private var transcriptFinal = false
+    private var creditsGeneration = 0
 
+    private lateinit var engineHeaderMeta: TextView
+    private lateinit var languageHeaderMeta: TextView
+    private lateinit var keyHeaderMeta: TextView
+    private lateinit var readinessValue: TextView
+    private lateinit var engineChipsHost: LinearLayout
+    private lateinit var modelCardHost: LinearLayout
+    private lateinit var languageGridHost: LinearLayout
+    private lateinit var languageNoteHost: LinearLayout
+    private lateinit var keyCardHost: LinearLayout
     private lateinit var testStatusView: TextView
     private lateinit var testTranscriptView: TextView
     private lateinit var testCard: LinearLayout
     private lateinit var testActionMeta: TextView
-    private lateinit var readinessValue: TextView
-    private var contentScroll: ScrollView? = null
-    private var keyEditing = false
-    private var creditsGeneration = 0
     private var creditsMain: TextView? = null
     private var creditsSub: TextView? = null
     private var creditsBar: LinearLayout? = null
@@ -62,7 +72,8 @@ class SpeechSettingsActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         shownProvider = settings.selectedEngine()?.provider ?: SpeechProvider.OPENAI
-        buildUi()
+        buildSkeleton()
+        renderAll()
     }
 
     override fun onStop() {
@@ -70,47 +81,42 @@ class SpeechSettingsActivity : Activity() {
         super.onStop()
     }
 
-    private fun buildUi() {
+    // --- Skeleton, built exactly once ---
+
+    private fun buildSkeleton() {
         window.statusBarColor = NexusUi.BG
         window.navigationBarColor = NexusUi.BG
-        val savedScrollY = contentScroll?.scrollY ?: 0
+
+        engineHeaderMeta = NexusUi.metaLabel(this, "", NexusUi.GREEN_DIM)
+        languageHeaderMeta = NexusUi.metaLabel(this, "", NexusUi.GREEN_DIM)
+        keyHeaderMeta = NexusUi.metaLabel(this, "", NexusUi.GREEN_DIM)
+        readinessValue = NexusUi.metaLabel(this, "", NexusUi.GREEN_DIM)
+        engineChipsHost = host()
+        modelCardHost = host()
+        languageGridHost = host()
+        languageNoteHost = host()
+        keyCardHost = host()
 
         val content = NexusUi.contentColumn(this).apply {
-            addView(NexusUi.sectionRow(this@SpeechSettingsActivity, "Engine", shownProvider.displayName), NexusUi.block())
+            addView(sectionHeaderRow("Engine", engineHeaderMeta), NexusUi.block())
             addView(BusTheme.gap(this@SpeechSettingsActivity, 12))
-            addView(providerSegments(), NexusUi.block())
+            addView(engineChipsHost, NexusUi.block())
             addView(BusTheme.gap(this@SpeechSettingsActivity, 10))
-            addView(modelCard(), NexusUi.block())
+            addView(modelCardHost, NexusUi.block())
 
             addView(BusTheme.gap(this@SpeechSettingsActivity, 28))
-            addView(NexusUi.sectionRow(this@SpeechSettingsActivity, "Language", settings.selectedLanguage().summaryName), NexusUi.block())
+            addView(sectionHeaderRow("Language", languageHeaderMeta), NexusUi.block())
             addView(BusTheme.gap(this@SpeechSettingsActivity, 12))
-            addView(languageGrid(), NexusUi.block())
-            settings.selectedLanguage().uiNote?.let { note ->
-                addView(BusTheme.gap(this@SpeechSettingsActivity, 8))
-                addView(NexusUi.rowSub(this@SpeechSettingsActivity, note).apply { maxLines = 3 }, NexusUi.block())
-            }
+            addView(languageGridHost, NexusUi.block())
+            addView(languageNoteHost, NexusUi.block())
 
             addView(BusTheme.gap(this@SpeechSettingsActivity, 28))
-            addView(NexusUi.sectionRow(this@SpeechSettingsActivity, "API key", shownProvider.displayName), NexusUi.block())
+            addView(sectionHeaderRow("API key", keyHeaderMeta), NexusUi.block())
             addView(BusTheme.gap(this@SpeechSettingsActivity, 12))
-            addView(credentialCard(), NexusUi.block())
+            addView(keyCardHost, NexusUi.block())
 
             addView(BusTheme.gap(this@SpeechSettingsActivity, 28))
-            readinessValue = NexusUi.metaLabel(this@SpeechSettingsActivity, "", NexusUi.GREEN_DIM)
-            addView(
-                LinearLayout(this@SpeechSettingsActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(NexusUi.dp(this@SpeechSettingsActivity, 2), NexusUi.dp(this@SpeechSettingsActivity, 2), NexusUi.dp(this@SpeechSettingsActivity, 2), 0)
-                    addView(
-                        NexusUi.sectionLabel(this@SpeechSettingsActivity, "Try it"),
-                        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-                    )
-                    addView(readinessValue)
-                },
-                NexusUi.block(),
-            )
+            addView(sectionHeaderRow("Try it", readinessValue), NexusUi.block())
             addView(BusTheme.gap(this@SpeechSettingsActivity, 12))
             addView(dictationCard(), NexusUi.block())
         }
@@ -127,7 +133,6 @@ class SpeechSettingsActivity : Activity() {
                 ),
             )
         }
-        contentScroll = scroll
 
         val root = NexusUi.fixedRoot(this).apply {
             addView(titleHeader("Speech"), NexusUi.block())
@@ -136,11 +141,79 @@ class SpeechSettingsActivity : Activity() {
                 LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
             )
         }
+        setContentView(root)
+    }
 
+    private fun host(): LinearLayout =
+        LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
+    private fun sectionHeaderRow(label: String, metaView: TextView): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(
+                NexusUi.dp(this@SpeechSettingsActivity, 2),
+                NexusUi.dp(this@SpeechSettingsActivity, 2),
+                NexusUi.dp(this@SpeechSettingsActivity, 2),
+                0,
+            )
+            addView(
+                NexusUi.sectionLabel(this@SpeechSettingsActivity, label),
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            addView(metaView)
+        }
+
+    // --- Section renderers ---
+
+    private fun renderAll() {
+        renderEngineSection()
+        renderLanguageSection()
+        renderKeySection()
         renderReadiness()
         renderDictation()
-        setContentView(root)
-        if (savedScrollY > 0) scroll.post { scroll.scrollTo(0, savedScrollY) }
+    }
+
+    private fun renderEngineSection() {
+        engineHeaderMeta.text = shownProvider.displayName.uppercase()
+        engineChipsHost.removeAllViews()
+        engineChipsHost.addView(providerSegments(), NexusUi.block())
+        modelCardHost.removeAllViews()
+        modelCardHost.addView(modelCard(), NexusUi.block())
+    }
+
+    private fun renderLanguageSection() {
+        languageHeaderMeta.text = settings.selectedLanguage().summaryName.uppercase()
+        languageGridHost.removeAllViews()
+        languageGridHost.addView(languageGrid(), NexusUi.block())
+        languageNoteHost.removeAllViews()
+        settings.selectedLanguage().uiNote?.let { note ->
+            languageNoteHost.addView(BusTheme.gap(this, 8))
+            languageNoteHost.addView(
+                NexusUi.rowSub(this, note).apply { maxLines = 3 },
+                NexusUi.block(),
+            )
+        }
+    }
+
+    private fun renderKeySection() {
+        keyHeaderMeta.text = shownProvider.displayName.uppercase()
+        creditsMain = null
+        creditsSub = null
+        creditsBar = null
+        creditsBarFill = null
+        creditsBarRest = null
+        keyCardHost.removeAllViews()
+        keyCardHost.addView(credentialCard(), NexusUi.block())
+    }
+
+    private fun onSpeechConfigChanged() {
+        stopDictationIfActive()
+        statusText = null
+        transcriptText = null
+        transcriptFinal = false
+        renderReadiness()
+        renderDictation()
     }
 
     // --- Engine ---
@@ -176,20 +249,13 @@ class SpeechSettingsActivity : Activity() {
             setOnClickListener {
                 if (shownProvider != provider) {
                     shownProvider = provider
-                    refreshUi()
+                    keyEditing = false
+                    renderEngineSection()
+                    renderKeySection()
+                    onSpeechConfigChanged()
                 }
             }
         }
-
-    /** Rebuild after a configuration change: stop any running test and recompute guidance. */
-    private fun refreshUi() {
-        stopDictationIfActive()
-        keyEditing = false
-        statusText = null
-        transcriptText = null
-        transcriptFinal = false
-        buildUi()
-    }
 
     private fun modelCard(): LinearLayout =
         NexusUi.card(this).apply {
@@ -217,7 +283,8 @@ class SpeechSettingsActivity : Activity() {
             setOnClickListener {
                 if (settings.selectedEngine() != engine) {
                     settings.selectedEngineId = engine.id
-                    refreshUi()
+                    renderEngineSection()
+                    onSpeechConfigChanged()
                 }
             }
             addView(
@@ -308,7 +375,8 @@ class SpeechSettingsActivity : Activity() {
             setOnClickListener {
                 if (settings.selectedLanguage() != language) {
                     settings.selectedLanguageId = language.id
-                    refreshUi()
+                    renderLanguageSection()
+                    onSpeechConfigChanged()
                 }
             }
         }
@@ -318,11 +386,6 @@ class SpeechSettingsActivity : Activity() {
     private fun credentialCard(): LinearLayout =
         NexusUi.card(this).apply {
             val hasKey = secrets.hasCredential(shownProvider.credentialKindForUi())
-            creditsMain = null
-            creditsSub = null
-            creditsBar = null
-            creditsBarFill = null
-            creditsBarRest = null
             if (hasKey && !keyEditing) {
                 addView(keyStatusBlock(), NexusUi.block())
             } else {
@@ -402,7 +465,7 @@ class SpeechSettingsActivity : Activity() {
                     background = NexusUi.pressed(this@SpeechSettingsActivity, Color.TRANSPARENT, 10)
                     setOnClickListener {
                         keyEditing = true
-                        buildUi()
+                        renderKeySection()
                     }
                     addView(
                         NexusUi.rowLabel(this@SpeechSettingsActivity, "Replace key"),
@@ -451,7 +514,7 @@ class SpeechSettingsActivity : Activity() {
                             NexusUi.textButton(this@SpeechSettingsActivity, "Cancel").apply {
                                 setOnClickListener {
                                     keyEditing = false
-                                    buildUi()
+                                    renderKeySection()
                                 }
                             },
                         )
@@ -505,7 +568,9 @@ class SpeechSettingsActivity : Activity() {
             return
         }
         toast("Saved")
-        refreshUi()
+        keyEditing = false
+        renderKeySection()
+        onSpeechConfigChanged()
     }
 
     private fun onClearCredential() {
@@ -513,7 +578,9 @@ class SpeechSettingsActivity : Activity() {
         secrets.clearApiKey(kind)
         if (shownProvider == SpeechProvider.AZURE) secrets.clearAzureRegion()
         toast("Key removed")
-        refreshUi()
+        keyEditing = false
+        renderKeySection()
+        onSpeechConfigChanged()
     }
 
     /** Async ElevenLabs quota refresh; the generation counter drops stale results. */
@@ -599,7 +666,7 @@ class SpeechSettingsActivity : Activity() {
             )
             isClickable = true
             isFocusable = true
-            setOnClickListener { onDictationButton() }
+            setOnClickListener { onDictationCardTap() }
             testCard = this
 
             testStatusView = NexusUi.statusLine(this@SpeechSettingsActivity)
@@ -624,7 +691,7 @@ class SpeechSettingsActivity : Activity() {
             )
         }
 
-    private fun onDictationButton() {
+    private fun onDictationCardTap() {
         if (testActive) {
             BusHubService.cancelSpeechDictationTest()
             return
@@ -702,7 +769,7 @@ class SpeechSettingsActivity : Activity() {
 
     private fun readinessGuidance(): String =
         when (settings.readiness(secrets)) {
-            SpeechReadiness.READY -> "Ready."
+            SpeechReadiness.READY -> "Tap and speak toward the glasses."
             SpeechReadiness.NO_ENGINE -> "Pick an engine above to get started."
             SpeechReadiness.MISSING_KEY -> "Add your ${settings.selectedEngine()?.provider?.displayName ?: "provider"} API key above."
             SpeechReadiness.MISSING_REGION -> "Add your Azure region above."
