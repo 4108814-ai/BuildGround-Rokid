@@ -452,12 +452,26 @@ Two asymmetries with the camera link are deliberate:
 
 - Photo sync never toggles the *phone's* Wi-Fi. If it is off the run ends with
   the `phone_wifi_off` blocker and the next trigger retries; there is no
-  `lohs_reverse` equivalent in v1.
+  `lohs_reverse` equivalent in v1. A denied nearby-devices grant reports
+  `phone_permission`, never `phone_wifi_off` — sending the wearer to a switch
+  that is already on makes a fixable problem look unfixable.
 - On the glasses it *does* use the hub's existing silent Wi-Fi path
   (`GlassesHub.requestHubWifi`, i.e. the signed command bridge with the
   accessibility fallback) and releases it through the same ~40 s grace-off. A
   camera session always wins: it blocks a sync from starting and aborts one in
-  flight with `ABORT{reason:"camera_active"}`.
+  flight with `ABORT{reason:"camera_active"}`. That deference extends to the
+  camera's *parked* group — the `DIRECT-RN-` group it keeps alive for ~40 s
+  after a session so warm reopens stay at 1.4 s instead of 5-7 s. A sync that
+  finds it standing refuses to remove it, reports
+  `camera_group_parked` on `/mediasync/state`, and waits for the next trigger.
+  Only groups that are neither ours nor the camera's are ever cleared.
+
+Because the `:camera` process can die without ever sending `closed`, the main
+process reconciles a stale session lazily: the moment a sync would skip with
+`camera_active` it checks whether a `:camera` process actually exists and, only
+if it provably does not, releases the flag and re-evaluates. An unreadable
+process list counts as "still alive" — an unknown answer must never cancel a
+real camera session.
 
 Delete-after-sync is opt-in and off by default. The phone carries the flag in
 each `FILE_ACK`; the glasses attempt `File.delete()` then a MediaStore delete and

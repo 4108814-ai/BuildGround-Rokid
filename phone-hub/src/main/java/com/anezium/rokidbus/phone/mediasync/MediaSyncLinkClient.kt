@@ -132,6 +132,16 @@ internal class MediaSyncLinkClient(
         primedForCycle = true
         val manager = manager ?: return finish(attempt, failure("No Wi-Fi Direct service"))
         val channel = channel ?: return finish(attempt, failure("No Wi-Fi Direct channel"))
+        // Exactly one join per priming cycle. Three paths can reach the join below — the
+        // stop-discovery success callback, its failure callback, and the fallback timer — and a
+        // second connect() landing inside a healthy join is what produces a BUSY error, an
+        // inflated failure count, and a recovery removeGroup that kills the working join.
+        val dispatch = MediaSyncSingleDispatch()
+        val join = {
+            if (isCurrent(attempt) && !attempt.socketOpened && dispatch.claim()) {
+                connectByCredentials(attempt)
+            }
+        }
         runCatching {
             manager.discoverPeers(
                 channel,
@@ -147,22 +157,22 @@ internal class MediaSyncLinkClient(
                     manager.stopPeerDiscovery(
                         channel,
                         object : WifiP2pManager.ActionListener {
-                            override fun onSuccess() = connectByCredentials(attempt)
-                            override fun onFailure(reason: Int) = connectByCredentials(attempt)
+                            override fun onSuccess() = join()
+                            override fun onFailure(reason: Int) = join()
                         },
                     )
-                }.onFailure { connectByCredentials(attempt) }
-                mainHandler.postDelayed(
-                    { if (isCurrent(attempt)) connectByCredentials(attempt) },
-                    decision.stopCallbackFallbackMs,
-                )
+                }.onFailure { join() }
+                // The framework sometimes swallows the stop callback entirely, so the cycle needs
+                // a timer that can still start the join. The claim above makes it a no-op in the
+                // normal case where the callback did arrive.
+                mainHandler.postDelayed(join, decision.stopCallbackFallbackMs)
             },
             decision.discoveryWaitMs,
         )
     }
 
     private fun connectByCredentials(attempt: Attempt) {
-        if (!isCurrent(attempt)) return
+        if (!isCurrent(attempt) || attempt.socketOpened) return
         val manager = manager ?: return finish(attempt, failure("No Wi-Fi Direct service"))
         val channel = channel ?: return finish(attempt, failure("No Wi-Fi Direct channel"))
         val number = retryPolicy.startAttempt()
@@ -171,12 +181,15 @@ internal class MediaSyncLinkClient(
             return
         }
         logger("mediaSync link join attempt=$number ssid=${attempt.offer.ssid}")
+        // enablePersistentMode(false) is the whole persistent-profile hygiene story on the phone
+        // side: the framework never stores a profile for this join, so nothing accumulates and no
+        // janitor is needed. (The hidden `netId` reflection the camera work explored is blocked by
+        // hiddenapi at targetSdk 36 and buys nothing on top of this.)
         val config = WifiP2pConfig.Builder()
             .setNetworkName(attempt.offer.ssid)
             .setPassphrase(attempt.offer.passphrase)
             .enablePersistentMode(false)
             .build()
-        MediaSyncTemporaryP2pConfig.apply(config, logger)
         runCatching {
             manager.connect(
                 channel,
@@ -382,20 +395,5 @@ internal class MediaSyncLinkClient(
         const val CONNECTION_INFO_POLL_MS = 500L
         const val JOIN_PROGRESS_TIMEOUT_MS = 4_500L
         const val GROUP_REMOVE_CALLBACK_TIMEOUT_MS = 1_000L
-    }
-}
-
-/**
- * Marks the join as a temporary group so Android does not accumulate a persistent profile per
- * session. `WifiP2pConfig.netId` is public in AOSP but hidden in the SDK, hence the reflection;
- * failure is non-fatal and only costs the janitor some work later.
- */
-internal object MediaSyncTemporaryP2pConfig {
-    private const val NETWORK_ID_TEMPORARY = -1
-
-    fun apply(config: WifiP2pConfig, logger: (String) -> Unit) {
-        runCatching {
-            WifiP2pConfig::class.java.getField("netId").setInt(config, NETWORK_ID_TEMPORARY)
-        }.onFailure { logger("mediaSync temporary group flag unavailable: ${it.message}") }
     }
 }

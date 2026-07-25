@@ -91,6 +91,7 @@ internal object PhotoSyncCopy {
                 MediaSyncBlocker.LINK_DOWN -> "Glasses not connected"
                 MediaSyncBlocker.CAMERA_ACTIVE -> "Paused while the camera is open"
                 MediaSyncBlocker.PHONE_WIFI_OFF -> "Turn on Wi-Fi to sync"
+                MediaSyncBlocker.PHONE_PERMISSION -> "Allow nearby-device access in Nexus settings"
                 MediaSyncBlocker.GLASSES_STORAGE_PERMISSION -> "Allow storage access on the glasses"
                 null -> "Ready"
             }

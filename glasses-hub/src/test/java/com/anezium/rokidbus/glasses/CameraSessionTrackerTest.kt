@@ -67,4 +67,45 @@ class CameraSessionTrackerTest {
 
         assertEquals(listOf(true, false), published)
     }
+
+    @Test
+    fun `a camera-blocked sync recovers when the camera process is gone`() {
+        assertTrue(
+            CameraSessionLivenessPolicy.shouldResetTracker(
+                MediaSyncSkipReason.CAMERA_ACTIVE,
+                cameraProcessAlive = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `a live camera process keeps its session`() {
+        assertFalse(
+            CameraSessionLivenessPolicy.shouldResetTracker(
+                MediaSyncSkipReason.CAMERA_ACTIVE,
+                cameraProcessAlive = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `an unreadable process list never cancels a session`() {
+        assertFalse(
+            CameraSessionLivenessPolicy.shouldResetTracker(
+                MediaSyncSkipReason.CAMERA_ACTIVE,
+                cameraProcessAlive = null,
+            ),
+        )
+    }
+
+    @Test
+    fun `other skip reasons never touch the tracker`() {
+        MediaSyncSkipReason.entries
+            .filter { it != MediaSyncSkipReason.CAMERA_ACTIVE }
+            .forEach { reason ->
+                assertFalse(
+                    CameraSessionLivenessPolicy.shouldResetTracker(reason, cameraProcessAlive = false),
+                )
+            }
+    }
 }

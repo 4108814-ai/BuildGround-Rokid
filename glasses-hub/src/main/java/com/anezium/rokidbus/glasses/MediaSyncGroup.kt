@@ -6,6 +6,7 @@ import android.net.wifi.p2p.WifiP2pGroup
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Handler
 import android.os.Looper
+import com.anezium.rokidbus.shared.MediaSyncStatusContract
 import java.security.SecureRandom
 
 /**
@@ -19,6 +20,34 @@ data class MediaSyncP2pProfile(
     val networkName: String,
     val passphrase: String,
 )
+
+enum class MediaSyncGroupOwnership {
+    /** A media-sync group we created, safe to reuse or rebuild. */
+    OURS,
+
+    /**
+     * The camera link's group. It is parked on purpose for ~40 s after a camera session so a
+     * warm reopen costs 1.4 s instead of 5-7 s; removing it would silently degrade the camera.
+     */
+    CAMERA_LINK,
+
+    /** Somebody else's group — the only kind photo sync may tear down. */
+    FOREIGN,
+}
+
+object MediaSyncGroupPolicy {
+    const val CAMERA_NETWORK_NAME_PREFIX = "DIRECT-RN-"
+
+    fun classify(networkName: String?, expectedNetworkName: String): MediaSyncGroupOwnership = when {
+        !networkName.isNullOrBlank() && networkName == expectedNetworkName ->
+            MediaSyncGroupOwnership.OURS
+        networkName != null && networkName.startsWith(MediaSyncP2pProfileStore.NETWORK_NAME_PREFIX) ->
+            MediaSyncGroupOwnership.OURS
+        networkName != null && networkName.startsWith(CAMERA_NETWORK_NAME_PREFIX) ->
+            MediaSyncGroupOwnership.CAMERA_LINK
+        else -> MediaSyncGroupOwnership.FOREIGN
+    }
+}
 
 class MediaSyncP2pProfileStore(context: Context) {
     private val preferences = context.applicationContext
@@ -82,6 +111,13 @@ internal class MediaSyncGroup(
     private var createAttempts = 0
     private var closed = false
 
+    /**
+     * Only ever true once a media-sync group is actually ours. [close] checks it before removing
+     * anything: a session that deferred to the camera's parked group must tear down nothing, or
+     * it would destroy the very group it just refused to touch.
+     */
+    private var ownsGroup = false
+
     data class Ready(
         val profile: MediaSyncP2pProfile,
         val interfaceName: String,
@@ -110,13 +146,26 @@ internal class MediaSyncGroup(
         val expected = profile ?: return onFailed("no_profile")
         runCatching {
             manager.requestGroupInfo(channel) { group ->
-                when {
-                    group == null -> createGroup(onReady, onFailed)
-                    isOurs(group, expected) -> {
-                        logger("mediaSync group reused ssid=${group.networkName}")
-                        publish(group, onReady, onFailed)
+                if (group == null) {
+                    createGroup(onReady, onFailed)
+                    return@requestGroupInfo
+                }
+                when (MediaSyncGroupPolicy.classify(group.networkName, expected.networkName)) {
+                    MediaSyncGroupOwnership.OURS ->
+                        if (isUsable(group, expected)) {
+                            logger("mediaSync group reused ssid=${group.networkName}")
+                            publish(group, onReady, onFailed)
+                        } else {
+                            logger("mediaSync group stale ssid=${group.networkName}")
+                            removeGroup { createGroup(onReady, onFailed) }
+                        }
+                    MediaSyncGroupOwnership.CAMERA_LINK -> {
+                        // The camera parks this group on purpose; taking it would cost the wearer
+                        // a cold camera reopen. Wait for the next trigger instead.
+                        logger("mediaSync group deferred ssid=${group.networkName} reason=camera")
+                        onFailed(MediaSyncStatusContract.REASON_CAMERA_GROUP_PARKED)
                     }
-                    else -> {
+                    MediaSyncGroupOwnership.FOREIGN -> {
                         logger("mediaSync group conflict ssid=${group.networkName}")
                         removeGroup { createGroup(onReady, onFailed) }
                     }
@@ -128,7 +177,7 @@ internal class MediaSyncGroup(
         }
     }
 
-    private fun isOurs(group: WifiP2pGroup, expected: MediaSyncP2pProfile): Boolean =
+    private fun isUsable(group: WifiP2pGroup, expected: MediaSyncP2pProfile): Boolean =
         group.isGroupOwner &&
             group.networkName == expected.networkName &&
             !group.passphrase.isNullOrBlank() &&
@@ -195,6 +244,7 @@ internal class MediaSyncGroup(
             onFailed("group_incomplete")
             return
         }
+        ownsGroup = true
         onReady(Ready(MediaSyncP2pProfile(networkName, passphrase), interfaceName))
     }
 
@@ -227,11 +277,12 @@ internal class MediaSyncGroup(
     override fun close() {
         if (closed) return
         closed = true
-        removeGroup {
+        val releaseChannel = {
             runCatching { channel?.close() }
             channel = null
             manager = null
         }
+        if (ownsGroup) removeGroup(releaseChannel) else releaseChannel()
     }
 
     companion object {

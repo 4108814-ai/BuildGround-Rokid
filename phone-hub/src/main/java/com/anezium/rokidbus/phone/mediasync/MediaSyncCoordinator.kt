@@ -18,6 +18,9 @@ object MediaSyncBlockerMapping {
     fun fromGlassesReason(reason: String?): MediaSyncBlocker? = when (reason) {
         "storage_permission" -> MediaSyncBlocker.GLASSES_STORAGE_PERMISSION
         "camera_active" -> MediaSyncBlocker.CAMERA_ACTIVE
+        // The camera link parks its Wi-Fi Direct group for ~40 s after a session so warm reopens
+        // stay fast. Photo sync waits it out rather than stealing the radio back.
+        MediaSyncStatusContract.REASON_CAMERA_GROUP_PARKED -> MediaSyncBlocker.CAMERA_ACTIVE
         "link_down" -> MediaSyncBlocker.LINK_DOWN
         "nothing_pending" -> MediaSyncBlocker.NOTHING_PENDING
         "auto_sync_off" -> MediaSyncBlocker.AUTO_SYNC_OFF
@@ -27,7 +30,9 @@ object MediaSyncBlockerMapping {
 
     fun fromLinkBlocker(blocker: MediaSyncLinkBlocker): MediaSyncBlocker = when (blocker) {
         MediaSyncLinkBlocker.PHONE_WIFI_OFF -> MediaSyncBlocker.PHONE_WIFI_OFF
-        MediaSyncLinkBlocker.MISSING_PERMISSION -> MediaSyncBlocker.PHONE_WIFI_OFF
+        // Never claim Wi-Fi is off when it is on: a denied nearby-devices grant looks unfixable
+        // if the screen sends the wearer to the wrong switch.
+        MediaSyncLinkBlocker.MISSING_PERMISSION -> MediaSyncBlocker.PHONE_PERMISSION
         MediaSyncLinkBlocker.NO_P2P_SERVICE -> MediaSyncBlocker.PHONE_WIFI_OFF
     }
 }
@@ -109,7 +114,16 @@ internal class MediaSyncCoordinator(
     fun requestSyncNow() {
         if (!consented) return
         logger("mediaSync manual trigger requested")
-        sendToGlasses(BusPaths.MEDIA_SYNC_TRIGGER, JSONObject().put("version", 1))
+        val delivered = sendToGlasses(BusPaths.MEDIA_SYNC_TRIGGER, JSONObject().put("version", 1))
+        if (delivered) return
+        // A tap that reaches nothing must still show something: without this the button press
+        // simply disappears whenever the glasses link is down.
+        logger("mediaSync manual trigger undelivered: link down")
+        synchronized(lock) {
+            state = MediaSyncState.IDLE
+            blocker = MediaSyncBlocker.LINK_DOWN
+        }
+        emitStatus()
     }
 
     /** `/mediasync/state` from the glasses engine: preparing, transferring, idle-with-reason. */

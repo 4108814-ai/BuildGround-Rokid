@@ -22,6 +22,7 @@ enum class MediaSyncBlocker(val wireValue: String) {
     LINK_DOWN("link_down"),
     CAMERA_ACTIVE("camera_active"),
     PHONE_WIFI_OFF("phone_wifi_off"),
+    PHONE_PERMISSION("phone_permission"),
     GLASSES_STORAGE_PERMISSION("glasses_storage_permission"),
     NOTHING_PENDING("nothing_pending"),
     ;
@@ -84,6 +85,13 @@ object MediaSyncStatusContract {
     const val VERSION = 1
     const val MAX_HISTORY = 8
     const val MAX_MESSAGE_LENGTH = 160
+
+    /**
+     * `/mediasync/state` reason the glasses send when the camera link's Wi-Fi Direct group is
+     * still parked. It is not a failure: the camera keeps that group alive for ~40 s so warm
+     * reopens stay fast, and photo sync waits for the next trigger instead of stealing it.
+     */
+    const val REASON_CAMERA_GROUP_PARKED = "camera_group_parked"
 
     fun encode(status: MediaSyncStatus): JSONObject = JSONObject()
         .put("version", VERSION)

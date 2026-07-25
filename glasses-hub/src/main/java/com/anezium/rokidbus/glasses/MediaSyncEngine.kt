@@ -1,6 +1,7 @@
 package com.anezium.rokidbus.glasses
 
 import android.Manifest
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -119,7 +120,7 @@ internal object MediaSyncEngine {
         if (active) executor.execute { finish(MediaSyncFileServer.ABORT_CAMERA) }
     }
 
-    private fun attempt(trigger: MediaSyncTrigger) {
+    private fun attempt(trigger: MediaSyncTrigger, reconciled: Boolean = false) {
         val context = appContext ?: return
         val catalog = catalog ?: return
         if (!consented) {
@@ -142,6 +143,19 @@ internal object MediaSyncEngine {
         )
         when (decision) {
             is MediaSyncTriggerDecision.Skip -> {
+                if (!reconciled &&
+                    CameraSessionLivenessPolicy.shouldResetTracker(
+                        decision.reason,
+                        isCameraProcessAlive(context),
+                    )
+                ) {
+                    // The :camera process died without closing its session; without this the
+                    // stale flag would block every sync until the whole hub restarts.
+                    logSync("camera session stale, camera process gone; releasing")
+                    GlassesHub.resetCameraSession()
+                    attempt(trigger, reconciled = true)
+                    return
+                }
                 logSync("skip trigger=$trigger reason=${decision.reason}")
                 reportState("idle", reason = decision.reason.name.lowercase())
                 if (decision.reason == MediaSyncSkipReason.NOTHING_PENDING && scan.settling) {
@@ -150,6 +164,22 @@ internal object MediaSyncEngine {
             }
             is MediaSyncTriggerDecision.Start -> begin(context, decision.trigger)
         }
+    }
+
+    /**
+     * Null when liveness cannot be read: an unknown answer must never cancel a real session.
+     * The `:camera` process is only ever inspected from the outside here — its statics stay
+     * untouched, which is the rule that keeps that process healthy.
+     */
+    private fun isCameraProcessAlive(context: Context): Boolean? {
+        val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            ?: return null
+        val cameraProcessName = "${context.packageName}$CAMERA_PROCESS_SUFFIX"
+        val running = runCatching { manager.runningAppProcesses }
+            .onFailure { logSync("camera liveness unavailable error=${it.message}") }
+            .getOrNull()
+            ?: return null
+        return running.any { it.processName == cameraProcessName }
     }
 
     /**
@@ -354,4 +384,5 @@ internal object MediaSyncEngine {
     private const val JOIN_TIMEOUT_MS = 90_000L
     private const val SESSION_TIMEOUT_MS = 20 * 60_000L
     private const val SETTLING_MARGIN_MS = 500L
+    private const val CAMERA_PROCESS_SUFFIX = ":camera"
 }

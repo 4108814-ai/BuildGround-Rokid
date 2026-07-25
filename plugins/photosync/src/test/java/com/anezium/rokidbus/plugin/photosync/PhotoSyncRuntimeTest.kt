@@ -142,6 +142,26 @@ class PhotoSyncRuntimeTest {
     }
 
     @Test
+    fun `a denied phone permission is never described as Wi-Fi being off`() {
+        assertEquals(
+            "Allow nearby-device access in Nexus settings",
+            PhotoSyncCopy.headline(MediaSyncStatus(blocker = MediaSyncBlocker.PHONE_PERMISSION)),
+        )
+        assertEquals(
+            "Turn on Wi-Fi to sync",
+            PhotoSyncCopy.headline(MediaSyncStatus(blocker = MediaSyncBlocker.PHONE_WIFI_OFF)),
+        )
+    }
+
+    @Test
+    fun `every blocker has copy`() {
+        MediaSyncBlocker.entries.forEach { blocker ->
+            val headline = PhotoSyncCopy.headline(MediaSyncStatus(blocker = blocker))
+            assertTrue("$blocker has no copy", headline.isNotBlank() && headline != "Ready")
+        }
+    }
+
+    @Test
     fun `transfer progress counts the file being worked on, never past the total`() {
         fun headline(done: Int, total: Int) = PhotoSyncCopy.headline(
             MediaSyncStatus(

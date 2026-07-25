@@ -1,5 +1,7 @@
 package com.anezium.rokidbus.phone.mediasync
 
+import java.util.concurrent.atomic.AtomicBoolean
+
 /**
  * Pure join/retry policies for the media-sync Wi-Fi Direct link.
  *
@@ -91,35 +93,19 @@ class MediaSyncDiscoveryPrimingPolicy(
 }
 
 /**
- * Persistent-group hygiene, scoped to the media-sync SSID prefix.
+ * One-shot claim for work that two independent callbacks may both reach.
  *
- * The prefix is deliberately different from the camera link's `DIRECT-RN-`: the Lens janitor
- * deletes every profile matching its own prefix, and photo sync must never be collateral damage
- * (nor cause any).
+ * The priming cycle is the case that needs it: `stopPeerDiscovery`'s callback normally fires the
+ * join, but the framework sometimes swallows it, so a fallback timer has to exist. Without a claim
+ * both would connect — and a second `connect()` landing inside a healthy join is exactly what
+ * turns into a BUSY error, an inflated failure count, and eventually a `removeGroup` that tears
+ * down the join that was working.
  */
-object MediaSyncPersistentGroupPolicy {
-    const val NETWORK_NAME_PREFIX = "DIRECT-NS-"
-    const val MAX_RETAINED_OWNED_GROUPS = 2
+class MediaSyncSingleDispatch {
+    private val dispatched = AtomicBoolean(false)
 
-    fun isOwnedGroup(networkName: String?): Boolean =
-        networkName != null && networkName.startsWith(NETWORK_NAME_PREFIX)
+    /** True for the first caller only. */
+    fun claim(): Boolean = dispatched.compareAndSet(false, true)
 
-    /**
-     * Profiles to delete, oldest first, keeping [MAX_RETAINED_OWNED_GROUPS] of our own plus
-     * anything explicitly retained (the group we are about to join, and the last one that worked).
-     */
-    fun networkIdsToDelete(
-        groups: List<MediaSyncPersistentGroup>,
-        retainedNetworkNames: List<String> = emptyList(),
-    ): List<Int> {
-        val retained = retainedNetworkNames.filter(String::isNotBlank).toSet()
-        val owned = groups.filter { isOwnedGroup(it.networkName) && it.networkName !in retained }
-        if (owned.size <= MAX_RETAINED_OWNED_GROUPS) return emptyList()
-        return owned.dropLast(MAX_RETAINED_OWNED_GROUPS).map(MediaSyncPersistentGroup::networkId)
-    }
+    fun isClaimed(): Boolean = dispatched.get()
 }
-
-data class MediaSyncPersistentGroup(
-    val networkName: String,
-    val networkId: Int,
-)

@@ -48,3 +48,22 @@ class CameraSessionTracker(private val onChanged: (Boolean) -> Unit = {}) {
         const val STATE_CLOSED = "closed"
     }
 }
+
+/**
+ * Recovers the tracker when the `:camera` process dies without closing its session.
+ *
+ * A crashed or force-stopped camera process never sends `closed`, so the main process would
+ * believe a session is live forever and skip every future sync with `camera_active` until the hub
+ * itself restarts. Reconciliation is deliberately lazy — it runs at the one moment the stale flag
+ * actually costs something, not on a poller.
+ */
+object CameraSessionLivenessPolicy {
+    /**
+     * [cameraProcessAlive] must be null when liveness could not be determined: an unknown answer
+     * keeps the current belief rather than cancelling a real camera session.
+     */
+    fun shouldResetTracker(
+        skipReason: MediaSyncSkipReason,
+        cameraProcessAlive: Boolean?,
+    ): Boolean = skipReason == MediaSyncSkipReason.CAMERA_ACTIVE && cameraProcessAlive == false
+}

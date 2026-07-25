@@ -635,6 +635,15 @@ object GlassesHub {
 
     internal fun isCameraSessionActive(): Boolean = cameraSessionTracker.isActive()
 
+    /**
+     * Releases a camera session the `:camera` process never closed — it crashed or was
+     * force-stopped. Callers must have established that the process is genuinely gone; this only
+     * clears the main process' belief and never reaches into `:camera`.
+     */
+    internal fun resetCameraSession() {
+        if (cameraSessionTracker.reset()) log("camera session reset: :camera process is gone")
+    }
+
     private fun updateRemotePhoneCapabilities(payload: JSONObject) {
         val advertised = PhoneHubCapabilitiesContract.parse(payload)
         val next = PhoneHubCapabilitiesContract.create(

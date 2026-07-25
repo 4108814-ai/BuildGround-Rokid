@@ -6,9 +6,9 @@ import com.anezium.rokidbus.phone.mediasync.MediaSyncJoinRecoveryAction
 import com.anezium.rokidbus.phone.mediasync.MediaSyncJoinRecoveryPolicy
 import com.anezium.rokidbus.phone.mediasync.MediaSyncJoinRetryPolicy
 import com.anezium.rokidbus.phone.mediasync.MediaSyncLinkBlocker
-import com.anezium.rokidbus.phone.mediasync.MediaSyncPersistentGroup
-import com.anezium.rokidbus.phone.mediasync.MediaSyncPersistentGroupPolicy
+import com.anezium.rokidbus.phone.mediasync.MediaSyncSingleDispatch
 import com.anezium.rokidbus.shared.MediaSyncBlocker
+import com.anezium.rokidbus.shared.MediaSyncStatusContract
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -59,35 +59,22 @@ class MediaSyncLinkPoliciesTest {
     }
 
     @Test
-    fun `the janitor only ever touches media sync profiles`() {
-        assertTrue(MediaSyncPersistentGroupPolicy.isOwnedGroup("DIRECT-NS-ab3d9k"))
-        assertFalse(MediaSyncPersistentGroupPolicy.isOwnedGroup("DIRECT-RN-ab3d9k"))
-        assertFalse(MediaSyncPersistentGroupPolicy.isOwnedGroup("DIRECT-xy-Android"))
-        assertFalse(MediaSyncPersistentGroupPolicy.isOwnedGroup(null))
+    fun `only the first caller in a priming cycle gets to join`() {
+        val dispatch = MediaSyncSingleDispatch()
+
+        assertFalse(dispatch.isClaimed())
+        assertTrue(dispatch.claim())
+        assertTrue(dispatch.isClaimed())
+        // The stop-discovery callback and the fallback timer both reach the join; a second
+        // connect() inside a healthy join is what inflates failures and triggers removeGroup.
+        assertFalse(dispatch.claim())
+        assertFalse(dispatch.claim())
     }
 
     @Test
-    fun `the janitor keeps the newest profiles and anything explicitly retained`() {
-        val groups = listOf(
-            MediaSyncPersistentGroup("DIRECT-NS-oldest", 1),
-            MediaSyncPersistentGroup("DIRECT-RN-camera", 2),
-            MediaSyncPersistentGroup("DIRECT-NS-middle", 3),
-            MediaSyncPersistentGroup("DIRECT-NS-newer", 4),
-            MediaSyncPersistentGroup("DIRECT-NS-newest", 5),
-        )
-
-        assertEquals(
-            listOf(1, 3),
-            MediaSyncPersistentGroupPolicy.networkIdsToDelete(groups),
-        )
-        assertEquals(
-            listOf(1),
-            MediaSyncPersistentGroupPolicy.networkIdsToDelete(groups, listOf("DIRECT-NS-middle")),
-        )
-        assertEquals(
-            emptyList<Int>(),
-            MediaSyncPersistentGroupPolicy.networkIdsToDelete(groups.take(3)),
-        )
+    fun `each priming cycle gets its own claim`() {
+        assertTrue(MediaSyncSingleDispatch().claim())
+        assertTrue(MediaSyncSingleDispatch().claim())
     }
 
     @Test
@@ -106,9 +93,31 @@ class MediaSyncLinkPoliciesTest {
         )
         assertNull(MediaSyncBlockerMapping.fromGlassesReason("already_running"))
         assertNull(MediaSyncBlockerMapping.fromGlassesReason(null))
+    }
+
+    @Test
+    fun `a parked camera group reads as the camera holding the radio`() {
+        assertEquals(
+            MediaSyncBlocker.CAMERA_ACTIVE,
+            MediaSyncBlockerMapping.fromGlassesReason(
+                MediaSyncStatusContract.REASON_CAMERA_GROUP_PARKED,
+            ),
+        )
+    }
+
+    @Test
+    fun `a denied nearby-devices grant never masquerades as Wi-Fi being off`() {
         assertEquals(
             MediaSyncBlocker.PHONE_WIFI_OFF,
             MediaSyncBlockerMapping.fromLinkBlocker(MediaSyncLinkBlocker.PHONE_WIFI_OFF),
+        )
+        assertEquals(
+            MediaSyncBlocker.PHONE_PERMISSION,
+            MediaSyncBlockerMapping.fromLinkBlocker(MediaSyncLinkBlocker.MISSING_PERMISSION),
+        )
+        assertEquals(
+            MediaSyncBlocker.PHONE_WIFI_OFF,
+            MediaSyncBlockerMapping.fromLinkBlocker(MediaSyncLinkBlocker.NO_P2P_SERVICE),
         )
     }
 }
