@@ -404,6 +404,68 @@ startup path instead of standing up a Wi-Fi Direct group that would only be
 torn down). Grant, package, and link changes recompute the bits. Bit `1` is
 retired and is no longer advertised by either hub.
 
+## Photo sync contract (`/mediasync/*`)
+
+Photo sync copies the captures the native camera button writes to the glasses'
+`/sdcard/DCIM/Camera` into the phone gallery, under `Download/Hi Rokid/` with the
+original filenames (the same MediaStore bucket Hi Rokid's own manual imports land
+in). Every `/mediasync/...` path is protected: it requires an approved, enabled
+`mediasync` grant, and the grant is also the *consent* — the hub engine stays
+dormant until at least one approved plugin holds it.
+
+Plugin-facing paths:
+
+| Path | Direction | Payload |
+|---|---|---|
+| `/mediasync/status` | hub → plugin (receive-only) | `MediaSyncStatusContract`: `state` (`idle`/`preparing`/`transferring`), optional `blocker`, `autoSyncOnCharge`, `deleteAfterSync`, `progress`, `history` (≤ 8 runs), `syncedTotal`, optional `deletionSupported` |
+| `/mediasync/settings` | plugin → hub | partial update `{version, autoSyncOnCharge?, deleteAfterSync?}`; an empty request is a refresh and is answered with a `/mediasync/status` push |
+| `/mediasync/now` | plugin → hub | `{version}`; relays a manual trigger to the glasses |
+
+Hub-to-hub paths, rejected outright when a plugin tries to originate them
+(`isHubOnlyMediaSyncPath`): `/mediasync/config` (phone → glasses:
+`autoSyncOnCharge` and `consented`), `/mediasync/trigger` (phone → glasses),
+`/mediasync/link/offer` (glasses → phone: `MediaSyncLinkOfferContract`), and
+`/mediasync/state` (glasses → phone: engine state, skip reason, per-session
+totals).
+
+Triggers, evaluated glasses-side as one pure policy
+(`MediaSyncTriggerPolicy`): a charging edge, a bus connect while charging, or a
+manual request — each gated on a non-empty stable catalog, no live camera
+session, and glasses storage access. There is no per-capture instant sync in v1.
+
+A capture only enters the catalog once two scans at least 3 s apart agree on its
+size and mtime *and* the mtime is at least 5 s old, so an in-progress video
+recording can never be transferred.
+
+The data plane mirrors the camera link but never shares anything with it: its own
+`DIRECT-NS-` SSID prefix (the Lens janitor deletes `DIRECT-RN-` profiles), its own
+TCP port `38403` (the camera link owns `38401`), and its own framing
+(`MediaSyncProtocol`, magic `MSYN`, 20-byte header, 256 KiB chunks). The glasses
+are Group Owner and serve; the phone joins by credentials and *pulls*: catalog,
+then one file at a time, acking each only after the bytes are hashed, verified
+against the trailing `FILE_END` SHA-256 and published out of `IS_PENDING`. That
+ordering is the whole v1 resume model — an interrupted file restarts from zero
+next run, a completed file never travels twice, and partial-file resume is future
+work.
+
+Two asymmetries with the camera link are deliberate:
+
+- Photo sync never toggles the *phone's* Wi-Fi. If it is off the run ends with
+  the `phone_wifi_off` blocker and the next trigger retries; there is no
+  `lohs_reverse` equivalent in v1.
+- On the glasses it *does* use the hub's existing silent Wi-Fi path
+  (`GlassesHub.requestHubWifi`, i.e. the signed command bridge with the
+  accessibility fallback) and releases it through the same ~40 s grace-off. A
+  camera session always wins: it blocks a sync from starting and aborts one in
+  flight with `ABORT{reason:"camera_active"}`.
+
+Delete-after-sync is opt-in and off by default. The phone carries the flag in
+each `FILE_ACK`; the glasses attempt `File.delete()` then a MediaStore delete and
+report `deleted`, `already_gone`, `not_permitted` or `failed`. Under scoped
+storage a headless app cannot delete another app's media without an interactive
+consent dialog, so `not_permitted` is expected on some ROMs — it surfaces as
+`deletionSupported: false` in the status rather than being silently swallowed.
+
 ## Hub capabilities announcements
 
 Both hubs announce an additive JSON payload on `/system/hub/capabilities`;

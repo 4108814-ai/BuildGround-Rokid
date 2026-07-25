@@ -518,3 +518,38 @@ adb -s $phone uninstall com.anezium.rokidbus.phoneprobe
   pending set does not re-notify.
 - Deny the `POST_NOTIFICATIONS` runtime permission and confirm the periodic
   checks still run without crashing (notification post is silently skipped).
+
+## Photo Sync v1 on-device validation
+
+Nothing below is covered by unit tests; all of it needs both devices.
+
+- Grant `READ_EXTERNAL_STORAGE` on the glasses (the hub asks on first open of
+  its own screen; `adb shell pm grant com.anezium.rokidbus.glasses
+  android.permission.READ_EXTERNAL_STORAGE` is the shortcut) and confirm the
+  status stops reporting "Allow storage access on the glasses".
+- Install Photo Sync, approve `mediasync` in Plugin access, accept the
+  nearby-Wi-Fi prompt that follows, and confirm the hub only starts syncing
+  after that approval (before it, the glasses log `skip reason=not_consented`).
+- First sync = full backfill: plug the glasses in with the phone connected and
+  Wi-Fi on; confirm every capture in `/sdcard/DCIM/Camera` lands in
+  `Download/Hi Rokid/` with its original filename, beside Hi Rokid's own
+  imports.
+- Re-trigger with nothing new: the run must end `up_to_date` with no transfer.
+- Delete a synced photo from the phone gallery, sync again: it must NOT come
+  back (the ledger is authoritative, not MediaStore presence).
+- Shoot a video, and while it is still recording start a sync: the video must
+  be absent from that session's catalog and appear only in a later one.
+- Open the camera plugin during a sync: the sync must abort with
+  `camera_active`, the camera link must behave exactly as before this feature
+  existed, and the next trigger must pick up the remaining files.
+- Turn the phone's Wi-Fi off and trigger: status must read "Turn on Wi-Fi to
+  sync" and the phone must NOT enable Wi-Fi by itself.
+- Enable delete-after-sync and sync one capture: check whether the file is
+  actually gone from `/sdcard/DCIM/Camera`. If the ROM refuses, the settings
+  screen must show the amber "The glasses refused the last delete" line — that
+  is the expected honest outcome, not a bug to hide.
+- Kill the Photo Sync process mid-sync (`am force-stop`): the transfer must
+  keep running (it lives in the hub) and the screen must recover on reopen.
+- After a sync, confirm the glasses release Wi-Fi through the usual ~40 s
+  grace-off and that a camera session started inside that window still gets
+  Wi-Fi immediately.

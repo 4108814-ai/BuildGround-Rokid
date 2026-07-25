@@ -38,6 +38,7 @@ timed lines, media decks, and real images.
 | **[Transit](plugins/transit/)** | Nearby stops and live departures (Transitous/MOTIS), with favourites |
 | **[Lyrics](plugins/lyrics/)** | Time-synced lyrics for whatever is playing on the phone, from Spotify/Musixmatch/Netease/LrcLib |
 | **[Media Deck](plugins/media/)** | Universal now-playing surface with album art and transport controls |
+| **[Photo Sync](plugins/photosync/)** | Not a HUD plugin: copies the photos and videos you shoot on the glasses into the phone gallery by itself, and gives you the switches for it |
 | **[Sample](plugins/sample/)** | Minimal copyable reference plugin |
 
 All of them install from the in-app **Nexus Store**, backed by the public

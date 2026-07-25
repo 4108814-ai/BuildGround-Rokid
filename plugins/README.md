@@ -21,6 +21,7 @@ releases. The Gradle project names keep the historical `:plugin-<id>` form
 | [Transit](transit/) | `transit` | Nearby stops, departures, and favourites |
 | [Lyrics](lyrics/) | `lyrics` | Live synced lyrics for whatever is playing |
 | [Media Deck](media/) | `media` | Universal now-playing surface with transport controls |
+| [Photo Sync](photosync/) | `photosync` | Copies glasses captures into the phone gallery on their own |
 | [Sample](sample/) | `hello` | Minimal copyable reference plugin |
 
 Feeds lives at the repository root as `plugin-feeds/`; everything else about
