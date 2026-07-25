@@ -111,8 +111,9 @@ object PinOverlayRenderer {
             setPadding(horizontalPadding, verticalPadding, horizontalPadding, verticalPadding)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                setColor(BusTheme.card)
-                alpha = PANEL_ALPHA
+                // Pure black: the additive AR optics emit nothing for black, so
+                // the panel reads as transparent and only the border and text show.
+                setColor(0xFF000000.toInt())
                 setStroke(BusTheme.dp(context, 1), BusTheme.hairline)
                 cornerRadius = BusTheme.dp(context, 7).toFloat()
             }
@@ -158,6 +159,5 @@ object PinOverlayRenderer {
     }
 
     private const val EDGE_MARGIN_DP = 12
-    private const val PANEL_ALPHA = 220
     private const val MAX_SCREEN_WIDTH_FRACTION = 0.45f
 }
