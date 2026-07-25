@@ -464,7 +464,22 @@ Two asymmetries with the camera link are deliberate:
   after a session so warm reopens stay at 1.4 s instead of 5-7 s. A sync that
   finds it standing refuses to remove it, reports
   `camera_group_parked` on `/mediasync/state`, and waits for the next trigger.
-  Only groups that are neither ours nor the camera's are ever cleared.
+
+**Group creation on this ROM.** Config-based `createGroup` (caller-chosen SSID
+and passphrase) is rejected outright — measured on the glasses as
+`reason=0`, with Wi-Fi on, location on and no existing group. Photo sync
+therefore uses the same ladder the camera link already relies on here: one
+configured attempt, then after 150 ms one no-config `createGroup`, taking
+whatever framework-generated credentials come back. The offer always carries
+the group's *actual* credentials, and those are recorded so a later session can
+recognise the group as ours.
+
+That recognition is the only ownership test there is: with framework-generated
+SSIDs the camera link's parked group is indistinguishable from any stranger's,
+so photo sync **never removes a group it did not create**. An unrecognised
+group defers the session with `camera_group_parked` and a later trigger
+retries; a parked group dies with the Wi-Fi grace period, so deferral converges
+on its own.
 
 Because the `:camera` process can die without ever sending `closed`, the main
 process reconciles a stale session lazily: the moment a sync would skip with

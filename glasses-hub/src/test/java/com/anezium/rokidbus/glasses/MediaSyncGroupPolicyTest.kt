@@ -4,47 +4,82 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class MediaSyncGroupPolicyTest {
-    private val expected = "DIRECT-NS-ab3d9k"
+    /** What the ROM handed back when we last created a group, plus the SSID we had asked for. */
+    private val ours = listOf("DIRECT-xy-Android_9f3a", "DIRECT-NS-ab3d9k")
+
+    private fun classify(networkName: String?) = MediaSyncGroupPolicy.classify(networkName, ours)
 
     @Test
-    fun `our own group is recognised by name`() {
-        assertEquals(
-            MediaSyncGroupOwnership.OURS,
-            MediaSyncGroupPolicy.classify(expected, expected),
-        )
+    fun `the framework-generated name we recorded on creation is ours`() {
+        // This ROM rejects configured creation, so our own group carries a DIRECT-xy- name no
+        // prefix rule could ever recognise. The recorded credentials are the only proof we have.
+        assertEquals(MediaSyncGroupOwnership.OURS, classify("DIRECT-xy-Android_9f3a"))
     }
 
     @Test
-    fun `a media sync group from a previous profile is still ours to rebuild`() {
-        assertEquals(
-            MediaSyncGroupOwnership.OURS,
-            MediaSyncGroupPolicy.classify("DIRECT-NS-oldkey", expected),
-        )
+    fun `the SSID we asked for is ours on ROMs that honour it`() {
+        assertEquals(MediaSyncGroupOwnership.OURS, classify("DIRECT-NS-ab3d9k"))
+        assertEquals(MediaSyncGroupOwnership.OURS, classify("DIRECT-NS-anyother"))
     }
 
     @Test
-    fun `the camera link's parked group is never ours to remove`() {
-        // The camera keeps this group alive for ~40 s after a session so a warm reopen costs
-        // 1.4 s instead of 5-7 s. Removing it would silently degrade the camera.
-        assertEquals(
-            MediaSyncGroupOwnership.CAMERA_LINK,
-            MediaSyncGroupPolicy.classify("DIRECT-RN-1a2b3c", expected),
-        )
+    fun `an identically-shaped stranger is not ours`() {
+        // Same DIRECT-xy- shape as our recorded group, different suffix: not proof, not ours.
+        assertEquals(MediaSyncGroupOwnership.FOREIGN, classify("DIRECT-xy-Android_0000"))
     }
 
     @Test
-    fun `anything else is a foreign group we may clear`() {
-        listOf("DIRECT-xy-Android_1234", "AndroidShare_9182", "", null).forEach { name ->
-            assertEquals(
-                "classify($name)",
-                MediaSyncGroupOwnership.FOREIGN,
-                MediaSyncGroupPolicy.classify(name, expected),
-            )
+    fun `a recognisable camera group is classified as the camera's`() {
+        assertEquals(MediaSyncGroupOwnership.CAMERA_LINK, classify("DIRECT-RN-1a2b3c"))
+    }
+
+    @Test
+    fun `blank and unknown names are foreign`() {
+        listOf("", null, "AndroidShare_9182").forEach { name ->
+            assertEquals("classify($name)", MediaSyncGroupOwnership.FOREIGN, classify(name))
         }
     }
 
     @Test
-    fun `the two prefixes cannot collide`() {
+    fun `nothing that is not ours is ever removed`() {
+        // The decisive rule after the first device run: on this ROM the camera's parked group is
+        // indistinguishable from any stranger's, so "foreign" must never mean "removable".
+        listOf(MediaSyncGroupOwnership.CAMERA_LINK, MediaSyncGroupOwnership.FOREIGN).forEach {
+            assertEquals(MediaSyncGroupAction.DEFER, MediaSyncGroupPolicy.action(it, usable = true))
+            assertEquals(MediaSyncGroupAction.DEFER, MediaSyncGroupPolicy.action(it, usable = false))
+        }
+    }
+
+    @Test
+    fun `our own group is reused when usable and rebuilt when not`() {
+        assertEquals(
+            MediaSyncGroupAction.REUSE,
+            MediaSyncGroupPolicy.action(MediaSyncGroupOwnership.OURS, usable = true),
+        )
+        assertEquals(
+            MediaSyncGroupAction.REBUILD,
+            MediaSyncGroupPolicy.action(MediaSyncGroupOwnership.OURS, usable = false),
+        )
+    }
+
+    @Test
+    fun `with nothing recorded yet only the requested prefix counts as ours`() {
+        assertEquals(
+            MediaSyncGroupOwnership.OURS,
+            MediaSyncGroupPolicy.classify("DIRECT-NS-ab3d9k", emptyList()),
+        )
+        assertEquals(
+            MediaSyncGroupOwnership.FOREIGN,
+            MediaSyncGroupPolicy.classify("DIRECT-xy-Android_9f3a", emptyList()),
+        )
+        assertEquals(
+            MediaSyncGroupOwnership.FOREIGN,
+            MediaSyncGroupPolicy.classify("DIRECT-xy-Android_9f3a", listOf("")),
+        )
+    }
+
+    @Test
+    fun `the two prefixes stay distinct`() {
         assertEquals("DIRECT-NS-", MediaSyncP2pProfileStore.NETWORK_NAME_PREFIX)
         assertEquals("DIRECT-RN-", MediaSyncGroupPolicy.CAMERA_NETWORK_NAME_PREFIX)
     }

@@ -553,3 +553,11 @@ Nothing below is covered by unit tests; all of it needs both devices.
 - After a sync, confirm the glasses release Wi-Fi through the usual ~40 s
   grace-off and that a camera session started inside that window still gets
   Wi-Fi immediately.
+- Group creation: expect `mediaSync group configured create rejected reason=0`
+  followed by `path=legacy` and `group ready ssid=DIRECT-xy-...` on this ROM.
+  A session that logs only the configured rejection and then ends is the
+  fallback failing to arm.
+- Close the camera, then trigger a sync inside the ~40 s park window: photo
+  sync must log `group deferred` and end with `camera_group_parked` — it must
+  never log `group removed`/`stale` for a group it did not create, and the next
+  camera open must still be a warm ~1.4 s reopen.
