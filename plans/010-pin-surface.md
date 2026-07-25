@@ -74,9 +74,11 @@ defensively but must never receive oversized payloads from a compliant hub.
 
 ## Capability gating
 
-- New hub feature bit `16` = `PIN_SURFACE` (2 = IMAGE_SURFACE, 4 =
-  CAMERA_CONSUMER_READY, 8 = CAMERA_FROZEN_SPP are taken). The glasses
-  announce adds `"pinSurfaceVersion": 1` to `/system/hub/capabilities`.
+- New hub feature bit `32` = `PIN_SURFACE` (2 = IMAGE_SURFACE, 4 =
+  CAMERA_CONSUMER_READY, 8 = CAMERA_FROZEN_SPP, and 16 =
+  CAMERA_LOHS_REVERSE_REQUIRED — undocumented in BUSSPEC at the time this plan
+  was written — are taken). The glasses announce adds `"pinSurfaceVersion": 1`
+  to `/system/hub/capabilities`.
 - The phone hub exposes the bit to plugins only after a valid announcement and
   only while `SPP_DATA_UP` is live — mirror the `IMAGE_SURFACE` gating exactly,
   including clearing on link-down and the "callers must not cache
