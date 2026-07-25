@@ -249,12 +249,14 @@ class PluginPermissionsActivity : Activity() {
         val title = when (capability) {
             PluginCapability.SURFACES -> "Show on your glasses"
             PluginCapability.MICROPHONE -> "Glasses microphone"
+            PluginCapability.STT -> "Speech to text"
             PluginCapability.HTTP_PROXY -> "Nexus HTTP proxy"
             PluginCapability.CAMERA -> "Glasses camera"
         }
         val note = when (capability) {
             PluginCapability.SURFACES -> "Render cards and images on the HUD"
             PluginCapability.MICROPHONE -> "Listen through the glasses microphone"
+            PluginCapability.STT -> "Turn speech from the glasses microphone into text"
             PluginCapability.HTTP_PROXY -> "Fetch through the phone connection"
             PluginCapability.CAMERA -> "Only while the camera view is open"
         }

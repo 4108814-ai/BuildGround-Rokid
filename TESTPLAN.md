@@ -228,7 +228,7 @@ fixture that uses the public `showImage`/`updateImage` calls:
 
 ## Round B slice 2
 
-Install/build as in the earlier sections, then verify both hubs report API v2:
+Install/build as in the earlier sections, then verify both hubs report API v3:
 
 ```powershell
 .\gradlew.bat assembleDebug
@@ -307,6 +307,67 @@ Useful PASS log fragments:
 - Glasses: `remote RX /probe/echo/reply id=...`
 - Glasses probe: `echo reply observed id=...`
 - Phone probe: `Big echo reply ... side=glasses`
+
+## STT capability v1
+
+Use an approved phone plugin whose descriptor requests `stt` and receives
+`/stt`, plus a second unapproved or differently granted fixture. Configure at
+least one realtime engine and one buffered engine in the hub. Evidence must
+redact transcript text, provider credentials, signer details, and device
+identity.
+
+Software gates:
+
+1. Descriptor parsing accepts `stt` with `/stt` and rejects `/stt` without the
+   capability. Route policy rejects unregistered, pending, revoked, and
+   approved-but-ungranted callers for both `/stt/session/start` and
+   `/stt/session/stop`.
+2. Start with unknown `version` and with `mode:"continuous"`; each reply keeps
+   the request ID and returns `accepted:false, reason:"INVALID_REQUEST"`.
+   Verify `BUSY`, `NO_LINK`, `NOT_READY`, and `START_FAILED` with the matching
+   arbitration/readiness/fault fixture.
+3. Exercise the typed SDK's pending/active/idle transitions, all denial and end
+   mappings, pluginId mismatch filtering, the 128-ID dedup window, idempotent
+   stop, registration loss, direct client close, normal service close, and
+   sticky `/stt/*` routing.
+
+On-device/session matrix:
+
+1. Start the Speech settings dictation test, then start the plugin; the plugin
+   receives `DENIED_BUSY`. Reverse the order and confirm the settings test is
+   busy. After either session ends, the other can start.
+2. Hold a raw `microphone` audio lease and start STT; expect `DENIED_BUSY`.
+   Start STT first and request raw audio; expect audio `BUSY`. Confirm there is
+   still exactly one CXR audio stream and it is released after each terminal
+   path.
+3. With a realtime engine, verify accepted reply → `listening` →
+   `recognizing` → zero or more monotonic partials → `processing` → final →
+   ended `completed`. State IDs must be `<sessionId>:s<n>`, partial IDs
+   `<sessionId>:p<seq>`, and final/ended IDs must be unique. With a buffered
+   engine, `realtime:false` and no partials are expected.
+4. Stay silent through endpointing. Expect one ended event with
+   `reason:"no_speech"`, no final transcript, and no orphan audio lease.
+5. Drop CXR-L mid-utterance. Expect `reason:"link_lost"` with a structured
+   transcript-free error, then verify a later reconnect permits a fresh
+   session.
+6. Kill the plugin binder and separately call unregister mid-session. Each
+   cancels and releases the session without attempting transcript replay.
+   Re-register and confirm another plugin can acquire immediately.
+7. Revoke the `stt` grant while the binder is alive. Expect one targeted ended
+   event with `reason:"revoked"`, then no partial/final traffic. Confirm the
+   plugin returns to the correct approval state and cannot restart without the
+   grant.
+8. Start with a valid language override (for example `fr`) and verify that
+   session uses it without changing the hub default. Repeat with an absent and
+   invalid ID; both use the hub-configured language.
+9. Send stop with the correct session ID, repeat it, then send stale/wrong IDs
+   from both owner and another approved principal. Every caller receives
+   `stopped:true`; only the verified owner+binder's current session is
+   cancelled.
+10. Search phone logcat, the Settings log broadcast, queued traffic, remote
+    glasses traffic, and Bus inspector output using a known spoken marker.
+    The marker must appear only in the holder's in-process callbacks. The
+    journal may show direction/path/size/verdict but never payload text.
 
 ## Cleanup
 

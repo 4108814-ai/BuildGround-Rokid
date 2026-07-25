@@ -3,6 +3,7 @@ package com.anezium.rokidbus.shared.plugin
 enum class PluginCapability(val wireValue: String) {
     SURFACES("surfaces"),
     MICROPHONE("microphone"),
+    STT("stt"),
     HTTP_PROXY("http_proxy"),
     CAMERA("camera"),
     ;

@@ -78,10 +78,50 @@ class SpeechSessionManagerTest {
         manager.close()
     }
 
+    @Test
+    fun languageOverrideAppliesOnlyToRequestedSession() {
+        val audio = ImmediateAudioAccess()
+        val engine = RecordingSession()
+        val languages = mutableListOf<TranscriptionLanguage>()
+        val manager = manager(
+            audio = audio,
+            recordingSession = engine,
+            clock = AtomicLong(1_000L),
+            languages = languages,
+        )
+
+        assertEquals(
+            SpeechStartResult.OK,
+            manager.startUtterance(RecordingUtteranceListener(), TranscriptionLanguage.FRENCH),
+        )
+        assertEquals(listOf(TranscriptionLanguage.FRENCH), languages)
+        manager.cancel()
+        manager.close()
+        assertEquals(TranscriptionLanguage.AUTO, settings.selectedLanguage())
+    }
+
+    @Test
+    fun listenerScopedCancelCannotCancelAnotherOwner() {
+        val audio = ImmediateAudioAccess()
+        val engine = RecordingSession()
+        val listener = RecordingUtteranceListener()
+        val manager = manager(audio, engine, AtomicLong(1_000L))
+
+        assertEquals(SpeechStartResult.OK, manager.startUtterance(listener))
+        manager.cancel(RecordingUtteranceListener())
+        assertTrue(manager.isActive)
+
+        manager.cancel(listener)
+        assertTrue(listener.ended.await(2, TimeUnit.SECONDS))
+        assertEquals(SpeechEndReason.CANCELLED, listener.reason)
+        manager.close()
+    }
+
     private fun manager(
         audio: InternalAudioAccess,
         recordingSession: RecordingSession,
         clock: AtomicLong,
+        languages: MutableList<TranscriptionLanguage>? = null,
     ): SpeechSessionManager =
         SpeechSessionManager(
             context = context,
@@ -94,7 +134,10 @@ class SpeechSessionManagerTest {
                     language: TranscriptionLanguage,
                     phoneLanguageTag: String,
                     listener: SttSessionListener,
-                ): SttSession = recordingSession.apply { this.listener = listener }
+                ): SttSession = recordingSession.apply {
+                    languages?.add(language)
+                    this.listener = listener
+                }
             },
             mainPoster = MainThreadPoster { task -> task() },
             elapsedRealtime = clock::get,

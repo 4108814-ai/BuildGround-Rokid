@@ -51,4 +51,19 @@ class PathRulesTest {
         assertEquals(PluginCapability.CAMERA, PathRules.requiredCapability("/camera/link/offer"))
         assertNull(PathRules.requiredCapability("/camera/session/state"))
     }
+
+    @Test
+    fun `stt routes and receive namespace are capability conditioned`() {
+        val stt = setOf(PluginCapability.STT)
+        assertEquals(PluginCapability.STT, PathRules.requiredCapability("/stt/session/start"))
+        assertEquals(PluginCapability.STT, PathRules.requiredCapability("/stt/session/stop"))
+        assertTrue(PathRules.isAllowedReceivePrefix("/stt", "scribe", stt))
+        assertTrue(PathRules.isAllowedReceivePrefix("/stt/partial", "scribe", stt))
+        assertFalse(PathRules.isAllowedReceivePrefix("/stt", "scribe", emptySet()))
+        assertEquals(PluginCapability.STT, PathRules.requiredCapabilityForReceivePrefix("/stt"))
+        assertEquals(
+            PluginCapability.STT,
+            PathRules.requiredCapabilityForReceivePrefix("/stt/session/ended"),
+        )
+    }
 }

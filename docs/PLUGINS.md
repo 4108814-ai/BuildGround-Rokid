@@ -82,8 +82,8 @@ dependencies { implementation(project(":bus-client")) }   // SDK: bus client + N
             <meta-data android:name="com.anezium.rokidbus.plugin.DISPLAY_NAME" android:value="My Plugin" />
             <meta-data android:name="com.anezium.rokidbus.plugin.ICON" android:value="star" />
             <meta-data android:name="com.anezium.rokidbus.plugin.API_VERSION" android:value="3" />
-            <meta-data android:name="com.anezium.rokidbus.plugin.CAPABILITIES" android:value="surfaces" />
-            <meta-data android:name="com.anezium.rokidbus.plugin.RECEIVE_PREFIXES" android:value="/plugin/myid,/system/plugin" />
+            <meta-data android:name="com.anezium.rokidbus.plugin.CAPABILITIES" android:value="surfaces,stt" />
+            <meta-data android:name="com.anezium.rokidbus.plugin.RECEIVE_PREFIXES" android:value="/plugin/myid,/system/plugin,/stt" />
             <meta-data android:name="com.anezium.rokidbus.plugin.SETTINGS_ACTIVITY" android:value=".MySettingsActivity" />
             <meta-data android:name="com.anezium.rokidbus.plugin.LAUNCHABLE" android:value="true" />
         </service>
@@ -223,6 +223,9 @@ NexusUi.uninstallCard(this, "My Plugin") {
   approves the requested capabilities in **Rokid Nexus → Settings → Plugin
   access** (or the Store flow). Pending/denied/disabled plugins are not
   launchable.
+- Updating a descriptor's requested capability set, including adding `stt`,
+  returns the existing grant to Pending by design. The user must review and
+  approve the new set before the plugin is launchable again.
 - SharedPreferences live in the plugin's own package; name the main file
   `nexus_plugin_<id>`.
 - Uninstalling removes the plugin and all its state; the hub's grant becomes

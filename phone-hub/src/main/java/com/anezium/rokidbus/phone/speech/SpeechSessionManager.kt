@@ -123,9 +123,17 @@ class SpeechSessionManager internal constructor(
     val isActive: Boolean
         get() = synchronized(lock) { active?.ended?.get() == false }
 
-    fun startUtterance(listener: SpeechUtteranceListener): SpeechStartResult {
+    val activeRealtime: Boolean?
+        get() = synchronized(lock) {
+            active?.takeIf { !it.ended.get() }?.engine?.usesRealtime
+        }
+
+    fun startUtterance(
+        listener: SpeechUtteranceListener,
+        language: TranscriptionLanguage? = null,
+    ): SpeechStartResult {
         val engine: SpeechEngine
-        val language: TranscriptionLanguage
+        val sessionLanguage: TranscriptionLanguage
         synchronized(lock) {
             if (closed) return SpeechStartResult.START_FAILED
             if (active?.ended?.get() == false) return SpeechStartResult.BUSY
@@ -134,19 +142,19 @@ class SpeechSessionManager internal constructor(
             return SpeechStartResult.NOT_READY
         }
         engine = settings.selectedEngine() ?: return SpeechStartResult.NOT_READY
-        language = settings.selectedLanguageForEngine(engine)
+        sessionLanguage = language ?: settings.selectedLanguageForEngine(engine)
 
         val run = ActiveUtterance(
             tag = "speech-${UUID.randomUUID()}",
             engine = engine,
-            language = language,
+            language = sessionLanguage,
             listener = listener,
         )
         run.vad.reset(elapsedRealtime())
         val stt = runCatching {
             sessionFactory.create(
                 engine = engine,
-                language = language,
+                language = sessionLanguage,
                 phoneLanguageTag = Locale.getDefault().toLanguageTag(),
                 listener = EngineListener(run),
             )
@@ -189,7 +197,7 @@ class SpeechSessionManager internal constructor(
             return SpeechStartResult.OK
         }
         postState(run, SpeechSessionState.LISTENING)
-        diagnostic("start engine=${engine.id} language=${language.id}")
+        diagnostic("start engine=${engine.id} language=${sessionLanguage.id}")
         executeAudio(run) {
             if (run.cancelRequested.get()) {
                 end(run, SpeechEndReason.CANCELLED, null)
@@ -225,7 +233,17 @@ class SpeechSessionManager internal constructor(
     }
 
     fun cancel() {
-        val run = synchronized(lock) { active } ?: return
+        cancelActive(expectedListener = null)
+    }
+
+    internal fun cancel(listener: SpeechUtteranceListener) {
+        cancelActive(expectedListener = listener)
+    }
+
+    private fun cancelActive(expectedListener: SpeechUtteranceListener?) {
+        val run = synchronized(lock) {
+            active?.takeIf { expectedListener == null || it.listener === expectedListener }
+        } ?: return
         if (!run.cancelRequested.compareAndSet(false, true)) return
         executeAudio(run) {
             end(run, SpeechEndReason.CANCELLED, null)

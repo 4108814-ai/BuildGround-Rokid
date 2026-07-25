@@ -50,10 +50,13 @@ import com.anezium.rokidbus.phone.speech.InternalAudioAccess
 import com.anezium.rokidbus.phone.speech.InternalAudioAcquireResult
 import com.anezium.rokidbus.phone.speech.InternalAudioConsumer
 import com.anezium.rokidbus.phone.speech.InternalAudioStopReason
+import com.anezium.rokidbus.phone.speech.SpeechEndReason
 import com.anezium.rokidbus.phone.speech.SpeechSessionManager
+import com.anezium.rokidbus.phone.speech.SpeechSessionState
 import com.anezium.rokidbus.phone.speech.SpeechSettingsStore
 import com.anezium.rokidbus.phone.speech.SpeechStartResult
 import com.anezium.rokidbus.phone.speech.SpeechUtteranceListener
+import com.anezium.rokidbus.phone.speech.SttError
 import com.example.cxrglobal.CXRLink
 import com.example.cxrglobal.CxrDefs
 import com.example.cxrglobal.GlassInfo
@@ -149,7 +152,21 @@ class BusHubService : Service() {
         var seq: Long = 0L,
     )
 
+    private class SpeechBusSession(
+        val sessionId: String,
+        val callbackBinder: IBinder,
+        val pluginId: String,
+        val grantKey: PluginGrantKey,
+        val stateSeq: AtomicLong = AtomicLong(),
+        val partialSeq: AtomicLong = AtomicLong(),
+        val accepted: AtomicBoolean = AtomicBoolean(),
+        val ended: AtomicBoolean = AtomicBoolean(),
+    ) {
+        lateinit var listener: SpeechUtteranceListener
+    }
+
     private val executor = Executors.newCachedThreadPool()
+    private val speechBusExecutor = SerialExecutor(executor)
     private val audioHandler = Handler(Looper.getMainLooper())
     private val updateCheckHandler = Handler(Looper.getMainLooper())
     @Volatile private var updateCheckLoopStopped = true
@@ -170,6 +187,8 @@ class BusHubService : Service() {
     private val pluginBusJournal = busJournal
     private val sppLoopStarted = AtomicBoolean(false)
     private val audioLeaseArbitrator = SingleAudioLeaseArbitrator<AudioLease>()
+    private val speechBusLock = Any()
+    private var activeSpeechBusSession: SpeechBusSession? = null
     private val glassesAppOperationLock = Any()
     private val glassesAppStateLock = Any()
     private val glassesAppReleaseLock = Any()
@@ -192,6 +211,7 @@ class BusHubService : Service() {
     private lateinit var cameraCompanionController: CameraCompanionController
     private lateinit var manualPairingEngine: GlassesManualPairingEngine
     private lateinit var transitLegacyStateExporter: TransitLegacyStateExporter
+    private lateinit var speechSettingsStore: SpeechSettingsStore
     private lateinit var speechSessionManager: SpeechSessionManager
     @Volatile private var cxrConnected = false
     @Volatile private var glassBtConnected = false
@@ -481,9 +501,10 @@ class BusHubService : Service() {
         transitLegacyStateExporter = TransitLegacyStateExporter(
             AndroidTransitLegacyStateStorage(applicationContext),
         )
+        speechSettingsStore = SpeechSettingsStore(applicationContext)
         speechSessionManager = SpeechSessionManager(
             context = applicationContext,
-            settings = SpeechSettingsStore(applicationContext),
+            settings = speechSettingsStore,
             secrets = HubSecretStore(applicationContext),
             internalAudio = object : InternalAudioAccess {
                 override fun acquireInternalAudio(
@@ -812,6 +833,7 @@ class BusHubService : Service() {
                 replyRemote = false,
                 senderUid = senderUid,
                 replyBinder = sender.replyBinder,
+                principal = sender.principal,
             )
         ) return
         if (deliverLocal(authorizedEnvelope, excludeUid = senderUid)) return
@@ -1032,6 +1054,7 @@ class BusHubService : Service() {
         replyRemote: Boolean,
         senderUid: Int? = null,
         replyBinder: IBinder? = null,
+        principal: PhonePluginPrincipal? = null,
     ): Boolean {
         when (envelope.path) {
             BusPaths.HTTP_REQUEST -> executor.execute { fetchAndStream(envelope, replyRemote, replyBinder) }
@@ -1039,6 +1062,12 @@ class BusHubService : Service() {
                 acquireAudioLease(envelope, replyRemote, senderUid, replyBinder)
             }
             AUDIO_LEASE_RELEASE -> executor.execute { releaseAudioLease(envelope, replyRemote, replyBinder) }
+            SttWireProtocol.SESSION_START_PATH -> speechBusExecutor.execute {
+                handleSpeechSessionStart(envelope, replyRemote, replyBinder, principal)
+            }
+            SttWireProtocol.SESSION_STOP_PATH -> speechBusExecutor.execute {
+                handleSpeechSessionStop(envelope, replyRemote, replyBinder, principal)
+            }
             else -> return false
         }
         return true
@@ -1243,6 +1272,7 @@ class BusHubService : Service() {
         }
         runCatching { registration.callbackBinder.unlinkToDeath(registration.deathRecipient, 0) }
         releaseAudioLeaseForLocalBinder(registration.callbackBinder, reason)
+        releaseSpeechSessionForLocalBinder(registration, reason)
         if (reason in setOf("binderDied", "dead callback", "unregister")) {
             registration.principal?.let { principal ->
                 if (::externalPluginController.isInitialized) {
@@ -1469,6 +1499,297 @@ class BusHubService : Service() {
                         .put("seq", sequence),
                 ),
             )
+        }
+    }
+
+    private fun handleSpeechSessionStart(
+        envelope: BusEnvelope,
+        replyRemote: Boolean,
+        replyBinder: IBinder?,
+        principal: PhonePluginPrincipal?,
+    ) {
+        if (replyRemote) {
+            sendRemote(errorEnvelope(envelope.id, "STT_LOCAL_ONLY"))
+            return
+        }
+        val registration = speechRegistration(replyBinder, principal) ?: return
+        val request = SttWireProtocol.parseStart(envelope.payload)
+        if (request == null) {
+            replyToSpeechRequest(
+                envelope = envelope,
+                payload = JSONObject()
+                    .put("accepted", false)
+                    .put("reason", "INVALID_REQUEST"),
+                registration = registration,
+            )
+            return
+        }
+
+        val session = SpeechBusSession(
+            sessionId = UUID.randomUUID().toString(),
+            callbackBinder = registration.callbackBinder,
+            pluginId = registration.principal!!.descriptor.id,
+            grantKey = registration.principal.grantKey(),
+        )
+        session.listener = SpeechBusListener(session)
+        val reserved = synchronized(speechBusLock) {
+            val current = activeSpeechBusSession
+            if (current != null && !current.ended.get()) {
+                false
+            } else {
+                activeSpeechBusSession = session
+                true
+            }
+        }
+        if (!reserved) {
+            replyToSpeechRequest(
+                envelope = envelope,
+                payload = JSONObject()
+                    .put("accepted", false)
+                    .put("reason", "BUSY"),
+                registration = registration,
+            )
+            return
+        }
+
+        val startResult = runCatching {
+            speechSessionManager.startUtterance(
+                listener = session.listener,
+                language = request.language,
+            )
+        }.getOrDefault(SpeechStartResult.START_FAILED)
+        if (startResult != SpeechStartResult.OK) {
+            discardSpeechBusSession(session)
+            replyToSpeechRequest(
+                envelope = envelope,
+                payload = JSONObject()
+                    .put("accepted", false)
+                    .put("reason", SttWireProtocol.startDenialReason(startResult)),
+                registration = registration,
+            )
+            return
+        }
+
+        if (!isCurrentSpeechBusSession(session) ||
+            speechRegistration(registration.callbackBinder, registration.principal) == null
+        ) {
+            speechSessionManager.cancel(session.listener)
+            return
+        }
+        val realtime = speechSessionManager.activeRealtime
+            ?: speechSettingsStore.selectedEngine()?.usesRealtime
+            ?: false
+        session.accepted.set(true)
+        replyToSpeechRequest(
+            envelope = envelope,
+            payload = JSONObject()
+                .put("accepted", true)
+                .put("sessionId", session.sessionId)
+                .put("realtime", realtime),
+            registration = registration,
+        )
+    }
+
+    private fun handleSpeechSessionStop(
+        envelope: BusEnvelope,
+        replyRemote: Boolean,
+        replyBinder: IBinder?,
+        principal: PhonePluginPrincipal?,
+    ) {
+        if (replyRemote) {
+            sendRemote(errorEnvelope(envelope.id, "STT_LOCAL_ONLY"))
+            return
+        }
+        val registration = speechRegistration(replyBinder, principal) ?: return
+        val requestedSessionId = envelope.payload.optString("sessionId")
+        val ownedSession = synchronized(speechBusLock) {
+            activeSpeechBusSession?.let { current ->
+                current.takeIf {
+                    !current.ended.get() &&
+                    current.sessionId == requestedSessionId &&
+                    current.callbackBinder == registration.callbackBinder &&
+                    current.grantKey == registration.principal!!.grantKey()
+                }
+            }
+        }
+        ownedSession?.let { speechSessionManager.cancel(it.listener) }
+        replyToSpeechRequest(
+            envelope = envelope,
+            payload = JSONObject().put("stopped", true),
+            registration = registration,
+        )
+    }
+
+    private inner class SpeechBusListener(
+        private val session: SpeechBusSession,
+    ) : SpeechUtteranceListener {
+        override fun onState(state: SpeechSessionState) {
+            speechBusExecutor.execute {
+                if (!isCurrentSpeechBusSession(session)) return@execute
+                val sequence = session.stateSeq.getAndIncrement()
+                deliverSpeechBusEnvelope(
+                    session,
+                    BusEnvelope(
+                        path = SttWireProtocol.STATE_PATH,
+                        id = SttWireProtocol.stateId(session.sessionId, sequence),
+                        payload = SttWireProtocol.statePayload(
+                            session.pluginId,
+                            session.sessionId,
+                            state,
+                        ),
+                    ),
+                )
+            }
+        }
+
+        override fun onPartial(text: String) {
+            speechBusExecutor.execute {
+                if (!isCurrentSpeechBusSession(session)) return@execute
+                val sequence = session.partialSeq.getAndIncrement()
+                deliverSpeechBusEnvelope(
+                    session,
+                    BusEnvelope(
+                        path = SttWireProtocol.PARTIAL_PATH,
+                        id = SttWireProtocol.partialId(session.sessionId, sequence),
+                        payload = SttWireProtocol.partialPayload(
+                            session.pluginId,
+                            session.sessionId,
+                            text,
+                            sequence,
+                        ),
+                    ),
+                )
+            }
+        }
+
+        override fun onFinal(text: String) {
+            speechBusExecutor.execute {
+                if (!isCurrentSpeechBusSession(session)) return@execute
+                deliverSpeechBusEnvelope(
+                    session,
+                    BusEnvelope(
+                        path = SttWireProtocol.FINAL_PATH,
+                        id = SttWireProtocol.finalId(session.sessionId),
+                        payload = SttWireProtocol.finalPayload(
+                            session.pluginId,
+                            session.sessionId,
+                            text,
+                        ),
+                    ),
+                )
+            }
+        }
+
+        override fun onEnded(reason: SpeechEndReason, error: SttError?) {
+            speechBusExecutor.execute {
+                if (!completeSpeechBusSession(session)) return@execute
+                deliverSpeechBusEnvelope(
+                    session,
+                    BusEnvelope(
+                        path = SttWireProtocol.SESSION_ENDED_PATH,
+                        id = SttWireProtocol.endedId(session.sessionId),
+                        payload = SttWireProtocol.endedPayload(
+                            session.pluginId,
+                            session.sessionId,
+                            reason,
+                            error,
+                        ),
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun speechRegistration(
+        callbackBinder: IBinder?,
+        principal: PhonePluginPrincipal?,
+    ): Registration? {
+        if (callbackBinder == null || principal == null) return null
+        return registrations.firstOrNull { registration ->
+            registration.callbackBinder == callbackBinder &&
+                registration.principal?.grantKey() == principal.grantKey() &&
+                PluginCapability.STT in registration.grantedCapabilities
+        }
+    }
+
+    private fun replyToSpeechRequest(
+        envelope: BusEnvelope,
+        payload: JSONObject,
+        registration: Registration,
+    ) {
+        payload.put("pluginId", registration.principal!!.descriptor.id)
+        deliverLocal(
+            BusEnvelope(
+                path = envelope.path + "/reply",
+                id = envelope.id,
+                payload = payload,
+            ),
+            targetBinder = registration.callbackBinder,
+        )
+    }
+
+    private fun deliverSpeechBusEnvelope(session: SpeechBusSession, envelope: BusEnvelope) {
+        deliverLocal(envelope, targetBinder = session.callbackBinder)
+    }
+
+    private fun isCurrentSpeechBusSession(session: SpeechBusSession): Boolean =
+        synchronized(speechBusLock) {
+            activeSpeechBusSession === session && !session.ended.get()
+        }
+
+    private fun discardSpeechBusSession(session: SpeechBusSession) {
+        synchronized(speechBusLock) {
+            if (activeSpeechBusSession === session) activeSpeechBusSession = null
+            session.ended.set(true)
+        }
+    }
+
+    private fun completeSpeechBusSession(session: SpeechBusSession): Boolean =
+        synchronized(speechBusLock) {
+            if (activeSpeechBusSession !== session ||
+                !session.ended.compareAndSet(false, true)
+            ) {
+                false
+            } else {
+                activeSpeechBusSession = null
+                true
+            }
+        }
+
+    private fun releaseSpeechSessionForLocalBinder(registration: Registration, reason: String) {
+        val session = synchronized(speechBusLock) {
+            val current = activeSpeechBusSession
+            if (current?.callbackBinder == registration.callbackBinder &&
+                current.ended.compareAndSet(false, true)
+            ) {
+                activeSpeechBusSession = null
+                current
+            } else {
+                null
+            }
+        } ?: return
+        speechSessionManager.cancel(session.listener)
+        if (reason != "authorizationChanged" || !session.accepted.get()) return
+
+        val revoked = BusEnvelope(
+            path = SttWireProtocol.SESSION_ENDED_PATH,
+            id = SttWireProtocol.endedId(session.sessionId),
+            payload = SttWireProtocol.revokedPayload(session.pluginId, session.sessionId),
+        )
+        speechBusExecutor.execute {
+            val payload = revoked.payload.toString().toByteArray(Charsets.UTF_8)
+            runCatching {
+                registration.callback.onMessage(revoked.path, revoked.id, payload)
+            }.onSuccess {
+                recordLocalDelivery(registration, revoked, PluginBusJournal.Verdict.OK, "LOCAL")
+            }.onFailure {
+                recordLocalDelivery(
+                    registration,
+                    revoked,
+                    PluginBusJournal.Verdict.REJECTED,
+                    "DEAD_CALLBACK",
+                )
+            }
         }
     }
 
