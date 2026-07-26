@@ -186,13 +186,14 @@ class AgentsPluginService : NexusPluginService() {
         val summary = if (session.status == AgentStatus.NEEDS_YOU) pendingSummary(session) else null
         val titleBudget = if (summary == null) 200 else 100
         val text = buildString {
-            append(if (selected) "› " else "  ")
             append(session.displayTitle.singleLine(titleBudget))
             if (summary != null) append(" — ").append(summary.singleLine(110))
         }.take(238)
         return NexusCardLine(
             text = text,
-            badge = session.provider.marker,
+            // The badge chip is the only fixed-position element on the row, so it
+            // carries the selection marker; the text itself may marquee.
+            badge = if (selected) "›${session.provider.marker}" else session.provider.marker,
             trail = listOfNotNull(session.status.boardToken(), age(now, session.lastActivityAt)),
         )
     }

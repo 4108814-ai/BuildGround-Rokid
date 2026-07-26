@@ -50,6 +50,9 @@ class AgentsSettingsActivity : Activity() {
         buildUi()
         loadConfig()
         observeConnections()
+        if (configStore.load().shouldMonitor) {
+            AgentsMonitorService.reconcile(applicationContext)
+        }
     }
 
     override fun onDestroy() {
