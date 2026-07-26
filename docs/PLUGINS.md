@@ -155,6 +155,16 @@ listener must remain idle until the plugin is open. While open, the SDK
 promotes the plugin service to a special-use foreground service so OEM app
 freezers leave it alone; when closed, it returns the plugin to dormant state.
 
+**Pins are the one exception**, and they are deliberately narrow. A dormant
+plugin may wake on a phone-side event, connect, send a single `/pin/show` or
+`/pin/hide`, and go straight back to dormant — that is the shape the pin was
+designed for (a ride-hailing plugin putting the arriving car in the corner).
+The exception buys you one push, not a foothold: no surface is opened, nothing
+is adopted as foreground, and you must not keep the connection, an engine, or a
+polling loop alive between pushes. The pin outlives your process on its own,
+and `ttlMs` bounds it if you never come back. Anything that needs to keep
+running still needs an open surface.
+
 The SDK always constructs the notification object required for the session
 foreground service. Do **not** declare or request `POST_NOTIFICATIONS`: on
 Android 13+ the SDK notification stays suppressed, and the Rokid Nexus hub

@@ -6,8 +6,8 @@ Status: spec locked, branch `pin-surface`, implementation in flight.
 
 Let a phone plugin pin a tiny, persistent text overlay in a corner of the
 glasses HUD. The pin stays visible across surface changes, the launcher, and
-native Rokid screens, until it is hidden, replaced, expired, or its owner
-disconnects. Motivating use case (external plugin developer request): a
+native Rokid screens, until it is hidden, replaced, expired, or its owner loses
+its grant. Motivating use case (external plugin developer request): a
 taxi/ride app keeping the car plate + description quietly in the corner while
 the wearer does other things.
 
@@ -60,13 +60,24 @@ defensively but must never receive oversized payloads from a compliant hub.
 - **Single global slot.** Last accepted `/pin/show` wins, across plugins;
   replacing another plugin's pin is allowed and logged phone-side. No eviction
   callback in v1.
-- The pin's lifecycle is **independent of surfaces**: it survives its owner's
-  surface being hidden/replaced, other plugins' surfaces, launcher open/close,
-  and native apps in the foreground.
+- The pin's lifecycle is **independent of surfaces and of its owner's process**:
+  it survives its owner's surface being hidden/replaced, other plugins'
+  surfaces, launcher open/close, native apps in the foreground, and the owner
+  disconnecting from the bus.
+- **Fire-and-forget is the intended shape.** The taxi case has no surface at
+  all: a dormant phone-side plugin wakes on a notification, connects, sends
+  `/pin/show`, and goes dormant again; it wakes to `show` again on every update
+  (idempotent upsert — that is why there is no `/pin/update`) and to `hide` when
+  the ride ends. Requiring it to stay bound for the life of the pin would
+  contradict the background policy in `docs/PLUGINS.md` and burn a process on a
+  three-line overlay.
 - The pin is cleared when: the owner sends `/pin/hide`; another `/pin/show`
   replaces it; `ttlMs` expires (glasses-side timer; phone tracks the deadline
-  too and drops its canonical state); the owning plugin's bus connection drops
-  (phone hub clears state and sends a synthetic `/pin/hide`).
+  too and drops its canonical state); or the owner loses the right to hold one —
+  grant revoked or package uninstalled (phone hub clears state and sends a
+  synthetic `/pin/hide`). That last check is keyed by owner id, not by
+  registration: the owner is normally dormant by then, so no binder is left to
+  notice. `ttlMs` — not disconnection — is what bounds an abandoned pin.
 - The **phone hub owns canonical pin state** and re-sends it (idempotent) when
   the glasses hub re-announces capabilities after a link-up, mirroring the
   surface resend model. The glasses a11y service re-renders the active pin in
@@ -119,8 +130,10 @@ defensively but must never receive oversized payloads from a compliant hub.
   assign seq → forward pipeline as surfaces; add the rate limiter, cap
   validation, and `/error` emission described above.
 - Canonical pin state holder: current payload + owner + TTL deadline; resend
-  on glasses announce; clear + synthetic hide on owner disconnect; expiry
-  clears state (and defensively sends hide when the link is up).
+  on glasses announce; clear + synthetic hide when the owner's grant goes away
+  (revoked or uninstalled), matched by owner id since the owner is usually
+  dormant by then; expiry clears state (and defensively sends hide when the
+  link is up). Registrations coming and going must NOT touch pin state.
 
 ## SDK (`:bus-client`)
 
@@ -176,5 +189,6 @@ plugin.
 3. Diff review shows no edits outside the additive scope above.
 4. Documented manual matrix for on-device validation: pin over launcher; pin
    over another plugin's card; persists after closing the owner's surface;
-   TTL expiry; owner disconnect clears; camera hides/restores; old-glasses
-   `CAPABILITY_NOT_AVAILABLE` path.
+   **survives the owner disconnecting entirely** (the taxi shape: push, go
+   dormant, pin stays); TTL expiry; grant revoke and uninstall clear it;
+   camera hides/restores; old-glasses `CAPABILITY_NOT_AVAILABLE` path.

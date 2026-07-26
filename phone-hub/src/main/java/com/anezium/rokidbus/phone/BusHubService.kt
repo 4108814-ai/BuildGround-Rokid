@@ -1524,12 +1524,10 @@ class BusHubService : Service() {
         runCatching { registration.callbackBinder.unlinkToDeath(registration.deathRecipient, 0) }
         releaseAudioLeaseForLocalBinder(registration.callbackBinder, reason)
         releaseSpeechSessionForLocalBinder(registration, reason)
-        registration.principal?.descriptor?.id?.let { pluginId ->
-            val stillRegistered = registrations.any {
-                it.principal?.descriptor?.id == pluginId
-            }
-            if (!stillRegistered) clearPinForDisconnectedOwner(pluginId, reason)
-        }
+        // A registration going away is normal: the hub unbinds dormant plugins, and a
+        // background plugin is expected to push its pin and disconnect. The pin outlives
+        // the connection — only losing the grant, a TTL, a replacement, or an explicit
+        // hide clears it. See clearPinForRevokedOwner.
         if (reason in setOf("binderDied", "dead callback", "unregister")) {
             registration.principal?.let { principal ->
                 if (::externalPluginController.isInitialized) {
@@ -1545,6 +1543,7 @@ class BusHubService : Service() {
     private fun revokePrincipal(key: PluginGrantKey) {
         if (::cameraCompanionController.isInitialized) cameraCompanionController.onRevoked(key)
         if (::externalPluginController.isInitialized) externalPluginController.onRevoked(key)
+        clearPinForRevokedOwner(key.pluginId, "authorizationChanged")
         registrations.filter { it.principal?.grantKey() == key }.forEach { registration ->
             removeRegistration(registration, "authorizationChanged")
         }
@@ -1590,6 +1589,15 @@ class BusHubService : Service() {
         handleSideloadNotification(packageName, action, replacing, reconciliation.candidates)
         cameraConsumerReadiness.recompute()
         refreshMediaSyncConsent()
+        // Keyed by owner id, not by registration: the pin's owner is usually dormant by
+        // the time it is uninstalled, so there is no binder left to notice it going away.
+        phonePinState.ownerPluginId()?.let { owner ->
+            val stillGranted = validPrincipals.any { principal ->
+                principal.descriptor.id == owner &&
+                    pluginGrantStore.stateFor(principal) is PluginGrantState.Approved
+            }
+            if (!stillGranted) clearPinForRevokedOwner(owner, "ownerUnavailable")
+        }
         val available = validPrincipals.any { principal ->
             principal.packageName == packageName &&
                 pluginGrantStore.stateFor(principal) is PluginGrantState.Approved
@@ -2072,8 +2080,8 @@ class BusHubService : Service() {
         }
     }
 
-    private fun clearPinForDisconnectedOwner(pluginId: String, reason: String) {
-        val result = phonePinState.ownerDisconnected(pluginId)
+    private fun clearPinForRevokedOwner(pluginId: String, reason: String) {
+        val result = phonePinState.ownerLostAccess(pluginId)
         if (result !is PhonePinClearResult.Cleared) return
         pinHandler.removeCallbacks(pinExpiryTick)
         log("pin cleared owner=$pluginId reason=$reason")

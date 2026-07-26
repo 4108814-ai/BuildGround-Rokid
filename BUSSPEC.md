@@ -279,11 +279,13 @@ plain string unless it carries an emphasis. A medium pin therefore looks like:
 The slot is last-writer-wins across plugins. A show may replace another
 plugin's pin without an eviction callback. Hide is honored only for the current
 owner; another plugin's hide is logged and ignored without an error. The pin
-survives surface replacement/hide, launcher changes, and foreground native
-apps. It is cleared by an owner hide, replacement, TTL expiry, or owner bus
-disconnect. The phone hub owns canonical state, tracks the TTL deadline, sends
-a synthetic hide for expiry/disconnect while linked, and resends the active
-complete pin after a valid glasses capability re-announcement.
+survives surface replacement/hide, launcher changes, foreground native apps,
+and its owner disconnecting from the bus — a background plugin is expected to
+push a pin and go dormant again. It is cleared by an owner hide, replacement,
+TTL expiry, or the owner losing its grant (revoked or uninstalled). The phone
+hub owns canonical state, tracks the TTL deadline, sends a synthetic hide for
+expiry/revocation while linked, and resends the active complete pin after a
+valid glasses capability re-announcement.
 
 The glasses render the pin in a small independent, non-focusable and
 non-touchable accessibility-overlay window above fullscreen surface and

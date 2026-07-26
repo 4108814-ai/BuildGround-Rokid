@@ -172,8 +172,23 @@ animation loops around v1.
 Pins reuse the existing `surfaces` grant and API version 3. They occupy one
 global last-writer-wins slot, are independent from `NexusSurfaceSession`, and
 remain visible across normal surface and launcher changes until hidden,
-replaced, expired, or the owning plugin disconnects. For that reason
+replaced, expired, or your plugin's grant goes away. For that reason
 `showPin`/`hidePin` live on `NexusPluginClient`, not a surface session.
+
+**A pin does not need a surface, and does not need you to stay connected.**
+This is the shape it was built for: a ride-hailing plugin spots the "driver
+arriving" notification on the phone, wakes, connects, sends `showPin`, and goes
+dormant again. The pin stays on the glasses. On every update it wakes and sends
+`showPin` again — there is no `/pin/update`, a `show` always carries the full
+state and replaces the previous one. When the ride ends it wakes once more and
+sends `hidePin`. Do not hold the bus connection open for the life of a pin;
+that violates the background policy in [PLUGINS.md](PLUGINS.md) and burns a
+process on three lines of text.
+
+Because of that, set `ttlMs` whenever the pin describes something with a
+natural end. It is the only thing bounding a pin whose owner never comes back —
+if your process is killed before it can `hidePin`, the TTL is what stops the
+pin becoming a permanent ghost.
 
 Check the live `supportsPinSurface` value immediately before use. Both methods
 return `CAPABILITY_NOT_AVAILABLE` without sending unless the glasses announced

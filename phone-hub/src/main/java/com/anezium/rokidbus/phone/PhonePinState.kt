@@ -78,9 +78,18 @@ internal class PhonePinState(
     fun hide(ownerPluginId: String): PhonePinClearResult =
         if (active?.ownerPluginId == ownerPluginId) clearActive() else PhonePinClearResult.Ignored
 
+    /**
+     * Clears the pin when its owner loses the right to hold one (grant revoked,
+     * package uninstalled). Losing the owner's bus connection is deliberately NOT
+     * a trigger: a pin is canonical hub state, and background plugins are expected
+     * to push one and go dormant again. `ttlMs` is what bounds an abandoned pin.
+     */
     @Synchronized
-    fun ownerDisconnected(ownerPluginId: String): PhonePinClearResult =
+    fun ownerLostAccess(ownerPluginId: String): PhonePinClearResult =
         if (active?.ownerPluginId == ownerPluginId) clearActive() else PhonePinClearResult.Ignored
+
+    @Synchronized
+    fun ownerPluginId(): String? = active?.ownerPluginId
 
     @Synchronized
     fun expireIfDue(): PhonePinClearResult {

@@ -67,10 +67,19 @@ class PhonePinStateTest {
     }
 
     @Test
-    fun `disconnect clears only the owning plugin`() {
+    fun `losing access clears only the owning plugin`() {
         state.show("alpha", owned("alpha"))
-        assertTrue(state.ownerDisconnected("beta") is PhonePinClearResult.Ignored)
-        assertTrue(state.ownerDisconnected("alpha") is PhonePinClearResult.Cleared)
+        assertTrue(state.ownerLostAccess("beta") is PhonePinClearResult.Ignored)
+        assertTrue(state.ownerLostAccess("alpha") is PhonePinClearResult.Cleared)
+    }
+
+    @Test
+    fun `owner id is exposed so a revoked dormant plugin can be matched`() {
+        assertNull(state.ownerPluginId())
+        state.show("alpha", owned("alpha"))
+        assertEquals("alpha", state.ownerPluginId())
+        state.ownerLostAccess("alpha")
+        assertNull(state.ownerPluginId())
     }
 
     @Test
@@ -79,7 +88,7 @@ class PhonePinStateTest {
         assertEquals("nexus-hub:pin", syncHide?.getString("surfaceId"))
         state.show("alpha", owned("alpha"))
         assertNull(state.emptySlotHidePayload())
-        val cleared = state.ownerDisconnected("alpha") as PhonePinClearResult.Cleared
+        val cleared = state.ownerLostAccess("alpha") as PhonePinClearResult.Cleared
         val afterClear = state.emptySlotHidePayload()
         assertNotNull(afterClear)
         assertTrue(afterClear!!.getLong("seq") > cleared.payload.getLong("seq"))
