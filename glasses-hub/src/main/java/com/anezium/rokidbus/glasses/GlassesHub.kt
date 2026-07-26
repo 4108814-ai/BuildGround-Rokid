@@ -158,12 +158,17 @@ object GlassesHub {
             handleManualSelfArmRequest(envelope)
             return
         }
+        MediaSyncEngine.trafficMonitor.note(envelope.path)
         if (envelope.path == BusPaths.MEDIA_SYNC_CONFIG) {
             MediaSyncEngine.onConfig(envelope.payload)
             return
         }
         if (envelope.path == BusPaths.MEDIA_SYNC_TRIGGER) {
             MediaSyncEngine.onTriggerRequest()
+            return
+        }
+        if (BusPaths.isMediaSyncTransferPath(envelope.path)) {
+            MediaSyncEngine.onTransferEnvelope(envelope.path, envelope.payload)
             return
         }
         appContext?.let { context ->
@@ -577,6 +582,8 @@ object GlassesHub {
     }
 
     private fun sendRemote(envelope: BusEnvelope): String? {
+        // Everything that is not our own bulk transfer buys the link a quiet window.
+        MediaSyncEngine.trafficMonitor.note(envelope.path)
         if (envelope.binary != null) {
             if (!SppServerManager.isConnected()) return "NO_DATA_PLANE"
             return if (SppServerManager.send(envelope)) null else "NO_DATA_PLANE"
@@ -610,28 +617,14 @@ object GlassesHub {
     }
 
     /**
-     * Wi-Fi acquisition for an in-process hub feature, on the exact path the
-     * `/glasses/wifi/request` bus handler takes: the same executor, the same ownership state
-     * machine and the same ~40 s grace-off, so a media-sync release can never cut the Wi-Fi a
-     * camera session just acquired (the two features are mutually exclusive by design).
+     * Hub-to-hub send for in-process features; returns true when the envelope reached a transport.
+     * A non-null [binary] forces SPP, which is the only transport that carries bytes.
      */
-    internal fun requestHubWifi(enabled: Boolean) {
-        val context = appContext ?: return
-        wifiRequestExecutor.execute {
-            if (enabled) {
-                wifiEnableReleasePending.set(false)
-                wifiDisableFuture?.cancel(false)
-                wifiDisableFuture = null
-                handleGlassesWifiRequest(context, true)
-            } else if (!deferWifiDisableUntilAccessibilityEnableCompletes()) {
-                scheduleGlassesWifiDisable(context)
-            }
-        }
-    }
-
-    /** Hub-to-hub send for in-process features; returns true when the envelope reached a transport. */
-    internal fun sendToPhone(path: String, payload: JSONObject): Boolean =
-        sendRemote(BusEnvelope(path = path, payload = payload)) == null
+    internal fun sendToPhone(
+        path: String,
+        payload: JSONObject,
+        binary: ByteArray? = null,
+    ): Boolean = sendRemote(BusEnvelope(path = path, payload = payload, binary = binary)) == null
 
     internal fun isCameraSessionActive(): Boolean = cameraSessionTracker.isActive()
 

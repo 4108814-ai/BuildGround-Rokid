@@ -1,5 +1,6 @@
 package com.anezium.rokidbus.glasses
 
+import com.anezium.rokidbus.shared.MediaSyncMode
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -9,7 +10,7 @@ class MediaSyncTriggerPolicyTest {
         charging: Boolean = true,
         hasEligibleFiles: Boolean = true,
         cameraSessionActive: Boolean = false,
-        autoSyncOnCharge: Boolean = true,
+        mode: MediaSyncMode = MediaSyncMode.CHARGING,
         syncInProgress: Boolean = false,
         storageReadable: Boolean = true,
     ) = MediaSyncConditions(
@@ -17,7 +18,7 @@ class MediaSyncTriggerPolicyTest {
         charging = charging,
         hasEligibleFiles = hasEligibleFiles,
         cameraSessionActive = cameraSessionActive,
-        autoSyncOnCharge = autoSyncOnCharge,
+        mode = mode,
         syncInProgress = syncInProgress,
         storageReadable = storageReadable,
     )
@@ -49,25 +50,59 @@ class MediaSyncTriggerPolicyTest {
     }
 
     @Test
-    fun `manual sync ignores charging and the auto-sync switch`() {
+    fun `the button works in every mode, charging or not`() {
         assertEquals(
             MediaSyncTriggerDecision.Start(MediaSyncTrigger.MANUAL),
             decide(
                 MediaSyncTrigger.MANUAL,
-                conditions(charging = false, autoSyncOnCharge = false),
+                conditions(charging = false, mode = MediaSyncMode.MANUAL),
             ),
         )
     }
 
     @Test
-    fun `automatic triggers respect the auto-sync switch`() {
+    fun `manual-only mode blocks every automatic trigger`() {
+        listOf(
+            MediaSyncTrigger.CHARGING_EDGE,
+            MediaSyncTrigger.BUS_CONNECT,
+            MediaSyncTrigger.NEW_CAPTURE,
+        ).forEach { trigger ->
+            assertEquals(
+                MediaSyncSkipReason.AUTO_SYNC_OFF,
+                skipReason(trigger, conditions(mode = MediaSyncMode.MANUAL)),
+            )
+        }
+    }
+
+    @Test
+    fun `always mode syncs off the charger, including straight after a capture`() {
+        listOf(
+            MediaSyncTrigger.NEW_CAPTURE,
+            MediaSyncTrigger.BUS_CONNECT,
+            MediaSyncTrigger.CHARGING_EDGE,
+        ).forEach { trigger ->
+            assertEquals(
+                MediaSyncTriggerDecision.Start(trigger),
+                decide(trigger, conditions(mode = MediaSyncMode.ALWAYS, charging = false)),
+            )
+        }
+    }
+
+    @Test
+    fun `charging mode holds a new capture until the glasses are on the charger`() {
         assertEquals(
-            MediaSyncSkipReason.AUTO_SYNC_OFF,
-            skipReason(MediaSyncTrigger.CHARGING_EDGE, conditions(autoSyncOnCharge = false)),
+            MediaSyncSkipReason.NOT_CHARGING,
+            skipReason(
+                MediaSyncTrigger.NEW_CAPTURE,
+                conditions(mode = MediaSyncMode.CHARGING, charging = false),
+            ),
         )
         assertEquals(
-            MediaSyncSkipReason.AUTO_SYNC_OFF,
-            skipReason(MediaSyncTrigger.BUS_CONNECT, conditions(autoSyncOnCharge = false)),
+            MediaSyncTriggerDecision.Start(MediaSyncTrigger.NEW_CAPTURE),
+            decide(
+                MediaSyncTrigger.NEW_CAPTURE,
+                conditions(mode = MediaSyncMode.CHARGING, charging = true),
+            ),
         )
     }
 

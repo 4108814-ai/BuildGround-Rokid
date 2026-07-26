@@ -7,14 +7,16 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
+import android.os.FileObserver
+import android.os.SystemClock
 import com.anezium.rokidbus.shared.BusPaths
-import com.anezium.rokidbus.shared.MediaSyncLinkOffer
-import com.anezium.rokidbus.shared.MediaSyncLinkOfferContract
+import com.anezium.rokidbus.shared.MediaSyncMode
+import com.anezium.rokidbus.shared.MediaSyncTrafficMonitor
+import com.anezium.rokidbus.shared.MediaSyncTransferContract
 import org.json.JSONObject
-import java.security.SecureRandom
+import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
@@ -24,14 +26,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Photo sync, glasses side.
  *
- * Lives in the MAIN hub process — never in `:camera`. It reaches Wi-Fi and hub state through
- * [GlassesHub] in-process calls, exactly as the hub's own handlers do, and it learns about camera
- * sessions from the envelopes that already cross the process boundary. Touching `CameraLink` or
- * `CameraActivity` from here would mean touching a different process' statics, which has broken
- * the camera before.
+ * Lives in the MAIN hub process — never in `:camera`. Since the transport moved to the Bluetooth
+ * bus there is no Wi-Fi involvement at all: no radio to enable, no group to negotiate, no command
+ * bridge or accessibility fallback anywhere in the path. A session is now just "the link is up,
+ * here is the catalog, pull what you need", with the politeness layer keeping the shared link
+ * usable throughout.
  *
- * All work is serialised onto one daemon executor: the triggers arrive from a broadcast receiver,
- * the SPP reader thread and the CXR main thread, and none of them may block.
+ * All work is serialised onto one daemon executor: triggers arrive from a broadcast receiver, a
+ * file observer, the SPP reader thread and the CXR main thread, and none of them may block.
  */
 internal object MediaSyncEngine {
     private val started = AtomicBoolean(false)
@@ -39,28 +41,23 @@ internal object MediaSyncEngine {
         Thread(runnable, "RokidNexusMediaSync").apply { isDaemon = true }
     }
 
+    /** Shared with [GlassesHub], which notes every envelope crossing the link in either direction. */
+    val trafficMonitor = MediaSyncTrafficMonitor(SystemClock::elapsedRealtime)
+
     @Volatile private var appContext: Context? = null
     @Volatile private var catalog: MediaCatalog? = null
-    @Volatile private var autoSyncOnCharge = true
+    @Volatile private var mode = MediaSyncMode.CHARGING
     @Volatile private var consented = false
     @Volatile private var linkUp = false
     @Volatile private var cameraSessionActive = false
 
     private var session: Session? = null
-    private var offerFuture: ScheduledFuture<*>? = null
     private var settlingFuture: ScheduledFuture<*>? = null
+    private var captureFuture: ScheduledFuture<*>? = null
     private var watchdogFuture: ScheduledFuture<*>? = null
+    private var captureObserver: FileObserver? = null
 
-    private class Session(
-        val id: String,
-        val token: String,
-        val group: MediaSyncGroup,
-    ) {
-        var server: MediaSyncFileServer? = null
-        var offer: MediaSyncLinkOffer? = null
-        var offersSent = 0
-        var clientJoined = false
-    }
+    private class Session(val id: String, val sender: MediaSyncTransferSender)
 
     private val powerReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -90,18 +87,56 @@ internal object MediaSyncEngine {
                 appContext.registerReceiver(powerReceiver, filter)
             }
         }.onFailure { logError("mediaSync power receiver registration failed", it) }
+        startCaptureObserver()
+        // A glasses hub restart wipes consent, and the CXR transport does not bounce, so the phone
+        // sees no edge on which to push it. Ask instead of waiting to be told.
+        requestConfig()
         logSync("started")
     }
 
-    /** The phone hub pushes its settings on connect and on every change. */
+    /**
+     * Watches the capture directory so ALWAYS mode reacts to a photo the moment it is taken rather
+     * than waiting for the next reconnect. The observer only ever nudges an attempt — the stability
+     * gate decides whether a file is actually ready, so a half-written video is simply not eligible
+     * yet and the settling re-check picks it up shortly after.
+     */
+    private fun startCaptureObserver() {
+        val directory = File(MediaCatalog.DEFAULT_DIRECTORY)
+        val observer = runCatching {
+            @Suppress("DEPRECATION")
+            object : FileObserver(directory.absolutePath, CAPTURE_EVENTS) {
+                override fun onEvent(event: Int, path: String?) {
+                    if (path.isNullOrBlank()) return
+                    onCaptureObserved()
+                }
+            }
+        }.onFailure { logError("mediaSync capture observer unavailable", it) }.getOrNull() ?: return
+        runCatching { observer.startWatching() }
+            .onFailure { logError("mediaSync capture observer start failed", it) }
+        captureObserver = observer
+        logSync("capture observer watching ${directory.absolutePath}")
+    }
+
+    /** Debounced: one photo fires several file events and a video fires many. */
+    private fun onCaptureObserved() {
+        synchronized(this) {
+            captureFuture?.cancel(false)
+            captureFuture = executor.schedule(
+                { attempt(MediaSyncTrigger.NEW_CAPTURE) },
+                CAPTURE_DEBOUNCE_MS,
+                TimeUnit.MILLISECONDS,
+            )
+        }
+    }
+
+    /** The phone hub pushes its settings on connect, on change, and when we ask. */
     fun onConfig(payload: JSONObject) {
-        autoSyncOnCharge = payload.optBoolean("autoSyncOnCharge", true)
+        mode = MediaSyncMode.fromWireValue(payload.optString("syncMode")) ?: MediaSyncMode.CHARGING
         consented = payload.optBoolean("consented", false)
-        logSync("config autoSyncOnCharge=$autoSyncOnCharge consented=$consented")
+        logSync("config mode=${mode.wireValue} consented=$consented")
         executor.execute { attempt(MediaSyncTrigger.BUS_CONNECT) }
     }
 
-    /** `/mediasync/trigger` — the phone forwarded a "Sync now" press. */
     fun onTriggerRequest() {
         executor.execute { attempt(MediaSyncTrigger.MANUAL) }
     }
@@ -110,14 +145,21 @@ internal object MediaSyncEngine {
         val changed = linkUp != up
         linkUp = up
         if (!changed) return
-        if (up) executor.execute { attempt(MediaSyncTrigger.BUS_CONNECT) } else executor.execute {
-            finish("link_down")
+        if (up) {
+            requestConfig()
+            executor.execute { attempt(MediaSyncTrigger.BUS_CONNECT) }
+        } else {
+            executor.execute { finish(MediaSyncTransferContract.ABORT_LINK) }
         }
     }
 
     fun onCameraSessionChanged(active: Boolean) {
         cameraSessionActive = active
-        if (active) executor.execute { finish(MediaSyncFileServer.ABORT_CAMERA) }
+        if (active) session?.sender?.onCameraSessionOpened()
+    }
+
+    private fun requestConfig() {
+        GlassesHub.sendToPhone(BusPaths.MEDIA_SYNC_CONFIG_REQUEST, JSONObject().put("version", 1))
     }
 
     private fun attempt(trigger: MediaSyncTrigger, reconciled: Boolean = false) {
@@ -136,7 +178,7 @@ internal object MediaSyncEngine {
                 charging = isCharging(context),
                 hasEligibleFiles = !scan.isEmpty,
                 cameraSessionActive = cameraSessionActive,
-                autoSyncOnCharge = autoSyncOnCharge,
+                mode = mode,
                 syncInProgress = session != null,
                 storageReadable = storageReadable,
             ),
@@ -149,8 +191,8 @@ internal object MediaSyncEngine {
                         isCameraProcessAlive(context),
                     )
                 ) {
-                    // The :camera process died without closing its session; without this the
-                    // stale flag would block every sync until the whole hub restarts.
+                    // The :camera process died without closing its session; without this the stale
+                    // flag would block every sync until the whole hub restarts.
                     logSync("camera session stale, camera process gone; releasing")
                     GlassesHub.resetCameraSession()
                     attempt(trigger, reconciled = true)
@@ -167,24 +209,8 @@ internal object MediaSyncEngine {
     }
 
     /**
-     * Null when liveness cannot be read: an unknown answer must never cancel a real session.
-     * The `:camera` process is only ever inspected from the outside here — its statics stay
-     * untouched, which is the rule that keeps that process healthy.
-     */
-    private fun isCameraProcessAlive(context: Context): Boolean? {
-        val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-            ?: return null
-        val cameraProcessName = "${context.packageName}$CAMERA_PROCESS_SUFFIX"
-        val running = runCatching { manager.runningAppProcesses }
-            .onFailure { logSync("camera liveness unavailable error=${it.message}") }
-            .getOrNull()
-            ?: return null
-        return running.any { it.processName == cameraProcessName }
-    }
-
-    /**
-     * The stability gate needs two scans to clear a capture, so the first trigger after boot
-     * always finds an empty catalog. Re-check once rather than making the wearer trigger twice.
+     * The stability gate needs two scans to clear a capture, so a freshly taken photo is never
+     * eligible on the first look. Re-check once rather than making the wearer trigger again.
      */
     private fun scheduleSettlingRecheck(trigger: MediaSyncTrigger) {
         if (settlingFuture?.isDone == false) return
@@ -197,124 +223,74 @@ internal object MediaSyncEngine {
 
     private fun begin(context: Context, trigger: MediaSyncTrigger) {
         val catalog = catalog ?: return
-        val group = MediaSyncGroup(context, MediaSyncP2pProfileStore(context), ::logSync)
-        val current = Session(UUID.randomUUID().toString(), randomToken(), group)
-        session = current
-        logSync("session begin trigger=$trigger id=${current.id}")
-        reportState("preparing", reason = trigger.name.lowercase())
-        GlassesHub.requestHubWifi(true)
-        if (!awaitWifi(context)) {
-            logSync("session abort reason=wifi_unavailable")
-            finish("wifi_unavailable")
-            return
-        }
-        if (cameraSessionActive) {
-            // The wait above can span twelve seconds; a camera session may have opened inside it
-            // and the camera always wins the radio.
-            finish(MediaSyncFileServer.ABORT_CAMERA)
-            return
-        }
-        val server = MediaSyncFileServer(
+        val sessionId = UUID.randomUUID().toString()
+        val sender = MediaSyncTransferSender(
+            sessionId = sessionId,
             catalog = catalog,
-            token = current.token,
             deletionExecutor = AndroidMediaSyncDeletionExecutor(context, catalog, ::logSync),
             isCameraSessionActive = { cameraSessionActive },
+            isLinkUp = { linkUp },
+            trafficMonitor = trafficMonitor,
+            send = GlassesHub::sendToPhone,
             logger = ::logSync,
-            onClientAuthenticated = { executor.execute { onClientJoined(current) } },
-            onSessionFinished = { summary -> executor.execute { onServerFinished(current, summary) } },
+            onFinished = { summary -> executor.execute { onSenderFinished(sessionId, summary) } },
         )
-        current.server = server
-        group.create(
-            onReady = { ready -> executor.execute { onGroupReady(current, ready) } },
-            onFailed = { reason -> executor.execute { onGroupFailed(current, reason) } },
-        )
-        watchdogFuture = executor.schedule(
-            { if (session === current && !current.clientJoined) finish("join_timeout") },
-            JOIN_TIMEOUT_MS,
-            TimeUnit.MILLISECONDS,
-        )
+        session = Session(sessionId, sender)
+        logSync("session begin trigger=$trigger id=$sessionId")
+        reportState("preparing", reason = trigger.name.lowercase())
+        armWatchdog(sessionId)
     }
 
-    private fun onGroupReady(current: Session, ready: MediaSyncGroup.Ready) {
-        if (session !== current) return
-        val address = groupOwnerAddress(ready.interfaceName)
-        val port = address?.let { current.server?.start(it) }
-        if (address == null || port == null) {
-            finish("server_bind_failed")
-            return
-        }
-        current.offer = MediaSyncLinkOffer(
-            sessionId = current.id,
-            ssid = ready.profile.networkName,
-            passphrase = ready.profile.passphrase,
-            goIp = address.hostAddress.orEmpty(),
-            port = port,
-            token = current.token,
-        )
-        logSync("session offer ssid=${ready.profile.networkName} port=$port")
-        sendOffer(current)
-    }
-
-    private fun onGroupFailed(current: Session, reason: String) {
-        if (session !== current) return
-        finish(reason)
-    }
-
-    private fun sendOffer(current: Session) {
-        val offer = current.offer ?: return
-        if (session !== current || current.clientJoined) return
-        current.offersSent += 1
-        GlassesHub.sendToPhone(
-            BusPaths.MEDIA_SYNC_LINK_OFFER,
-            MediaSyncLinkOfferContract.encode(offer),
-        )
-        if (current.offersSent >= MAX_OFFER_SENDS) return
-        offerFuture = executor.schedule(
-            { sendOffer(current) },
-            OFFER_RETRY_MS,
-            TimeUnit.MILLISECONDS,
-        )
-    }
-
-    private fun onClientJoined(current: Session) {
-        if (session !== current) return
-        current.clientJoined = true
-        offerFuture?.cancel(false)
-        offerFuture = null
+    /** Ends a session the phone stopped driving — it went away without saying goodbye. */
+    private fun armWatchdog(sessionId: String) {
         watchdogFuture?.cancel(false)
         watchdogFuture = executor.schedule(
-            { if (session === current) finish("session_timeout") },
+            { if (session?.id == sessionId) finish("session_timeout") },
             SESSION_TIMEOUT_MS,
             TimeUnit.MILLISECONDS,
         )
-        logSync("session joined id=${current.id}")
-        reportState("transferring", reason = null)
     }
 
-    private fun onServerFinished(current: Session, summary: MediaSyncServerSummary) {
-        if (session !== current) return
-        log(
+    /** Inbound data-plane traffic, all of it addressed to the live session. */
+    fun onTransferEnvelope(path: String, payload: JSONObject) {
+        val current = session ?: return
+        if (!MediaSyncTransferContract.isForSession(payload, current.id)) return
+        armWatchdog(current.id)
+        when (path) {
+            BusPaths.MEDIA_SYNC_XFER_CATALOG_REQUEST -> current.sender.onCatalogRequest()
+            BusPaths.MEDIA_SYNC_XFER_FILE_REQUEST -> {
+                val name = MediaSyncTransferContract.name(payload) ?: return
+                current.sender.onFileRequest(name, MediaSyncTransferContract.offset(payload))
+            }
+            BusPaths.MEDIA_SYNC_XFER_FILE_ACK -> {
+                val name = MediaSyncTransferContract.name(payload) ?: return
+                current.sender.onFileAck(name, payload.optBoolean("ok"), payload.optBoolean("delete"))
+            }
+            BusPaths.MEDIA_SYNC_XFER_BYE -> current.sender.onBye()
+            BusPaths.MEDIA_SYNC_XFER_ABORT -> executor.execute {
+                finish(payload.optString("reason").ifBlank { "phone_abort" })
+            }
+            else -> Unit
+        }
+    }
+
+    private fun onSenderFinished(sessionId: String, summary: MediaSyncServerSummary) {
+        val current = session ?: return
+        if (current.id != sessionId) return
+        logSync(
             "session served files=${summary.filesServed} bytes=${summary.bytesServed} " +
                 "deleted=${summary.filesDeleted} deletionRefused=${summary.deletionRefused}",
         )
-        reportState(
-            state = "ended",
-            reason = summary.abortReason,
-            summary = summary,
-        )
+        reportState(state = "ended", reason = summary.abortReason, summary = summary)
         finish(summary.abortReason ?: "completed", alreadyReported = true)
     }
 
     private fun finish(reason: String, alreadyReported: Boolean = false) {
         val current = session ?: return
         session = null
-        offerFuture?.cancel(false)
-        offerFuture = null
         watchdogFuture?.cancel(false)
         watchdogFuture = null
-        runCatching { current.server?.close() }
-        runCatching { current.group.close() }
-        GlassesHub.requestHubWifi(false)
+        runCatching { current.sender.close() }
         logSync("session end id=${current.id} reason=$reason")
         if (!alreadyReported) reportState("idle", reason)
     }
@@ -354,35 +330,35 @@ internal object MediaSyncEngine {
     }
 
     /**
-     * The ROM boots with Wi-Fi off and the hub enables it silently through the command bridge,
-     * falling back to the accessibility toggle. The runway matches the camera link's: long enough
-     * to outlast the accessibility panel sequence.
+     * Null when liveness cannot be read: an unknown answer must never cancel a real session.
+     * The `:camera` process is only ever inspected from the outside here — its statics stay
+     * untouched, which is the rule that keeps that process healthy.
      */
-    private fun awaitWifi(context: Context): Boolean {
-        val wifiManager = context.applicationContext
-            .getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return false
-        repeat(MAX_WIFI_WAIT_ATTEMPTS) {
-            if (runCatching { wifiManager.isWifiEnabled }.getOrDefault(false)) return true
-            runCatching { Thread.sleep(WIFI_WAIT_MS) }.onFailure { return false }
-        }
-        return runCatching { wifiManager.isWifiEnabled }.getOrDefault(false)
-    }
-
-    private fun randomToken(): String {
-        val bytes = ByteArray(TOKEN_BYTES)
-        SecureRandom().nextBytes(bytes)
-        return bytes.joinToString("") { "%02x".format(it) }
+    private fun isCameraProcessAlive(context: Context): Boolean? {
+        val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            ?: return null
+        val cameraProcessName = "${context.packageName}$CAMERA_PROCESS_SUFFIX"
+        val running = runCatching { manager.runningAppProcesses }
+            .onFailure { logSync("camera liveness unavailable error=${it.message}") }
+            .getOrNull()
+            ?: return null
+        return running.any { it.processName == cameraProcessName }
     }
 
     private fun logSync(message: String) = log("mediaSync $message")
 
-    private const val TOKEN_BYTES = 16
-    private const val MAX_WIFI_WAIT_ATTEMPTS = 16
-    private const val WIFI_WAIT_MS = 750L
-    private const val OFFER_RETRY_MS = 2_500L
-    private const val MAX_OFFER_SENDS = 10
-    private const val JOIN_TIMEOUT_MS = 90_000L
-    private const val SESSION_TIMEOUT_MS = 20 * 60_000L
     private const val SETTLING_MARGIN_MS = 500L
     private const val CAMERA_PROCESS_SUFFIX = ":camera"
+
+    /** Generous: a paused transfer waiting out foreign traffic must not be reaped mid-file. */
+    private const val SESSION_TIMEOUT_MS = 5 * 60_000L
+
+    /**
+     * A capture writes in bursts; one attempt after they settle is enough, and the stability gate
+     * still has the final say on eligibility.
+     */
+    private const val CAPTURE_DEBOUNCE_MS = 2_000L
+
+    @Suppress("DEPRECATION")
+    private const val CAPTURE_EVENTS = FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO
 }
