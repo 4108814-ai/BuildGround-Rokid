@@ -797,8 +797,15 @@ Ended reasons are exactly `completed`, `cancelled`, `no_speech`, `error`,
 There is one speech session globally. Plugin sessions and the hub-owned Speech
 settings dictation test use the same `SpeechSessionManager`, so either makes a
 start from the other return `BUSY`. Speech also acquires the existing raw audio
-lease internally: an active `microphone` holder makes STT return `BUSY`, and an
-active speech session makes raw audio acquisition return `BUSY`.
+lease internally: an active `microphone` holder makes STT return `BUSY`, and a
+capturing speech session makes raw audio acquisition return `BUSY`.
+
+The internal lease is released at the voice endpoint rather than at the end of
+the session, so the microphone stops the moment the speaker stops. A session in
+`processing` no longer holds the lease: raw audio acquisition succeeds again
+while the transcript is still in flight, and losing the glasses link at that
+point ends neither the session nor the pending result. Starting another speech
+session still returns `BUSY` until the current one ends.
 
 Ownership is the verified plugin principal plus callback binder, never a
 caller-supplied plugin ID. A stop from another principal is treated as stale.

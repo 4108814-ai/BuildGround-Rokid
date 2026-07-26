@@ -337,9 +337,15 @@ On-device/session matrix:
    receives `DENIED_BUSY`. Reverse the order and confirm the settings test is
    busy. After either session ends, the other can start.
 2. Hold a raw `microphone` audio lease and start STT; expect `DENIED_BUSY`.
-   Start STT first and request raw audio; expect audio `BUSY`. Confirm there is
-   still exactly one CXR audio stream and it is released after each terminal
-   path.
+   Start STT first and, while it is still capturing, request raw audio; expect
+   audio `BUSY`. Confirm there is still exactly one CXR audio stream and it is
+   released after each terminal path.
+2b. Speak, then stop, and watch `CXR audio stream state` while the transcript is
+   still in flight. The stream must report `started=false` at the voice
+   endpoint, before the final arrives — not at the end of the session. Raw audio
+   acquisition must succeed during that window, and dropping CXR-L there must
+   still deliver the final and `completed`. Every `started=true` must have a
+   matching `started=false`, including across dictations started back to back.
 3. With a realtime engine, verify accepted reply → `listening` →
    `recognizing` → zero or more monotonic partials → `processing` → final →
    ended `completed`. State IDs must be `<sessionId>:s<n>`, partial IDs
@@ -347,9 +353,9 @@ On-device/session matrix:
    engine, `realtime:false` and no partials are expected.
 4. Stay silent through endpointing. Expect one ended event with
    `reason:"no_speech"`, no final transcript, and no orphan audio lease.
-5. Drop CXR-L mid-utterance. Expect `reason:"link_lost"` with a structured
-   transcript-free error, then verify a later reconnect permits a fresh
-   session.
+5. Drop CXR-L mid-utterance, while audio is still being captured. Expect
+   `reason:"link_lost"` with a structured transcript-free error, then verify a
+   later reconnect permits a fresh session.
 6. Kill the plugin binder and separately call unregister mid-session. Each
    cancels and releases the session without attempting transcript replay.
    Re-register and confirm another plugin can acquire immediately.

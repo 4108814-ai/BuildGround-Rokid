@@ -323,7 +323,10 @@ breadcrumbs, or bug reports.
 The hub has one global speech session shared with its Speech settings dictation
 test. It also consumes the same one-holder glasses audio lease used by
 `NexusAudioSession`. A settings test, another STT plugin, or a raw microphone
-lease can therefore produce `DENIED_BUSY`. Realtime engines set
+lease can therefore produce `DENIED_BUSY`. The lease is handed back as soon as
+the speaker stops rather than when the transcript lands, so the microphone frees
+up during `PROCESSING` and a link drop while the result is in flight does not
+lose it. Realtime engines set
 `realtime=true` and may emit monotonic partials before one final. Buffered
 engines set `realtime=false` and normally emit no partial callbacks.
 
