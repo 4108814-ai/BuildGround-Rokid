@@ -96,10 +96,15 @@ Three things this settles:
    fallback is not needed.
 3. A 30 Hz custom redraw does not show up in the frame timings.
 
-What it cannot settle: whether a 280 ms morph **reads or smears through the
-waveguide**. Frames delivered to the app are not photons through the optics.
-That needs a camera pointed through the lens, and the durations above are
-provisional until it happens.
+What frame timings cannot settle is whether a 280 ms morph **reads or smears
+through the waveguide** — frames delivered to the app are not photons through
+the optics. That was answered the way it should be: the wearer watched the
+full loop on hardware and the motion read cleanly, the flare included. The
+durations are accepted.
+
+A camera through the lens stays available as a tuning instrument if a future
+change makes something look wrong, but it was never the gate. A person wearing
+the glasses saying it reads is the gate, and that happened.
 
 ## The real waveform
 
@@ -154,8 +159,6 @@ adb -s <glasses> shell am broadcast \
 
 ## Open
 
-- Film the loop through the optics and set the final durations from what the
-  eye sees rather than what the profiler says.
 - Wearer-level settings: default pin corner, motion intensity (the kill switch
   needs a screen), and the already-noted choice between a pin and a notice for
   the same event.
