@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.44
+
+### Glasses that keep themselves maintained
+
+- Manual setup no longer fails after a successful pairing. It was looking for the
+  glasses' connect port over mDNS, which plenty of routers never forward; the
+  glasses now hand that port to the phone directly.
+- Glasses whose pairing credential is no longer accepted repair themselves: the
+  refused identity is dropped and a fresh pairing runs on its own, instead of
+  every later maintenance pass failing silently for the life of the install.
+- Setup no longer reports itself complete while the pairing is missing, which is
+  what let a unit look healthy and still be unable to refresh its own watchdog.
+
+### Fixes
+
+- Text fields are no longer hidden behind the keyboard — the pairing form in
+  particular, where you cannot check what you typed against a code that expires.
+- The glasses display stays awake while you copy a pairing code, so the dialog
+  no longer closes halfway through.
+
 ## 1.0.43
 
 ### Photos Sync
