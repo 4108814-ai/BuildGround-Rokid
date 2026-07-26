@@ -48,6 +48,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
         )
         SurfaceOverlayRenderer.onServiceConnected(this)
         PinOverlayRenderer.onServiceConnected(this)
+        NoticeOverlayRenderer.onServiceConnected(this)
         LauncherOverlayRenderer.onServiceConnected(this)
         MotionSpikeRenderer.onServiceConnected(this)
         GlassesHub.start(applicationContext)
@@ -129,6 +130,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
                     main.postDelayed(tapExpiry, TripleTapDetector.DEFAULT_WINDOW_MS + 1L)
                 }
                 when {
+                    noticeConsumesBack(event) -> true
                     LauncherOverlayRenderer.handleKeyEvent(event) -> true
                     SurfaceController.handleKeyEvent(event) -> true
                     else -> false
@@ -140,6 +142,21 @@ class RokidBusAccessibilityService : AccessibilityService() {
         }
         return handled
     }
+
+    /**
+     * BACK dismisses a visible notice and stops there. It runs ahead of the
+     * surface on purpose: a plugin never sees this key, so it cannot hold the
+     * wearer inside a banner, and `SurfaceController`'s back failsafe is neither
+     * started nor cancelled by a dismissal it never hears about.
+     *
+     * Only the DOWN is claimed here. The matching UP is consumed by the
+     * `consumedDownKeys` bookkeeping above, which exists precisely because the
+     * consumer routinely disappears between the two.
+     */
+    private fun noticeConsumesBack(event: KeyEvent): Boolean =
+        event.keyCode == KeyEvent.KEYCODE_BACK &&
+            event.action == KeyEvent.ACTION_DOWN &&
+            NoticeController.dismissFromBack()
 
     private fun handleRingKeyEvent(event: KeyEvent): Boolean {
         // Preserve the raw R08 DOWN/UP pair even if its translated action hides
@@ -186,6 +203,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
         LauncherOverlayRenderer.onServiceDestroyed(this)
         PinOverlayRenderer.onServiceDestroyed(this)
         SurfaceOverlayRenderer.onServiceDestroyed(this)
+        NoticeOverlayRenderer.onServiceDestroyed(this)
         MotionSpikeRenderer.onServiceDestroyed(this)
         SurfaceController.cancelRingInput()
         RingFocusBroadcastCoordinator.onServiceDestroyed(this)

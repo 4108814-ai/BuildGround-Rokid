@@ -107,10 +107,12 @@ internal class CameraOverlayView @JvmOverloads constructor(
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         PinController.setCameraOverlayActive(true)
+        NoticeController.setCameraOverlayActive(true)
     }
 
     override fun onDetachedFromWindow() {
         PinController.setCameraOverlayActive(false)
+        NoticeController.setCameraOverlayActive(false)
         super.onDetachedFromWindow()
     }
 
