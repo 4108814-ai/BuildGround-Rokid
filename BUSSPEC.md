@@ -487,11 +487,17 @@ multi-minute video survives interruption instead of restarting.
   link the transfer is being careful with.
 
 Delete-after-sync is opt-in and off by default. The phone carries the flag in
-each file ack; the glasses attempt `File.delete()` then a MediaStore delete and
-report `deleted`, `already_gone`, `not_permitted` or `failed`. Under scoped
-storage a headless app cannot delete another app's media without an interactive
-consent dialog, so `not_permitted` is expected on some ROMs — it surfaces as
-`deletionSupported: false` in the status rather than being silently swallowed.
+each file ack; the glasses attempt `File.delete()`, then a MediaStore delete,
+then the command bridge, and report `deleted`, `already_gone`, `not_permitted` or
+`failed`. The first two routes are refused on this hardware — the capture belongs
+to the camera app and scoped storage yields only to an all-files grant or an
+interactive consent dialog a headless hub has no screen for — so the bridge's
+`delete_capture` is what actually removes the file: a shell-uid process may, and
+the name is re-validated there against a fixed capture directory rather than
+trusted. When the bridge is absent the outcome stays the honest `not_permitted`,
+which surfaces as `deletionSupported: false` in the status rather than being
+silently swallowed. Adding another privileged command follows the recipe in
+`docs/SELF_ARM_ONBOARDING.md`.
 
 Because the `:camera` process can die without ever sending `closed`, the main
 process reconciles a stale session lazily: the moment a sync would skip with

@@ -119,6 +119,65 @@ Every launcher resume refreshes this posture off the UI thread and fails closed 
 or socket checks cannot be completed. An old completion marker cannot override an unsafe current
 posture.
 
+## The command bridge, and how to add a command to it
+
+Some things Nexus must do on the glasses are refused to an ordinary app and have no API: turning
+Wi-Fi on (`setWifiEnabled` is gone since API 29), joining a network, deleting a capture that belongs
+to the camera app. The command bridge is the answer — a small shell-uid process, spawned by the
+self-arm session and detached with `PPID=1`, that accepts a **fixed, signed list of commands** over a
+file channel. It opens no port and takes no free-form input; that closed list is the entire security
+story, so keep it closed.
+
+**How a request travels.** The app writes `<nonce>.request` into its own external-files channel
+(`…/files/cmd_bridge/`), rings a FIFO doorbell, and the bridge picks it up. The line is
+`command:nonce:arg1:…:token`, where the token is `sha256(secret:command:nonce:arg1:…)` and the secret
+is a 32-byte value generated once, kept app-private and baked into the deployed script. Arguments
+that could contain `:` travel base64-encoded. The bridge re-validates everything itself and refuses
+on any surprise: unknown command, malformed nonce, replayed nonce, bad token, wrong shape.
+
+**Adding a command — the whole path.** Every step matters; skipping one is how a command ships in the
+APK and never reaches the glasses.
+
+1. **`SelfArmCommandBridgeProtocol`** — add the constant, put it in `allowedCommands`, and give it a
+   shape rule in `verify` (argument count, encoding, length bounds).
+2. **`SelfArmCommandBridgeClient`** — add the call that builds the arguments and submits. Give it a
+   way to observe the *real effect* and pass that as `awaitResult`.
+3. **The script** (`glasses-hub/src/main/assets/rokid-nexus-cmd-bridge.sh`) — parse the command in the
+   request `case` (compute `token_input` exactly as the client does), then execute it in the second
+   `case`. **Re-validate the arguments here rather than trusting them**; the delete command rebuilds
+   its path from a fixed directory and refuses anything with a separator, a leading dot or an
+   unexpected character, so it cannot be steered elsewhere.
+4. **Bump both versions**: `VERSION=` in the script *and* `SelfArmConstants.BRIDGE_VERSION`. The app
+   keeps a rendered copy and only regenerates it when the constant moves; the running loop only hands
+   over when the script version changes. Miss either and nothing deploys.
+5. **Never name the secret placeholder in the script.** The app refuses an asset carrying more than
+   one occurrence of it, and that failure aborts the whole self-arm. Split the literal if you need to
+   refer to it (`"__ROKID_NEXUS_BRIDGE_""SECRET_HEX__"`).
+
+**Never read the bridge's response file from the app.** A file created by the bridge's uid can stay
+invisible to the app's uid for seconds behind the FUSE negative-dentry cache, which made every
+request look like it had failed. Watch the effect instead: `WifiManager.isWifiEnabled` for the Wi-Fi
+commands, a directory listing for the delete command. A listing also beats a `stat`, which can answer
+from a cached entry.
+
+**How the script reaches the glasses.** Normally the self-arm session rewrites it on every hub start.
+That session needs working ADB, so the bridge also updates itself from the installed APK every few
+minutes (`unzip -p $(pm path …) assets/rokid-nexus-cmd-bridge.sh`) — the code it runs always comes
+from a package we signed, never from a blob handed to it at runtime. A candidate must look like the
+script, carry exactly one secret slot and parse under `sh -n`; the successor has to still be alive
+three seconds later or the previous script is restored and the current loop keeps serving.
+
+Verifying a command on a device:
+
+```powershell
+adb -s $glasses shell "cat /data/local/tmp/rokid-nexus-cmd-bridge.version"
+adb -s $glasses shell "tail -20 /data/local/tmp/rokid-nexus-cmd-bridge.log"
+```
+
+The log names every request it completed or rejected, with the reason. `command completed
+command=<name>` is the line to look for; `request rejected reason=command` means the running loop is
+older than the APK and has not handed over yet.
+
 ## ADB-user fallback
 
 ADB users can still grant the development permission directly. Grant before a cold launch:
