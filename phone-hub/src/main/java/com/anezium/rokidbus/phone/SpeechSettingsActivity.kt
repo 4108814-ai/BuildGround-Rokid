@@ -61,6 +61,7 @@ class SpeechSettingsActivity : Activity() {
     private lateinit var languageGridHost: LinearLayout
     private lateinit var languageNoteHost: LinearLayout
     private lateinit var keyCardHost: LinearLayout
+    private lateinit var keySectionHost: LinearLayout
     private lateinit var testStatusView: TextView
     private lateinit var testTranscriptView: TextView
     private lateinit var testCard: LinearLayout
@@ -98,6 +99,7 @@ class SpeechSettingsActivity : Activity() {
         languageGridHost = host()
         languageNoteHost = host()
         keyCardHost = host()
+        keySectionHost = host()
 
         val content = NexusUi.contentColumn(this).apply {
             addView(sectionHeaderRow("Engine", engineHeaderMeta), NexusUi.block())
@@ -112,10 +114,15 @@ class SpeechSettingsActivity : Activity() {
             addView(languageGridHost, NexusUi.block())
             addView(languageNoteHost, NexusUi.block())
 
-            addView(BusTheme.gap(this@SpeechSettingsActivity, 28))
-            addView(sectionHeaderRow("API key", keyHeaderMeta), NexusUi.block())
-            addView(BusTheme.gap(this@SpeechSettingsActivity, 12))
-            addView(keyCardHost, NexusUi.block())
+            addView(
+                keySectionHost.apply {
+                    addView(BusTheme.gap(this@SpeechSettingsActivity, 28))
+                    addView(sectionHeaderRow("API key", keyHeaderMeta), NexusUi.block())
+                    addView(BusTheme.gap(this@SpeechSettingsActivity, 12))
+                    addView(keyCardHost, NexusUi.block())
+                },
+                NexusUi.block(),
+            )
 
             addView(BusTheme.gap(this@SpeechSettingsActivity, 28))
             addView(sectionHeaderRow("Try it", readinessValue), NexusUi.block())
@@ -194,7 +201,7 @@ class SpeechSettingsActivity : Activity() {
         languageGridHost.addView(languageGrid(effective, autoDetected), NexusUi.block())
         languageNoteHost.removeAllViews()
         val note = if (autoDetected) {
-            "Android Speech picks the language up on its own. Choose a cloud engine to force one."
+            "The Android engine picks the language up on its own. Choose a cloud engine to force one."
         } else {
             effective.uiNote
         }
@@ -208,6 +215,14 @@ class SpeechSettingsActivity : Activity() {
     }
 
     private fun renderKeySection() {
+        // The Android recognizer takes no credentials, so the whole section goes away for it
+        // rather than claiming a key is saved.
+        if (shownProvider == SpeechProvider.ANDROID) {
+            keySectionHost.visibility = View.GONE
+            keyCardHost.removeAllViews()
+            return
+        }
+        keySectionHost.visibility = View.VISIBLE
         keyHeaderMeta.text = shownProvider.displayName.uppercase()
         creditsMain = null
         creditsSub = null
@@ -295,6 +310,8 @@ class SpeechSettingsActivity : Activity() {
                 if (settings.selectedEngine() != engine) {
                     settings.selectedEngineId = engine.id
                     renderEngineSection()
+                    // The Android engine locks the language grid, so it has to redraw too.
+                    renderLanguageSection()
                     onSpeechConfigChanged()
                 }
             }
@@ -804,7 +821,7 @@ class SpeechSettingsActivity : Activity() {
             SpeechReadiness.MISSING_KEY -> "Add your ${settings.selectedEngine()?.provider?.displayName ?: "provider"} API key above."
             SpeechReadiness.MISSING_REGION -> "Add your Azure region above."
             SpeechReadiness.MISSING_MIC_PERMISSION ->
-                "Android Speech needs the microphone permission — tap to allow it."
+                "The Android engine needs the microphone permission — tap to allow it."
         }
 
     private fun renderReadiness() {
@@ -855,8 +872,11 @@ class SpeechSettingsActivity : Activity() {
                 testCard.background = NexusUi.pressedBordered(this, NexusUi.PANEL, 15)
             }
             else -> {
-                testActionMeta.text = "SET UP ABOVE"
-                testActionMeta.setTextColor(NexusUi.INK4)
+                // The mic permission is granted from this very card, so it is not a "set up above":
+                // it is an action, and it gets an action's colour.
+                val needsMic = settings.readiness(secrets) == SpeechReadiness.MISSING_MIC_PERMISSION
+                testActionMeta.text = if (needsMic) "ALLOW MIC ›" else "SET UP ABOVE"
+                testActionMeta.setTextColor(if (needsMic) NexusUi.AMBER else NexusUi.INK4)
                 testCard.background = NexusUi.pressedBordered(this, NexusUi.PANEL, 15)
             }
         }
@@ -947,7 +967,7 @@ class SpeechSettingsActivity : Activity() {
             setStatus("Microphone allowed — tap to dictate.", NexusUi.INK2)
         } else if (!shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
             // Permanently denied: the system dialog will not come back, so send them to Settings.
-            setStatus("Allow the microphone in Android settings to use Android Speech.", NexusUi.AMBER)
+            setStatus("Allow the microphone in Android settings to use the Android engine.", NexusUi.AMBER)
         } else {
             setStatus(readinessGuidance(), NexusUi.AMBER)
         }

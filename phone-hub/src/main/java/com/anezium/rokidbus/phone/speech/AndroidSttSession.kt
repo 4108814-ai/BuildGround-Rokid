@@ -657,9 +657,11 @@ internal class AndroidSttSession(
         private const val TAG = "NexusAndroidStt"
         private const val ANDROID_PROVIDER_LABEL = "Android"
         private const val SAMPLE_RATE_HZ = 16_000
-        private const val SPEECH_INPUT_MINIMUM_LENGTH_MS = 2_500L
-        private const val SPEECH_POSSIBLY_COMPLETE_SILENCE_MS = 2_500L
-        private const val SPEECH_COMPLETE_SILENCE_MS = 3_000L
+        // Int, not Long: RecognizerIntent reads these extras with getInt, and a Long silently
+        // falls back to 0 (Relay ships them as Long and has been losing them all along).
+        private const val SPEECH_INPUT_MINIMUM_LENGTH_MS = 2_500
+        private const val SPEECH_POSSIBLY_COMPLETE_SILENCE_MS = 2_500
+        private const val SPEECH_COMPLETE_SILENCE_MS = 3_000
         private const val FINAL_RESULT_TIMEOUT_MS = 2_500L
         private const val TRANSIENT_RETRY_DELAY_MS = 250L
         private const val MAX_TRANSIENT_RETRIES = 1

@@ -41,7 +41,14 @@ class SpeechEngineConfigTest {
         assertFalse(SpeechEngine.ANDROID_RECOGNIZER.usesCompletedAudio)
         assertNull(SpeechEngine.ANDROID_RECOGNIZER.completedAudioModelId)
         assertNull(SpeechEngine.ANDROID_RECOGNIZER.realtimeModelId)
-        assertEquals("Android Speech", SpeechEngine.ANDROID_RECOGNIZER.displayName)
+        assertEquals("Android Built-in recognizer", SpeechEngine.ANDROID_RECOGNIZER.displayName)
+        // The engine cards strip the provider prefix, so the remainder must still name the engine.
+        assertEquals(
+            "Built-in recognizer",
+            SpeechEngine.ANDROID_RECOGNIZER.displayName
+                .removePrefix(SpeechProvider.ANDROID.displayName)
+                .trim(),
+        )
         assertEquals("Android", SpeechEngine.ANDROID_RECOGNIZER.shortLabel)
         assertEquals(
             "Works straight away — no account, no API key, nothing to pay.",

@@ -89,6 +89,17 @@ class AndroidSttSessionTest {
         )
         assertTrue(intent.hasExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE))
 
+        // Timing extras must be Int: recognizers read them with getInt, and a Long is silently
+        // dropped for the default 0 — observed on device with the Google recognizer.
+        listOf(
+            RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,
+            RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS,
+            RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
+        ).forEach { key ->
+            assertTrue("$key must be an Int extra", intent.extras?.get(key) is Int)
+            assertTrue("$key must survive getInt", intent.getIntExtra(key, -1) > 0)
+        }
+
         session.finishAudio()
 
         assertTrue(pipe.writeClosed)

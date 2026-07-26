@@ -32,7 +32,7 @@ enum class SpeechEngine(
     ANDROID_RECOGNIZER(
         id = "android_recognizer",
         provider = SpeechProvider.ANDROID,
-        displayName = "Android Speech",
+        displayName = "Android Built-in recognizer",
         shortLabel = "Android",
         choiceDescription = "Works straight away — no account, no API key, nothing to pay.",
         choiceBadges = listOf("Live text", "No key", "Phone engine"),
