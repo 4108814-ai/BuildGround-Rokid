@@ -90,7 +90,11 @@ object NexusUi {
             setOnApplyWindowInsetsListener { view, insets ->
                 val (top, bottom) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     val bars = insets.getInsets(WindowInsets.Type.systemBars())
-                    bars.top to bars.bottom
+                    // Without the keyboard inset the window never gives back the space it covers,
+                    // so `adjustResize` has nothing to resize and a focused field stays hidden
+                    // underneath it — which is exactly what typing a pairing code needs not to do.
+                    val ime = insets.getInsets(WindowInsets.Type.ime())
+                    bars.top to maxOf(bars.bottom, ime.bottom)
                 } else {
                     @Suppress("DEPRECATION")
                     insets.systemWindowInsetTop to insets.systemWindowInsetBottom
