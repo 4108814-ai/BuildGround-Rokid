@@ -25,6 +25,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
     private var wifiEnableActive = false
     private var manualWifiEnableActive = false
     private var manualNavigationActive = false
+    private var forcedWirelessBootstrap = false
     private var pendingManualTarget: SelfArmManualTarget? = null
     private var pendingManualCompletion: ((Boolean) -> Unit)? = null
     private var manualWaitingForNetwork = false
@@ -203,10 +204,12 @@ class RokidBusAccessibilityService : AccessibilityService() {
         if (manualNavigationActive) return
         if (wirelessBootstrapActive) return
         finishWifiEnableIfActive(false)
+        val forced = forcedWirelessBootstrap
+        forcedWirelessBootstrap = false
         val state = SelfArmOnboardingStateMachine.evaluate(
             SelfArmOnboardingStore.snapshot(applicationContext),
         )
-        if (state.stage == SelfArmOnboardingState.Stage.COMPLETE) {
+        if (!forced && state.stage == SelfArmOnboardingState.Stage.COMPLETE) {
             SelfArmOnboardingStore.finish(applicationContext, "wireless_bootstrap_complete", true)
             returnToOnboarding()
             return
@@ -506,9 +509,12 @@ class RokidBusAccessibilityService : AccessibilityService() {
         /** True while the AccessibilityService is connected and able to drive Settings. */
         internal fun isLive(): Boolean = liveInstance != null
 
-        internal fun requestWirelessBootstrap(context: Context): Boolean {
+        internal fun requestWirelessBootstrap(context: Context, force: Boolean = false): Boolean {
             SelfArmOnboardingStore.requestSetup(context.applicationContext)
             val service = liveInstance ?: return false
+            // A recovery knows something the onboarding state machine does not: the unit has no
+            // pairing left, so "complete" is not true however healthy accessibility looks.
+            if (force) service.forcedWirelessBootstrap = true
             service.main.post(service::startWirelessBootstrap)
             return true
         }

@@ -143,7 +143,9 @@ internal class SelfArmLocalAdbBootstrapper(
         private val CERT_LOCK = Any()
         private var kadbCertConfigured = false
         private val certificateRejections = java.util.concurrent.atomic.AtomicInteger(0)
-        private val selfPairingRequested = java.util.concurrent.atomic.AtomicBoolean(false)
+        private val selfPairingStarted = java.util.concurrent.atomic.AtomicBoolean(false)
+        private val selfPairingAttempts = java.util.concurrent.atomic.AtomicInteger(0)
+        private const val MAX_SELF_PAIRING_ATTEMPTS = 6
         private const val CERTIFICATE_REJECTIONS_BEFORE_RESET = 2
         private val CERTIFICATE_REJECTION_MARKERS = listOf(
             "CERTIFICATE_VERIFY_FAILED",
@@ -324,12 +326,18 @@ internal class SelfArmLocalAdbBootstrapper(
          * autonomy — it stays maintained only for as long as someone runs the manual flow from the
          * phone. Re-pairing is what gives it back.
          */
-        private fun requestSelfPairing(context: Context) {
-            if (!selfPairingRequested.compareAndSet(false, true)) return
+        internal fun requestSelfPairing(context: Context) {
+            if (selfPairingStarted.get()) return
+            // The first no-op usually lands before the accessibility service has connected, and
+            // that service is what drives the Settings screens. Keep asking on later attempts
+            // rather than burning the single try on a moment when nothing could have answered.
+            val attempt = selfPairingAttempts.incrementAndGet()
+            if (attempt > MAX_SELF_PAIRING_ATTEMPTS) return
             val started = runCatching {
-                RokidBusAccessibilityService.requestWirelessBootstrap(context.applicationContext)
+                RokidBusAccessibilityService.requestWirelessBootstrap(context.applicationContext, force = true)
             }.getOrDefault(false)
-            Log.w(TAG, "self-pairing requested after identity reset started=$started")
+            if (started) selfPairingStarted.set(true)
+            Log.w(TAG, "self-pairing requested attempt=$attempt started=$started")
         }
 
         /**

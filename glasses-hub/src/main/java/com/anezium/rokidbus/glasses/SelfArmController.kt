@@ -240,6 +240,11 @@ internal object SelfArmController {
                 "Self-arm no-op reason=$reason directRepair=$repairedDirectly " +
                     "bootstrapComplete=$bootstrapComplete classicKey=${key != null}",
             )
+            // Not bootstrapped means the unit cannot spawn its own watchdog or command bridge, and
+            // never will until it pairs: those are shell processes that a privileged session has to
+            // start, and every reboot takes them with it. Ask for that pairing instead of logging
+            // the same no-op forever.
+            if (!bootstrapComplete) SelfArmLocalAdbBootstrapper.requestSelfPairing(context)
             return if (tlsSessionUnreachable) {
                 SelfArmWatchdogEnsureResult.SESSION_UNREACHABLE
             } else {
