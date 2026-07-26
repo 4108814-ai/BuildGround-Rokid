@@ -197,7 +197,11 @@ object MotionSpikeRenderer {
     private fun playRelay() {
         val view = panel ?: return
         morph.snapTo(1f)
-        view.showMessage("Marie", "On my way, ten minutes out. Do you still need me to bring the charger?", "tap to reply · back to dismiss")
+        view.showMessage(
+            "Marie",
+            "Je suis en route, dix minutes. Tu as toujours besoin du chargeur ?",
+            "tap pour répondre · retour pour ignorer",
+        )
         slide.snapTo(-banner.height().toFloat())
         fade.snapTo(0f)
 
@@ -205,23 +209,33 @@ object MotionSpikeRenderer {
         fade.animateTo(1f, HudMotion.STANDARD_MS, HudMotion.enter)
 
         handler.postDelayed({
-            view.showListening("Listening…")
+            view.showListening("J'écoute…")
             startWaveform()
         }, RELAY_READ_MS)
 
+        var elapsed = RELAY_READ_MS + RELAY_SPEAK_MS
         handler.postDelayed({
             stopWaveform()
-            view.showMessage("Marie", "Ok j'arrive dans cinq minutes", "sending in 3")
-        }, RELAY_READ_MS + RELAY_SPEAK_MS)
+            // The wearer's own words come back bright: this is the thing they
+            // are about to send, not someone else's message.
+            view.showTranscript("Marie", "Ok j'arrive dans cinq minutes")
+        }, elapsed)
 
-        handler.postDelayed({
-            view.setFooter("sent")
-        }, RELAY_READ_MS + RELAY_SPEAK_MS + RELAY_SETTLE_MS)
+        // The retry window, counted out loud. Three seconds of "you can still
+        // take this back" is the whole reason the flow needs no confirmation
+        // screen, so it should be visible rather than implied.
+        for (remaining in 3 downTo 1) {
+            handler.postDelayed({ view.setCountdown(remaining) }, elapsed)
+            elapsed += RELAY_COUNTDOWN_STEP_MS
+        }
+
+        handler.postDelayed({ view.showSent() }, elapsed)
+        elapsed += RELAY_SENT_HOLD_MS
 
         handler.postDelayed({
             slide.animateTo(-banner.height().toFloat(), HudMotion.EXIT_MS, HudMotion.exit)
             fade.animateTo(0f, HudMotion.EXIT_MS, HudMotion.exit) { finish("taxi") }
-        }, RELAY_READ_MS + RELAY_SPEAK_MS + RELAY_SETTLE_MS + RELAY_SENT_HOLD_MS)
+        }, elapsed)
     }
 
     /**
@@ -370,6 +384,11 @@ object MotionSpikeRenderer {
             )
             waveform.visibility = GONE
             footer.visibility = GONE
+            // Both rows are full width but their text is left-aligned, so a
+            // centre-pivot pulse would slide the words sideways instead of
+            // growing them where they sit.
+            body.pivotX = 0f
+            footer.pivotX = 0f
         }
 
         fun showChip(label: String, value: String) {
@@ -408,8 +427,41 @@ object MotionSpikeRenderer {
             setFooter(footerText)
         }
 
-        fun setFooter(footerText: String?) {
+        /** The wearer's own dictated words, read back for approval. */
+        fun showTranscript(titleText: String, text: String) {
+            title.text = titleText
+            title.textSize = 14f
+            body.text = text
+            body.textSize = 13f
+            body.setTextColor(BusTheme.phosphor)
+            body.visibility = VISIBLE
+            waveform.visibility = GONE
+        }
+
+        fun setCountdown(remaining: Int) {
+            setFooter("envoi dans $remaining")
+            HudMotion.pulse(footer, peak = 1.06f)
+        }
+
+        /**
+         * The send has to land. A 10sp muted "sent" is a whisper at the one
+         * moment the wearer is waiting for an answer, so the resolution takes
+         * over the bright role and the message they just sent steps back.
+         */
+        fun showSent() {
+            body.setTextColor(BusTheme.muted)
+            setFooter("✓ Envoyé", bright = true)
+            HudMotion.pulse(footer)
+        }
+
+        fun setFooter(footerText: String?, bright: Boolean = false) {
             footer.text = footerText.orEmpty()
+            footer.textSize = if (bright) 14f else 10f
+            footer.setTextColor(if (bright) BusTheme.phosphor else BusTheme.muted)
+            footer.typeface = Typeface.create(
+                Typeface.MONOSPACE,
+                if (bright) Typeface.BOLD else Typeface.NORMAL,
+            )
             footer.visibility = if (footerText.isNullOrEmpty()) GONE else VISIBLE
         }
 
@@ -465,8 +517,8 @@ object MotionSpikeRenderer {
 
     private const val RELAY_READ_MS = 1_600L
     private const val RELAY_SPEAK_MS = 3_400L
-    private const val RELAY_SETTLE_MS = 1_200L
-    private const val RELAY_SENT_HOLD_MS = 900L
+    private const val RELAY_COUNTDOWN_STEP_MS = 800L
+    private const val RELAY_SENT_HOLD_MS = 1_100L
 
     private const val FLARE_CHIP_HOLD_MS = 1_400L
     private const val FLARE_TAIL_MS = 600L
