@@ -87,7 +87,8 @@ export function toolSummary(name: string, input: unknown): string {
         values.url,
         values.query,
       ].find((value): value is string => typeof value === "string" && value.trim().length > 0);
-  return candidate ? `${name} · ${condense(candidate, 120)}` : name;
+  // A tool row is a glance, not a log: two HUD lines at most.
+  return candidate ? `${name} · ${condense(candidate, 90)}` : name;
 }
 
 /**

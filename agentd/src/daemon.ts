@@ -5,6 +5,7 @@ import { discoverRecentSessions } from "./discovery";
 import { HookHttpServer } from "./http-server";
 import { FileLogger } from "./logger";
 import { SessionStore } from "./session-store";
+import { PhoneLink } from "./phone-link";
 import { TranscriptTailManager } from "./transcript";
 import { readRecentMessages } from "./transcript-messages";
 import type { HookPayload } from "./types";
@@ -28,11 +29,28 @@ export async function startDaemon(): Promise<RunningDaemon> {
   }
 
   let wsHub: WsHub | undefined;
+  let phoneLink: PhoneLink | undefined;
   const tailManager = new TranscriptTailManager(
     (sessionId, update) => sessions.applyTranscriptUpdate(sessionId, update),
     logger,
-    (sessionId, message) => wsHub?.broadcastDetailMessage(sessionId, message),
+    (sessionId, message) => {
+      wsHub?.broadcastDetailMessage(sessionId, message);
+      phoneLink?.sendDetailMessage(sessionId, message);
+    },
   );
+
+  const detailProvider = async (sessionId: string, limit: number) => {
+    const transcriptPath = sessions.transcriptPath(sessionId);
+    return transcriptPath ? readRecentMessages(transcriptPath, limit) : [];
+  };
+  // Reading a conversation also starts tailing it, so the view stays live
+  // even for a session that had been quiet since the daemon started.
+  const onDetailOpen = (sessionId: string) => {
+    const transcriptPath = sessions.transcriptPath(sessionId);
+    if (transcriptPath && !tailManager.isTailing(sessionId)) {
+      tailManager.start(sessionId, transcriptPath);
+    }
+  };
   const processHook = (payload: HookPayload) => {
     sessions.handleHook(payload);
     const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined;
@@ -56,29 +74,20 @@ export async function startDaemon(): Promise<RunningDaemon> {
     onHook: processHook,
     logger,
   });
-  const hub = new WsHub(config, sessions, logger, {
-    detailProvider: async (sessionId, limit) => {
-      const transcriptPath = sessions.transcriptPath(sessionId);
-      return transcriptPath ? readRecentMessages(transcriptPath, limit) : [];
-    },
-    // Reading a conversation also starts tailing it, so the view stays live
-    // even for a session that had been quiet since the daemon started.
-    onDetailOpen: (sessionId) => {
-      const transcriptPath = sessions.transcriptPath(sessionId);
-      if (transcriptPath && !tailManager.isTailing(sessionId)) {
-        tailManager.start(sessionId, transcriptPath);
-      }
-    },
-  });
+  const hub = new WsHub(config, sessions, logger, { detailProvider, onDetailOpen });
   wsHub = hub;
+  const link = new PhoneLink({ config, store: sessions, logger, detailProvider, onDetailOpen });
+  phoneLink = link;
   const heartbeatTimer = setInterval(() => sessions.sweepStalled(), 60_000);
   heartbeatTimer.unref();
 
   try {
     await httpServer.start();
     await hub.start();
+    link.start();
   } catch (error) {
     clearInterval(heartbeatTimer);
+    link.stop();
     await httpServer.stop().catch(() => undefined);
     await hub.stop().catch(() => undefined);
     tailManager.stopAll();
@@ -104,6 +113,7 @@ export async function startDaemon(): Promise<RunningDaemon> {
       }
       stopped = true;
       clearInterval(heartbeatTimer);
+      link.stop();
       tailManager.stopAll();
       await Promise.all([httpServer.stop(), hub.stop()]);
       sessions.dispose();
