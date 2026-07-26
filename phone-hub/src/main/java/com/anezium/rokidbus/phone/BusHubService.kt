@@ -3803,6 +3803,7 @@ class BusHubService : Service() {
         }
         log(
             "renderer capabilities image=$imageSupported pin=$pinSupported " +
+                "notice=${advertised.features and BusCapabilityBits.NOTICE_SURFACE != 0} " +
                 "maxImageBytes=$remoteMaxImageBytes",
         )
         // Link bits may be unchanged; repeat the callback so clients refresh capabilities().
