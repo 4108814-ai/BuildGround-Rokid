@@ -22,6 +22,7 @@ import com.anezium.rokidbus.client.ui.BusTheme
 import com.anezium.rokidbus.client.ui.NexusPluginIcons
 import com.anezium.rokidbus.client.ui.NexusUi
 import com.anezium.rokidbus.shared.MediaSyncBlocker
+import com.anezium.rokidbus.shared.MediaSyncMode
 import com.anezium.rokidbus.shared.MediaSyncState
 import com.anezium.rokidbus.shared.MediaSyncStatus
 import java.text.SimpleDateFormat
@@ -131,7 +132,7 @@ class PhotoSyncSettingsActivity : Activity() {
     private fun structureKey(current: MediaSyncStatus?): String = when (current) {
         null -> "disconnected"
         else -> listOf(
-            current.settings.autoSyncOnCharge,
+            current.settings.mode,
             current.settings.deleteAfterSync,
             current.deletionSupported,
             current.history.joinToString(",") { "${it.finishedAtMillis}/${it.result.wireValue}" },
@@ -145,7 +146,8 @@ class PhotoSyncSettingsActivity : Activity() {
             NexusUi.cardBody(
                 this,
                 "Photos and videos you capture on the glasses copy themselves into your phone " +
-                    "gallery, in the same Hi Rokid album.",
+                    "gallery, in the same Hi Rokid album. They travel over the glasses " +
+                    "connection, so no Wi-Fi is needed.",
             ),
             NexusUi.block(),
         )
@@ -158,16 +160,24 @@ class PhotoSyncSettingsActivity : Activity() {
         content.addView(BusTheme.gap(this, 22))
         content.addView(NexusUi.sectionRow(this, "Automatic"), NexusUi.block())
         content.addView(BusTheme.gap(this, 10))
-        content.addView(
-            toggleRow(
-                title = "Sync when charging",
-                subtitle = "Runs on its own once the glasses are on the charger",
-                checked = current?.settings?.autoSyncOnCharge ?: true,
-                enabled = current != null,
-                onChanged = { enabled -> runtime?.setAutoSyncOnCharge(enabled) },
-            ),
-            NexusUi.block(),
-        )
+        val mode = current?.settings?.mode ?: MediaSyncMode.CHARGING
+        listOf(
+            Triple(MediaSyncMode.ALWAYS, "Always", "Syncs as soon as you capture"),
+            Triple(MediaSyncMode.CHARGING, "While charging", "Syncs when the glasses are on the charger"),
+            Triple(MediaSyncMode.MANUAL, "Manual only", "Only when you tap Sync now"),
+        ).forEachIndexed { index, (option, title, subtitle) ->
+            if (index > 0) content.addView(BusTheme.gap(this, 8))
+            content.addView(
+                choiceRow(
+                    title = title,
+                    subtitle = subtitle,
+                    selected = option == mode,
+                    enabled = current != null,
+                    onSelected = { runtime?.setSyncMode(option) },
+                ),
+                NexusUi.block(),
+            )
+        }
         content.addView(BusTheme.gap(this, 8))
         content.addView(
             toggleRow(
@@ -335,6 +345,53 @@ class PhotoSyncSettingsActivity : Activity() {
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
             )
         }
+
+    /**
+     * Exclusive choice, in the kit's vocabulary: a pressable row with the same dot the status card
+     * uses as its selection mark. Chips (the Store's precedent) cannot carry a sub-line, and each
+     * of these three needs one to be understandable.
+     */
+    private fun choiceRow(
+        title: String,
+        subtitle: String,
+        selected: Boolean,
+        enabled: Boolean,
+        onSelected: () -> Unit,
+    ): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = if (selected) {
+            NexusUi.bordered(this@PhotoSyncSettingsActivity, NexusUi.PANEL, NexusUi.GREEN_DIM, 15)
+        } else {
+            NexusUi.pressedBordered(this@PhotoSyncSettingsActivity, NexusUi.PANEL, 15)
+        }
+        setPadding(
+            NexusUi.dp(this@PhotoSyncSettingsActivity, 15),
+            NexusUi.dp(this@PhotoSyncSettingsActivity, 12),
+            NexusUi.dp(this@PhotoSyncSettingsActivity, 15),
+            NexusUi.dp(this@PhotoSyncSettingsActivity, 12),
+        )
+        alpha = if (enabled) 1f else 0.5f
+        isClickable = enabled
+        isFocusable = enabled
+        if (enabled) setOnClickListener { if (!selected) onSelected() }
+        addView(
+            NexusUi.dot(this@PhotoSyncSettingsActivity).also {
+                NexusUi.setDotColor(it, if (selected) NexusUi.GREEN else NexusUi.LINE)
+            },
+        )
+        addView(
+            LinearLayout(this@PhotoSyncSettingsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(NexusUi.rowTitle(this@PhotoSyncSettingsActivity, title))
+                addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 3))
+                addView(wrappingSubtitle(subtitle))
+            },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = NexusUi.dp(this@PhotoSyncSettingsActivity, 12)
+            },
+        )
+    }
 
     private fun toggleRow(
         title: String,

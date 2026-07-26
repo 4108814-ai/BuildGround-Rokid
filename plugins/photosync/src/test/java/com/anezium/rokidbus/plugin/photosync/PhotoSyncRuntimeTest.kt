@@ -2,6 +2,7 @@ package com.anezium.rokidbus.plugin.photosync
 
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.MediaSyncBlocker
+import com.anezium.rokidbus.shared.MediaSyncMode
 import com.anezium.rokidbus.shared.MediaSyncProgress
 import com.anezium.rokidbus.shared.MediaSyncResult
 import com.anezium.rokidbus.shared.MediaSyncRun
@@ -70,7 +71,7 @@ class PhotoSyncRuntimeTest {
 
     @Test
     fun `each control sends exactly one bus message on the right path`() {
-        runtime.setAutoSyncOnCharge(false)
+        runtime.setSyncMode(MediaSyncMode.ALWAYS)
         runtime.setDeleteAfterSync(true)
         runtime.syncNow()
         runtime.refresh()
@@ -84,21 +85,20 @@ class PhotoSyncRuntimeTest {
             ),
             host.sends.map { it.first },
         )
-        assertEquals(false, host.sends[0].second.getBoolean("autoSyncOnCharge"))
-        assertTrue(host.sends[0].second.has("autoSyncOnCharge"))
+        assertEquals("always", host.sends[0].second.getString("syncMode"))
         assertEquals(false, host.sends[0].second.has("deleteAfterSync"))
         assertEquals(true, host.sends[1].second.getBoolean("deleteAfterSync"))
-        assertEquals(false, host.sends[3].second.has("autoSyncOnCharge"))
+        assertEquals(false, host.sends[3].second.has("syncMode"))
     }
 
     @Test
     fun `settings requests only carry the field the wearer touched`() {
-        val current = MediaSyncSettings(autoSyncOnCharge = true, deleteAfterSync = false)
+        val current = MediaSyncSettings(mode = MediaSyncMode.CHARGING, deleteAfterSync = false)
         runtime.setDeleteAfterSync(true)
 
         val applied = MediaSyncStatusContract.applySettingsRequest(current, host.sends.single().second)
 
-        assertEquals(MediaSyncSettings(autoSyncOnCharge = true, deleteAfterSync = true), applied)
+        assertEquals(MediaSyncSettings(mode = MediaSyncMode.CHARGING, deleteAfterSync = true), applied)
     }
 
     @Test
@@ -139,18 +139,6 @@ class PhotoSyncRuntimeTest {
             ),
         )
         assertEquals("Connecting to the glasses", PhotoSyncCopy.headline(MediaSyncStatus(state = MediaSyncState.PREPARING)))
-    }
-
-    @Test
-    fun `a denied phone permission is never described as Wi-Fi being off`() {
-        assertEquals(
-            "Allow nearby-device access in Nexus settings",
-            PhotoSyncCopy.headline(MediaSyncStatus(blocker = MediaSyncBlocker.PHONE_PERMISSION)),
-        )
-        assertEquals(
-            "Turn on Wi-Fi to sync",
-            PhotoSyncCopy.headline(MediaSyncStatus(blocker = MediaSyncBlocker.PHONE_WIFI_OFF)),
-        )
     }
 
     @Test

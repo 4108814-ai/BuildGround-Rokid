@@ -2,6 +2,7 @@ package com.anezium.rokidbus.plugin.photosync
 
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.MediaSyncBlocker
+import com.anezium.rokidbus.shared.MediaSyncMode
 import com.anezium.rokidbus.shared.MediaSyncResult
 import com.anezium.rokidbus.shared.MediaSyncRun
 import com.anezium.rokidbus.shared.MediaSyncState
@@ -51,9 +52,9 @@ internal class PhotoSyncRuntime(private val host: PhotoSyncHost) {
     fun refresh(): Boolean =
         host.send(BusPaths.MEDIA_SYNC_SETTINGS, MediaSyncStatusContract.encodeSettingsRequest())
 
-    fun setAutoSyncOnCharge(enabled: Boolean): Boolean = host.send(
+    fun setSyncMode(mode: MediaSyncMode): Boolean = host.send(
         BusPaths.MEDIA_SYNC_SETTINGS,
-        MediaSyncStatusContract.encodeSettingsRequest(autoSyncOnCharge = enabled),
+        MediaSyncStatusContract.encodeSettingsRequest(mode = mode),
     )
 
     fun setDeleteAfterSync(enabled: Boolean): Boolean = host.send(
@@ -87,12 +88,14 @@ internal object PhotoSyncCopy {
             MediaSyncState.IDLE -> when (status.blocker) {
                 MediaSyncBlocker.NOTHING_PENDING -> "Up to date"
                 MediaSyncBlocker.NOT_CHARGING -> "Waiting for the glasses to charge"
-                MediaSyncBlocker.AUTO_SYNC_OFF -> "Automatic sync is off"
+                MediaSyncBlocker.AUTO_SYNC_OFF -> "Manual sync only"
                 MediaSyncBlocker.LINK_DOWN -> "Glasses not connected"
                 MediaSyncBlocker.CAMERA_ACTIVE -> "Paused while the camera is open"
-                MediaSyncBlocker.PHONE_WIFI_OFF -> "Turn on Wi-Fi to sync"
-                MediaSyncBlocker.PHONE_PERMISSION -> "Allow nearby-device access in Nexus settings"
-                MediaSyncBlocker.GLASSES_WIFI_DIRECT -> "Waiting for the glasses' Wi-Fi"
+                // Retired with the Wi-Fi Direct transport; kept for wire compatibility.
+                MediaSyncBlocker.PHONE_WIFI_OFF,
+                MediaSyncBlocker.PHONE_PERMISSION,
+                MediaSyncBlocker.GLASSES_WIFI_DIRECT,
+                -> "Waiting for the glasses"
                 MediaSyncBlocker.GLASSES_STORAGE_PERMISSION -> "Allow storage access on the glasses"
                 null -> "Ready"
             }
