@@ -97,12 +97,12 @@ class PhotoSyncSettingsActivity : Activity() {
             addView(
                 NexusUi.pluginHeader(
                     this@PhotoSyncSettingsActivity,
-                    // Photo Sync's own glyph — a capture frame with the sync arrow leaving it —
+                    // Photos Sync's own glyph — a capture frame with the sync arrow leaving it —
                     // and the same file the hub shows in the plugin list. The shared vocabulary
                     // has nothing for "captures travelling", so falling back to its generic send
                     // icon left a paper plane here and the real mark everywhere else.
                     R.drawable.nexus_glyph_photosync,
-                    "Photo Sync",
+                    "Photos Sync",
                     "Glasses captures to your gallery · v$versionLabel",
                 ),
                 NexusUi.block(),
@@ -231,7 +231,7 @@ class PhotoSyncSettingsActivity : Activity() {
         content.addView(NexusUi.sectionRow(this, "Plugin"), NexusUi.block())
         content.addView(BusTheme.gap(this, 10))
         content.addView(
-            NexusUi.uninstallCard(this, "Photo Sync") {
+            NexusUi.uninstallCard(this, "Photos Sync") {
                 startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:$packageName")))
             },
             NexusUi.block(),

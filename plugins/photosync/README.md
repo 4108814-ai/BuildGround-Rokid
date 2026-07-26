@@ -1,4 +1,4 @@
-# Photo Sync
+# Photos Sync
 
 Copies the photos and videos you shoot with the glasses' camera button into your
 phone gallery, on their own, the way a phone camera backs itself up.

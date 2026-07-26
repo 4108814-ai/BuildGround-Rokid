@@ -519,7 +519,7 @@ adb -s $phone uninstall com.anezium.rokidbus.phoneprobe
 - Deny the `POST_NOTIFICATIONS` runtime permission and confirm the periodic
   checks still run without crashing (notification post is silently skipped).
 
-## Photo Sync v1 on-device validation
+## Photos Sync v1 on-device validation
 
 Nothing below is covered by unit tests; all of it needs both devices. Photo sync
 runs over the Bluetooth bus — **no Wi-Fi is involved at any point**, on either
@@ -529,7 +529,7 @@ device. If a test seems to need Wi-Fi, something is wrong.
   own screen; `adb shell pm grant com.anezium.rokidbus.glasses
   android.permission.READ_EXTERNAL_STORAGE` is the shortcut) and confirm the
   status stops reporting "Allow storage access on the glasses".
-- Install Photo Sync, approve `mediasync` in Plugin access, and confirm the hub
+- Install Photos Sync, approve `mediasync` in Plugin access, and confirm the hub
   only starts syncing after that approval (before it, the glasses log
   `skip reason=not_consented`).
 - **Photos first**: with a few captures pending and the glasses charging, confirm
@@ -561,7 +561,7 @@ device. If a test seems to need Wi-Fi, something is wrong.
   actually gone from `/sdcard/DCIM/Camera`. If the ROM refuses, the settings
   screen must show the amber "The glasses refused the last delete" line — that is
   the expected honest outcome, not a bug to hide.
-- Kill the Photo Sync process mid-sync (`am force-stop`): the transfer must keep
+- Kill the Photos Sync process mid-sync (`am force-stop`): the transfer must keep
   running (it lives in the hub) and the screen must recover on reopen.
 - **Consent after a glasses hub restart**: force-stop only the glasses hub. When
   it comes back it must request config and resume working without touching the

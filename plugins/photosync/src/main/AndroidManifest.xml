@@ -42,10 +42,10 @@
                 android:value="photosync" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.DISPLAY_NAME"
-                android:value="Photo Sync" />
-            <meta-data
-                android:name="com.anezium.rokidbus.plugin.ICON"
-                android:value="send" />
+                android:value="Photos Sync" />
+            <!-- Deliberately no ICON key: a built-in key always wins over ICON_DRAWABLE in the
+                 hub's resolver, so declaring one would hide this plugin's own glyph behind the
+                 generic send arrow. -->
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.ICON_DRAWABLE"
                 android:resource="@drawable/nexus_glyph_photosync" />

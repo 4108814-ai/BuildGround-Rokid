@@ -8,7 +8,7 @@ import org.json.JSONObject
 import java.util.UUID
 
 /**
- * Photo Sync has no HUD surface: the transfer lives in the Nexus hub and keeps running while this
+ * Photos Sync has no HUD surface: the transfer lives in the Nexus hub and keeps running while this
  * process is dead. The service exists so the settings screen has a live bus registration to talk
  * through, and so the hub can push status while the screen is open.
  */

@@ -1,4 +1,4 @@
-# Changelog — Photo Sync
+# Changelog — Photos Sync
 
 ## 1.0.0 — unreleased
 

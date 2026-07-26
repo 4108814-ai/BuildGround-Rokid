@@ -18,7 +18,7 @@ internal interface PhotoSyncHost {
 }
 
 /**
- * Everything the Photo Sync plugin does, minus Android.
+ * Everything the Photos Sync plugin does, minus Android.
  *
  * The plugin owns no sync state: the hub holds the ledger, the settings and the transfer, and
  * survives this process being killed. This runtime is a thin control surface — it mirrors the
