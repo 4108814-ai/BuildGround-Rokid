@@ -143,6 +143,7 @@ internal class SelfArmLocalAdbBootstrapper(
         private val CERT_LOCK = Any()
         private var kadbCertConfigured = false
         private val certificateRejections = java.util.concurrent.atomic.AtomicInteger(0)
+        private val selfPairingRequested = java.util.concurrent.atomic.AtomicBoolean(false)
         private const val CERTIFICATE_REJECTIONS_BEFORE_RESET = 2
         private val CERTIFICATE_REJECTION_MARKERS = listOf(
             "CERTIFICATE_VERIFY_FAILED",
@@ -311,6 +312,24 @@ internal class SelfArmLocalAdbBootstrapper(
                 }
                 Log.w(TAG, "pairing identity reset reason=$reason removedKeyFiles=$removed")
             }
+            requestSelfPairing(context)
+        }
+
+        /**
+         * Asks the glasses to pair themselves again, without anyone touching them.
+         *
+         * The command bridge covers privileged *commands* without ADB, but it cannot spawn itself:
+         * it and the watchdog are shell processes that die with every reboot, and only a privileged
+         * session brings them back. So a unit that has lost its own pairing has also lost its
+         * autonomy — it stays maintained only for as long as someone runs the manual flow from the
+         * phone. Re-pairing is what gives it back.
+         */
+        private fun requestSelfPairing(context: Context) {
+            if (!selfPairingRequested.compareAndSet(false, true)) return
+            val started = runCatching {
+                RokidBusAccessibilityService.requestWirelessBootstrap(context.applicationContext)
+            }.getOrDefault(false)
+            Log.w(TAG, "self-pairing requested after identity reset started=$started")
         }
 
         /**
