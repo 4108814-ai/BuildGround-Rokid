@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.0.46
+
+### Notices
+
+- Plugins can interrupt you briefly with a band across the top of your view: a
+  message that just arrived, a delivery at the door, one thing that happened
+  and is worth a glance. It arrives, says its piece, and leaves on its own.
+- You can answer one without opening anything. Tap the band and the plugin
+  hears you, even though it has no screen open and never did — which is the
+  point of the whole thing. Back always dismisses, and no plugin can take that
+  key away from you.
+- A band claims two gestures, not your glasses. Scroll still reaches whatever
+  is underneath it, the launcher still opens, and every other control keeps
+  working while a notice is up.
+- Nothing can leave a band in your view: it clears on its own deadline, and no
+  amount of updating it pushes past a minute.
+
+### Motion
+
+- The HUD moves now. Bands slide in and out instead of appearing, and the whole
+  interface shares one set of timings rather than each screen inventing its
+  own.
+- Motion marks something happening, never decoration. Nothing on the glasses
+  animates in a loop while you are wearing them and walking around.
+
 ## 1.0.45
 
 ### Pins
