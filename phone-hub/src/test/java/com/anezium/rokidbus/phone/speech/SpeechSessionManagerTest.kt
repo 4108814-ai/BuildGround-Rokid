@@ -79,6 +79,34 @@ class SpeechSessionManagerTest {
     }
 
     @Test
+    fun endpointHandsTheMicrophoneBackBeforeTheProviderAnswers() {
+        val audio = ImmediateAudioAccess()
+        val engine = RecordingSession()
+        val listener = RecordingUtteranceListener()
+        val clock = AtomicLong(1_000L)
+        val manager = manager(audio, engine, clock)
+
+        assertEquals(SpeechStartResult.OK, manager.startUtterance(listener))
+        assertTrue(engine.started.await(2, TimeUnit.SECONDS))
+        audio.consumer!!.onPcm(voicePcm(1_600), 0, 3_200, 0L, 1_010L)
+        // Let the speech chunk land before the clock jumps, so the detector times the
+        // silence from the moment the voice was heard.
+        assertTrue(engine.accepted.await(2, TimeUnit.SECONDS))
+        clock.set(10_000L)
+
+        assertTrue(engine.finished.await(2, TimeUnit.SECONDS))
+        assertEquals(1, audio.releaseCalls.get())
+        assertEquals(null, listener.reason)
+
+        engine.listener.onFinal("bonjour")
+        assertTrue(listener.ended.await(2, TimeUnit.SECONDS))
+        assertEquals(SpeechEndReason.COMPLETED, listener.reason)
+        assertEquals(1, audio.releaseCalls.get())
+        manager.close()
+        assertEquals(1, audio.releaseCalls.get())
+    }
+
+    @Test
     fun languageOverrideAppliesOnlyToRequestedSession() {
         val audio = ImmediateAudioAccess()
         val engine = RecordingSession()
@@ -117,6 +145,16 @@ class SpeechSessionManagerTest {
         manager.close()
     }
 
+    /** Samples loud enough to clear the detector's peak threshold. */
+    private fun voicePcm(samples: Int): ByteArray {
+        val bytes = ByteArray(samples * 2)
+        for (index in 0 until samples) {
+            bytes[index * 2] = 0x00
+            bytes[index * 2 + 1] = 0x20 // 8192, well above the 2800 peak threshold
+        }
+        return bytes
+    }
+
     private fun manager(
         audio: InternalAudioAccess,
         recordingSession: RecordingSession,
@@ -151,6 +189,8 @@ class SpeechSessionManagerTest {
     private class RecordingSession : SttSession {
         lateinit var listener: SttSessionListener
         val started = CountDownLatch(1)
+        val accepted = CountDownLatch(1)
+        val finished = CountDownLatch(1)
         val acceptCalls = AtomicInteger()
         val finishCalls = AtomicInteger()
         val cancelCalls = AtomicInteger()
@@ -163,10 +203,12 @@ class SpeechSessionManagerTest {
 
         override fun acceptPcm(data: ByteArray, offset: Int, length: Int) {
             acceptCalls.incrementAndGet()
+            accepted.countDown()
         }
 
         override fun finishAudio() {
             finishCalls.incrementAndGet()
+            finished.countDown()
         }
 
         override fun cancel() {

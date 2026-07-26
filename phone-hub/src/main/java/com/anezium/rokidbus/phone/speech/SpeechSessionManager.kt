@@ -428,6 +428,11 @@ class SpeechSessionManager internal constructor(
             "endpoint engine=${run.engine.id} language=${run.language.id} " +
                 "bytes=${run.pcmBytes} speech=${run.vad.speechDetected} reason=${closeReason.substringBefore(' ')}",
         )
+        // The utterance is complete, so hand the microphone back before the provider
+        // round-trip: the glasses mic stops the moment you stop speaking instead of
+        // staying open while the transcript is in flight. A link drop from here on no
+        // longer matters either — every byte the engine needs has already been sent.
+        releaseLease(run)
         if (!run.vad.speechDetected) {
             run.sttSession?.cancel()
             end(run, SpeechEndReason.NO_SPEECH, null)
