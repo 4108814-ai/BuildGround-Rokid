@@ -16,6 +16,7 @@ import com.anezium.rokidbus.shared.MediaSyncMode
 import com.anezium.rokidbus.shared.MediaSyncTrafficMonitor
 import com.anezium.rokidbus.shared.MediaSyncTransferContract
 import org.json.JSONObject
+import com.anezium.rokidbus.shared.MediaSyncMediaFile
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -56,6 +57,9 @@ internal object MediaSyncEngine {
     private var captureFuture: ScheduledFuture<*>? = null
     private var watchdogFuture: ScheduledFuture<*>? = null
     private var captureObserver: FileObserver? = null
+
+    /** Last seen state of the capture directory, so the safety scan reacts to changes only. */
+    @Volatile private var captureFingerprint: String? = null
 
     private class Session(val id: String, val sender: MediaSyncTransferSender)
 
@@ -126,18 +130,40 @@ internal object MediaSyncEngine {
      * reconnect. Other modes need nothing: they already have their own trigger.
      */
     private fun startAlwaysSafetyScan() {
+        captureFingerprint = readCaptureFingerprint()
         runCatching {
             executor.scheduleWithFixedDelay(
                 {
-                    if (mode == MediaSyncMode.ALWAYS && consented && linkUp && session == null) {
-                        attempt(MediaSyncTrigger.NEW_CAPTURE, quiet = true)
+                    if (mode != MediaSyncMode.ALWAYS || !consented || !linkUp || session != null) {
+                        return@scheduleWithFixedDelay
                     }
+                    // Only a directory that actually changed is worth a session. The glasses
+                    // cannot tell what the phone already holds — every stable capture looks
+                    // pending from here — so triggering on "there are files" would open a
+                    // session every minute forever, on the very link this feature is careful
+                    // not to crowd.
+                    val fingerprint = readCaptureFingerprint()
+                    if (fingerprint == captureFingerprint) return@scheduleWithFixedDelay
+                    captureFingerprint = fingerprint
+                    logSync("safety scan noticed a capture change")
+                    attempt(MediaSyncTrigger.NEW_CAPTURE, quiet = true)
                 },
                 ALWAYS_SCAN_INTERVAL_MS,
                 ALWAYS_SCAN_INTERVAL_MS,
                 TimeUnit.MILLISECONDS,
             )
         }.onFailure { logError("mediaSync safety scan unavailable", it) }
+    }
+
+    /** Cheap directory summary: what changed, not what is pending. */
+    private fun readCaptureFingerprint(): String {
+        val files = runCatching { File(MediaCatalog.DEFAULT_DIRECTORY).listFiles() }
+            .getOrNull()
+            .orEmpty()
+            .filter { it.isFile && MediaSyncMediaFile.isSupported(it.name) }
+        val newest = files.maxOfOrNull { it.lastModified() } ?: 0L
+        val bytes = files.sumOf { it.length() }
+        return "${files.size}:$newest:$bytes"
     }
 
     /** Debounced: one photo fires several file events and a video fires many. */
