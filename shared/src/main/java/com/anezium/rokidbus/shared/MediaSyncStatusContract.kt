@@ -49,8 +49,28 @@ enum class MediaSyncResult(val wireValue: String) {
     }
 }
 
+/**
+ * When photo sync is allowed to start on its own.
+ *
+ * [ALWAYS] only became viable once the transport moved to the Bluetooth bus: there is no radio to
+ * spin up any more, the link is already alive, and the politeness layer bounds what a transfer
+ * costs everyone else. [CHARGING] stays the default all the same — it is the setting that never
+ * surprises anyone.
+ */
+enum class MediaSyncMode(val wireValue: String) {
+    ALWAYS("always"),
+    CHARGING("charging"),
+    MANUAL("manual"),
+    ;
+
+    companion object {
+        fun fromWireValue(value: String?): MediaSyncMode? =
+            entries.firstOrNull { it.wireValue == value }
+    }
+}
+
 data class MediaSyncSettings(
-    val autoSyncOnCharge: Boolean = true,
+    val mode: MediaSyncMode = MediaSyncMode.CHARGING,
     val deleteAfterSync: Boolean = false,
 )
 
@@ -85,7 +105,7 @@ data class MediaSyncStatus(
 
 /** JSON shapes for `/mediasync/status`, `/mediasync/settings` and `/mediasync/now`. */
 object MediaSyncStatusContract {
-    const val VERSION = 1
+    const val VERSION = 2
     const val MAX_HISTORY = 8
     const val MAX_MESSAGE_LENGTH = 160
 
@@ -100,7 +120,7 @@ object MediaSyncStatusContract {
         .put("version", VERSION)
         .put("state", status.state.wireValue)
         .put("syncedTotal", status.syncedTotal)
-        .put("autoSyncOnCharge", status.settings.autoSyncOnCharge)
+        .put("syncMode", status.settings.mode.wireValue)
         .put("deleteAfterSync", status.settings.deleteAfterSync)
         .apply {
             status.blocker?.let { put("blocker", it.wireValue) }
@@ -164,7 +184,8 @@ object MediaSyncStatusContract {
             state = state,
             blocker = blocker,
             settings = MediaSyncSettings(
-                autoSyncOnCharge = payload.optBoolean("autoSyncOnCharge", true),
+                mode = MediaSyncMode.fromWireValue(payload.optString("syncMode"))
+                    ?: MediaSyncMode.CHARGING,
                 deleteAfterSync = payload.optBoolean("deleteAfterSync", false),
             ),
             progress = MediaSyncProgress(
@@ -185,28 +206,28 @@ object MediaSyncStatusContract {
     }
 
     fun encodeSettingsRequest(
-        autoSyncOnCharge: Boolean? = null,
+        mode: MediaSyncMode? = null,
         deleteAfterSync: Boolean? = null,
     ): JSONObject = JSONObject()
         .put("version", VERSION)
         .apply {
-            autoSyncOnCharge?.let { put("autoSyncOnCharge", it) }
+            mode?.let { put("syncMode", it.wireValue) }
             deleteAfterSync?.let { put("deleteAfterSync", it) }
         }
 
     /** Applies a partial settings request; unknown or absent fields keep their current value. */
     fun applySettingsRequest(current: MediaSyncSettings, payload: JSONObject): MediaSyncSettings? {
         if (payload.optInt("version") != VERSION) return null
-        val autoSync = if (payload.has("autoSyncOnCharge")) {
-            payload.opt("autoSyncOnCharge") as? Boolean ?: return null
+        val mode = if (payload.has("syncMode")) {
+            MediaSyncMode.fromWireValue(payload.optString("syncMode")) ?: return null
         } else {
-            current.autoSyncOnCharge
+            current.mode
         }
         val delete = if (payload.has("deleteAfterSync")) {
             payload.opt("deleteAfterSync") as? Boolean ?: return null
         } else {
             current.deleteAfterSync
         }
-        return MediaSyncSettings(autoSync, delete)
+        return MediaSyncSettings(mode, delete)
     }
 }

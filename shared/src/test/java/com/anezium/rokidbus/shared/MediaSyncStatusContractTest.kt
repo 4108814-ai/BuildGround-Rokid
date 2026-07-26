@@ -13,7 +13,7 @@ class MediaSyncStatusContractTest {
         val status = MediaSyncStatus(
             state = MediaSyncState.TRANSFERRING,
             blocker = null,
-            settings = MediaSyncSettings(autoSyncOnCharge = false, deleteAfterSync = true),
+            settings = MediaSyncSettings(mode = MediaSyncMode.ALWAYS, deleteAfterSync = true),
             progress = MediaSyncProgress(3, 12, 4_200_000L, 18_600_000L, "img-1.jpg"),
             history = listOf(
                 MediaSyncRun(1_752_170_396_000L, MediaSyncResult.COMPLETED, 12, 18_600_000L, 0, 12),
@@ -58,25 +58,25 @@ class MediaSyncStatusContractTest {
         val encoded = MediaSyncStatusContract.encode(MediaSyncStatus())
         assertNull(MediaSyncStatusContract.decode(JSONObject(encoded.toString()).put("state", "warping")))
         assertNull(MediaSyncStatusContract.decode(JSONObject(encoded.toString()).put("blocker", "gremlins")))
-        assertNull(MediaSyncStatusContract.decode(JSONObject(encoded.toString()).put("version", 2)))
+        assertNull(MediaSyncStatusContract.decode(JSONObject(encoded.toString()).put("version", 99)))
     }
 
     @Test
     fun `a partial settings request only moves the field it carries`() {
-        val current = MediaSyncSettings(autoSyncOnCharge = true, deleteAfterSync = false)
+        val current = MediaSyncSettings(mode = MediaSyncMode.ALWAYS, deleteAfterSync = false)
 
         val onlyDelete = MediaSyncStatusContract.applySettingsRequest(
             current,
             MediaSyncStatusContract.encodeSettingsRequest(deleteAfterSync = true),
         )
 
-        assertTrue(onlyDelete!!.autoSyncOnCharge)
+        assertEquals(MediaSyncMode.ALWAYS, onlyDelete!!.mode)
         assertTrue(onlyDelete.deleteAfterSync)
     }
 
     @Test
     fun `an empty settings request is a refresh, not a reset`() {
-        val current = MediaSyncSettings(autoSyncOnCharge = false, deleteAfterSync = true)
+        val current = MediaSyncSettings(mode = MediaSyncMode.MANUAL, deleteAfterSync = true)
 
         val unchanged = MediaSyncStatusContract.applySettingsRequest(
             current,
@@ -102,10 +102,32 @@ class MediaSyncStatusContractTest {
     }
 
     @Test
-    fun `defaults are auto sync on and delete off`() {
+    fun `defaults are charge-anchored sync and delete off`() {
         val defaults = MediaSyncSettings()
 
-        assertTrue(defaults.autoSyncOnCharge)
+        assertEquals(MediaSyncMode.CHARGING, defaults.mode)
         assertFalse(defaults.deleteAfterSync)
+    }
+
+    @Test
+    fun `every sync mode survives the wire`() {
+        MediaSyncMode.entries.forEach { mode ->
+            val decoded = MediaSyncStatusContract.decode(
+                MediaSyncStatusContract.encode(MediaSyncStatus(settings = MediaSyncSettings(mode = mode))),
+            )
+            assertEquals(mode, decoded?.settings?.mode)
+        }
+    }
+
+    @Test
+    fun `an unknown sync mode is refused rather than guessed`() {
+        assertNull(
+            MediaSyncStatusContract.applySettingsRequest(
+                MediaSyncSettings(),
+                JSONObject()
+                    .put("version", MediaSyncStatusContract.VERSION)
+                    .put("syncMode", "whenever"),
+            ),
+        )
     }
 }

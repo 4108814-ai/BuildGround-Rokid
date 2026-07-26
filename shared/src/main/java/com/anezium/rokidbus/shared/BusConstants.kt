@@ -48,9 +48,27 @@ object BusPaths {
     const val MEDIA_SYNC_SETTINGS = "/mediasync/settings"
     const val MEDIA_SYNC_NOW = "/mediasync/now"
     const val MEDIA_SYNC_CONFIG = "/mediasync/config"
+    const val MEDIA_SYNC_CONFIG_REQUEST = "/mediasync/config/request"
     const val MEDIA_SYNC_TRIGGER = "/mediasync/trigger"
-    const val MEDIA_SYNC_LINK_OFFER = "/mediasync/link/offer"
     const val MEDIA_SYNC_STATE = "/mediasync/state"
+
+    /** Data plane. Chunks ride here as binary envelopes over SPP; see MediaSyncTransferContract. */
+    const val MEDIA_SYNC_XFER_PREFIX = "/mediasync/xfer"
+    const val MEDIA_SYNC_XFER_CATALOG_REQUEST = "/mediasync/xfer/catalog/request"
+    const val MEDIA_SYNC_XFER_CATALOG = "/mediasync/xfer/catalog"
+    const val MEDIA_SYNC_XFER_FILE_REQUEST = "/mediasync/xfer/file/request"
+    const val MEDIA_SYNC_XFER_FILE_BEGIN = "/mediasync/xfer/file/begin"
+    const val MEDIA_SYNC_XFER_FILE_CHUNK = "/mediasync/xfer/file/chunk"
+    const val MEDIA_SYNC_XFER_FILE_END = "/mediasync/xfer/file/end"
+    const val MEDIA_SYNC_XFER_FILE_ACK = "/mediasync/xfer/file/ack"
+    const val MEDIA_SYNC_XFER_FILE_ERROR = "/mediasync/xfer/file/error"
+    const val MEDIA_SYNC_XFER_DELETE_RESULT = "/mediasync/xfer/delete"
+    const val MEDIA_SYNC_XFER_ABORT = "/mediasync/xfer/abort"
+    const val MEDIA_SYNC_XFER_BYE = "/mediasync/xfer/bye"
+
+    /** Our own bulk traffic, which the politeness layer must not mistake for somebody else's. */
+    fun isMediaSyncTransferPath(path: String): Boolean =
+        path == MEDIA_SYNC_XFER_PREFIX || path.startsWith("$MEDIA_SYNC_XFER_PREFIX/")
     const val GLASSES_WIFI_REQUEST = "/glasses/wifi/request"
     const val GLASSES_SELFARM_MANUAL = "/glasses/selfarm/manual"
     const val GLASSES_SELFARM_MANUAL_REPLY = "/glasses/selfarm/manual/reply"
