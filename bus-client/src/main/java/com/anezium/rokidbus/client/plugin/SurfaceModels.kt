@@ -7,6 +7,8 @@ import com.anezium.rokidbus.shared.MediaArtworkContract
 import com.anezium.rokidbus.shared.PinSurfaceContent
 import com.anezium.rokidbus.shared.PinSurfaceContract
 import com.anezium.rokidbus.shared.PinSurfaceEmphasis
+import com.anezium.rokidbus.shared.NoticeCloseReason
+import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import com.anezium.rokidbus.shared.PinSurfaceLine
 import com.anezium.rokidbus.shared.PinSurfacePosition
 import com.anezium.rokidbus.shared.PinSurfaceSize
@@ -523,3 +525,90 @@ private const val MAX_TIMED_LINES = 2_000
 private const val MAX_CONTENT_KEY_CHARS = 128
 private const val MAX_ARTWORK_DIMENSION = 192
 private const val MAX_SURFACE_PAYLOAD_BYTES = 64 * 1024
+
+/** Why a notice stopped being visible, as delivered to the plugin that raised it. */
+enum class NexusNoticeCloseReason(internal val contract: NoticeCloseReason) {
+    /** The wearer pressed back. */
+    USER(NoticeCloseReason.USER),
+
+    /** Its own deadline, or the sixty-second ceiling every notice has. */
+    TIMEOUT(NoticeCloseReason.TIMEOUT),
+
+    /** This plugin called hideNotice. */
+    OWNER(NoticeCloseReason.OWNER),
+
+    /** Another plugin took the band. */
+    REPLACED(NoticeCloseReason.REPLACED),
+
+    /** The plugin lost its grant or its connection. Best-effort. */
+    DISCONNECT(NoticeCloseReason.DISCONNECT),
+    ;
+
+    internal companion object {
+        fun fromWire(value: String): NexusNoticeCloseReason? =
+            NoticeCloseReason.fromWireValue(value)?.let { reason ->
+                entries.firstOrNull { it.contract == reason }
+            }
+    }
+}
+
+/**
+ * A transient band across the top of the wearer's view.
+ *
+ * Use it for a single real-world event that has just happened and may deserve
+ * one gesture of reply. Anything the wearer follows over minutes is not a
+ * notice, and anything static that should simply stay put is a pin.
+ *
+ * [title] is capped at 32 trimmed characters, [body] at 240, [footer] at 40, and
+ * at least one of title or body must survive trimming. Newlines in the body
+ * collapse to spaces; the renderer wraps it. [ttlMs] is clamped to 2-20 seconds
+ * and restarts on every accepted update, but no notice outlives sixty seconds
+ * from the first show.
+ */
+data class NexusNotice(
+    val title: String? = null,
+    val body: String? = null,
+    val footer: String? = null,
+    val interactive: Boolean = false,
+    val ttlMs: Long? = null,
+) {
+    init {
+        require(title == null || title.trim().length <= NoticeSurfaceContract.MAX_TITLE_CHARS)
+        require(body == null || body.trim().length <= NoticeSurfaceContract.MAX_BODY_CHARS)
+        require(footer == null || footer.trim().length <= NoticeSurfaceContract.MAX_FOOTER_CHARS)
+        require(!title?.trim().isNullOrEmpty() || !body?.trim().isNullOrEmpty())
+    }
+
+    internal fun toPayload(): JSONObject = JSONObject()
+        .put("surfaceId", NoticeSurfaceContract.LOCAL_SURFACE_ID)
+        .put("kind", NoticeSurfaceContract.KIND)
+        .apply {
+            title?.trim()?.takeIf { it.isNotEmpty() }?.let { put("title", it) }
+            body?.trim()?.takeIf { it.isNotEmpty() }?.let { put("body", it) }
+            footer?.trim()?.takeIf { it.isNotEmpty() }?.let { put("footer", it) }
+            if (interactive) put("interactive", true)
+            ttlMs?.let { put("ttlMs", it) }
+        }
+}
+
+/**
+ * A change to the visible notice. Only the fields you set are sent, and only
+ * those are replaced: leaving one out keeps whatever is on screen, while
+ * passing an empty string clears it. An update cannot leave the band with no
+ * text at all.
+ */
+data class NexusNoticeUpdate(
+    val title: String? = null,
+    val body: String? = null,
+    val footer: String? = null,
+    val ttlMs: Long? = null,
+) {
+    internal fun toPayload(): JSONObject = JSONObject()
+        .put("surfaceId", NoticeSurfaceContract.LOCAL_SURFACE_ID)
+        .apply {
+            title?.let { put("title", it.trim()) }
+            body?.let { put("body", it.trim()) }
+            footer?.let { put("footer", it.trim()) }
+            ttlMs?.let { put("ttlMs", it) }
+        }
+}

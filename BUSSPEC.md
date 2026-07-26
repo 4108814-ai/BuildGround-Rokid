@@ -412,6 +412,116 @@ Surface input payload:
 The back key hides the surface locally on glasses and is still reported to the phone
 as `/surface/input` so the active plugin can close its own state.
 
+## Notice protocol v1
+
+A notice is a transient band across the top of the wearer's view: one
+real-world event, briefly, and then gone. It is the third HUD kind alongside
+pins and surfaces, and the boundaries between them are the point.
+
+- **pin** — ambient and persistent, no input. A fact that stays put.
+- **notice** — transient, top band, arrives and resolves on its own.
+- **surface** — engaged. The wearer is looking at it and driving it.
+
+Anything the wearer follows over minutes is neither: that is an activity
+(plan 012).
+
+Notices reuse the `surfaces` grant; there is no notice capability and the
+plugin API version remains 3. Glasses announce support with feature bit 64
+(`NOTICE_SURFACE`) and `noticeSurfaceVersion`.
+
+### Paths
+
+Phone to glasses:
+
+- `/notice/show` — shows or replaces the band. Full state every time.
+- `/notice/update` — refreshes the visible band. Fields present replace their
+  value; fields absent keep it; a field sent empty clears it. Honored only for
+  the plugin that owns the slot and only while a band is actually visible,
+  otherwise ignored with a log rather than an error — an update racing a
+  deadline that fired a frame earlier is ordinary.
+- `/notice/hide` — clears it. Owner only.
+
+Glasses to phone to plugin:
+
+- `/notice/closed` — `{noticeId, reason}` with `reason` in
+  `user | timeout | owner | replaced | disconnect`. Delivered exactly once per
+  notice, including when the owner hid it itself. Not delivered when the owner
+  is what disappeared.
+
+Notice traffic coming back is **owner-scoped**: the hub delivers it only to the
+plugin named by `pluginId` in the payload, so nothing else subscribed to the
+path learns that this plugin had a banner dismissed.
+
+The plugin sends local `surfaceId` `notice`; the phone hub injects
+`ownerPluginId` and rewrites the id to `<pluginId>:notice`, exactly as it does
+for pins.
+
+### Payload
+
+```json
+{
+  "surfaceId": "relay:notice",
+  "ownerPluginId": "relay",
+  "seq": 12,
+  "kind": "notice",
+  "title": "Marie",
+  "body": "On my way, ten minutes out.",
+  "footer": "tap to reply · back to dismiss",
+  "interactive": true,
+  "ttlMs": 8000
+}
+```
+
+- `title` optional, 32 chars after trim. `body` optional, 240. `footer`
+  optional, 40. At least one of title or body must survive trimming.
+- Newlines in the body collapse to spaces. The renderer wraps; a plugin does
+  not lay the band out by hand.
+- `interactive` optional, default false.
+- `ttlMs` optional, default 8000, clamped to `[2000, 20000]`. Every accepted
+  show or update restarts it.
+
+### Two limits that are not the TTL
+
+**An absolute lifetime of 60 s** from the first accepted show, enforced by the
+phone hub. Because every update restarts the TTL — which is what keeps a band
+alive while someone dictates into it — a plugin could otherwise hold a banner
+in the wearer's eye forever by updating it.
+
+**Five accepted messages per second per plugin**, shared between show and
+update so the budget cannot be dodged by alternating. Sized so a transcript can
+refresh a body a few times a second without any plugin driving the renderer.
+
+### Errors
+
+- `INVALID_NOTICE` — shape, id, cap, or enum validation failed.
+- `NOTICE_RATE_LIMITED` — over the per-second budget.
+- `CAPABILITY_NOT_AVAILABLE` — notice v1 was not announced, or the glasses
+  cannot be reached.
+
+That last one is a real difference from pins. **A notice is never held for a
+link that is down.** A pin is a standing fact and is worth delivering late; a
+notice is a moment, and one delivered thirty seconds after the event is a lie
+about the present. The plugin is told and decides for itself.
+
+### Rendering
+
+Geometry is platform-owned; a plugin sends text and nothing else. Top band,
+80% of screen width, pure black with the hairline border — the additive optics
+emit nothing for black, so the fill reads as transparent and only the border
+and text light up. The band grows with its body to 40% of screen height and
+then ellipsizes.
+
+The band arrives and leaves through the shared motion layer (plan 013) rather
+than blinking into place.
+
+The window is never focusable and never touchable, and it never keeps the
+screen on or wakes the display. A notice that arrives on a dark screen is
+missed; that is correct for v1 and matches the pin rule.
+
+BACK always dismisses, platform-side, and is never forwarded to the plugin.
+There is no `handlesBack` for notices and there never will be: a plugin must
+not be able to hold the wearer inside a banner.
+
 ## Camera contract
 
 The generic camera contract is available only to an installed plugin whose exact

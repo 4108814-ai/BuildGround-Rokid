@@ -6,6 +6,8 @@ import com.anezium.rokidbus.client.PluginRegistrationResult
 import com.anezium.rokidbus.shared.BusCapabilityBits
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.LinkStateBits
+import com.anezium.rokidbus.shared.NoticeSurfaceContract
+import com.anezium.rokidbus.shared.NoticeSurfaceValidationResult
 import com.anezium.rokidbus.shared.PinSurfaceContract
 import com.anezium.rokidbus.shared.PinSurfaceValidationResult
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
@@ -74,6 +76,52 @@ class NexusPluginClient internal constructor(
                 BusPaths.PIN_HIDE,
                 UUID.randomUUID().toString(),
                 JSONObject().put("surfaceId", PinSurfaceContract.LOCAL_SURFACE_ID),
+            )
+        ) {
+            NexusSdkResult.SENT
+        } else {
+            NexusSdkResult.NOT_REGISTERED
+        }
+    }
+
+    /**
+     * Whether these glasses can show a notice, and whether they can be reached
+     * right now. Unlike a pin this does take the link into account: a notice is
+     * a moment, so the hub never holds one for glasses that are asleep.
+     */
+    val supportsNoticeSurface: Boolean
+        get() = currentLinkState and LinkStateBits.SPP_DATA_UP != 0 &&
+            hubCapabilities and BusCapabilityBits.NOTICE_SURFACE != 0
+
+    fun showNotice(notice: NexusNotice): NexusSdkResult {
+        noticePreflight()?.let { return it }
+        val payload = notice.toPayload()
+        if (NoticeSurfaceContract.validateShow(payload) !is NoticeSurfaceValidationResult.Valid) {
+            return NexusSdkResult.INVALID_PAYLOAD
+        }
+        return if (send(BusPaths.NOTICE_SHOW, UUID.randomUUID().toString(), payload)) {
+            NexusSdkResult.SENT
+        } else {
+            NexusSdkResult.NOT_REGISTERED
+        }
+    }
+
+    fun updateNotice(update: NexusNoticeUpdate): NexusSdkResult {
+        noticePreflight()?.let { return it }
+        return if (send(BusPaths.NOTICE_UPDATE, UUID.randomUUID().toString(), update.toPayload())) {
+            NexusSdkResult.SENT
+        } else {
+            NexusSdkResult.NOT_REGISTERED
+        }
+    }
+
+    fun hideNotice(): NexusSdkResult {
+        noticePreflight()?.let { return it }
+        return if (
+            send(
+                BusPaths.NOTICE_HIDE,
+                UUID.randomUUID().toString(),
+                JSONObject().put("surfaceId", NoticeSurfaceContract.LOCAL_SURFACE_ID),
             )
         ) {
             NexusSdkResult.SENT
@@ -241,6 +289,11 @@ class NexusPluginClient internal constructor(
         if (closed || payload.optString("pluginId") != pluginId || !rememberEvent(id)) return
         if (routeSpeechMessage(path, payload)) return
         if (routeAudioMessage(path, payload)) return
+        if (path == BusPaths.NOTICE_CLOSED) {
+            NexusNoticeCloseReason.fromWire(payload.optString("reason"))
+                ?.let(callbacks::onNoticeClosed)
+            return
+        }
         when (path) {
             // A duplicate PLUGIN_OPEN (fresh event id) is the hub asking an already-open
             // plugin to re-present itself — e.g. the glasses fell back to the launcher
@@ -395,6 +448,13 @@ class NexusPluginClient internal constructor(
             seenEventIdSet.remove(seenEventIds.removeFirst())
         }
         return true
+    }
+
+    private fun noticePreflight(): NexusSdkResult? = when {
+        !isApproved -> NexusSdkResult.NOT_REGISTERED
+        !hasCapability(PluginCapability.SURFACES) -> NexusSdkResult.CAPABILITY_NOT_GRANTED
+        !supportsNoticeSurface -> NexusSdkResult.CAPABILITY_NOT_AVAILABLE
+        else -> null
     }
 
     private fun pinPreflight(): NexusSdkResult? = when {

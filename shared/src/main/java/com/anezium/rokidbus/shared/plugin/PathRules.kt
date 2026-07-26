@@ -42,6 +42,19 @@ object PathRules {
     fun isPluginPrivate(path: String, pluginId: String): Boolean =
         matchesPrefix(path, "/plugin/$pluginId")
 
+    /**
+     * Paths delivered only to the plugin named by `pluginId` in the payload,
+     * never to everything that happens to subscribe to the prefix.
+     *
+     * Notice traffic coming back from the glasses belongs here: which plugin's
+     * banner the wearer dismissed, and what they pressed on it, is that
+     * plugin's business and nobody else's.
+     */
+    fun isOwnerScoped(path: String): Boolean = when (normalizeAbsolute(path)) {
+        BusPaths.NOTICE_CLOSED, BusPaths.NOTICE_INPUT -> true
+        else -> matchesPrefix(path, "/system/plugin")
+    }
+
     fun requiredCapability(path: String): PluginCapability? = when (normalizeAbsolute(path)) {
         "/surface/show", "/surface/update", "/surface/hide",
         BusPaths.PIN_SHOW, BusPaths.PIN_HIDE,

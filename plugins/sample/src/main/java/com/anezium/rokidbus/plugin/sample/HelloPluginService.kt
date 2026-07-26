@@ -3,6 +3,7 @@ package com.anezium.rokidbus.plugin.sample
 import android.view.KeyEvent
 import com.anezium.rokidbus.client.plugin.NexusCard
 import com.anezium.rokidbus.client.plugin.NexusImage
+import com.anezium.rokidbus.client.plugin.NexusNotice
 import com.anezium.rokidbus.client.plugin.NexusPin
 import com.anezium.rokidbus.client.plugin.NexusPinEmphasis
 import com.anezium.rokidbus.client.plugin.NexusPinLine
@@ -103,7 +104,7 @@ class HelloPluginService : NexusPluginService() {
             KeyEvent.KEYCODE_ENTER,
             -> {
                 when (state.activate()) {
-                    HelloPluginAction.RENDER -> cycleDemoPin()
+                    HelloPluginAction.RENDER -> cycleDemoHud()
                     HelloPluginAction.START_SPEECH -> startSpeech()
                     HelloPluginAction.STOP_SPEECH -> {
                         stopSpeechWhenStarted = true
@@ -182,14 +183,22 @@ class HelloPluginService : NexusPluginService() {
         if (show) surface?.showCard(card) else surface?.updateCard(card)
     }
 
-    /** Cycles the demo pin through its two size tiers before hiding it again. */
-    private fun cycleDemoPin() {
+    /**
+     * Walks the ambient HUD tiers: both pin sizes, then a notice, then nothing.
+     * The notice needs no hide step of its own -- it expires on its own deadline,
+     * which is the difference between the two tiers in one gesture.
+     */
+    private fun cycleDemoHud() {
         val client = nexusClient ?: return
-        val next = (pinStep + 1) % 3
+        val next = (pinStep + 1) % 4
         val sent = when (next) {
             PIN_SMALL -> client.showPin(SMALL_PIN)
             PIN_MEDIUM -> client.showPin(MEDIUM_PIN)
-            else -> client.hidePin()
+            DEMO_NOTICE -> {
+                client.hidePin()
+                client.showNotice(DEMO_NOTICE_BAND)
+            }
+            else -> NexusSdkResult.SENT
         } == NexusSdkResult.SENT
         if (sent) pinStep = next
     }
@@ -199,6 +208,19 @@ class HelloPluginService : NexusPluginService() {
         const val PIN_HIDDEN = 0
         const val PIN_SMALL = 1
         const val PIN_MEDIUM = 2
+        const val DEMO_NOTICE = 3
+
+        /**
+         * Interactive is left false: claiming input is the next slice, and a
+         * reference that promises a tap it cannot answer would be worse than one
+         * that says nothing.
+         */
+        val DEMO_NOTICE_BAND = NexusNotice(
+            title = "Nexus notice",
+            body = "A band that arrives, says one thing, and leaves on its own deadline.",
+            footer = "back to dismiss",
+            ttlMs = 6_000L,
+        )
 
         /** No `ttlMs` of its own, so it takes the hub's 30-minute default. */
         val SMALL_PIN = NexusPin(

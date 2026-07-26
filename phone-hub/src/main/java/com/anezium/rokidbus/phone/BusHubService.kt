@@ -41,6 +41,9 @@ import com.anezium.rokidbus.shared.ImageSurfaceValidationResult
 import com.anezium.rokidbus.shared.LinkStateBits
 import com.anezium.rokidbus.shared.MediaArtworkContract
 import com.anezium.rokidbus.shared.PhoneHubCapabilities
+import com.anezium.rokidbus.shared.NoticeCloseReason
+import com.anezium.rokidbus.shared.NoticeSurfaceContract
+import com.anezium.rokidbus.shared.NoticeSurfaceValidationResult
 import com.anezium.rokidbus.shared.PhoneHubCapabilitiesContract
 import com.anezium.rokidbus.shared.PinSurfaceContract
 import com.anezium.rokidbus.shared.PinSurfaceValidationResult
@@ -176,6 +179,9 @@ class BusHubService : Service() {
     private val pinHandler = Handler(Looper.getMainLooper())
     private val phonePinState = PhonePinState(nowMs = { SystemClock.elapsedRealtime() })
     private val pinExpiryTick = Runnable(::expireCanonicalPin)
+    private val noticeHandler = Handler(Looper.getMainLooper())
+    private val noticeExpiryTick = Runnable(::expireCanonicalNotice)
+    private val phoneNoticeState = PhoneNoticeState(nowMs = { SystemClock.elapsedRealtime() })
     private val updateCheckHandler = Handler(Looper.getMainLooper())
     @Volatile private var updateCheckLoopStopped = true
     private val updateCheckTick = object : Runnable {
@@ -716,6 +722,7 @@ class BusHubService : Service() {
     override fun onDestroy() {
         stopPeriodicUpdateChecks()
         pinHandler.removeCallbacks(pinExpiryTick)
+        noticeHandler.removeCallbacks(noticeExpiryTick)
         sppLoopStop = true
         if (::speechSessionManager.isInitialized) speechSessionManager.close()
         stopAudioLease(InternalAudioStopReason.HUB_STOPPED)
@@ -794,6 +801,25 @@ class BusHubService : Service() {
                 return
             }
         }
+        if (isNoticePath(envelope.path)) {
+            val invalidNotice = envelope.binary != null ||
+                envelope.payload.optString("surfaceId") != NoticeSurfaceContract.LOCAL_SURFACE_ID ||
+                (
+                    envelope.path == BusPaths.NOTICE_SHOW &&
+                        NoticeSurfaceContract.validateShow(envelope.payload) !is NoticeSurfaceValidationResult.Valid
+                    )
+            if (invalidNotice) {
+                recordLocalRoute(
+                    envelope,
+                    senderUid,
+                    sender,
+                    PluginBusJournal.Verdict.REJECTED,
+                    NoticeSurfaceContract.ERROR_INVALID_NOTICE,
+                )
+                deliverError(sender.replyBinder, envelope.id, NoticeSurfaceContract.ERROR_INVALID_NOTICE)
+                return
+            }
+        }
         val ownedEnvelope = if (
             sender.principal != null &&
             PathRules.requiredCapability(envelope.path) == PluginCapability.SURFACES
@@ -804,6 +830,8 @@ class BusHubService : Service() {
                     envelope.path == BusPaths.PIN_SHOW || envelope.path == BusPaths.PIN_HIDE
                 ) {
                     PinSurfaceContract.ERROR_INVALID_PIN
+                } else if (isNoticePath(envelope.path)) {
+                    NoticeSurfaceContract.ERROR_INVALID_NOTICE
                 } else {
                     "INVALID_SURFACE_ID"
                 }
@@ -825,6 +853,10 @@ class BusHubService : Service() {
         }
         if (ownedEnvelope.path == BusPaths.PIN_SHOW || ownedEnvelope.path == BusPaths.PIN_HIDE) {
             handleLocalPin(ownedEnvelope, senderUid, sender)
+            return
+        }
+        if (isNoticePath(ownedEnvelope.path)) {
+            handleLocalNotice(ownedEnvelope, senderUid, sender)
             return
         }
         if (
@@ -942,6 +974,11 @@ class BusHubService : Service() {
         if (::pluginRegistry.isInitialized && pluginRegistry.handleRemote(envelope)) return
         if (handleHubPath(envelope, replyRemote = true)) {
             recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
+            return
+        }
+        if (envelope.path == BusPaths.NOTICE_CLOSED) {
+            recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
+            handleGlassesNoticeClosed(envelope)
             return
         }
         if (deliverLocal(envelope)) {
@@ -1118,12 +1155,178 @@ class BusHubService : Service() {
     private fun journalCategory(path: String, hasBinary: Boolean): PluginBusJournal.Category = when (path) {
         BusPaths.SURFACE_SHOW, BusPaths.SURFACE_UPDATE, BusPaths.SURFACE_HIDE,
         BusPaths.PIN_SHOW, BusPaths.PIN_HIDE,
+        BusPaths.NOTICE_SHOW, BusPaths.NOTICE_UPDATE, BusPaths.NOTICE_HIDE,
         -> PluginBusJournal.Category.SURFACE
-        BusPaths.SURFACE_INPUT, BusPaths.PLUGIN_INPUT -> PluginBusJournal.Category.INPUT
+        BusPaths.SURFACE_INPUT, BusPaths.PLUGIN_INPUT,
+        BusPaths.NOTICE_INPUT, BusPaths.NOTICE_CLOSED,
+        -> PluginBusJournal.Category.INPUT
         BusPaths.PLUGIN_OPEN, BusPaths.PLUGIN_CLOSE -> PluginBusJournal.Category.LIFECYCLE
         BusPaths.PLUGIN_REGISTRATION -> PluginBusJournal.Category.REGISTRATION
         BusPaths.LAUNCHER_LIST, BusPaths.LAUNCHER_OPEN -> PluginBusJournal.Category.LAUNCHER
         else -> if (hasBinary) PluginBusJournal.Category.BINARY else PluginBusJournal.Category.TRANSPORT
+    }
+
+    private fun isNoticePath(path: String): Boolean =
+        path == BusPaths.NOTICE_SHOW ||
+            path == BusPaths.NOTICE_UPDATE ||
+            path == BusPaths.NOTICE_HIDE
+
+    private fun handleLocalNotice(
+        envelope: BusEnvelope,
+        senderUid: Int,
+        sender: AuthorizedSender,
+    ) {
+        val principal = sender.principal
+        if (principal == null || envelope.binary != null) {
+            rejectNotice(envelope, senderUid, sender, NoticeSurfaceContract.ERROR_INVALID_NOTICE)
+            return
+        }
+        if (capabilities() and BusCapabilityBits.NOTICE_SURFACE == 0) {
+            rejectNotice(envelope, senderUid, sender, NoticeSurfaceContract.ERROR_CAPABILITY_NOT_AVAILABLE)
+            return
+        }
+        // Unlike a pin, nothing here is worth holding for glasses that cannot be
+        // reached: a banner delivered after the moment has passed is worse than
+        // no banner. The plugin is told and decides for itself.
+        if (!pinLinkUp()) {
+            rejectNotice(envelope, senderUid, sender, NoticeSurfaceContract.ERROR_CAPABILITY_NOT_AVAILABLE)
+            return
+        }
+
+        val pluginId = principal.descriptor.id
+        when (envelope.path) {
+            BusPaths.NOTICE_SHOW ->
+                when (val result = phoneNoticeState.show(pluginId, envelope.payload)) {
+                    is PhoneNoticeShowResult.Rejected ->
+                        rejectNotice(envelope, senderUid, sender, result.code)
+                    is PhoneNoticeShowResult.Accepted -> {
+                        result.replacedOwnerPluginId?.let { previous ->
+                            log("notice replaced owner=$previous by=$pluginId")
+                            deliverNoticeClosed(previous, NoticeCloseReason.REPLACED)
+                        }
+                        scheduleNoticeExpiry()
+                        forwardNotice(envelope, result.notice.payload, senderUid, sender)
+                    }
+                }
+            BusPaths.NOTICE_UPDATE ->
+                when (val result = phoneNoticeState.update(pluginId, envelope.payload)) {
+                    PhoneNoticeUpdateResult.Ignored -> recordLocalRoute(
+                        envelope,
+                        senderUid,
+                        sender,
+                        PluginBusJournal.Verdict.OK,
+                        "NOTICE_UPDATE_IGNORED",
+                    )
+                    is PhoneNoticeUpdateResult.Rejected ->
+                        rejectNotice(envelope, senderUid, sender, result.code)
+                    is PhoneNoticeUpdateResult.Accepted -> {
+                        scheduleNoticeExpiry()
+                        forwardNotice(envelope, result.notice.payload, senderUid, sender)
+                    }
+                }
+            BusPaths.NOTICE_HIDE ->
+                when (val result = phoneNoticeState.hide(pluginId)) {
+                    PhoneNoticeClearResult.Ignored -> recordLocalRoute(
+                        envelope,
+                        senderUid,
+                        sender,
+                        PluginBusJournal.Verdict.OK,
+                        "NOTICE_HIDE_IGNORED_NOT_OWNER",
+                    )
+                    is PhoneNoticeClearResult.Cleared -> {
+                        noticeHandler.removeCallbacks(noticeExpiryTick)
+                        recordLocalRoute(envelope, senderUid, sender, PluginBusJournal.Verdict.OK)
+                        sendRemote(BusEnvelope(path = BusPaths.NOTICE_HIDE, payload = result.payload))
+                        deliverNoticeClosed(result.ownerPluginId, result.reason)
+                    }
+                }
+        }
+    }
+
+    private fun forwardNotice(
+        envelope: BusEnvelope,
+        payload: JSONObject,
+        senderUid: Int,
+        sender: AuthorizedSender,
+    ) {
+        val forwarded = envelope.copy(payload = payload)
+        recordLocalRoute(forwarded, senderUid, sender, PluginBusJournal.Verdict.OK)
+        sendRemote(forwarded)?.let { deliverError(sender.replyBinder, envelope.id, it) }
+    }
+
+    private fun rejectNotice(
+        envelope: BusEnvelope,
+        senderUid: Int,
+        sender: AuthorizedSender,
+        code: String,
+    ) {
+        recordLocalRoute(envelope, senderUid, sender, PluginBusJournal.Verdict.REJECTED, code)
+        deliverError(sender.replyBinder, envelope.id, code)
+    }
+
+    /**
+     * Tells the owner its notice is gone, and why. `pluginId` is what scopes the
+     * delivery: notice traffic is owner-scoped, so no other plugin subscribed to
+     * the path learns that this one had a banner dismissed.
+     */
+    private fun deliverNoticeClosed(pluginId: String, reason: NoticeCloseReason) {
+        val payload = NoticeSurfaceContract
+            .closedPayload("$pluginId:${NoticeSurfaceContract.LOCAL_SURFACE_ID}", reason)
+            .put("pluginId", pluginId)
+        deliverLocal(BusEnvelope(path = BusPaths.NOTICE_CLOSED, payload = payload))
+    }
+
+    private fun handleGlassesNoticeClosed(envelope: BusEnvelope) {
+        val surfaceId = envelope.payload.optString("noticeId")
+        val reason = NoticeCloseReason.fromWireValue(envelope.payload.optString("reason"))
+            ?: NoticeCloseReason.USER
+        when (val result = phoneNoticeState.closedByGlasses(surfaceId, reason)) {
+            PhoneNoticeClearResult.Ignored ->
+                log("notice close ignored id=$surfaceId reason=${reason.wireValue}")
+            is PhoneNoticeClearResult.Cleared -> {
+                noticeHandler.removeCallbacks(noticeExpiryTick)
+                log("notice closed owner=${result.ownerPluginId} reason=${reason.wireValue}")
+                deliverNoticeClosed(result.ownerPluginId, result.reason)
+            }
+        }
+    }
+
+    private fun scheduleNoticeExpiry() {
+        noticeHandler.removeCallbacks(noticeExpiryTick)
+        val deadline = phoneNoticeState.expiryDeadlineMs() ?: return
+        noticeHandler.postDelayed(
+            noticeExpiryTick,
+            (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0L),
+        )
+    }
+
+    private fun expireCanonicalNotice() {
+        when (val result = phoneNoticeState.expireIfDue()) {
+            PhoneNoticeClearResult.Ignored -> scheduleNoticeExpiry()
+            is PhoneNoticeClearResult.Cleared -> {
+                noticeHandler.removeCallbacks(noticeExpiryTick)
+                log("notice expired owner=${result.ownerPluginId}")
+                if (pinLinkUp()) {
+                    sendRemote(BusEnvelope(path = BusPaths.NOTICE_HIDE, payload = result.payload))
+                }
+                deliverNoticeClosed(result.ownerPluginId, result.reason)
+            }
+        }
+    }
+
+    /**
+     * The owner lost the right to hold a notice. Nothing is delivered back: the
+     * plugin is normally being uninstalled or revoked, and there is no one left
+     * to tell.
+     */
+    private fun clearNoticeForRevokedOwner(pluginId: String, reason: String) {
+        val result = phoneNoticeState.ownerLostAccess(pluginId)
+        if (result !is PhoneNoticeClearResult.Cleared) return
+        noticeHandler.removeCallbacks(noticeExpiryTick)
+        log("notice cleared owner=$pluginId reason=$reason")
+        if (pinLinkUp()) {
+            sendRemote(BusEnvelope(path = BusPaths.NOTICE_HIDE, payload = result.payload))
+        }
     }
 
     private fun handleLocalPin(
@@ -1371,7 +1574,7 @@ class BusHubService : Service() {
         if (registration.prefixes.none { PathRules.matchesPrefix(envelope.path, it) }) return false
         val principal = registration.principal ?: return true
         if (PathRules.isPluginPrivate(envelope.path, principal.descriptor.id)) return true
-        if (PathRules.matchesPrefix(envelope.path, "/system/plugin")) {
+        if (PathRules.isOwnerScoped(envelope.path)) {
             return envelope.payload.optString("pluginId") == principal.descriptor.id
         }
         return true
@@ -1557,6 +1760,7 @@ class BusHubService : Service() {
         if (::cameraCompanionController.isInitialized) cameraCompanionController.onRevoked(key)
         if (::externalPluginController.isInitialized) externalPluginController.onRevoked(key)
         clearPinForRevokedOwner(key.pluginId, "authorizationChanged")
+        clearNoticeForRevokedOwner(key.pluginId, "authorizationChanged")
         registrations.filter { it.principal?.grantKey() == key }.forEach { registration ->
             removeRegistration(registration, "authorizationChanged")
         }
@@ -1610,6 +1814,7 @@ class BusHubService : Service() {
                     pluginGrantStore.stateFor(principal) is PluginGrantState.Approved
             }
             if (!stillGranted) clearPinForRevokedOwner(owner, "ownerUnavailable")
+            if (!stillGranted) clearNoticeForRevokedOwner(owner, "ownerUnavailable")
         }
         val available = validPrincipals.any { principal ->
             principal.packageName == packageName &&
