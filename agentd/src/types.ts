@@ -66,3 +66,13 @@ export interface TranscriptUpdate {
   lastTool?: string;
   error?: string;
 }
+
+export type MessageRole = "user" | "assistant" | "tool";
+
+/** One conversation entry, trimmed to what a HUD can usefully show. */
+export interface SessionMessage {
+  role: MessageRole;
+  text: string;
+  at: number;
+  tool?: string;
+}

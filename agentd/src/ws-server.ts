@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import WebSocket, { WebSocketServer, type RawData } from "ws";
 import { SessionStore } from "./session-store";
-import type { AgentConfig, Logger, Session } from "./types";
+import type { AgentConfig, Logger, Session, SessionMessage } from "./types";
 
 const PROTOCOL_VERSION = 1;
 const SERVER_VERSION = (() => {
@@ -22,6 +22,8 @@ interface ClientState {
   lastPongAt: number;
   helloTimer: NodeJS.Timeout;
   pongTimer?: NodeJS.Timeout;
+  /** Session whose conversation this client is currently reading, if any. */
+  openSessionId?: string;
 }
 
 export interface WsHubOptions {
@@ -29,7 +31,13 @@ export interface WsHubOptions {
   helloTimeoutMs?: number;
   keepaliveIntervalMs?: number;
   pongTimeoutMs?: number;
+  /** Supplies the recent conversation of a session for the detail view. */
+  detailProvider?: (sessionId: string, limit: number) => Promise<SessionMessage[]>;
+  /** Called when a client starts reading a session, so tailing can begin. */
+  onDetailOpen?: (sessionId: string) => void;
 }
+
+const DETAIL_MESSAGE_LIMIT = 40;
 
 function tokenMatches(received: unknown, expected: string): boolean {
   if (typeof received !== "string") {
@@ -215,11 +223,49 @@ export class WsHub {
         state.lastPongAt = Date.now();
         this.armPongDeadline(socket, state);
         break;
+      case "detail_open": {
+        const sessionId = typeof message.sessionId === "string" ? message.sessionId : undefined;
+        if (!sessionId) {
+          break;
+        }
+        state.openSessionId = sessionId;
+        this.options.onDetailOpen?.(sessionId);
+        void this.sendDetail(socket, sessionId);
+        break;
+      }
+      case "detail_close":
+        state.openSessionId = undefined;
+        break;
       default:
         this.logger.info("ws_unknown_message", {
           type: typeof message.type === "string" ? message.type.slice(0, 80) : "missing",
         });
         break;
+    }
+  }
+
+  private async sendDetail(socket: WebSocket, sessionId: string): Promise<void> {
+    const provider = this.options.detailProvider;
+    const messages = provider ? await provider(sessionId, DETAIL_MESSAGE_LIMIT) : [];
+    const state = this.clients.get(socket);
+    // The wearer may have left the conversation while the tail was being read.
+    if (!state?.authenticated || state.openSessionId !== sessionId) {
+      return;
+    }
+    this.send(socket, {
+      type: "detail",
+      sessionId,
+      session: this.store.get(sessionId) ?? null,
+      messages,
+    });
+  }
+
+  /** Streams a newly appended message to whoever is reading that session. */
+  broadcastDetailMessage(sessionId: string, message: SessionMessage): void {
+    for (const [socket, state] of this.clients) {
+      if (state.authenticated && state.openSessionId === sessionId) {
+        this.send(socket, { type: "detail_append", sessionId, message });
+      }
     }
   }
 

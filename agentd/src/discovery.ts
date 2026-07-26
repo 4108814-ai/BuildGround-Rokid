@@ -127,6 +127,7 @@ export async function discoverRecentSessions(
         projectDir: candidate.projectDir,
         title: details.title,
         lastActivityAt: candidate.mtimeMs,
+        transcriptPath: candidate.filePath,
       });
     } catch (error) {
       logger.warn("discovery_transcript_failed", {

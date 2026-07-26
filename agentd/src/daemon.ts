@@ -6,6 +6,7 @@ import { HookHttpServer } from "./http-server";
 import { FileLogger } from "./logger";
 import { SessionStore } from "./session-store";
 import { TranscriptTailManager } from "./transcript";
+import { readRecentMessages } from "./transcript-messages";
 import type { HookPayload } from "./types";
 import { WsHub } from "./ws-server";
 
@@ -26,9 +27,11 @@ export async function startDaemon(): Promise<RunningDaemon> {
     sessions.addDiscovered(session);
   }
 
+  let wsHub: WsHub | undefined;
   const tailManager = new TranscriptTailManager(
     (sessionId, update) => sessions.applyTranscriptUpdate(sessionId, update),
     logger,
+    (sessionId, message) => wsHub?.broadcastDetailMessage(sessionId, message),
   );
   const processHook = (payload: HookPayload) => {
     sessions.handleHook(payload);
@@ -53,17 +56,31 @@ export async function startDaemon(): Promise<RunningDaemon> {
     onHook: processHook,
     logger,
   });
-  const wsHub = new WsHub(config, sessions, logger);
+  const hub = new WsHub(config, sessions, logger, {
+    detailProvider: async (sessionId, limit) => {
+      const transcriptPath = sessions.transcriptPath(sessionId);
+      return transcriptPath ? readRecentMessages(transcriptPath, limit) : [];
+    },
+    // Reading a conversation also starts tailing it, so the view stays live
+    // even for a session that had been quiet since the daemon started.
+    onDetailOpen: (sessionId) => {
+      const transcriptPath = sessions.transcriptPath(sessionId);
+      if (transcriptPath && !tailManager.isTailing(sessionId)) {
+        tailManager.start(sessionId, transcriptPath);
+      }
+    },
+  });
+  wsHub = hub;
   const heartbeatTimer = setInterval(() => sessions.sweepStalled(), 60_000);
   heartbeatTimer.unref();
 
   try {
     await httpServer.start();
-    await wsHub.start();
+    await hub.start();
   } catch (error) {
     clearInterval(heartbeatTimer);
     await httpServer.stop().catch(() => undefined);
-    await wsHub.stop().catch(() => undefined);
+    await hub.stop().catch(() => undefined);
     tailManager.stopAll();
     sessions.dispose();
     throw error;
@@ -88,7 +105,7 @@ export async function startDaemon(): Promise<RunningDaemon> {
       stopped = true;
       clearInterval(heartbeatTimer);
       tailManager.stopAll();
-      await Promise.all([httpServer.stop(), wsHub.stop()]);
+      await Promise.all([httpServer.stop(), hub.stop()]);
       sessions.dispose();
       logger.info("daemon_stopped");
     },

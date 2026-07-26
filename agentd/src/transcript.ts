@@ -1,7 +1,8 @@
 import { open, stat } from "node:fs/promises";
 import { watch, type FSWatcher } from "node:fs";
-import type { Logger, TranscriptUpdate } from "./types";
+import type { Logger, SessionMessage, TranscriptUpdate } from "./types";
 import { truncateText } from "./session-store";
+import { extractMessage } from "./transcript-messages";
 
 const READ_CHUNK_BYTES = 64 * 1024;
 
@@ -138,6 +139,8 @@ export class TranscriptLineParser {
     private readonly onUpdate: (update: TranscriptUpdate) => void,
     private readonly logger: Logger,
     private readonly now: () => number = Date.now,
+    /** Optional: receives each appended line as a displayable message. */
+    private readonly onMessage?: (message: SessionMessage) => void,
   ) {}
 
   push(chunk: Buffer): void {
@@ -151,9 +154,16 @@ export class TranscriptLineParser {
       }
       if (line.length > 0) {
         try {
-          const update = extractTranscriptUpdate(JSON.parse(line.toString("utf8")), this.now());
+          const entry: unknown = JSON.parse(line.toString("utf8"));
+          const update = extractTranscriptUpdate(entry, this.now());
           if (update) {
             this.onUpdate(update);
+          }
+          if (this.onMessage) {
+            const message = extractMessage(entry, this.now());
+            if (message) {
+              this.onMessage(message);
+            }
           }
         } catch {
           this.logger.warn("transcript_line_unparseable", { lineBytes: line.length });
@@ -171,6 +181,7 @@ export class TranscriptLineParser {
 export interface TranscriptTailerOptions {
   pollIntervalMs?: number;
   startAtEnd?: boolean;
+  onMessage?: (message: SessionMessage) => void;
 }
 
 export class TranscriptTailer {
@@ -188,7 +199,7 @@ export class TranscriptTailer {
     private readonly logger: Logger,
     private readonly options: TranscriptTailerOptions = {},
   ) {
-    this.parser = new TranscriptLineParser(onUpdate, logger);
+    this.parser = new TranscriptLineParser(onUpdate, logger, Date.now, options.onMessage);
   }
 
   async start(): Promise<void> {
@@ -317,7 +328,12 @@ export class TranscriptTailManager {
   constructor(
     private readonly onUpdate: (sessionId: string, update: TranscriptUpdate) => void,
     private readonly logger: Logger,
+    private readonly onMessage?: (sessionId: string, message: SessionMessage) => void,
   ) {}
+
+  isTailing(sessionId: string): boolean {
+    return this.tailers.has(sessionId);
+  }
 
   start(sessionId: string, filePath: string): void {
     const current = this.tailers.get(sessionId);
@@ -329,6 +345,7 @@ export class TranscriptTailManager {
       filePath,
       (update) => this.onUpdate(sessionId, update),
       this.logger,
+      { onMessage: this.onMessage ? (message) => this.onMessage?.(sessionId, message) : undefined },
     );
     this.tailers.set(sessionId, { filePath, tailer });
     void tailer.start().catch((error) => {

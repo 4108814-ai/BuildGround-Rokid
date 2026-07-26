@@ -22,6 +22,7 @@ export interface DiscoveredSession {
   projectDir: string;
   title?: string;
   lastActivityAt: number;
+  transcriptPath?: string;
 }
 
 type UpsertListener = (session: Session) => void;
@@ -116,7 +117,9 @@ export class SessionStore {
       stale: true,
       lastActivityAt: discovered.lastActivityAt,
     };
-    this.records.set(discovered.id, { session });
+    // Keep the transcript path even while stale: the wearer can open the
+    // conversation of a session that has not emitted a hook event yet.
+    this.records.set(discovered.id, { session, transcriptPath: discovered.transcriptPath });
     this.emitUpsert(session);
   }
 
