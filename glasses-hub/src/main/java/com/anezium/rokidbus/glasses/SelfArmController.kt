@@ -216,6 +216,10 @@ internal object SelfArmController {
             }.onFailure {
                 tlsSessionUnreachable = it.hasSessionUnavailableCause()
                 logError("Self-arm TLS session unavailable reason=$reason", it)
+                // A credential the daemon refuses never recovers on its own, and every later
+                // re-arm dies the same silent death. Let the bootstrapper drop it after a second
+                // refusal so setup can ask for a fresh pairing instead.
+                SelfArmLocalAdbBootstrapper.onSessionUnavailable(context, it)
             }.getOrNull()
             if (initialTlsSession != null) {
                 return runSequence(

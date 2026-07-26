@@ -142,6 +142,14 @@ internal class SelfArmLocalAdbBootstrapper(
         const val BOOTSTRAP_COMPLETE_KEY = "wireless_bootstrap_complete"
         private val CERT_LOCK = Any()
         private var kadbCertConfigured = false
+        private val certificateRejections = java.util.concurrent.atomic.AtomicInteger(0)
+        private const val CERTIFICATE_REJECTIONS_BEFORE_RESET = 2
+        private val CERTIFICATE_REJECTION_MARKERS = listOf(
+            "CERTIFICATE_VERIFY_FAILED",
+            "CERTIFICATE_UNKNOWN",
+            "SSLV3_ALERT",
+            "Failure in SSL library",
+        )
 
         fun isBootstrapComplete(context: Context): Boolean =
             context.applicationContext
@@ -254,6 +262,72 @@ internal class SelfArmLocalAdbBootstrapper(
                     shortThrowable(lastFailure),
                 lastFailure,
             )
+        }
+
+        /**
+         * True when adbd refused our certificate rather than failing to reach us.
+         *
+         * Measured on a device in this state: adbd logs `Invalid base64 key` and rejects the
+         * handshake with `CERTIFICATE_VERIFY_FAILED`, while a laptop's adb pairs and connects to
+         * the very same daemon over the very same port — so the daemon and its key store are
+         * healthy and the credential we present is not.
+         */
+        private fun isCertificateRejection(throwable: Throwable?): Boolean {
+            var cause = throwable
+            var depth = 0
+            while (cause != null && depth < 6) {
+                val message = cause.message.orEmpty()
+                if (CERTIFICATE_REJECTION_MARKERS.any { message.contains(it, ignoreCase = true) }) {
+                    return true
+                }
+                cause = cause.cause
+                depth += 1
+            }
+            return false
+        }
+
+        /**
+         * Throws away the pairing identity so the next setup can start clean.
+         *
+         * A credential adbd will not accept is worse than no credential at all: every re-arm keeps
+         * failing, silently, for the life of the install — which is exactly how a glasses unit ends
+         * up months behind on its watchdog and bridge scripts with nothing on screen to say so.
+         * Dropping it turns that into a state the wearer can act on, because the setup flow asks to
+         * pair again.
+         */
+        private fun resetPairingIdentity(context: Context, reason: String) {
+            synchronized(CERT_LOCK) {
+                val keyDirectory = File(context.applicationContext.filesDir, "kadb-tls")
+                val removed = runCatching {
+                    keyDirectory.listFiles()?.count { it.delete() } ?: 0
+                }.getOrDefault(0)
+                kadbCertConfigured = false
+                runCatching {
+                    context.applicationContext
+                        .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit()
+                        .putBoolean(BOOTSTRAP_COMPLETE_KEY, false)
+                        .commit()
+                }
+                Log.w(TAG, "pairing identity reset reason=$reason removedKeyFiles=$removed")
+            }
+        }
+
+        /**
+         * Called when a re-arm could not open its session. Two consecutive certificate rejections
+         * are enough: a transient network problem does not produce them, and waiting longer only
+         * means more days of a unit that cannot be maintained.
+         */
+        internal fun onSessionUnavailable(context: Context, throwable: Throwable?) {
+            if (!isCertificateRejection(throwable)) {
+                certificateRejections.set(0)
+                return
+            }
+            val count = certificateRejections.incrementAndGet()
+            Log.w(TAG, "paired TLS certificate rejected count=$count")
+            if (count < CERTIFICATE_REJECTIONS_BEFORE_RESET) return
+            certificateRejections.set(0)
+            resetPairingIdentity(context, "certificate_rejected")
         }
 
         private fun pidSet(value: String): Set<String> = value
