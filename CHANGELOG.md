@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.0.45
+
+### Pins
+
+- Plugins can leave a small panel pinned in a corner of your view — a plate
+  number, a gate, a door code. It stays there while you get on with things, and
+  nothing has to hold a screen open to keep it in front of you.
+- A pin outlives the plugin that put it there. A plugin woken by a notification
+  can push one and go straight back to sleep, which is the whole point: the taxi
+  that is eight minutes out should not need an app left open to tell you its
+  plate.
+- Pins pushed while the glasses are asleep on a table are no longer lost. They
+  are kept and delivered the moment the glasses come back, instead of failing
+  silently at exactly the moment a background plugin had something to say.
+- A pin that names no deadline now clears itself after thirty minutes, so a
+  plugin killed before it can tidy up cannot strand one in your view. Plugins
+  that know their own horizon still set it, from a second to a day.
+- Pins step aside while the camera is in use, and come back afterwards.
+
+### Speech without an account
+
+- Transcription now works out of the box on the phone's own speech engine: no
+  key, no account, nothing to pay. It is the default until you pick something
+  else, and whatever you pick still wins.
+- The microphone is requested where you need it, on the dictation card, instead
+  of sending you off to set something up elsewhere first.
+- The Speech screen tells the truth about the engine you chose. It no longer
+  offers to save an API key for an engine that takes none, and the language grid
+  locks itself when the engine detects the language on its own.
+
 ## 1.0.44
 
 ### Glasses that keep themselves maintained
