@@ -1,6 +1,7 @@
 package com.anezium.rokidbus.phone
 
 import android.app.Activity
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
@@ -38,6 +39,7 @@ class GlassesManualSetupActivity : Activity() {
     private lateinit var root: LinearLayout
     private lateinit var stepper: LinearLayout
     private lateinit var body: LinearLayout
+    private lateinit var scrollHost: ScrollView
 
     // Retained so a state change that arrives mid-typing doesn't wipe half-entered values: we only
     // rebuild the form when we *enter* WAITING_FOR_CODE, not on every re-emit of it.
@@ -64,6 +66,7 @@ class GlassesManualSetupActivity : Activity() {
         content.addView(body, NexusUi.block())
 
         val scroll = ScrollView(this).apply {
+            scrollHost = this
             isFillViewport = true
             isVerticalScrollBarEnabled = false
             addView(
@@ -534,11 +537,32 @@ class GlassesManualSetupActivity : Activity() {
 
     // ---- Small builders ------------------------------------------------------------------------
 
+    /**
+     * Scrolls [view] clear of the soft keyboard. The rectangle is deliberately taller than the
+     * field so the label above and the next field below stay readable while typing.
+     */
+    private fun revealAboveKeyboard(view: View) {
+        if (!::scrollHost.isInitialized) return
+        val reveal = Runnable {
+            val margin = NexusUi.dp(this, 96)
+            view.requestRectangleOnScreen(
+                Rect(0, -NexusUi.dp(this, 28), view.width, view.height + margin),
+                false,
+            )
+        }
+        scrollHost.post(reveal)
+        scrollHost.postDelayed(reveal, KEYBOARD_SETTLE_MS)
+    }
+
     private class Field(val container: LinearLayout, val edit: EditText)
 
     private fun labelledField(label: String, hint: String, numeric: Boolean): Field {
         val edit = NexusUi.field(this, hint).apply {
             if (numeric) inputType = InputType.TYPE_CLASS_NUMBER
+            // The keyboard covers exactly the three fields being copied off the glasses, and you
+            // cannot check what you typed against a code that expires. Lift the focused field
+            // above it — twice, because the window is still being resized on the first pass.
+            setOnFocusChangeListener { view, hasFocus -> if (hasFocus) revealAboveKeyboard(view) }
         }
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -606,6 +630,8 @@ class GlassesManualSetupActivity : Activity() {
     private fun dp(value: Int): Int = NexusUi.dp(this, value)
 
     private companion object {
+        /** The window is still resizing when focus lands; the second pass lands after it settles. */
+        const val KEYBOARD_SETTLE_MS = 250L
         const val STEP_COUNT = 4
         const val MAX_ENGINE_ATTACH_ATTEMPTS = 20
         const val ENGINE_ATTACH_RETRY_MS = 150L

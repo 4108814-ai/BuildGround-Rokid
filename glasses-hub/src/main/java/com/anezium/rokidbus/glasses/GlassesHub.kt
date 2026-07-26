@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
 import com.anezium.rokidbus.client.IBusCallback
@@ -67,6 +68,7 @@ object GlassesHub {
         Thread(runnable, "RokidNexusWifi").apply { isDaemon = true }
     }
     private var wifiDisableFuture: ScheduledFuture<*>? = null
+    private var manualSetupScreenLock: PowerManager.WakeLock? = null
     @Volatile private var launcherEntries: List<LauncherEntry> = emptyList()
     @Volatile private var appContext: Context? = null
     @Volatile private var cxrUp = false
@@ -428,6 +430,16 @@ object GlassesHub {
         }
         val armed = action == SelfArmManualAction.CLOSE && envelope.payload.optBoolean("armed", false)
         val context = appContext
+        // Reading a pairing code off the glasses and typing it on the phone takes longer than the
+        // screen stays on, and the display going dark dismisses the pairing dialog — which cancels
+        // the pairing the wearer was halfway through. Hold the screen for the manual flow, and give
+        // it back the moment the flow closes.
+        if (context != null) {
+            when (action) {
+                SelfArmManualAction.CLOSE -> releaseManualSetupScreen()
+                else -> holdManualSetupScreen(context)
+            }
+        }
         if (context != null && action.requiresDeveloperOptions() &&
             !SelfArmWirelessAdbController.areDeveloperOptionsUsable(context)
         ) {
@@ -629,6 +641,29 @@ object GlassesHub {
     internal fun isCameraSessionActive(): Boolean = cameraSessionTracker.isActive()
 
     /**
+     * Keeps the glasses display awake for the manual setup flow. Bounded by a timeout as well as by
+     * the closing action, so a flow abandoned halfway can never leave the screen on for good.
+     */
+    private fun holdManualSetupScreen(context: Context) {
+        if (manualSetupScreenLock?.isHeld == true) return
+        val power = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+        manualSetupScreenLock = runCatching {
+            @Suppress("DEPRECATION")
+            power.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "RokidNexus:manualSetup",
+            ).apply { acquire(MANUAL_SETUP_SCREEN_TIMEOUT_MS) }
+        }.onFailure { logError("manual setup screen hold failed", it) }.getOrNull()
+    }
+
+    private fun releaseManualSetupScreen() {
+        val lock = manualSetupScreenLock ?: return
+        manualSetupScreenLock = null
+        runCatching { if (lock.isHeld) lock.release() }
+            .onFailure { logError("manual setup screen release failed", it) }
+    }
+
+    /**
      * Releases a camera session the `:camera` process never closed — it crashed or was
      * force-stopped. Callers must have established that the process is genuinely gone; this only
      * clears the main process' belief and never reaches into `:camera`.
@@ -784,5 +819,7 @@ object GlassesHub {
     }
 
     private const val WIFI_DISABLE_GRACE_MS = 40_000L
+    /** Long enough to read a code and type it on the phone; short enough to never strand the screen. */
+    private const val MANUAL_SETUP_SCREEN_TIMEOUT_MS = 5 * 60_000L
     private const val CAMERA_LAUNCHER_ID = "camera"
 }
