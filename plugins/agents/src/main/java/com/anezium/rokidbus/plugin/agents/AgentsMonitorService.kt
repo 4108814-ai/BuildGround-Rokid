@@ -72,6 +72,10 @@ class AgentsMonitorService : Service() {
                 if (configStore.load().shouldMonitor) reconcile()
                 testOpenClaw()
             }
+            ACTION_OPEN_DETAIL -> {
+                intent.getStringExtra(EXTRA_SESSION_ID)?.let(agentdClient::openDetail)
+            }
+            ACTION_CLOSE_DETAIL -> agentdClient.closeDetail()
             else -> reconcile()
         }
         return START_STICKY
@@ -219,6 +223,11 @@ class AgentsMonitorService : Service() {
             "com.anezium.rokidbus.plugin.agents.action.TEST_AGENTD"
         const val ACTION_TEST_OPENCLAW =
             "com.anezium.rokidbus.plugin.agents.action.TEST_OPENCLAW"
+        const val ACTION_OPEN_DETAIL =
+            "com.anezium.rokidbus.plugin.agents.action.OPEN_DETAIL"
+        const val ACTION_CLOSE_DETAIL =
+            "com.anezium.rokidbus.plugin.agents.action.CLOSE_DETAIL"
+        const val EXTRA_SESSION_ID = "sessionId"
         private const val MONITOR_NOTIFICATION_ID = 3101
         private const val TEST_WINDOW_MS = 15_000L
         private const val PRUNE_INTERVAL_MS = 60_000L
@@ -233,6 +242,25 @@ class AgentsMonitorService : Service() {
                 context.stopService(intent)
                 context.stopService(Intent(context, AgentsPluginService::class.java))
             }
+        }
+
+        /** The wearer opened a conversation on the HUD: ask the daemon for it. */
+        fun openDetail(context: Context, session: AgentSession) {
+            if (session.provider != AgentProvider.CLAUDE) return
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, AgentsMonitorService::class.java)
+                    .setAction(ACTION_OPEN_DETAIL)
+                    .putExtra(EXTRA_SESSION_ID, session.id),
+            )
+        }
+
+        fun closeDetail(context: Context) {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, AgentsMonitorService::class.java)
+                    .setAction(ACTION_CLOSE_DETAIL),
+            )
         }
 
         fun test(context: Context, provider: AgentProvider) {

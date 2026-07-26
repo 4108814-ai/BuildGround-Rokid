@@ -13,9 +13,55 @@ class AgentSessionStore {
         AgentProvider.values().associateWith { ProviderConnectionState() },
     )
 
+    private val _conversation = MutableStateFlow<AgentConversation?>(null)
+
     val sessions: StateFlow<List<AgentSession>> = _sessions.asStateFlow()
     val connections: StateFlow<Map<AgentProvider, ProviderConnectionState>> =
         _connections.asStateFlow()
+    val conversation: StateFlow<AgentConversation?> = _conversation.asStateFlow()
+
+    @Synchronized
+    fun openConversation(session: AgentSession) {
+        _conversation.value = AgentConversation(
+            sessionKey = session.key,
+            sessionId = session.id,
+            provider = session.provider,
+        )
+    }
+
+    @Synchronized
+    fun closeConversation() {
+        _conversation.value = null
+    }
+
+    @Synchronized
+    fun setConversation(
+        provider: AgentProvider,
+        sessionId: String,
+        messages: List<AgentMessage>,
+    ) {
+        val current = _conversation.value ?: return
+        // A late reply for a conversation the wearer already left must not reopen it.
+        if (current.provider != provider || current.sessionId != sessionId) return
+        _conversation.value = current.copy(
+            loading = false,
+            messages = messages.takeLast(AgentConversation.MAX_MESSAGES),
+        )
+    }
+
+    @Synchronized
+    fun appendConversation(
+        provider: AgentProvider,
+        sessionId: String,
+        message: AgentMessage,
+    ) {
+        val current = _conversation.value ?: return
+        if (current.provider != provider || current.sessionId != sessionId) return
+        _conversation.value = current.copy(
+            loading = false,
+            messages = (current.messages + message).takeLast(AgentConversation.MAX_MESSAGES),
+        )
+    }
 
     @Synchronized
     fun replaceProvider(

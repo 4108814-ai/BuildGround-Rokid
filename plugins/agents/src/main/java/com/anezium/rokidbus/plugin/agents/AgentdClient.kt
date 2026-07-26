@@ -22,6 +22,19 @@ class AgentdClient(
     private var loopJob: Job? = null
     @Volatile private var socket: WebSocket? = null
 
+    /** Survives reconnects: the daemon forgets, the wearer should not. */
+    @Volatile private var openSessionId: String? = null
+
+    fun openDetail(sessionId: String) {
+        openSessionId = sessionId
+        socket?.send(AgentdProtocolCodec.detailOpen(sessionId))
+    }
+
+    fun closeDetail() {
+        openSessionId = null
+        socket?.send(AgentdProtocolCodec.DETAIL_CLOSE)
+    }
+
     fun start(config: AgentdConfig) {
         stop(clearSessions = false)
         loopJob = scope.launch {
@@ -103,11 +116,23 @@ class AgentdClient(
                     }
                     is AgentdAction.Snapshot -> {
                         store.replaceProvider(AgentProvider.CLAUDE, action.sessions)
+                        // A fresh connection knows nothing of the open conversation.
+                        openSessionId?.let { webSocket.send(AgentdProtocolCodec.detailOpen(it)) }
                     }
                     is AgentdAction.Upsert -> store.upsert(action.session)
                     is AgentdAction.Removed -> {
                         store.remove(AgentProvider.CLAUDE, action.sessionId)
                     }
+                    is AgentdAction.Detail -> store.setConversation(
+                        AgentProvider.CLAUDE,
+                        action.sessionId,
+                        action.messages,
+                    )
+                    is AgentdAction.DetailAppend -> store.appendConversation(
+                        AgentProvider.CLAUDE,
+                        action.sessionId,
+                        action.message,
+                    )
                     is AgentdAction.Send -> webSocket.send(action.text)
                     AgentdAction.Ignore -> Unit
                 }

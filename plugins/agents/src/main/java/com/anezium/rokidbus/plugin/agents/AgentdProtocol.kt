@@ -8,6 +8,8 @@ sealed interface AgentdAction {
     data class Snapshot(val seq: Long, val sessions: List<AgentSession>) : AgentdAction
     data class Upsert(val seq: Long, val session: AgentSession) : AgentdAction
     data class Removed(val seq: Long, val sessionId: String) : AgentdAction
+    data class Detail(val sessionId: String, val messages: List<AgentMessage>) : AgentdAction
+    data class DetailAppend(val sessionId: String, val message: AgentMessage) : AgentdAction
     data class Send(val text: String) : AgentdAction
     data object Ignore : AgentdAction
 }
@@ -69,6 +71,18 @@ class AgentdProtocolCodec {
                 lastSeq = seq
                 AgentdAction.Removed(seq, sessionId)
             }
+            // Conversation payloads carry no seq: they are a reply to the
+            // wearer opening a session, never part of the session stream.
+            "detail" -> {
+                val sessionId = json.nullableString("sessionId") ?: return AgentdAction.Ignore
+                AgentdAction.Detail(sessionId, json.optJSONArray("messages").toMessages())
+            }
+            "detail_append" -> {
+                val sessionId = json.nullableString("sessionId") ?: return AgentdAction.Ignore
+                val message = json.optJSONObject("message")?.toAgentMessage()
+                    ?: return AgentdAction.Ignore
+                AgentdAction.DetailAppend(sessionId, message)
+            }
             "ping" -> AgentdAction.Send(
                 JSONObject()
                     .put("type", "pong")
@@ -96,7 +110,35 @@ class AgentdProtocolCodec {
 
     companion object {
         const val REFRESH = """{"type":"refresh"}"""
+        const val DETAIL_CLOSE = """{"type":"detail_close"}"""
+
+        fun detailOpen(sessionId: String): String = JSONObject()
+            .put("type", "detail_open")
+            .put("sessionId", sessionId)
+            .toString()
     }
+}
+
+private fun JSONArray?.toMessages(): List<AgentMessage> {
+    if (this == null) return emptyList()
+    return buildList {
+        for (index in 0 until length()) {
+            optJSONObject(index)?.toAgentMessage()?.let(::add)
+        }
+    }
+}
+
+private fun JSONObject.toAgentMessage(): AgentMessage? {
+    val text = nullableString("text") ?: return null
+    val role = nullableString("role")?.let { raw ->
+        MessageRole.values().firstOrNull { it.wireValue == raw }
+    } ?: return null
+    return AgentMessage(
+        role = role,
+        text = text,
+        at = longOrNull("at"),
+        tool = nullableString("tool"),
+    )
 }
 
 private fun JSONArray?.toSessions(): List<AgentSession> {
