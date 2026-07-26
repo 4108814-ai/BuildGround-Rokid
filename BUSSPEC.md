@@ -461,9 +461,21 @@ multi-minute video survives interruption instead of restarting.
 
 - Chunks are 32 KiB (half the image channel's proven 64 KiB), which halves how
   long any other message can sit behind ours, for ~0.4% header overhead.
-- One chunk in flight: `SppServerManager.send` blocks until the frame is written,
-  so a returning call *is* the transport's confirmation. There is no
-  application-level per-chunk ack.
+- **Windowed acks, because the transport acknowledges too early.**
+  `SppServerManager.send` returns once the frame reaches the socket, not once it
+  reaches the air — measured on device as a ~41 ms enqueue cadence against a
+  ~90 ms wire time per chunk. The kernel queue therefore ran several chunks deep,
+  which broke two things at once: `FILE_END` (control channel) overtook chunks
+  still queued on SPP so the receiver verified a short file, and the politeness
+  layer was pacing *enqueues* while the radio kept draining a backlog for seconds
+  after a yield or an abort. The receiver now acks its staged offset every 2
+  chunks (`/mediasync/xfer/file/progress`), the sender may run at most
+  `ACK_WINDOW_BYTES` (128 KiB, four chunks ≈ 360 ms of air time) ahead of the
+  last ack, and **`FILE_END` is sent only once the whole file is acked** — so
+  `staged == expected` holds before the terminator is even written, and the
+  staged/expected log line at verification is an invariant check rather than a
+  diagnostic. Ordering guarantees per message type are documented in
+  `MediaSyncTransferContract`.
 - Before every chunk, `MediaSyncPolitenessPolicy` is consulted: a live camera
   session aborts the session outright, a dropped link ends it, foreign traffic
   seen in the last 400 ms yields for 1.5 s, and otherwise a chunk goes out

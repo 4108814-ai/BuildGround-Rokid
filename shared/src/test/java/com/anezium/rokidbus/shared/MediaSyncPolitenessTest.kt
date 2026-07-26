@@ -1,6 +1,7 @@
 package com.anezium.rokidbus.shared
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -81,6 +82,55 @@ class MediaSyncPolitenessTest {
         assertTrue(MediaSyncTransferContract.CHUNK_BYTES <= MediaSyncTransferContract.MAX_CHUNK_BYTES)
         assertTrue(MediaSyncPolitenessPolicy.CHUNK_PACING_MS in 1..200)
         assertTrue(MediaSyncPolitenessPolicy.YIELD_BACKOFF_MS >= MediaSyncPolitenessPolicy.QUIET_THRESHOLD_MS)
+    }
+
+    @Test
+    fun `the sender may run exactly one window ahead, never further`() {
+        val window = MediaSyncTransferContract.ACK_WINDOW_BYTES
+
+        assertTrue(MediaSyncWindowPolicy.maySend(nextOffset = 0L, ackedOffset = 0L))
+        assertTrue(MediaSyncWindowPolicy.maySend(window.toLong(), ackedOffset = 0L))
+        // One byte past the window is where the socket queue would start growing unbounded.
+        assertFalse(MediaSyncWindowPolicy.maySend(window + 1L, ackedOffset = 0L))
+        assertTrue(MediaSyncWindowPolicy.maySend(window + 1L, ackedOffset = 1L))
+    }
+
+    @Test
+    fun `the window is a handful of chunks, not a whole file`() {
+        val chunksPerWindow =
+            MediaSyncTransferContract.ACK_WINDOW_BYTES / MediaSyncTransferContract.CHUNK_BYTES
+
+        assertEquals(4, chunksPerWindow)
+        // The receiver must ack more often than the window is deep, or the sender starves.
+        assertTrue(MediaSyncTransferContract.ACK_EVERY_CHUNKS < chunksPerWindow)
+    }
+
+    @Test
+    fun `the receiver acks on cadence and always on the last byte`() {
+        val every = MediaSyncTransferContract.ACK_EVERY_CHUNKS
+
+        assertFalse(MediaSyncWindowPolicy.shouldAck(0, stagedBytes = 10L, expectedBytes = 100L))
+        assertTrue(MediaSyncWindowPolicy.shouldAck(every, stagedBytes = 10L, expectedBytes = 100L))
+        // The tail rarely lands on the cadence, so completeness has to force an ack of its own -
+        // otherwise the sender would wait for an ack that never comes and time out.
+        assertTrue(MediaSyncWindowPolicy.shouldAck(1, stagedBytes = 100L, expectedBytes = 100L))
+        assertTrue(MediaSyncWindowPolicy.shouldAck(0, stagedBytes = 101L, expectedBytes = 100L))
+    }
+
+    @Test
+    fun `the terminator waits for the last byte to be acknowledged`() {
+        // This is the rule that removes the two-channel race: FILE_END travels the control channel
+        // and could otherwise overtake chunks still queued on SPP.
+        assertFalse(MediaSyncWindowPolicy.mayFinish(ackedOffset = 999L, sizeBytes = 1_000L))
+        assertTrue(MediaSyncWindowPolicy.mayFinish(ackedOffset = 1_000L, sizeBytes = 1_000L))
+        assertTrue(MediaSyncWindowPolicy.mayFinish(ackedOffset = 1_001L, sizeBytes = 1_000L))
+    }
+
+    @Test
+    fun `a fully resumed file may finish without any chunk being sent`() {
+        // The sender seeds its acked offset from the requested offset, so a file the phone already
+        // holds in full goes straight to verification.
+        assertTrue(MediaSyncWindowPolicy.mayFinish(ackedOffset = 4_096L, sizeBytes = 4_096L))
     }
 
     @Test

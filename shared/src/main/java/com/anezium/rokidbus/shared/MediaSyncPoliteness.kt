@@ -66,6 +66,35 @@ object MediaSyncPolitenessPolicy {
 }
 
 /**
+ * Application-level flow control over a transport that acknowledges too early.
+ *
+ * `SppServerManager.send` returns when the frame reaches the socket, not when it reaches the air,
+ * so "one chunk in flight" was never true: the kernel queue ran several chunks deep. Holding the
+ * sender to a bounded lead over the receiver's acknowledged offset is what makes in-flight bytes
+ * an actual quantity rather than a hope — which in turn is what makes a yield or an abort take
+ * effect on the radio instead of only on the enqueue path.
+ */
+object MediaSyncWindowPolicy {
+    /** True when a chunk starting at [nextOffset] would stay inside the window. */
+    fun maySend(
+        nextOffset: Long,
+        ackedOffset: Long,
+        windowBytes: Int = MediaSyncTransferContract.ACK_WINDOW_BYTES,
+    ): Boolean = nextOffset - ackedOffset <= windowBytes
+
+    /** The receiver acks on a fixed cadence, and always once it holds the last byte. */
+    fun shouldAck(
+        chunksSinceAck: Int,
+        stagedBytes: Long,
+        expectedBytes: Long,
+        everyChunks: Int = MediaSyncTransferContract.ACK_EVERY_CHUNKS,
+    ): Boolean = chunksSinceAck >= everyChunks || stagedBytes >= expectedBytes
+
+    /** The terminator may only follow a fully acknowledged file. */
+    fun mayFinish(ackedOffset: Long, sizeBytes: Long): Boolean = ackedOffset >= sizeBytes
+}
+
+/**
  * How much of a file still has to travel, given what the receiver already holds.
  *
  * Resume is mandatory rather than nice-to-have here: at ~0.36 MB/s a 100 MB video is a multi-minute

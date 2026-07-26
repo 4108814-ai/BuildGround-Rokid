@@ -262,6 +262,12 @@ internal object MediaSyncEngine {
                 val name = MediaSyncTransferContract.name(payload) ?: return
                 current.sender.onFileRequest(name, MediaSyncTransferContract.offset(payload))
             }
+            BusPaths.MEDIA_SYNC_XFER_FILE_PROGRESS -> {
+                // Straight through, not via the sender's executor: the streaming loop is blocked
+                // waiting for this ack, so queueing it behind that loop would deadlock the file.
+                val name = MediaSyncTransferContract.name(payload) ?: return
+                current.sender.onProgressAck(name, MediaSyncTransferContract.staged(payload))
+            }
             BusPaths.MEDIA_SYNC_XFER_FILE_ACK -> {
                 val name = MediaSyncTransferContract.name(payload) ?: return
                 current.sender.onFileAck(name, payload.optBoolean("ok"), payload.optBoolean("delete"))

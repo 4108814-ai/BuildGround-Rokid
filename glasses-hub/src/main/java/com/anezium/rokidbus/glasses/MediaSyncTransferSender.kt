@@ -4,8 +4,10 @@ import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.MediaSyncCatalogContract
 import com.anezium.rokidbus.shared.MediaSyncPace
 import com.anezium.rokidbus.shared.MediaSyncPolitenessPolicy
+import android.os.SystemClock
 import com.anezium.rokidbus.shared.MediaSyncTrafficMonitor
 import com.anezium.rokidbus.shared.MediaSyncTransferContract
+import com.anezium.rokidbus.shared.MediaSyncWindowPolicy
 import org.json.JSONObject
 import java.io.InputStream
 import java.util.concurrent.Executors
@@ -50,6 +52,14 @@ internal class MediaSyncTransferSender(
     @Volatile private var deletionRefused = false
     @Volatile private var streaming = false
 
+    /**
+     * Progress acks arrive on the bus reader thread, not this sender's executor, and the streaming
+     * loop blocks waiting on exactly this state — so it lives under its own monitor.
+     */
+    private val ackLock = Object()
+    private var ackedName: String? = null
+    private var ackedOffset = 0L
+
     fun onCatalogRequest() = executor.execute {
         if (closed.get()) return@execute
         val scan = catalog.scan()
@@ -91,6 +101,14 @@ internal class MediaSyncTransferSender(
         )
     }
 
+    /** Deliberately not on the executor: the streaming loop is blocked waiting for this. */
+    fun onProgressAck(name: String, staged: Long) {
+        synchronized(ackLock) {
+            if (name == ackedName && staged > ackedOffset) ackedOffset = staged
+            ackLock.notifyAll()
+        }
+    }
+
     fun onBye() = executor.execute { finish(null) }
 
     /** The camera took the glasses; stop mid-file and let the phone resume from its offset. */
@@ -116,6 +134,11 @@ internal class MediaSyncTransferSender(
             MediaSyncTransferContract.fileBegin(sessionId, name, size, file.lastModified(), requestedOffset),
             null,
         )
+        synchronized(ackLock) {
+            ackedName = name
+            // Bytes below the requested offset are on the phone by definition.
+            ackedOffset = requestedOffset
+        }
         streaming = true
         try {
             val digest = MediaSyncTransferContract.newDigest()
@@ -146,6 +169,11 @@ internal class MediaSyncTransferSender(
                 sendError(name, MediaSyncTransferContract.ERROR_READ_FAILED)
                 return
             }
+            // The terminator rides the control channel while chunks ride SPP, so sending it here
+            // would let it overtake bytes still sitting in the socket queue — precisely how every
+            // file came out short on device. Waiting for a full ack makes the ordering a property
+            // of the protocol instead of two channels' relative latency.
+            if (!awaitFullAck(name, size)) return
             send(
                 BusPaths.MEDIA_SYNC_XFER_FILE_END,
                 MediaSyncTransferContract.fileEnd(sessionId, name, MediaSyncTransferContract.hex(digest)),
@@ -187,6 +215,12 @@ internal class MediaSyncTransferSender(
                     if (!sleep(MediaSyncPolitenessPolicy.YIELD_BACKOFF_MS)) return false
                 }
                 MediaSyncPace.SEND -> {
+                    if (!MediaSyncWindowPolicy.maySend(offset, ackedOffsetNow())) {
+                        // The receiver is behind. Sending anyway would only deepen the socket
+                        // queue and make the next yield or abort take longer to reach the radio.
+                        if (!awaitWindow(offset)) return false
+                        continue
+                    }
                     val payload = if (from == 0 && length == buffer.size) {
                         buffer.copyOf()
                     } else {
@@ -211,6 +245,49 @@ internal class MediaSyncTransferSender(
                     if (!sleep(MediaSyncPolitenessPolicy.YIELD_BACKOFF_MS)) return false
                 }
             }
+        }
+        return false
+    }
+
+    private fun ackedOffsetNow(): Long = synchronized(ackLock) { ackedOffset }
+
+    /** Waits for the window to open, staying responsive to the camera and to link loss. */
+    private fun awaitWindow(nextOffset: Long): Boolean =
+        awaitAck("window") { MediaSyncWindowPolicy.maySend(nextOffset, it) }
+
+    private fun awaitFullAck(name: String, size: Long): Boolean =
+        awaitAck("final ack for $name") { MediaSyncWindowPolicy.mayFinish(it, size) }
+
+    private fun awaitAck(what: String, satisfied: (Long) -> Boolean): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + ACK_TIMEOUT_MS
+        while (!closed.get()) {
+            if (satisfied(ackedOffsetNow())) return true
+            val pace = MediaSyncPolitenessPolicy.pace(
+                cameraSessionActive = isCameraSessionActive(),
+                linkUp = isLinkUp(),
+                // Waiting is not our turn to talk, so foreign traffic is irrelevant here; only the
+                // two terminal conditions matter while we hold.
+                millisSinceForeignTraffic = Long.MAX_VALUE,
+            )
+            if (pace == MediaSyncPace.ABORT) {
+                abort(
+                    if (isCameraSessionActive()) {
+                        MediaSyncTransferContract.ABORT_CAMERA
+                    } else {
+                        MediaSyncTransferContract.ABORT_LINK
+                    },
+                )
+                return false
+            }
+            if (SystemClock.elapsedRealtime() >= deadline) {
+                logger("timed out waiting for $what")
+                abort("ack_timeout")
+                return false
+            }
+            val waited = runCatching {
+                synchronized(ackLock) { ackLock.wait(ACK_POLL_MS) }
+            }.isSuccess
+            if (!waited) return false
         }
         return false
     }
@@ -250,5 +327,9 @@ internal class MediaSyncTransferSender(
 
     private companion object {
         const val MAX_CHUNK_SEND_FAILURES = 3
+
+        /** Generous: the receiver may legitimately be slow while it stages and hashes. */
+        const val ACK_TIMEOUT_MS = 30_000L
+        const val ACK_POLL_MS = 200L
     }
 }

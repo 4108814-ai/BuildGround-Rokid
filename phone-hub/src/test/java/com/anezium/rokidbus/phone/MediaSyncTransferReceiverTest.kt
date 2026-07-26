@@ -288,6 +288,102 @@ class MediaSyncTransferReceiverTest {
     }
 
     @Test
+    fun `the receiver acks staged bytes so the sender can advance its window`() {
+        val data = bytes(MediaSyncTransferContract.CHUNK_BYTES * 5, seed = 10L)
+        val item = MediaSyncItem("vid-window.mp4", data.size.toLong(), 5L)
+        val receiver = receiver()
+        receiver.deliverCatalog(listOf(item))
+        receiver.deliverFile(item, data)
+
+        val acks = sent.filter { it.first == BusPaths.MEDIA_SYNC_XFER_FILE_PROGRESS }
+            .map { MediaSyncTransferContract.staged(it.second) }
+
+        // Every ack reports a real staged offset, they only ever grow, and the last one covers
+        // the whole file - which is what releases FILE_END on the sender.
+        assertTrue("acks: $acks", acks.isNotEmpty())
+        assertEquals(acks.sorted(), acks)
+        assertEquals(data.size.toLong(), acks.last())
+        acks.forEach { assertTrue(it in 1..data.size.toLong()) }
+    }
+
+    @Test
+    fun `acks arrive often enough to keep the window open`() {
+        val chunks = 6
+        val data = bytes(MediaSyncTransferContract.CHUNK_BYTES * chunks, seed = 11L)
+        val item = MediaSyncItem("vid-cadence.mp4", data.size.toLong(), 5L)
+        val receiver = receiver()
+        receiver.deliverCatalog(listOf(item))
+        receiver.deliverFile(item, data)
+
+        val acks = sent.filter { it.first == BusPaths.MEDIA_SYNC_XFER_FILE_PROGRESS }
+        assertEquals(chunks / MediaSyncTransferContract.ACK_EVERY_CHUNKS, acks.size)
+    }
+
+    @Test
+    fun `a late chunk arriving after the file was abandoned is ignored`() {
+        // Chunks and the terminator travel different channels, so stragglers are expected; they
+        // must never be appended to whatever file the session has moved on to.
+        val data = bytes(1_024, seed = 12L)
+        val first = MediaSyncItem("img-first.jpg", data.size.toLong(), 5L)
+        val second = MediaSyncItem("img-second.jpg", 2_048L, 6L)
+        val receiver = receiver()
+        receiver.deliverCatalog(listOf(first, second))
+
+        receiver.onEnvelope(
+            BusPaths.MEDIA_SYNC_XFER_FILE_ERROR,
+            MediaSyncTransferContract.fileError(session, first.name, "not_found"),
+            null,
+        )
+        // Straggler for the abandoned file lands after the session moved to the second one.
+        receiver.onEnvelope(
+            BusPaths.MEDIA_SYNC_XFER_FILE_CHUNK,
+            MediaSyncTransferContract.chunkMeta(session, first.name, 0, 0L),
+            data,
+        )
+
+        assertEquals(0L, staging.receivedBytes(first.name))
+        assertEquals(0L, staging.receivedBytes(second.name))
+    }
+
+    @Test
+    fun `a staging write failure aborts the session instead of stalling the sender`() {
+        // The sender blocks waiting for an ack; silently failing this file would hang it until its
+        // timeout, so the session ends immediately and honestly instead.
+        val readOnly = temporaryFolder.newFile("not-a-directory")
+        val blocked = MediaSyncStagingStore(readOnly)
+        val item = MediaSyncItem("img-x.jpg", 512L, 5L)
+        var run: MediaSyncRun? = null
+        val receiver = MediaSyncTransferReceiver(
+            sessionId = session,
+            ledger = ledger,
+            gallery = gallery,
+            staging = blocked,
+            deleteAfterSync = false,
+            clock = { 1_000L },
+            logger = {},
+            send = { path, payload -> sent += path to payload; true },
+            onProgress = {},
+            onDeletionOutcome = {},
+            onFinished = { run = it },
+        )
+
+        receiver.deliverCatalog(listOf(item))
+        receiver.onEnvelope(
+            BusPaths.MEDIA_SYNC_XFER_FILE_BEGIN,
+            MediaSyncTransferContract.fileBegin(session, item.name, item.sizeBytes, 0L, 0L),
+            null,
+        )
+        receiver.onEnvelope(
+            BusPaths.MEDIA_SYNC_XFER_FILE_CHUNK,
+            MediaSyncTransferContract.chunkMeta(session, item.name, 0, 0L),
+            bytes(512, seed = 13L),
+        )
+
+        assertEquals(MediaSyncResult.FAILED, run?.result)
+        assertNotNull(sent.firstOrNull { it.first == BusPaths.MEDIA_SYNC_XFER_ABORT })
+    }
+
+    @Test
     fun `an empty pending set ends the session as up to date`() {
         val item = MediaSyncItem("img-c.jpg", 10L, 5L)
         ledger.record(item, 1L)

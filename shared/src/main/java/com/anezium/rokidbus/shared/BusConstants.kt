@@ -59,6 +59,7 @@ object BusPaths {
     const val MEDIA_SYNC_XFER_FILE_REQUEST = "/mediasync/xfer/file/request"
     const val MEDIA_SYNC_XFER_FILE_BEGIN = "/mediasync/xfer/file/begin"
     const val MEDIA_SYNC_XFER_FILE_CHUNK = "/mediasync/xfer/file/chunk"
+    const val MEDIA_SYNC_XFER_FILE_PROGRESS = "/mediasync/xfer/file/progress"
     const val MEDIA_SYNC_XFER_FILE_END = "/mediasync/xfer/file/end"
     const val MEDIA_SYNC_XFER_FILE_ACK = "/mediasync/xfer/file/ack"
     const val MEDIA_SYNC_XFER_FILE_ERROR = "/mediasync/xfer/file/error"

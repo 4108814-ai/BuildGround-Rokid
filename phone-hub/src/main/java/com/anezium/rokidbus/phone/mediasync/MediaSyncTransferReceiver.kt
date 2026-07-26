@@ -8,6 +8,7 @@ import com.anezium.rokidbus.shared.MediaSyncResult
 import com.anezium.rokidbus.shared.MediaSyncResumePolicy
 import com.anezium.rokidbus.shared.MediaSyncRun
 import com.anezium.rokidbus.shared.MediaSyncTransferContract
+import com.anezium.rokidbus.shared.MediaSyncWindowPolicy
 import org.json.JSONObject
 
 /**
@@ -48,6 +49,7 @@ internal class MediaSyncTransferReceiver(
     private var lastProgressAtMillis = 0L
     private var awaitingDeleteResult = false
     private var consecutiveHashFailures = 0
+    private var chunksSinceAck = 0
 
     fun start() {
         send(BusPaths.MEDIA_SYNC_XFER_CATALOG_REQUEST, MediaSyncTransferContract.sessionJson(sessionId))
@@ -140,6 +142,7 @@ internal class MediaSyncTransferReceiver(
         }
         if (offset > 0L) logger("mediaSync resuming name=${item.name} offset=$offset")
         expectedOffset = offset
+        chunksSinceAck = 0
         send(
             BusPaths.MEDIA_SYNC_XFER_FILE_REQUEST,
             MediaSyncTransferContract.fileRequest(sessionId, item.name, offset),
@@ -171,12 +174,31 @@ internal class MediaSyncTransferReceiver(
             return
         }
         if (!staging.append(item.name, data, data.size)) {
-            logger("mediaSync staging write failed name=${item.name}")
-            failCurrent()
+            // Local disk trouble is not a per-file problem, and leaving the sender waiting for an
+            // ack that will never come would stall it until its timeout.
+            logger("mediaSync staging write failed name=${item.name}; aborting session")
+            send(
+                BusPaths.MEDIA_SYNC_XFER_ABORT,
+                MediaSyncTransferContract.abort(sessionId, "staging_write_failed"),
+            )
+            finish(
+                if (filesSynced > 0) MediaSyncResult.PARTIAL else MediaSyncResult.FAILED,
+                "Could not write to storage",
+            )
             return
         }
         expectedOffset += data.size
         bytesSynced += data.size
+        chunksSinceAck += 1
+        // The ack is what lets the sender advance its window, so it has to be prompt and it has to
+        // be truthful: it reports bytes already durably staged, never bytes merely received.
+        if (MediaSyncWindowPolicy.shouldAck(chunksSinceAck, expectedOffset, item.sizeBytes)) {
+            chunksSinceAck = 0
+            send(
+                BusPaths.MEDIA_SYNC_XFER_FILE_PROGRESS,
+                MediaSyncTransferContract.fileProgress(sessionId, item.name, expectedOffset),
+            )
+        }
         publishProgress(force = false)
     }
 
