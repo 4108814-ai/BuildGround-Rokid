@@ -24,6 +24,9 @@ import androidx.core.content.ContextCompat
 import com.anezium.rokidbus.client.BusClient
 import com.anezium.rokidbus.client.BusEvent
 import com.anezium.rokidbus.client.ui.BusTheme
+import com.anezium.rokidbus.phone.speech.HubSecretStore
+import com.anezium.rokidbus.phone.speech.SpeechReadiness
+import com.anezium.rokidbus.phone.speech.SpeechSettingsStore
 import com.anezium.rokidbus.shared.LinkStateBits
 
 private const val SETTINGS_TAG = "RokidNexusSettings"
@@ -37,6 +40,7 @@ class SettingsActivity : Activity() {
     private lateinit var bondValue: TextView
     private lateinit var logView: TextView
     private lateinit var logScroll: ScrollView
+    private var speechValue: TextView? = null
     private var hubUiClient: BusClient? = null
     private var lastLinkState = 0
     private val updateStateListener: () -> Unit = { renderUpdateUi() }
@@ -80,6 +84,7 @@ class SettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        renderSpeechRow()
         resumeRecoveredNexusUpdateInstall()
         if (lastLinkState and LinkStateBits.CXR_CONTROL_UP != 0) {
             BusHubService.queryGlassesApp(this)
@@ -139,6 +144,8 @@ class SettingsActivity : Activity() {
                 },
                 NexusUi.block(),
             )
+            addView(BusTheme.gap(this@SettingsActivity, 10))
+            addView(speechRow(), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 28))
             addView(NexusUi.sectionRow(this@SettingsActivity, "Advanced"), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 12))
@@ -449,6 +456,38 @@ class SettingsActivity : Activity() {
                 },
             )
         }
+
+    private fun speechRow(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = NexusUi.pressedBordered(this@SettingsActivity, NexusUi.PANEL, 15)
+            setPadding(
+                NexusUi.dp(this@SettingsActivity, 15),
+                NexusUi.dp(this@SettingsActivity, 14),
+                NexusUi.dp(this@SettingsActivity, 15),
+                NexusUi.dp(this@SettingsActivity, 14),
+            )
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                startActivity(Intent(this@SettingsActivity, SpeechSettingsActivity::class.java))
+            }
+            addView(
+                NexusUi.rowTitle(this@SettingsActivity, "Speech"),
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            speechValue = NexusUi.metaLabel(this@SettingsActivity, "", NexusUi.GREEN)
+            addView(speechValue)
+            renderSpeechRow()
+        }
+
+    private fun renderSpeechRow() {
+        val value = speechValue ?: return
+        val ready = SpeechSettingsStore(this).readiness(HubSecretStore(this)) == SpeechReadiness.READY
+        value.text = if (ready) "READY ›" else "SET UP ›"
+        value.setTextColor(if (ready) NexusUi.GREEN_DIM else NexusUi.GREEN)
+    }
 
     private fun actionRow(
         title: String,

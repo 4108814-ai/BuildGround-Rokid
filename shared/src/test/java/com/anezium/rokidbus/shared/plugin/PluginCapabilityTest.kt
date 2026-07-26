@@ -7,10 +7,10 @@ import org.junit.Test
 class PluginCapabilityTest {
     @Test
     fun `capabilities parse and serialize canonically`() {
-        val result = PluginCapability.parseList("http_proxy; surfaces microphone camera")
+        val result = PluginCapability.parseList("http_proxy; surfaces microphone stt camera")
         assertTrue(result is CapabilityParseResult.Valid)
         val capabilities = (result as CapabilityParseResult.Valid).capabilities
-        assertEquals("surfaces,microphone,http_proxy,camera", PluginCapability.serialize(capabilities))
+        assertEquals("surfaces,microphone,stt,http_proxy,camera", PluginCapability.serialize(capabilities))
     }
 
     @Test
@@ -28,6 +28,8 @@ class PluginCapabilityTest {
         assertEquals(PluginCapability.SURFACES, PathRules.requiredCapability("/surface/hide"))
         assertEquals(PluginCapability.MICROPHONE, PathRules.requiredCapability("/audio/lease/acquire"))
         assertEquals(PluginCapability.MICROPHONE, PathRules.requiredCapability("/audio/lease/release"))
+        assertEquals(PluginCapability.STT, PathRules.requiredCapability("/stt/session/start"))
+        assertEquals(PluginCapability.STT, PathRules.requiredCapability("/stt/session/stop"))
         assertEquals(PluginCapability.HTTP_PROXY, PathRules.requiredCapability("/http/request"))
         assertEquals(PluginCapability.CAMERA, PathRules.requiredCapability("/camera/freeze/result"))
         assertEquals(PluginCapability.CAMERA, PathRules.requiredCapability("/camera/overlay"))

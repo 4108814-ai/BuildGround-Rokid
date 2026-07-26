@@ -12,6 +12,7 @@ object PathRules {
         "/audio/lease/release/reply",
         "/audio/lease/revoked",
     )
+    private val sttReceivePrefixes = setOf("/stt")
     private val cameraReceivePrefixes = setOf(
         BusPaths.CAMERA_SESSION_STATE,
         BusPaths.CAMERA_LINK_OFFER,
@@ -44,6 +45,7 @@ object PathRules {
     fun requiredCapability(path: String): PluginCapability? = when (normalizeAbsolute(path)) {
         "/surface/show", "/surface/update", "/surface/hide" -> PluginCapability.SURFACES
         "/audio/lease/acquire", "/audio/lease/release" -> PluginCapability.MICROPHONE
+        "/stt/session/start", "/stt/session/stop" -> PluginCapability.STT
         "/http/request" -> PluginCapability.HTTP_PROXY
         BusPaths.CAMERA_LINK_OFFER,
         BusPaths.CAMERA_FREEZE_RESULT,
@@ -69,6 +71,9 @@ object PathRules {
         if (PluginCapability.MICROPHONE in requestedCapabilities &&
             audioReplyPrefixes.any { matchesPrefix(normalized, it) || matchesPrefix(it, normalized) }
         ) return true
+        if (PluginCapability.STT in requestedCapabilities &&
+            sttReceivePrefixes.any { matchesPrefix(normalized, it) || matchesPrefix(it, normalized) }
+        ) return true
         if (PluginCapability.CAMERA in requestedCapabilities &&
             cameraReceivePrefixes.any { matchesPrefix(normalized, it) }
         ) return true
@@ -85,6 +90,9 @@ object PathRules {
         }
         if (audioReplyPrefixes.any { matchesPrefix(normalized, it) || matchesPrefix(it, normalized) }) {
             return PluginCapability.MICROPHONE
+        }
+        if (sttReceivePrefixes.any { matchesPrefix(normalized, it) || matchesPrefix(it, normalized) }) {
+            return PluginCapability.STT
         }
         if (cameraReceivePrefixes.any { matchesPrefix(normalized, it) }) {
             return PluginCapability.CAMERA

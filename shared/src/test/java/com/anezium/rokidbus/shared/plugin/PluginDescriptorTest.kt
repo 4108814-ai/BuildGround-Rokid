@@ -131,6 +131,27 @@ class PluginDescriptorTest {
     }
 
     @Test
+    fun `stt descriptor and receive prefix require stt capability`() {
+        val receive = "/system/plugin,/plugin/hello.plugin,/stt"
+        val withStt = validMetadata() + mapOf(
+            BusConstants.META_PLUGIN_CAPABILITIES to "stt",
+            BusConstants.META_PLUGIN_RECEIVE_PREFIXES to receive,
+        )
+        val descriptor = PluginDescriptorParser.parse(withStt)
+        assertTrue(descriptor is PluginDescriptorParseResult.Valid)
+        assertEquals(
+            setOf(PluginCapability.STT),
+            (descriptor as PluginDescriptorParseResult.Valid).descriptor.requestedCapabilities,
+        )
+        assertEquals(
+            PluginDescriptorParseResult.Invalid("RECEIVE_PREFIX_OUTSIDE_NAMESPACE"),
+            PluginDescriptorParser.parse(
+                withStt + (BusConstants.META_PLUGIN_CAPABILITIES to "surfaces"),
+            ),
+        )
+    }
+
+    @Test
     fun `conflicting duplicate metadata is rejected`() {
         val entries = validMetadata().entries.map { it.key to it.value } +
             (BusConstants.META_PLUGIN_ID to "other")

@@ -45,6 +45,18 @@ import com.anezium.rokidbus.shared.PhoneHubCapabilitiesContract
 import com.anezium.rokidbus.shared.plugin.PathRules
 import com.anezium.rokidbus.shared.plugin.PluginCapability
 import com.anezium.rokidbus.shared.plugin.PluginCapability.Companion.serialize
+import com.anezium.rokidbus.phone.speech.HubSecretStore
+import com.anezium.rokidbus.phone.speech.InternalAudioAccess
+import com.anezium.rokidbus.phone.speech.InternalAudioAcquireResult
+import com.anezium.rokidbus.phone.speech.InternalAudioConsumer
+import com.anezium.rokidbus.phone.speech.InternalAudioStopReason
+import com.anezium.rokidbus.phone.speech.SpeechEndReason
+import com.anezium.rokidbus.phone.speech.SpeechSessionManager
+import com.anezium.rokidbus.phone.speech.SpeechSessionState
+import com.anezium.rokidbus.phone.speech.SpeechSettingsStore
+import com.anezium.rokidbus.phone.speech.SpeechStartResult
+import com.anezium.rokidbus.phone.speech.SpeechUtteranceListener
+import com.anezium.rokidbus.phone.speech.SttError
 import com.example.cxrglobal.CXRLink
 import com.example.cxrglobal.CxrDefs
 import com.example.cxrglobal.GlassInfo
@@ -63,7 +75,9 @@ import java.net.URL
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.FutureTask
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -127,17 +141,33 @@ class BusHubService : Service() {
         val principal: PhonePluginPrincipal? = null,
     )
 
-    private enum class AudioLeaseSide { LOCAL, REMOTE }
+    private enum class AudioLeaseSide { LOCAL, REMOTE, INTERNAL }
 
     private data class AudioLease(
         val leaseId: String,
         val side: AudioLeaseSide,
         val localCallbackBinder: IBinder?,
         val holderPluginId: String?,
+        val internalTag: String? = null,
+        val internalConsumer: InternalAudioConsumer? = null,
         var seq: Long = 0L,
     )
 
+    private class SpeechBusSession(
+        val sessionId: String,
+        val callbackBinder: IBinder,
+        val pluginId: String,
+        val grantKey: PluginGrantKey,
+        val stateSeq: AtomicLong = AtomicLong(),
+        val partialSeq: AtomicLong = AtomicLong(),
+        val accepted: AtomicBoolean = AtomicBoolean(),
+        val ended: AtomicBoolean = AtomicBoolean(),
+    ) {
+        lateinit var listener: SpeechUtteranceListener
+    }
+
     private val executor = Executors.newCachedThreadPool()
+    private val speechBusExecutor = SerialExecutor(executor)
     private val audioHandler = Handler(Looper.getMainLooper())
     private val updateCheckHandler = Handler(Looper.getMainLooper())
     @Volatile private var updateCheckLoopStopped = true
@@ -157,14 +187,15 @@ class BusHubService : Service() {
     private val imageSurfaceRateLimiter = ImageSurfaceRateLimiter()
     private val pluginBusJournal = busJournal
     private val sppLoopStarted = AtomicBoolean(false)
-    private val audioLeaseLock = Any()
+    private val audioLeaseArbitrator = SingleAudioLeaseArbitrator<AudioLease>()
+    private val speechBusLock = Any()
+    private var activeSpeechBusSession: SpeechBusSession? = null
     private val glassesAppOperationLock = Any()
     private val glassesAppStateLock = Any()
     private val glassesAppReleaseLock = Any()
     @Volatile private var sppLoopStop = false
     @Volatile private var hubEnabled = true
     @Volatile private var startupBlockedByBluetoothPermission = false
-    @Volatile private var audioLease: AudioLease? = null
     private val writeLock = Any()
     private var socket: BluetoothSocket? = null
     private var output: OutputStream? = null
@@ -182,6 +213,8 @@ class BusHubService : Service() {
     private lateinit var mediaSyncCoordinator: MediaSyncCoordinator
     private lateinit var manualPairingEngine: GlassesManualPairingEngine
     private lateinit var transitLegacyStateExporter: TransitLegacyStateExporter
+    private lateinit var speechSettingsStore: SpeechSettingsStore
+    private lateinit var speechSessionManager: SpeechSessionManager
     @Volatile private var cxrConnected = false
     @Volatile private var glassBtConnected = false
     @Volatile private var glassesWorn = false
@@ -470,6 +503,23 @@ class BusHubService : Service() {
         transitLegacyStateExporter = TransitLegacyStateExporter(
             AndroidTransitLegacyStateStorage(applicationContext),
         )
+        speechSettingsStore = SpeechSettingsStore(applicationContext)
+        speechSessionManager = SpeechSessionManager(
+            context = applicationContext,
+            settings = speechSettingsStore,
+            secrets = HubSecretStore(applicationContext),
+            internalAudio = object : InternalAudioAccess {
+                override fun acquireInternalAudio(
+                    tag: String,
+                    consumer: InternalAudioConsumer,
+                ): InternalAudioAcquireResult =
+                    this@BusHubService.acquireInternalAudio(tag, consumer)
+
+                override fun releaseInternalAudio(tag: String) {
+                    this@BusHubService.releaseInternalAudio(tag)
+                }
+            },
+        )
         val externalRuntime = AndroidExternalPluginRuntime(
             context = applicationContext,
             isRegisteredCallback = ::isExternalPrincipalRegistered,
@@ -633,7 +683,8 @@ class BusHubService : Service() {
     private fun stopHub() {
         prefs().edit().putBoolean(PREF_ENABLED, false).apply()
         hubEnabled = false
-        stopAudioLease()
+        if (::speechSessionManager.isInitialized) speechSessionManager.cancel()
+        stopAudioLease(InternalAudioStopReason.HUB_STOPPED)
         runCatching { cxrLink?.disconnect() }
         cxrLink = null
         cxrConnected = false
@@ -654,7 +705,8 @@ class BusHubService : Service() {
     override fun onDestroy() {
         stopPeriodicUpdateChecks()
         sppLoopStop = true
-        stopAudioLease()
+        if (::speechSessionManager.isInitialized) speechSessionManager.close()
+        stopAudioLease(InternalAudioStopReason.HUB_STOPPED)
         runCatching { cxrLink?.disconnect() }
         closeSocket()
         PhoneClientSupervisor.detach(applicationContext, this)
@@ -799,6 +851,7 @@ class BusHubService : Service() {
                 replyRemote = false,
                 senderUid = senderUid,
                 replyBinder = sender.replyBinder,
+                principal = sender.principal,
             )
         ) return
         if (deliverLocal(authorizedEnvelope, excludeUid = senderUid)) return
@@ -1028,6 +1081,7 @@ class BusHubService : Service() {
         replyRemote: Boolean,
         senderUid: Int? = null,
         replyBinder: IBinder? = null,
+        principal: PhonePluginPrincipal? = null,
     ): Boolean {
         when (envelope.path) {
             BusPaths.HTTP_REQUEST -> executor.execute { fetchAndStream(envelope, replyRemote, replyBinder) }
@@ -1042,6 +1096,12 @@ class BusHubService : Service() {
             }
             BusPaths.MEDIA_SYNC_NOW -> executor.execute {
                 if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.requestSyncNow()
+            }
+            SttWireProtocol.SESSION_START_PATH -> speechBusExecutor.execute {
+                handleSpeechSessionStart(envelope, replyRemote, replyBinder, principal)
+            }
+            SttWireProtocol.SESSION_STOP_PATH -> speechBusExecutor.execute {
+                handleSpeechSessionStop(envelope, replyRemote, replyBinder, principal)
             }
             else -> return false
         }
@@ -1320,6 +1380,7 @@ class BusHubService : Service() {
         }
         runCatching { registration.callbackBinder.unlinkToDeath(registration.deathRecipient, 0) }
         releaseAudioLeaseForLocalBinder(registration.callbackBinder, reason)
+        releaseSpeechSessionForLocalBinder(registration, reason)
         if (reason in setOf("binderDied", "dead callback", "unregister")) {
             registration.principal?.let { principal ->
                 if (::externalPluginController.isInitialized) {
@@ -1551,6 +1612,297 @@ class BusHubService : Service() {
         }
     }
 
+    private fun handleSpeechSessionStart(
+        envelope: BusEnvelope,
+        replyRemote: Boolean,
+        replyBinder: IBinder?,
+        principal: PhonePluginPrincipal?,
+    ) {
+        if (replyRemote) {
+            sendRemote(errorEnvelope(envelope.id, "STT_LOCAL_ONLY"))
+            return
+        }
+        val registration = speechRegistration(replyBinder, principal) ?: return
+        val request = SttWireProtocol.parseStart(envelope.payload)
+        if (request == null) {
+            replyToSpeechRequest(
+                envelope = envelope,
+                payload = JSONObject()
+                    .put("accepted", false)
+                    .put("reason", "INVALID_REQUEST"),
+                registration = registration,
+            )
+            return
+        }
+
+        val session = SpeechBusSession(
+            sessionId = UUID.randomUUID().toString(),
+            callbackBinder = registration.callbackBinder,
+            pluginId = registration.principal!!.descriptor.id,
+            grantKey = registration.principal.grantKey(),
+        )
+        session.listener = SpeechBusListener(session)
+        val reserved = synchronized(speechBusLock) {
+            val current = activeSpeechBusSession
+            if (current != null && !current.ended.get()) {
+                false
+            } else {
+                activeSpeechBusSession = session
+                true
+            }
+        }
+        if (!reserved) {
+            replyToSpeechRequest(
+                envelope = envelope,
+                payload = JSONObject()
+                    .put("accepted", false)
+                    .put("reason", "BUSY"),
+                registration = registration,
+            )
+            return
+        }
+
+        val startResult = runCatching {
+            speechSessionManager.startUtterance(
+                listener = session.listener,
+                language = request.language,
+            )
+        }.getOrDefault(SpeechStartResult.START_FAILED)
+        if (startResult != SpeechStartResult.OK) {
+            discardSpeechBusSession(session)
+            replyToSpeechRequest(
+                envelope = envelope,
+                payload = JSONObject()
+                    .put("accepted", false)
+                    .put("reason", SttWireProtocol.startDenialReason(startResult)),
+                registration = registration,
+            )
+            return
+        }
+
+        if (!isCurrentSpeechBusSession(session) ||
+            speechRegistration(registration.callbackBinder, registration.principal) == null
+        ) {
+            speechSessionManager.cancel(session.listener)
+            return
+        }
+        val realtime = speechSessionManager.activeRealtime
+            ?: speechSettingsStore.selectedEngine()?.usesRealtime
+            ?: false
+        session.accepted.set(true)
+        replyToSpeechRequest(
+            envelope = envelope,
+            payload = JSONObject()
+                .put("accepted", true)
+                .put("sessionId", session.sessionId)
+                .put("realtime", realtime),
+            registration = registration,
+        )
+    }
+
+    private fun handleSpeechSessionStop(
+        envelope: BusEnvelope,
+        replyRemote: Boolean,
+        replyBinder: IBinder?,
+        principal: PhonePluginPrincipal?,
+    ) {
+        if (replyRemote) {
+            sendRemote(errorEnvelope(envelope.id, "STT_LOCAL_ONLY"))
+            return
+        }
+        val registration = speechRegistration(replyBinder, principal) ?: return
+        val requestedSessionId = envelope.payload.optString("sessionId")
+        val ownedSession = synchronized(speechBusLock) {
+            activeSpeechBusSession?.let { current ->
+                current.takeIf {
+                    !current.ended.get() &&
+                    current.sessionId == requestedSessionId &&
+                    current.callbackBinder == registration.callbackBinder &&
+                    current.grantKey == registration.principal!!.grantKey()
+                }
+            }
+        }
+        ownedSession?.let { speechSessionManager.cancel(it.listener) }
+        replyToSpeechRequest(
+            envelope = envelope,
+            payload = JSONObject().put("stopped", true),
+            registration = registration,
+        )
+    }
+
+    private inner class SpeechBusListener(
+        private val session: SpeechBusSession,
+    ) : SpeechUtteranceListener {
+        override fun onState(state: SpeechSessionState) {
+            speechBusExecutor.execute {
+                if (!isCurrentSpeechBusSession(session)) return@execute
+                val sequence = session.stateSeq.getAndIncrement()
+                deliverSpeechBusEnvelope(
+                    session,
+                    BusEnvelope(
+                        path = SttWireProtocol.STATE_PATH,
+                        id = SttWireProtocol.stateId(session.sessionId, sequence),
+                        payload = SttWireProtocol.statePayload(
+                            session.pluginId,
+                            session.sessionId,
+                            state,
+                        ),
+                    ),
+                )
+            }
+        }
+
+        override fun onPartial(text: String) {
+            speechBusExecutor.execute {
+                if (!isCurrentSpeechBusSession(session)) return@execute
+                val sequence = session.partialSeq.getAndIncrement()
+                deliverSpeechBusEnvelope(
+                    session,
+                    BusEnvelope(
+                        path = SttWireProtocol.PARTIAL_PATH,
+                        id = SttWireProtocol.partialId(session.sessionId, sequence),
+                        payload = SttWireProtocol.partialPayload(
+                            session.pluginId,
+                            session.sessionId,
+                            text,
+                            sequence,
+                        ),
+                    ),
+                )
+            }
+        }
+
+        override fun onFinal(text: String) {
+            speechBusExecutor.execute {
+                if (!isCurrentSpeechBusSession(session)) return@execute
+                deliverSpeechBusEnvelope(
+                    session,
+                    BusEnvelope(
+                        path = SttWireProtocol.FINAL_PATH,
+                        id = SttWireProtocol.finalId(session.sessionId),
+                        payload = SttWireProtocol.finalPayload(
+                            session.pluginId,
+                            session.sessionId,
+                            text,
+                        ),
+                    ),
+                )
+            }
+        }
+
+        override fun onEnded(reason: SpeechEndReason, error: SttError?) {
+            speechBusExecutor.execute {
+                if (!completeSpeechBusSession(session)) return@execute
+                deliverSpeechBusEnvelope(
+                    session,
+                    BusEnvelope(
+                        path = SttWireProtocol.SESSION_ENDED_PATH,
+                        id = SttWireProtocol.endedId(session.sessionId),
+                        payload = SttWireProtocol.endedPayload(
+                            session.pluginId,
+                            session.sessionId,
+                            reason,
+                            error,
+                        ),
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun speechRegistration(
+        callbackBinder: IBinder?,
+        principal: PhonePluginPrincipal?,
+    ): Registration? {
+        if (callbackBinder == null || principal == null) return null
+        return registrations.firstOrNull { registration ->
+            registration.callbackBinder == callbackBinder &&
+                registration.principal?.grantKey() == principal.grantKey() &&
+                PluginCapability.STT in registration.grantedCapabilities
+        }
+    }
+
+    private fun replyToSpeechRequest(
+        envelope: BusEnvelope,
+        payload: JSONObject,
+        registration: Registration,
+    ) {
+        payload.put("pluginId", registration.principal!!.descriptor.id)
+        deliverLocal(
+            BusEnvelope(
+                path = envelope.path + "/reply",
+                id = envelope.id,
+                payload = payload,
+            ),
+            targetBinder = registration.callbackBinder,
+        )
+    }
+
+    private fun deliverSpeechBusEnvelope(session: SpeechBusSession, envelope: BusEnvelope) {
+        deliverLocal(envelope, targetBinder = session.callbackBinder)
+    }
+
+    private fun isCurrentSpeechBusSession(session: SpeechBusSession): Boolean =
+        synchronized(speechBusLock) {
+            activeSpeechBusSession === session && !session.ended.get()
+        }
+
+    private fun discardSpeechBusSession(session: SpeechBusSession) {
+        synchronized(speechBusLock) {
+            if (activeSpeechBusSession === session) activeSpeechBusSession = null
+            session.ended.set(true)
+        }
+    }
+
+    private fun completeSpeechBusSession(session: SpeechBusSession): Boolean =
+        synchronized(speechBusLock) {
+            if (activeSpeechBusSession !== session ||
+                !session.ended.compareAndSet(false, true)
+            ) {
+                false
+            } else {
+                activeSpeechBusSession = null
+                true
+            }
+        }
+
+    private fun releaseSpeechSessionForLocalBinder(registration: Registration, reason: String) {
+        val session = synchronized(speechBusLock) {
+            val current = activeSpeechBusSession
+            if (current?.callbackBinder == registration.callbackBinder &&
+                current.ended.compareAndSet(false, true)
+            ) {
+                activeSpeechBusSession = null
+                current
+            } else {
+                null
+            }
+        } ?: return
+        speechSessionManager.cancel(session.listener)
+        if (reason != "authorizationChanged" || !session.accepted.get()) return
+
+        val revoked = BusEnvelope(
+            path = SttWireProtocol.SESSION_ENDED_PATH,
+            id = SttWireProtocol.endedId(session.sessionId),
+            payload = SttWireProtocol.revokedPayload(session.pluginId, session.sessionId),
+        )
+        speechBusExecutor.execute {
+            val payload = revoked.payload.toString().toByteArray(Charsets.UTF_8)
+            runCatching {
+                registration.callback.onMessage(revoked.path, revoked.id, payload)
+            }.onSuccess {
+                recordLocalDelivery(registration, revoked, PluginBusJournal.Verdict.OK, "LOCAL")
+            }.onFailure {
+                recordLocalDelivery(
+                    registration,
+                    revoked,
+                    PluginBusJournal.Verdict.REJECTED,
+                    "DEAD_CALLBACK",
+                )
+            }
+        }
+    }
+
     private fun acquireAudioLease(
         envelope: BusEnvelope,
         replyRemote: Boolean,
@@ -1566,7 +1918,7 @@ class BusHubService : Service() {
                 ?.id
         }
         val link = cxrLink
-        if (audioLease != null) {
+        if (audioLeaseArbitrator.snapshot() != null) {
             replyToAudioRequest(envelope, replyRemote, JSONObject().put("granted", false).put("reason", "BUSY"), replyBinder, holderPluginId)
             return
         }
@@ -1582,12 +1934,9 @@ class BusHubService : Service() {
             localCallbackBinder = holderBinder,
             holderPluginId = holderPluginId,
         )
-        synchronized(audioLeaseLock) {
-            if (audioLease != null) {
-                replyToAudioRequest(envelope, replyRemote, JSONObject().put("granted", false).put("reason", "BUSY"), replyBinder, holderPluginId)
-                return
-            }
-            audioLease = lease
+        if (!audioLeaseArbitrator.tryAcquire(lease)) {
+            replyToAudioRequest(envelope, replyRemote, JSONObject().put("granted", false).put("reason", "BUSY"), replyBinder, holderPluginId)
+            return
         }
 
         audioHandler.post {
@@ -1602,14 +1951,12 @@ class BusHubService : Service() {
                 false
             }
             if (!started) {
-                synchronized(audioLeaseLock) {
-                    if (audioLease?.leaseId == lease.leaseId) audioLease = null
-                }
+                audioLeaseArbitrator.clearIf { it.leaseId == lease.leaseId }
                 stopAudioStreamQuietly()
                 replyToAudioRequest(envelope, replyRemote, JSONObject().put("granted", false).put("reason", "START_FAILED"), replyBinder, holderPluginId)
                 return@post
             }
-            if (synchronized(audioLeaseLock) { audioLease?.leaseId != lease.leaseId }) {
+            if (audioLeaseArbitrator.snapshot()?.leaseId != lease.leaseId) {
                 // A concurrent revoke may have run stopAudioStreamQuietly() before our
                 // startAudioStream() landed; stop again so no orphan stream survives.
                 stopAudioStreamQuietly()
@@ -1633,30 +1980,70 @@ class BusHubService : Service() {
         }
     }
 
-    private fun releaseAudioLease(envelope: BusEnvelope, replyRemote: Boolean, replyBinder: IBinder?) {
-        val leaseId = envelope.payload.optString("leaseId")
-        val leaseToStop = synchronized(audioLeaseLock) {
-            val current = audioLease
-            if (current != null && current.leaseId == leaseId) {
-                audioLease = null
-                current
+    private fun acquireInternalAudio(
+        tag: String,
+        consumer: InternalAudioConsumer,
+    ): InternalAudioAcquireResult {
+        val link = cxrLink
+        if (audioLeaseArbitrator.snapshot() != null) return InternalAudioAcquireResult.BUSY
+        if (link == null || !isCxrUp()) return InternalAudioAcquireResult.NO_LINK
+        val lease = AudioLease(
+            leaseId = UUID.randomUUID().toString(),
+            side = AudioLeaseSide.INTERNAL,
+            localCallbackBinder = null,
+            holderPluginId = null,
+            internalTag = tag,
+            internalConsumer = consumer,
+        )
+        if (!audioLeaseArbitrator.tryAcquire(lease)) return InternalAudioAcquireResult.BUSY
+
+        val result = runOnAudioMain {
+            val started = runCatching {
+                link.setInterruptAiWake(true)
+                link.setCXRAudioCbk(audioCallback)
+                link.startAudioStream(CXR_AUDIO_PCM)
+            }.getOrDefault(false)
+            if (!started) {
+                audioLeaseArbitrator.clearIf { it.leaseId == lease.leaseId }
+                stopAudioStreamQuietly()
+                InternalAudioAcquireResult.START_FAILED
+            } else if (audioLeaseArbitrator.snapshot()?.leaseId != lease.leaseId) {
+                // Match plugin acquisition's post-start double check so a concurrent link
+                // revoke cannot leave an orphan stream running.
+                stopAudioStreamQuietly()
+                if (isCxrUp()) {
+                    InternalAudioAcquireResult.START_FAILED
+                } else {
+                    InternalAudioAcquireResult.NO_LINK
+                }
             } else {
-                null
+                InternalAudioAcquireResult.OK
             }
         }
+        if (result != null) return result
+
+        audioLeaseArbitrator.clearIf { it.leaseId == lease.leaseId }
+        stopAudioStreamQuietly()
+        return InternalAudioAcquireResult.START_FAILED
+    }
+
+    private fun releaseInternalAudio(tag: String) {
+        val leaseToStop = audioLeaseArbitrator.clearIf {
+            it.side == AudioLeaseSide.INTERNAL && it.internalTag == tag
+        }
+        if (leaseToStop != null) stopAudioStreamQuietly()
+    }
+
+    private fun releaseAudioLease(envelope: BusEnvelope, replyRemote: Boolean, replyBinder: IBinder?) {
+        val leaseId = envelope.payload.optString("leaseId")
+        val leaseToStop = audioLeaseArbitrator.clearIf { it.leaseId == leaseId }
         if (leaseToStop != null) stopAudioStreamQuietly()
         replyToAudioRequest(envelope, replyRemote, JSONObject().put("released", true), replyBinder, leaseToStop?.holderPluginId)
     }
 
     private fun releaseAudioLeaseForLocalBinder(callbackBinder: IBinder, reason: String) {
-        val leaseToStop = synchronized(audioLeaseLock) {
-            val current = audioLease
-            if (current?.side == AudioLeaseSide.LOCAL && current.localCallbackBinder == callbackBinder) {
-                audioLease = null
-                current
-            } else {
-                null
-            }
+        val leaseToStop = audioLeaseArbitrator.clearIf { current ->
+            current.side == AudioLeaseSide.LOCAL && current.localCallbackBinder == callbackBinder
         }
         if (leaseToStop != null) {
             log("Audio lease ${leaseToStop.leaseId} released after $reason")
@@ -1665,12 +2052,12 @@ class BusHubService : Service() {
     }
 
     private fun revokeAudioLease(reason: String) {
-        val leaseToRevoke = synchronized(audioLeaseLock) {
-            val current = audioLease ?: return
-            audioLease = null
-            current
-        }
+        val leaseToRevoke = audioLeaseArbitrator.clear() ?: return
         stopAudioStreamQuietly()
+        if (leaseToRevoke.side == AudioLeaseSide.INTERNAL) {
+            leaseToRevoke.internalConsumer?.onStopped(InternalAudioStopReason.LINK_LOST)
+            return
+        }
         val revoked = BusEnvelope(
             path = AUDIO_LEASE_REVOKED,
             id = leaseToRevoke.leaseId,
@@ -1686,13 +2073,27 @@ class BusHubService : Service() {
         deliverAudioToHolder(leaseToRevoke, revoked)
     }
 
-    private fun stopAudioLease() {
-        val leaseToStop = synchronized(audioLeaseLock) {
-            val current = audioLease
-            audioLease = null
-            current
+    private fun stopAudioLease(internalReason: InternalAudioStopReason) {
+        val leaseToStop = audioLeaseArbitrator.clear()
+        if (leaseToStop != null) {
+            stopAudioStreamQuietly()
+            if (leaseToStop.side == AudioLeaseSide.INTERNAL) {
+                leaseToStop.internalConsumer?.onStopped(internalReason)
+            }
         }
-        if (leaseToStop != null) stopAudioStreamQuietly()
+    }
+
+    private fun <T> runOnAudioMain(block: () -> T): T? {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            return runCatching(block).getOrNull()
+        }
+        val task = FutureTask<T> { block() }
+        if (!audioHandler.post(task)) return null
+        return runCatching {
+            task.get(INTERNAL_AUDIO_START_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        }.onFailure {
+            task.cancel(false)
+        }.getOrNull()
     }
 
     private fun stopAudioStreamQuietly() {
@@ -1712,20 +2113,30 @@ class BusHubService : Service() {
         val safeOffset = offset.coerceIn(0, data.size)
         val safeLength = length.coerceAtMost(data.size - safeOffset)
         if (safeLength <= 0) return
-        val chunk = data.copyOfRange(safeOffset, safeOffset + safeLength)
-        val leaseSnapshot = synchronized(audioLeaseLock) {
-            val current = audioLease ?: return
+        val leaseSnapshot = audioLeaseArbitrator.withActive { current ->
             val seq = current.seq
             current.seq += 1
             current.copy(seq = seq)
+        } ?: return
+        if (leaseSnapshot.side == AudioLeaseSide.INTERNAL) {
+            leaseSnapshot.internalConsumer?.onPcm(
+                data = data,
+                offset = safeOffset,
+                length = safeLength,
+                seq = leaseSnapshot.seq,
+                elapsedRealtimeMs = SystemClock.elapsedRealtime(),
+            )
+            return
         }
+        val chunk = data.copyOfRange(safeOffset, safeOffset + safeLength)
+        val elapsedRealtime = SystemClock.elapsedRealtime()
         val frame = BusEnvelope(
             path = AUDIO_FRAMES,
             id = "${leaseSnapshot.leaseId}:${leaseSnapshot.seq}",
             payload = JSONObject()
                 .put("leaseId", leaseSnapshot.leaseId)
                 .put("seq", leaseSnapshot.seq)
-                .put("elapsedRealtime", SystemClock.elapsedRealtime())
+                .put("elapsedRealtime", elapsedRealtime)
                 .apply {
                     if (leaseSnapshot.side == AudioLeaseSide.LOCAL) {
                         leaseSnapshot.holderPluginId?.let { put("pluginId", it) }
@@ -1740,6 +2151,7 @@ class BusHubService : Service() {
         when (lease.side) {
             AudioLeaseSide.LOCAL -> lease.localCallbackBinder?.let { deliverLocal(envelope, targetBinder = it) }
             AudioLeaseSide.REMOTE -> sendRemote(envelope)
+            AudioLeaseSide.INTERNAL -> Unit
         }
     }
 
@@ -3029,6 +3441,32 @@ class BusHubService : Service() {
         internal fun manualPairingEngine(): GlassesManualPairingEngine? =
             activeInstance?.manualPairingEngine
 
+        /**
+         * Same-process hook for the future non-exported Speech settings activity. Transcript
+         * callbacks are delivered directly and never enter the app's log broadcast.
+         */
+        internal fun startSpeechDictationTest(
+            listener: SpeechUtteranceListener,
+        ): SpeechStartResult =
+            activeInstance
+                ?.takeIf { it::speechSessionManager.isInitialized }
+                ?.speechSessionManager
+                ?.startUtterance(listener)
+                ?: SpeechStartResult.NO_LINK
+
+        internal fun cancelSpeechDictationTest() {
+            activeInstance
+                ?.takeIf { it::speechSessionManager.isInitialized }
+                ?.speechSessionManager
+                ?.cancel()
+        }
+
+        internal fun isSpeechDictationTestActive(): Boolean =
+            activeInstance
+                ?.takeIf { it::speechSessionManager.isInitialized }
+                ?.speechSessionManager
+                ?.isActive == true
+
         fun startWithToken(context: android.content.Context, token: String) {
             if (!canRunHub(context)) {
                 Log.i(TAG, "startWithToken skipped: BLUETOOTH_CONNECT permission not granted")
@@ -3102,5 +3540,7 @@ class BusHubService : Service() {
             Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
                 context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) ==
                 PackageManager.PERMISSION_GRANTED
+
+        private const val INTERNAL_AUDIO_START_TIMEOUT_SECONDS = 10L
     }
 }

@@ -77,7 +77,7 @@ certificate, route prefixes, or surface ownership.
 Descriptor metadata keys are `com.anezium.rokidbus.plugin.ID`,
 `.DISPLAY_NAME`, `.API_VERSION`, `.CAPABILITIES`, `.RECEIVE_PREFIXES`,
 `.SETTINGS_ACTIVITY`, and `.LAUNCHABLE`. Plugin IDs match
-`[a-z][a-z0-9._-]{2,63}`. Capability values are `surfaces`, `microphone`,
+`[a-z][a-z0-9._-]{2,63}`. Capability values are `surfaces`, `microphone`, `stt`,
 `http_proxy`, and `camera`; unknown values invalidate the descriptor. Grants are keyed by
 package, plugin ID, and signing digest and are never implied by installation.
 
@@ -725,6 +725,98 @@ unworn, so a lease acquired while unworn streams near-silence — this is a
 hardware property, not a bus fault. Plugins consume this through the SDK's
 `nexusAudioSession(callbacks)`; the raw `/audio/*` paths above are the wire
 contract behind it.
+
+## STT v1
+
+Speech-to-text is a separate derived-sensitive-data capability. A plugin may
+request `stt` without requesting `microphone`: the hub owns the engine,
+credentials, glasses PCM, and raw audio lease, while the plugin receives text
+only. Both plugin-to-hub request paths require an approved `stt` grant:
+
+- `/stt/session/start` payload
+  `{"version":1,"mode":"utterance","language":"fr"}`. `language` is optional
+  and, when recognized, is a `TranscriptionLanguage` ID. An absent or unknown
+  ID uses the hub's configured language. Version 1 supports only `utterance`;
+  `continuous` is reserved.
+- `/stt/session/stop` payload `{"sessionId":"<uuid>"}`. Stop is idempotent. A
+  missing, wrong, stale, or differently owned session ID has no effect and
+  still receives `{"stopped":true}`.
+
+Replies append `/reply` and retain the request envelope ID:
+
+```json
+{"accepted":true,"sessionId":"<uuid>","realtime":true,"pluginId":"holder"}
+```
+
+or:
+
+```json
+{"accepted":false,"reason":"BUSY","pluginId":"holder"}
+```
+
+Start denial reasons are exactly `BUSY`, `NO_LINK`, `NOT_READY`,
+`START_FAILED`, and `INVALID_REQUEST`. Unknown `version` or `mode` produces
+`INVALID_REQUEST`. `realtime` tells the client whether partial hypotheses will
+stream; buffered engines normally emit only the final result. Stop replies are
+`{"stopped":true,"pluginId":"holder"}`.
+
+The hub sends the following JSON events only to the callback binder that owns
+the session. Every payload includes `pluginId` matching that verified holder:
+
+- `/stt/state`
+  `{"version":1,"sessionId":"<uuid>","state":"listening","pluginId":"holder"}`.
+  State is `listening`, `recognizing`, or `processing`; event IDs are
+  `<sessionId>:s<n>`.
+- `/stt/partial`
+  `{"version":1,"sessionId":"<uuid>","text":"...","seq":0,"pluginId":"holder"}`.
+  Realtime engines only; `seq` is monotonic and the event ID is
+  `<sessionId>:p<seq>`.
+- `/stt/final`
+  `{"version":1,"sessionId":"<uuid>","text":"...","pluginId":"holder"}` with
+  event ID `<sessionId>:final`.
+- `/stt/session/ended`
+  `{"version":1,"sessionId":"<uuid>","reason":"completed","pluginId":"holder"}`
+  with event ID `<sessionId>:ended`.
+
+Ended reasons are exactly `completed`, `cancelled`, `no_speech`, `error`,
+`link_lost`, and `revoked`. An ended event may add:
+
+```json
+{
+  "error": {
+    "kind": "NETWORK",
+    "provider": "OpenAI",
+    "detail": "Provider network request failed"
+  }
+}
+```
+
+`error.kind` is the corresponding `SttErrorKind` enum name. `provider` and
+`detail` are optional, and detail is diagnostic-only and transcript-free.
+
+There is one speech session globally. Plugin sessions and the hub-owned Speech
+settings dictation test use the same `SpeechSessionManager`, so either makes a
+start from the other return `BUSY`. Speech also acquires the existing raw audio
+lease internally: an active `microphone` holder makes STT return `BUSY`, and an
+active speech session makes raw audio acquisition return `BUSY`.
+
+Ownership is the verified plugin principal plus callback binder, never a
+caller-supplied plugin ID. A stop from another principal is treated as stale.
+Binder death, unregister, or grant revocation cancels the session. Grant
+revocation attempts a final targeted `revoked` event while the binder is still
+alive; dead/unregistered binders are only cleaned up. Link loss ends the
+session with `link_lost`.
+
+Transcript privacy is a routing invariant. Partial and final text is never
+broadcast, forwarded to glasses, queued for a sleeping client, or written to
+the hub log. The developer `PluginBusJournal` records only direction, path,
+size, verdict, and bounded routing reason, never JSON payload contents.
+
+STT is additive and the plugin API remains version 3; there is no AIDL change.
+Older hubs do not know the strict `stt` descriptor value and therefore reject
+such plugins rather than degrading transparently. Adding `stt` to an existing
+plugin's requested capability set also returns its signer-bound grant to
+Pending until the user re-approves it.
 
 ## Appendix: historical protocol versions
 

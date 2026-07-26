@@ -20,12 +20,15 @@ class NexusPluginClient internal constructor(
     private val seenEventIds = ArrayDeque<String>()
     private val seenEventIdSet = linkedSetOf<String>()
     private val audioSessionLock = Any()
+    private val speechSessionLock = Any()
     private var registrationState = PluginRegistrationResult.REGISTRATION_FAILED
     private var opened = false
     private var closed = false
     private var approvedCapabilities: Set<PluginCapability> = emptySet()
     private var registeredAudioSession: NexusAudioSession? = null
     private var audioSessionApiUsed = false
+    private var registeredSpeechSession: NexusSpeechSession? = null
+    private var speechSessionApiUsed = false
     @Volatile private var currentLinkState = 0
     @Volatile private var hubCapabilities = 0
 
@@ -60,6 +63,8 @@ class NexusPluginClient internal constructor(
     }
 
     internal fun isApprovedForAudio(): Boolean = !closed && isApproved
+
+    internal fun isApprovedForSpeech(): Boolean = !closed && isApproved
 
     internal fun registerAudioSession(session: NexusAudioSession): Boolean =
         synchronized(audioSessionLock) {
@@ -103,6 +108,56 @@ class NexusPluginClient internal constructor(
         )
     }
 
+    internal fun registerSpeechSession(session: NexusSpeechSession): Boolean =
+        synchronized(speechSessionLock) {
+            if (closed || registeredSpeechSession?.let { it !== session } == true) {
+                false
+            } else {
+                registeredSpeechSession = session
+                speechSessionApiUsed = true
+                true
+            }
+        }
+
+    internal fun unregisterSpeechSession(session: NexusSpeechSession) {
+        synchronized(speechSessionLock) {
+            if (registeredSpeechSession === session) registeredSpeechSession = null
+        }
+    }
+
+    internal fun sendSpeechStart(
+        session: NexusSpeechSession,
+        id: String,
+        language: String?,
+    ): Boolean {
+        if (synchronized(speechSessionLock) { registeredSpeechSession !== session }) return false
+        val payload = JSONObject()
+            .put("version", 1)
+            .put("mode", "utterance")
+        language?.trim()?.takeIf(String::isNotEmpty)?.let { payload.put("language", it) }
+        return send(NEXUS_STT_SESSION_START_PATH, id, payload)
+    }
+
+    internal fun sendSpeechStop(
+        session: NexusSpeechSession,
+        id: String,
+        sessionId: String,
+    ): Boolean {
+        if (synchronized(speechSessionLock) { registeredSpeechSession !== session }) return false
+        return send(
+            NEXUS_STT_SESSION_STOP_PATH,
+            id,
+            JSONObject().put("sessionId", sessionId),
+        )
+    }
+
+    internal fun releaseSpeechSession() {
+        currentSpeechSession()?.terminate(
+            reason = NexusSpeechStopReason.CANCELLED,
+            stopActiveSession = true,
+        )
+    }
+
     override fun onRegistrationState(result: Int) {
         if (closed) return
         registrationState = result
@@ -111,6 +166,10 @@ class NexusPluginClient internal constructor(
             terminateAudioSession(
                 reason = NexusAudioStopReason.ERROR,
                 releaseActiveLease = false,
+            )
+            terminateSpeechSession(
+                reason = NexusSpeechStopReason.ERROR,
+                stopActiveSession = false,
             )
         }
         callbacks.onRegistrationState(result)
@@ -134,6 +193,7 @@ class NexusPluginClient internal constructor(
 
     override fun onMessage(path: String, id: String, payload: JSONObject) {
         if (closed || payload.optString("pluginId") != pluginId || !rememberEvent(id)) return
+        if (routeSpeechMessage(path, payload)) return
         if (routeAudioMessage(path, payload)) return
         when (path) {
             // A duplicate PLUGIN_OPEN (fresh event id) is the hub asking an already-open
@@ -147,6 +207,7 @@ class NexusPluginClient internal constructor(
             BusPaths.PLUGIN_CLOSE -> if (opened) {
                 opened = false
                 releaseAudioSession()
+                releaseSpeechSession()
                 callbacks.onClose()
             }
             BusPaths.PLUGIN_INPUT -> if (opened && isApproved) {
@@ -181,6 +242,7 @@ class NexusPluginClient internal constructor(
 
     override fun onBinary(path: String, id: String, payload: JSONObject, data: ByteArray) {
         if (closed || !isApproved || payload.optString("pluginId") != pluginId || !rememberEvent(id)) return
+        if (routeSpeechBinary(path)) return
         if (routeAudioBinary(path, payload, data)) return
         callbacks.onBinary(path, id, payload, data)
     }
@@ -193,6 +255,10 @@ class NexusPluginClient internal constructor(
         terminateAudioSession(
             reason = NexusAudioStopReason.ERROR,
             releaseActiveLease = false,
+        )
+        terminateSpeechSession(
+            reason = NexusSpeechStopReason.ERROR,
+            stopActiveSession = false,
         )
         if (opened) {
             opened = false
@@ -223,6 +289,27 @@ class NexusPluginClient internal constructor(
         return consume
     }
 
+    private fun routeSpeechMessage(path: String, payload: JSONObject): Boolean {
+        if (!isSpeechPath(path)) return false
+        val (session, consume) = synchronized(speechSessionLock) {
+            registeredSpeechSession to speechSessionApiUsed
+        }
+        when (path) {
+            NEXUS_STT_SESSION_START_REPLY_PATH -> session?.onStartReply(payload)
+            NEXUS_STT_SESSION_STOP_REPLY_PATH -> session?.onStopReply(payload)
+            NEXUS_STT_STATE_PATH -> session?.onState(payload)
+            NEXUS_STT_PARTIAL_PATH -> session?.onPartial(payload)
+            NEXUS_STT_FINAL_PATH -> session?.onFinal(payload)
+            NEXUS_STT_SESSION_ENDED_PATH -> session?.onEnded(payload)
+        }
+        return consume
+    }
+
+    private fun routeSpeechBinary(path: String): Boolean {
+        if (!isSpeechPath(path)) return false
+        return synchronized(speechSessionLock) { speechSessionApiUsed }
+    }
+
     private fun routeAudioBinary(path: String, payload: JSONObject, data: ByteArray): Boolean {
         if (path != NEXUS_AUDIO_FRAMES_PATH) return false
         val (session, consume) = synchronized(audioSessionLock) {
@@ -235,12 +322,25 @@ class NexusPluginClient internal constructor(
     private fun currentAudioSession(): NexusAudioSession? =
         synchronized(audioSessionLock) { registeredAudioSession }
 
+    private fun currentSpeechSession(): NexusSpeechSession? =
+        synchronized(speechSessionLock) { registeredSpeechSession }
+
     private fun terminateAudioSession(
         reason: NexusAudioStopReason,
         releaseActiveLease: Boolean,
     ) {
         currentAudioSession()?.terminate(reason, releaseActiveLease)
     }
+
+    private fun terminateSpeechSession(
+        reason: NexusSpeechStopReason,
+        stopActiveSession: Boolean,
+    ) {
+        currentSpeechSession()?.terminate(reason, stopActiveSession)
+    }
+
+    private fun isSpeechPath(path: String): Boolean =
+        path == "/stt" || path.startsWith("/stt/")
 
     private fun rememberEvent(id: String): Boolean {
         if (id.isBlank() || !seenEventIdSet.add(id)) return false

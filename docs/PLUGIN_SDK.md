@@ -19,7 +19,7 @@ resolved transitively.
 repositories { maven("https://jitpack.io") }
 
 dependencies {
-    implementation("com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.2.1")
+    implementation("com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.3.0")
 }
 ```
 
@@ -54,11 +54,12 @@ does not approve it.
 ```
 
 Plugin IDs use `[a-z][a-z0-9._-]{2,63}`. Requested capabilities are `surfaces`,
-`http_proxy`, `microphone`, and `camera`. Camera paths are protected by the
+`http_proxy`, `microphone`, `stt`, and `camera`. Camera paths are protected by the
 approved signer-bound grant. `microphone` is grantable from the phone UI for any
 plugin that requests it (see §3.1); the plugin needs no Android `RECORD_AUDIO`
 permission — glasses-microphone PCM reaches the plugin over the hub, not through
-the phone's own recorder.
+the phone's own recorder. `stt` is a separate grant for hub-produced transcript
+text and does not require the plugin to request raw `microphone` access.
 
 ## 3. Implement the service
 
@@ -195,9 +196,9 @@ class DictationService : NexusPluginService() {
             }
 
             override fun onAudioFrame(pcm: ByteArray, seq: Long, elapsedRealtimeMs: Long) {
-                // ~50 frames/s of little-endian 16-bit mono PCM. Feed your STT,
-                // recorder, VAD, etc. `pcm` is owned by the caller — copy it if
-                // you keep it past this call.
+                // Variable buffers, typically ~10 frames/s at ~3.2 KiB each.
+                // Feed your STT, recorder, VAD, etc. `pcm` is owned by the caller;
+                // copy it if you keep it past this call.
             }
 
             override fun onAudioStopped(reason: NexusAudioStopReason) {
@@ -238,6 +239,121 @@ Two hardware facts to design around:
 - **The level is conservative.** Captured speech peaks well below full scale;
   if you play the audio back or show a meter, apply gain (roughly 5×) or
   normalize.
+
+### 3.2 Speech to text
+
+Request `stt` and receive `/stt`; do not request `microphone` unless the plugin
+also needs raw PCM:
+
+```xml
+<meta-data android:name="com.anezium.rokidbus.plugin.CAPABILITIES"
+    android:value="surfaces,stt" />
+<meta-data android:name="com.anezium.rokidbus.plugin.RECEIVE_PREFIXES"
+    android:value="/plugin/yourid,/system/plugin,/stt" />
+```
+
+After install, the user must grant **Speech to text** in **Rokid Nexus →
+Settings → Plugin access**. Installation never grants it. Adding `stt` to an
+already installed descriptor changes the requested capability set and returns
+the plugin to Pending until the user re-approves it.
+
+Create one typed session with `nexusSpeechSession(callbacks)`. This complete
+minimal service starts a French utterance when opened:
+
+```kotlin
+class SpeechPluginService : NexusPluginService() {
+    private var speech: NexusSpeechSession? = null
+
+    override fun onNexusOpen() {
+        val session = nexusSpeechSession(object : NexusSpeechCallbacks {
+            override fun onSpeechStarted(realtime: Boolean) {
+                // realtime=true means partial hypotheses may follow.
+            }
+
+            override fun onSpeechState(state: NexusSpeechState) {
+                // LISTENING, RECOGNIZING, or PROCESSING
+            }
+
+            override fun onSpeechPartial(text: String) {
+                // Update lightweight UI only. Never log transcript text.
+            }
+
+            override fun onSpeechFinal(text: String) {
+                // Use the completed transcript. Never log transcript text.
+            }
+
+            override fun onSpeechStopped(
+                reason: NexusSpeechStopReason,
+                error: NexusSpeechError?,
+            ) {
+                speech = null
+                // error has kind plus optional provider/detail; no transcript.
+            }
+        }) ?: return
+        speech = session
+        when (session.start(language = "fr")) {
+            NexusSdkResult.SENT -> Unit
+            NexusSdkResult.CAPABILITY_NOT_GRANTED -> speech = null
+            NexusSdkResult.NOT_REGISTERED -> speech = null
+            else -> speech = null
+        }
+    }
+
+    override fun onNexusInput(event: NexusInputEvent) = Unit
+
+    override fun onNexusClose() {
+        speech?.stop()
+        speech = null
+    }
+}
+```
+
+`language` is optional and accepts a hub `TranscriptionLanguage` ID such as
+`auto`, `en`, `fr`, `de`, `es`, `it`, `pt`, `ja`, `ko`, `yue`, `zh-hant`, or
+`zh-hans`. An absent or unknown ID uses the hub's configured language for that
+session. Only utterance mode exists in v1.
+
+All speech callbacks are serialized on the plugin application's main thread,
+just like lifecycle and audio callbacks. Offload network calls, database work,
+large parsing, or other heavy processing immediately. Transcript strings are
+immutable, but retaining or persisting them is a plugin privacy decision; do
+not put partials, finals, prompts, or user speech in logcat, analytics, crash
+breadcrumbs, or bug reports.
+
+The hub has one global speech session shared with its Speech settings dictation
+test. It also consumes the same one-holder glasses audio lease used by
+`NexusAudioSession`. A settings test, another STT plugin, or a raw microphone
+lease can therefore produce `DENIED_BUSY`. Realtime engines set
+`realtime=true` and may emit monotonic partials before one final. Buffered
+engines set `realtime=false` and normally emit no partial callbacks.
+
+Start denials map as follows:
+
+| Hub reason | `NexusSpeechStopReason` |
+|---|---|
+| `BUSY` | `DENIED_BUSY` |
+| `NO_LINK` | `DENIED_NO_LINK` |
+| `NOT_READY` | `DENIED_NOT_READY` |
+| `START_FAILED` | `DENIED_START_FAILED` |
+| `INVALID_REQUEST` or unknown | `DENIED_INVALID` |
+
+Session endings map as follows:
+
+| Hub reason | `NexusSpeechStopReason` |
+|---|---|
+| `completed` | `COMPLETED` |
+| `cancelled` | `CANCELLED` |
+| `no_speech` | `NO_SPEECH` |
+| `error` or unknown | `ERROR` |
+| `link_lost` | `LINK_LOST` |
+| `revoked` | `REVOKED` |
+
+`NexusSpeechError` exposes the slice-1 `SttErrorKind` name and optional
+provider/detail. `stop()` is idempotent: while active it sends one stop request
+and immediately finishes locally with `CANCELLED`; late replies/events remain
+consumed by the sticky typed route. Approval loss or direct client close
+terminates with `ERROR`, while the service's normal close/destruction calls
+stop first and terminates with `CANCELLED`.
 
 ## 4. Approve and debug
 

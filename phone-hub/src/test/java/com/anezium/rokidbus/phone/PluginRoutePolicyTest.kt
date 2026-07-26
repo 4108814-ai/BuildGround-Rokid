@@ -20,9 +20,13 @@ class PluginRoutePolicyTest {
     fun `every privileged route requires its exact capability`() {
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.SURFACES), "/surface/show"))
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.MICROPHONE), "/audio/lease/acquire"))
+        assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.STT), "/stt/session/start"))
+        assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.STT), "/stt/session/stop"))
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.HTTP_PROXY), "/http/request"))
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/surface/update") is PluginRouteDecision.Denied)
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/audio/lease/release") is PluginRouteDecision.Denied)
+        assertTrue(PluginRoutePolicy.authorize(plugin(), "/stt/session/start") is PluginRouteDecision.Denied)
+        assertTrue(PluginRoutePolicy.authorize(plugin(), "/stt/session/stop") is PluginRouteDecision.Denied)
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/http/request") is PluginRouteDecision.Denied)
     }
 
