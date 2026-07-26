@@ -1,6 +1,6 @@
 # Changelog — Photos Sync
 
-## 1.0.0 — unreleased
+## 1.0.0
 
 - First release: glasses captures copy themselves into `Download/Hi Rokid/` on
   the phone, over the Bluetooth connection the glasses already have — no Wi-Fi on

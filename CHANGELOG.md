@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.0.43
+
+### Photos Sync
+
+- Captures taken on the glasses now copy themselves into your phone gallery, in
+  the same `Download/Hi Rokid/` album Hi Rokid imports into — over the Bluetooth
+  connection the glasses already have, so neither device needs Wi-Fi. Install the
+  new Photos Sync plugin from the Store to turn it on.
+- Sync runs while charging by default; you can set it to sync as soon as you
+  capture, or only when you tap Sync now. Interrupted transfers resume where they
+  stopped, and every file is checksum-verified before it reaches the gallery.
+- The transfer stays out of the way of everything else on the connection: it
+  pauses for a camera session, yields whenever anything else is talking, and
+  keeps only one chunk in flight.
+- Deleting captures from the glasses after they are safely on the phone is
+  available as an opt-in, and honestly reports when the glasses refuse.
+
+### Glasses maintenance
+
+- The command bridge now updates itself from the installed app, so a glasses unit
+  whose ADB self-arm has gone stale still receives new privileged capabilities.
+- The manual setup flow keeps the glasses display awake while you copy the
+  pairing code, and the phone form no longer hides behind the keyboard.
+
 ## SDK 0.3.0
 
 - New speech session API: plugins holding the new `stt` capability can start hub
