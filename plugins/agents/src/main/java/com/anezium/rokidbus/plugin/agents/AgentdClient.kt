@@ -134,7 +134,8 @@ class AgentdClient(
                         action.message,
                     )
                     is AgentdAction.Send -> webSocket.send(action.text)
-                    AgentdAction.Ignore -> Unit
+                    // Only the LAN link sees a daemon hello: here we are the client.
+                    is AgentdAction.Hello, AgentdAction.Ignore -> Unit
                 }
             }
 

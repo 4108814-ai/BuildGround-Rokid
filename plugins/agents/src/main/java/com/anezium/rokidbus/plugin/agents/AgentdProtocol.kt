@@ -4,6 +4,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 sealed interface AgentdAction {
+    /** A computer dialling in on the LAN link, before anything else is sent. */
+    data class Hello(
+        val machineId: String,
+        val machineName: String,
+        val token: String,
+    ) : AgentdAction
     data class HelloAcknowledged(val machineName: String?) : AgentdAction
     data class Snapshot(val seq: Long, val sessions: List<AgentSession>) : AgentdAction
     data class Upsert(val seq: Long, val session: AgentSession) : AgentdAction
@@ -42,6 +48,15 @@ class AgentdProtocolCodec {
     fun parse(text: String): AgentdAction {
         val json = runCatching { JSONObject(text) }.getOrNull() ?: return AgentdAction.Ignore
         return when (json.optString("type")) {
+            "hello" -> {
+                if (json.optInt("v", -1) != 1) return AgentdAction.Ignore
+                val machineId = json.nullableString("machineId") ?: return AgentdAction.Ignore
+                AgentdAction.Hello(
+                    machineId = machineId,
+                    machineName = json.nullableString("machineName") ?: machineId.take(8),
+                    token = json.nullableString("token").orEmpty(),
+                )
+            }
             "hello_ack" -> {
                 if (json.optInt("v", -1) != 1) return AgentdAction.Ignore
                 AgentdAction.HelloAcknowledged(

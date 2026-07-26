@@ -34,6 +34,11 @@ class AgentsMonitorService : Service() {
     private val openClawClient by lazy {
         OpenClawClient(httpClient, AgentsRuntime.store, configStore, serviceScope, VERSION_NAME)
     }
+    private val linkServer by lazy {
+        AgentdLinkServer(AgentsRuntime.store, configStore, serviceScope) { machineName ->
+            notifications.notifyMachineTrusted(machineName)
+        }
+    }
     private var runningAgentd: AgentdConfig? = null
     private var runningOpenClaw: OpenClawConfig? = null
     private var temporaryAgentd: Job? = null
@@ -73,9 +78,15 @@ class AgentsMonitorService : Service() {
                 testOpenClaw()
             }
             ACTION_OPEN_DETAIL -> {
-                intent.getStringExtra(EXTRA_SESSION_ID)?.let(agentdClient::openDetail)
+                intent.getStringExtra(EXTRA_SESSION_ID)?.let { sessionId ->
+                    agentdClient.openDetail(sessionId)
+                    linkServer.openDetail(sessionId)
+                }
             }
-            ACTION_CLOSE_DETAIL -> agentdClient.closeDetail()
+            ACTION_CLOSE_DETAIL -> {
+                agentdClient.closeDetail()
+                linkServer.closeDetail()
+            }
             else -> reconcile()
         }
         return START_STICKY
@@ -87,6 +98,7 @@ class AgentsMonitorService : Service() {
         temporaryAgentd?.cancel()
         temporaryOpenClaw?.cancel()
         agentdClient.stop(clearSessions = true)
+        linkServer.stop(clearSessions = true)
         openClawClient.stop(clearSessions = true)
         stopService(Intent(this, AgentsPluginService::class.java))
         httpClient.dispatcher.executorService.shutdown()
@@ -104,6 +116,8 @@ class AgentsMonitorService : Service() {
             Intent(this, AgentsPluginService::class.java)
                 .setAction(AgentsPluginService.ACTION_MONITOR_ACTIVE),
         )
+        // Pairing data is the away-from-home path (we dial the daemon over the
+        // tailnet). With none configured we simply listen: the daemon finds us.
         val wantedAgentd = config.agentd?.takeIf { config.agentdEnabled && it.configured }
         if (wantedAgentd != runningAgentd) {
             if (wantedAgentd == null) {
@@ -112,6 +126,11 @@ class AgentsMonitorService : Service() {
                 agentdClient.start(wantedAgentd)
             }
             runningAgentd = wantedAgentd
+        }
+        if (config.agentdEnabled && wantedAgentd == null) {
+            linkServer.start()
+        } else {
+            linkServer.stop(clearSessions = wantedAgentd == null)
         }
         val wantedOpenClaw = config.openClaw?.takeIf { config.openClawEnabled && it.configured }
         if (wantedOpenClaw != runningOpenClaw) {

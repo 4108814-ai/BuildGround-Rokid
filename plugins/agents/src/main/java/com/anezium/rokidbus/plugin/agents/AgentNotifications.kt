@@ -63,6 +63,25 @@ class AgentNotifications(private val context: Context) {
         NotificationManagerCompat.from(context).notify(session.key.hashCode(), notification)
     }
 
+    /** First contact from a computer: tell the wearer who just linked up. */
+    fun notifyMachineTrusted(machineName: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        val notification = NotificationCompat.Builder(context, SESSION_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_agents)
+            .setContentTitle("$machineName is now linked")
+            .setContentText("Its Claude Code sessions appear on your glasses")
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setAutoCancel(true)
+            .setContentIntent(settingsPendingIntent())
+            .build()
+        NotificationManagerCompat.from(context).notify(machineName.hashCode(), notification)
+    }
+
     fun monitorNotification(summary: String) =
         NotificationCompat.Builder(context, MONITOR_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_agents)

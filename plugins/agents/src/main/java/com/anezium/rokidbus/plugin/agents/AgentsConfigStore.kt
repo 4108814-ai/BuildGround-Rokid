@@ -32,9 +32,10 @@ data class AgentsConfig(
     val openClawEnabled: Boolean,
     val openClaw: OpenClawConfig?,
 ) {
+    // Claude Code needs no configuration any more: enabling it makes the phone
+    // listen, and the daemon on the LAN finds it by itself.
     val shouldMonitor: Boolean
-        get() = agentdEnabled && agentd?.configured == true ||
-            openClawEnabled && openClaw?.configured == true
+        get() = agentdEnabled || openClawEnabled && openClaw?.configured == true
 }
 
 sealed interface AgentdPairingParseResult {
@@ -148,6 +149,38 @@ class AgentsConfigStore(context: Context) {
         prefs.edit().putString(KEY_OPENCLAW_DEVICE_TOKEN, token).apply()
     }
 
+    /**
+     * Trust on first use: the first computer that dials in is remembered with its
+     * token, and later connections must present the same one. No code to type,
+     * and a stranger on the network cannot take over a known machine's identity.
+     */
+    fun isMachineTrusted(machineId: String, token: String): Boolean {
+        val known = prefs.getString(machineKey(machineId), null) ?: return false
+        return known == token
+    }
+
+    fun trustMachine(machineId: String, token: String, machineName: String) {
+        prefs.edit()
+            .putString(machineKey(machineId), token)
+            .putString("$KEY_MACHINE_NAME_PREFIX$machineId", machineName)
+            .apply()
+    }
+
+    fun trustedMachineNames(): List<String> = prefs.all.keys
+        .filter { it.startsWith(KEY_MACHINE_NAME_PREFIX) }
+        .mapNotNull { prefs.getString(it, null) }
+        .sorted()
+
+    fun forgetMachines() {
+        prefs.edit().apply {
+            prefs.all.keys
+                .filter { it.startsWith(KEY_MACHINE_PREFIX) || it.startsWith(KEY_MACHINE_NAME_PREFIX) }
+                .forEach(::remove)
+        }.apply()
+    }
+
+    private fun machineKey(machineId: String): String = "$KEY_MACHINE_PREFIX$machineId"
+
     fun notificationFingerprint(sessionKey: String): String? =
         prefs.getString("$KEY_NOTIFICATION_PREFIX$sessionKey", null)
 
@@ -169,5 +202,7 @@ class AgentsConfigStore(context: Context) {
         const val KEY_OPENCLAW_SEED = "openclaw.device_seed"
         const val KEY_OPENCLAW_DEVICE_TOKEN = "openclaw.device_token"
         const val KEY_NOTIFICATION_PREFIX = "notification."
+        const val KEY_MACHINE_PREFIX = "machine.token."
+        const val KEY_MACHINE_NAME_PREFIX = "machine.name."
     }
 }

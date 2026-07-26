@@ -38,6 +38,7 @@ class AgentsSettingsActivity : Activity() {
     private lateinit var agentdSummary: TextView
     private lateinit var agentdConnection: TextView
     private lateinit var agentdDot: View
+    private lateinit var machinesLine: TextView
     private lateinit var openClawEnabled: Switch
     private lateinit var openClawHost: EditText
     private lateinit var openClawPort: EditText
@@ -67,7 +68,7 @@ class AgentsSettingsActivity : Activity() {
         openClawEnabled = Switch(this)
         agentdDot = NexusUi.dot(this)
         openClawDot = NexusUi.dot(this)
-        agentdPairing = NexusUi.field(this, "Paste nexus-agentd pairing JSON").apply {
+        agentdPairing = NexusUi.field(this, "Away from home: paste pairing JSON (optional)").apply {
             setSingleLine(false)
             minLines = 3
             maxLines = 6
@@ -81,6 +82,7 @@ class AgentsSettingsActivity : Activity() {
                 override fun afterTextChanged(s: Editable?) = Unit
             })
         }
+        machinesLine = NexusUi.rowSub(this, "No computer linked yet")
         agentdSummary = NexusUi.cardBody(this, "No daemon paired.")
         agentdConnection = NexusUi.statusLine(this).apply { text = "DISCONNECTED" }
         openClawHost = NexusUi.field(this, "Host or ws(s)://host").apply {
@@ -167,6 +169,17 @@ class AgentsSettingsActivity : Activity() {
         addView(switchRow("Monitor sessions", agentdEnabled), NexusUi.block())
         addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
         addView(connectionRow(agentdDot, agentdConnection), NexusUi.block())
+        addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
+        addView(
+            NexusUi.cardBody(
+                this@AgentsSettingsActivity,
+                "Run nexus-agentd on your computer and it finds this phone on the " +
+                    "same Wi-Fi by itself — no address, no cable, nothing to open.",
+            ),
+            NexusUi.block(),
+        )
+        addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
+        addView(machinesLine, NexusUi.block())
         addView(NexusUi.divider(this@AgentsSettingsActivity))
         addView(agentdPairing, NexusUi.block())
         addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
@@ -182,13 +195,15 @@ class AgentsSettingsActivity : Activity() {
             NexusUi.block(),
         )
         addView(
-            NexusUi.textButton(this@AgentsSettingsActivity, "Clear pairing", danger = true).apply {
+            NexusUi.textButton(this@AgentsSettingsActivity, "Forget computers", danger = true).apply {
                 setOnClickListener {
-                    agentdEnabled.isChecked = false
                     agentdPairing.text.clear()
-                    configStore.saveAgentd(null, enabled = false)
+                    configStore.saveAgentd(null, enabled = agentdEnabled.isChecked)
+                    configStore.forgetMachines()
                     agentdSummary.text = "No daemon paired."
+                    machinesLine.text = "No computer linked yet"
                     AgentsMonitorService.reconcile(applicationContext)
+                    toast("Linked computers forgotten.")
                 }
             },
             NexusUi.block(),
@@ -267,6 +282,12 @@ class AgentsSettingsActivity : Activity() {
 
     private fun loadConfig() {
         val config = configStore.load()
+        val machines = configStore.trustedMachineNames()
+        machinesLine.text = if (machines.isEmpty()) {
+            "No computer linked yet"
+        } else {
+            "Linked: ${machines.joinToString(", ")}"
+        }
         agentdEnabled.isChecked = config.agentdEnabled
         agentdSummary.text = config.agentd?.let {
             "${it.name} · ${it.host}:${it.port}"
