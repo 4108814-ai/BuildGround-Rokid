@@ -1,30 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Photos Sync: a camera with its capture travelling out of it.
-     Drawn as green strokes like the rest of the plugin glyph family rather than a filled
-     silhouette, so it reads the same wherever it lands — the hub tints what it loads from another
-     package, this plugin's own header does not tint at all, and a white fill showed up white
-     there. Same weight and caps as the built-in glyphs so the family stays coherent. -->
+<!-- A capture frame with a sync arrow leaving it. Filled in the accent green rather than white:
+     the hub tints what it loads from another package, but a plugin's own header renders the
+     resource untouched, so a white fill showed up white there. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path
-        android:pathData="M4.4,7.8 L6.1,7.8 L7.3,5.8 L10.5,5.8 L11.7,7.8 L14.4,7.8 A2,2 0 0 1 16.4,9.8 L16.4,16.2 A2,2 0 0 1 14.4,18.2 L4.4,18.2 A2,2 0 0 1 2.4,16.2 L2.4,9.8 A2,2 0 0 1 4.4,7.8 Z"
-        android:strokeColor="#FF4DFF8C"
-        android:strokeWidth="1.7"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
+        android:fillColor="#FF4DFF8C"
+        android:pathData="M4,5 L8,5 L9.4,3 L14.6,3 L16,5 L20,5 A2,2 0 0 1 22,7 L22,10.5 L20,10.5 L20,7 L4,7 L4,17 L11,17 L11,19 L4,19 A2,2 0 0 1 2,17 L2,7 A2,2 0 0 1 4,5 Z" />
     <path
-        android:pathData="M12.2,13 A2.8,2.8 0 1 1 6.6,13 A2.8,2.8 0 1 1 12.2,13"
-        android:strokeColor="#FF4DFF8C"
-        android:strokeWidth="1.7"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
+        android:fillColor="#FF4DFF8C"
+        android:pathData="M9.6,12 A2.4,2.4 0 1 0 14.4,12 A2.4,2.4 0 1 0 9.6,12 Z" />
     <path
-        android:pathData="M20.2,9.6 L20.2,19.2 M17.4,16.4 L20.2,19.2 L23,16.4"
-        android:strokeColor="#FF4DFF8C"
-        android:strokeWidth="1.7"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
+        android:fillColor="#FF4DFF8C"
+        android:pathData="M17.5,12.2 L21.6,16.3 L18.5,16.3 L18.5,21.2 L16.5,21.2 L16.5,16.3 L13.4,16.3 Z" />
 </vector>
