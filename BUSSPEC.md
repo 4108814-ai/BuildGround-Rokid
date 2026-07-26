@@ -733,6 +733,12 @@ request `stt` without requesting `microphone`: the hub owns the engine,
 credentials, glasses PCM, and raw audio lease, while the plugin receives text
 only. Both plugin-to-hub request paths require an approved `stt` grant:
 
+Which engine transcribes is the user's business, not the plugin's. A session
+may be served by a cloud provider or by the phone's own recognizer — which
+takes no credentials and is what a fresh install starts on. The wire contract
+below is identical either way, so plugins must not infer engine, cost, or
+where the audio went from anything they receive.
+
 - `/stt/session/start` payload
   `{"version":1,"mode":"utterance","language":"fr"}`. `language` is optional
   and, when recognized, is a `TranscriptionLanguage` ID. An absent or unknown

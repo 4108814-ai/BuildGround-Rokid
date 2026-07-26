@@ -375,6 +375,35 @@ On-device/session matrix:
     The marker must appear only in the holder's in-process callbacks. The
     journal may show direction/path/size/verdict but never payload text.
 
+### Android engine
+
+The phone's own recognizer needs no credentials, so it is the engine a fresh
+install lands on. It also needs the phone microphone permission, which the
+cloud engines never did.
+
+1. On a profile that has never picked an engine, the Speech screen selects the
+   Android engine and readiness is never `MISSING_KEY`. Pick a cloud engine and
+   reopen the screen: the explicit choice wins and survives a hub restart.
+2. Deny `RECORD_AUDIO`. Readiness reads `MISSING_MIC_PERMISSION` and the
+   dictation card offers to grant it; granting from that card returns the
+   screen to `READY` without leaving the app. Deny permanently (twice) and
+   confirm the copy points at Android settings instead of a dead prompt.
+3. Force a language, run the Android engine, then switch back to a cloud
+   engine. The forced language must still be selected: the Android engine runs
+   on auto-detection but never rewrites the stored choice. While it is
+   selected the language grid is read-only.
+4. Run one dictation and confirm the hub audio lease opens and closes exactly
+   once, and that the recognizer receives the glasses PCM rather than the phone
+   microphone — speak toward the glasses only, with the phone face down and
+   away.
+5. Start a plugin STT session while the Android engine is selected, and check
+   the plugin sees no protocol difference from a cloud engine: same reply
+   shape, same events, same stop semantics.
+6. On a phone that refuses the microphone foreground-service type, the hub must
+   stay alive and fall back to its connected-device foreground service, and the
+   session must end with a structured `source-unavailable` error rather than a
+   crash.
+
 ## Cleanup
 
 If you saved the old accessibility setting before appending, restore it. Otherwise remove only

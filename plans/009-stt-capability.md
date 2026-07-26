@@ -1,6 +1,6 @@
 # Plan 009 — Speech-to-text capability
 
-Status: analysis done, branch `stt-capability`, awaiting build go.
+Status: slices 1-3 shipped. Slice 4 (continuous mode) is what remains.
 
 ## Goal
 
@@ -130,7 +130,13 @@ Relay service idle lifecycle.
    + grant/route/protocol tests.
 3. **Android CXR engine** — injected-recognizer port + hub mic foreground
    policy (RECORD_AUDIO, `FOREGROUND_SERVICE_MICROPHONE`, companion-device
-   consideration). Free no-key default once proven.
+   consideration). Free no-key default once proven. *Shipped: the recognizer is
+   fed the glasses PCM through a `ParcelFileDescriptor` pipe behind the same
+   `SttSession` interface as the cloud engines, and it is the engine a profile
+   lands on until the user picks another. Two lessons worth keeping: the
+   `RecognizerIntent` timing extras must be `Int` (a `Long` is silently dropped
+   for 0 — Relay has been losing them all along), and the engine must never
+   rewrite the user's stored language, only run on auto and lock the grid.*
 4. **Continuous mode** — segmented live transcription on realtime engines
    (VAD-driven segment commits, provider reconnect); enables live captions and
    long-form Scribe-style consumers.
