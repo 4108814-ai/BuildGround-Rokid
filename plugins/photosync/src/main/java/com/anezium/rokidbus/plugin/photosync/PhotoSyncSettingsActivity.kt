@@ -19,7 +19,6 @@ import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
-import com.anezium.rokidbus.client.ui.NexusPluginIcons
 import com.anezium.rokidbus.client.ui.NexusUi
 import com.anezium.rokidbus.shared.MediaSyncBlocker
 import com.anezium.rokidbus.shared.MediaSyncMode
@@ -98,7 +97,11 @@ class PhotoSyncSettingsActivity : Activity() {
             addView(
                 NexusUi.pluginHeader(
                     this@PhotoSyncSettingsActivity,
-                    NexusPluginIcons.drawableFor("send", "photosync"),
+                    // Photo Sync's own glyph — a capture frame with the sync arrow leaving it —
+                    // and the same file the hub shows in the plugin list. The shared vocabulary
+                    // has nothing for "captures travelling", so falling back to its generic send
+                    // icon left a paper plane here and the real mark everywhere else.
+                    R.drawable.nexus_glyph_photosync,
                     "Photo Sync",
                     "Glasses captures to your gallery · v$versionLabel",
                 ),

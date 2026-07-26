@@ -4,7 +4,9 @@ import android.content.Context
 import android.net.wifi.WifiManager
 import android.system.Os
 import android.system.OsConstants
+import android.os.SystemClock
 import android.util.Base64
+import com.anezium.rokidbus.shared.MediaSyncCatalogContract
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -39,7 +41,8 @@ internal object SelfArmCommandBridgeProtocol {
     private val nonceRegex = Regex("[0-9a-f]{32}")
     private val tokenRegex = Regex("[0-9a-f]{64}")
     private val encodedArgumentRegex = Regex("[A-Za-z0-9+/]+={0,2}")
-    private val allowedCommands = setOf(WIFI_ENABLE, WIFI_DISABLE, WIFI_CONNECT)
+    const val DELETE_CAPTURE = "delete_capture"
+    private val allowedCommands = setOf(WIFI_ENABLE, WIFI_DISABLE, WIFI_CONNECT, DELETE_CAPTURE)
 
     sealed interface Verification {
         data class Accepted(
@@ -114,6 +117,8 @@ internal object SelfArmCommandBridgeProtocol {
                     -> arguments[1].length in 1..172 && encodedArgumentRegex.matches(arguments[1])
                     null -> false
                 }
+            DELETE_CAPTURE -> arguments.size == 1 &&
+                arguments[0].length in 1..344 && encodedArgumentRegex.matches(arguments[0])
             else -> false
         }
         if (!validShape) return Verification.Rejected("format")
@@ -183,6 +188,44 @@ internal object SelfArmCommandBridgeClient {
             timeoutMs,
         ) { awaitWifiNetwork(wifiManager, ssid, timeoutMs) }
     }
+
+    /**
+     * Removes one capture from the glasses' camera directory through the shell-uid bridge.
+     *
+     * The hub cannot do this itself: the file belongs to the camera app, and scoped storage only
+     * yields to an all-files grant or an interactive consent dialog the headless hub has no screen
+     * for. The bridge has neither problem, so delete-after-sync becomes a promise photo sync can
+     * actually keep. Success is read from the directory rather than from the bridge's response
+     * file: a file written by the bridge's uid can stay invisible to this one for seconds behind
+     * the FUSE cache, so the effect is what gets checked.
+     */
+    fun deleteCapture(context: Context, name: String, timeoutMs: Long = DEFAULT_TIMEOUT_MS): Boolean {
+        if (timeoutMs <= 0L || !MediaSyncCatalogContract.isSafeName(name)) return false
+        val appContext = context.applicationContext
+        val directory = File(MediaCatalog.DEFAULT_DIRECTORY)
+        if (!isPresent(directory, name)) return true
+        val encoded = Base64.encodeToString(name.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+        if (encoded.length !in 1..344) return false
+        return submit(
+            appContext,
+            SelfArmCommandBridgeProtocol.DELETE_CAPTURE,
+            listOf(encoded),
+            timeoutMs,
+        ) { awaitCaptureGone(directory, name, timeoutMs) }
+    }
+
+    private fun awaitCaptureGone(directory: File, name: String, timeoutMs: Long): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (!isPresent(directory, name)) return true
+            Thread.sleep(RESPONSE_POLL_MS)
+        }
+        return !isPresent(directory, name)
+    }
+
+    /** Listing the directory forces a fresh read; a stat can answer from a cached entry. */
+    private fun isPresent(directory: File, name: String): Boolean =
+        runCatching { directory.list()?.contains(name) }.getOrNull() ?: File(directory, name).exists()
 
     internal fun ensureSecretHex(context: Context): String = synchronized(secretLock) {
         loadSecretHex(context)?.let { return@synchronized it }

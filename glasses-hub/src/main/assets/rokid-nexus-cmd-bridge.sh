@@ -10,7 +10,8 @@ SEENFILE="$BASE/$NAME.seen"
 PENDING_DISABLE="$BASE/$NAME.pending-disable"
 CHANNEL="/sdcard/Android/data/com.anezium.rokidbus.glasses/files/cmd_bridge"
 DOORBELL="$CHANNEL/doorbell"
-VERSION="2026-07-21.1"
+VERSION="2026-07-26.1"
+CAPTURE_DIR="/sdcard/DCIM/Camera"
 SECRET="__ROKID_NEXUS_BRIDGE_SECRET_HEX__"
 POLL_INTERVAL=1
 DISABLE_DELAY=2
@@ -221,6 +222,22 @@ EOF
       fi
       token_input="${SECRET}:${command}:${nonce}:${ssid_encoded}:${passphrase_encoded}:${security}"
       ;;
+    delete_capture)
+      name_encoded="$field3"
+      token="$field4"
+      case "$name_encoded" in
+        ""|*[!A-Za-z0-9+/=]*)
+          reject_request "$request_file" "$file_nonce" format
+          return
+          ;;
+      esac
+      if [ -n "$field5" ] || [ -n "$field6" ] || [ -z "$token" ] ||
+        [ "$request_line" != "$command:$nonce:$name_encoded:$token" ]; then
+        reject_request "$request_file" "$file_nonce" format
+        return
+      fi
+      token_input="${SECRET}:${command}:${nonce}:${name_encoded}"
+      ;;
     *)
       reject_request "$request_file" "$file_nonce" command
       return
@@ -269,6 +286,40 @@ EOF
       else
         write_response "$nonce" error schedule_failed
         log_line "command failed command=wifi_disable nonce=$nonce reason=schedule"
+      fi
+      ;;
+    delete_capture)
+      # The wearer's captures belong to the camera app, so scoped storage refuses the hub's own
+      # delete. Shell may remove them - but only ever one of the camera's own capture files:
+      # the name is re-validated here rather than trusted, and anything with a path separator, a
+      # leading dot or an unexpected character is refused outright, so this command can never be
+      # steered outside the capture directory.
+      if ! capture_name="$(printf '%s' "$name_encoded" | base64 -d 2>/dev/null)"; then
+        write_response "$nonce" error decode_failed
+        log_line "command failed command=delete_capture nonce=$nonce reason=decode"
+      else
+        case "$capture_name" in
+          ""|.*|*/*|*[!A-Za-z0-9._+-]*)
+            write_response "$nonce" error name_invalid
+            log_line "command failed command=delete_capture nonce=$nonce reason=name"
+            ;;
+          *)
+            if [ "${#capture_name}" -gt 255 ]; then
+              write_response "$nonce" error name_invalid
+              log_line "command failed command=delete_capture nonce=$nonce reason=length"
+            elif [ ! -f "$CAPTURE_DIR/$capture_name" ]; then
+              write_response "$nonce" ok ""
+              log_line "command completed command=delete_capture nonce=$nonce reason=absent"
+            elif rm -f "$CAPTURE_DIR/$capture_name" >/dev/null 2>&1 &&
+              [ ! -f "$CAPTURE_DIR/$capture_name" ]; then
+              write_response "$nonce" ok ""
+              log_line "command completed command=delete_capture nonce=$nonce"
+            else
+              write_response "$nonce" error command_failed
+              log_line "command failed command=delete_capture nonce=$nonce"
+            fi
+            ;;
+        esac
       fi
       ;;
     wifi_connect)
@@ -359,8 +410,15 @@ loop_forever() {
 
 start_bridge() {
   if is_bridge_running; then
-    echo "running pid=$(cat "$PIDFILE" 2>/dev/null) version=$VERSION"
-    exit 0
+    running_version="$(cat "$VERSIONFILE" 2>/dev/null)"
+    if [ "$running_version" = "$VERSION" ]; then
+      echo "running pid=$(cat "$PIDFILE" 2>/dev/null) version=$VERSION"
+      exit 0
+    fi
+    # An app update rewrites this script, but the loop already running is the old one and would
+    # keep rejecting commands it has never heard of. A version change is the signal to hand over.
+    log_line "bridge version changed old=${running_version:-unknown} new=$VERSION; restarting"
+    stop_bridge >/dev/null 2>&1
   fi
   prepare_channel >/dev/null 2>&1 || true
   nohup sh "$0" run >/dev/null 2>&1 &

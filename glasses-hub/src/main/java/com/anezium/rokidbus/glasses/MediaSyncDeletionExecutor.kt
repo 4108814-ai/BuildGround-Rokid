@@ -49,7 +49,29 @@ class AndroidMediaSyncDeletionExecutor(
             catalog.forget(name)
             return MediaSyncDeletionOutcome.DELETED
         }
-        return deleteThroughMediaStore(name, file)
+        val viaMediaStore = deleteThroughMediaStore(name, file)
+        if (viaMediaStore == MediaSyncDeletionOutcome.DELETED) return viaMediaStore
+        return deleteThroughBridge(name, file, viaMediaStore)
+    }
+
+    /**
+     * Last resort, and on this ROM the only one that works: the capture belongs to the camera app,
+     * so both routes above are refused, while the shell-uid command bridge may remove it. The
+     * bridge is best-effort by design — when it is not running the outcome stays the honest
+     * [MediaSyncDeletionOutcome.NOT_PERMITTED] the settings screen already reports.
+     */
+    private fun deleteThroughBridge(
+        name: String,
+        file: File,
+        fallback: MediaSyncDeletionOutcome,
+    ): MediaSyncDeletionOutcome {
+        val deleted = runCatching { SelfArmCommandBridgeClient.deleteCapture(appContext, name) }
+            .onFailure { logger("mediaSync delete bridge failed name=$name error=${it.message}") }
+            .getOrDefault(false)
+        if (!deleted || file.exists()) return fallback
+        catalog.forget(name)
+        logger("mediaSync delete name=$name via=bridge")
+        return MediaSyncDeletionOutcome.DELETED
     }
 
     private fun deleteThroughMediaStore(name: String, file: File): MediaSyncDeletionOutcome {
