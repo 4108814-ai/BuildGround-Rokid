@@ -8,8 +8,10 @@
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <queries>
@@ -85,7 +87,7 @@
         <service
             android:name=".BusHubService"
             android:exported="true"
-            android:foregroundServiceType="connectedDevice">
+            android:foregroundServiceType="connectedDevice|microphone">
             <intent-filter>
                 <action android:name="com.anezium.rokidbus.action.HUB" />
             </intent-filter>

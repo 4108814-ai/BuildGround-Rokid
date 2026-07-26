@@ -5,7 +5,9 @@ import java.util.Locale
 /**
  * Forced transcription language. Provider-specific codes are kept because script and dialect
  * selection differ: Cantonese uses ElevenLabs `yue`, Azure `zh-HK`, and an OpenAI prompt.
- * Android tag chains remain dormant until the Android engine is added in slice 3.
+ * Android tag chains stay available for per-session overrides, but the Android recognizer runs on
+ * Auto — like Relay it auto-detects, so the settings screen locks the grid instead of rewriting
+ * the stored choice.
  */
 enum class TranscriptionLanguage(
     val id: String,

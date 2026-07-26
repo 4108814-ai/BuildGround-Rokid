@@ -104,7 +104,10 @@ class SpeechSessionManager internal constructor(
         settings = settings,
         secrets = secrets,
         internalAudio = internalAudio,
-        sessionFactory = CloudSttSessionFactory(secrets),
+        sessionFactory = RoutingSttSessionFactory(
+            cloud = CloudSttSessionFactory(secrets),
+            android = AndroidSttSessionFactory(context),
+        ),
         mainPoster = Handler(Looper.getMainLooper()).let { handler ->
             MainThreadPoster { task -> handler.post(task) }
         },
@@ -205,10 +208,11 @@ class SpeechSessionManager internal constructor(
             }
             val started = runCatching { stt.start() }.getOrDefault(false)
             if (!started && !run.ended.get()) {
+                val startFailure = (stt as? SttStartFailureSource)?.startFailure
                 end(
                     run,
                     SpeechEndReason.ERROR,
-                    SttError(
+                    startFailure ?: SttError(
                         SttErrorKind.INTERNAL,
                         engine.provider.displayName,
                         "Speech engine failed to start",

@@ -44,12 +44,13 @@ class HubSecretStore(context: Context) {
     )
 
     fun hasCredential(kind: SpeechCredentialKind): Boolean =
-        !apiKey(kind).isNullOrBlank()
+        kind == SpeechCredentialKind.NONE || !apiKey(kind).isNullOrBlank()
 
     fun hasCredential(engine: SpeechEngine): Boolean =
         hasCredential(engine.credentialKind)
 
     fun apiKey(kind: SpeechCredentialKind): String? {
+        if (kind == SpeechCredentialKind.NONE) return null
         val raw = prefs.getString(kind.preferenceName(), null) ?: return null
         return runCatching {
             val envelope = HubSecretEnvelope.parse(raw) ?: return null
@@ -61,6 +62,7 @@ class HubSecretStore(context: Context) {
     }
 
     fun saveApiKey(kind: SpeechCredentialKind, apiKey: String): Boolean {
+        if (kind == SpeechCredentialKind.NONE) return false
         val cleanKey = apiKey.trim()
         if (cleanKey.isBlank()) return false
         val raw = runCatching {
@@ -72,9 +74,13 @@ class HubSecretStore(context: Context) {
     }
 
     fun clearApiKey(kind: SpeechCredentialKind): Boolean =
-        runCatching {
-            prefs.edit().remove(kind.preferenceName()).commit()
-        }.getOrDefault(false)
+        if (kind == SpeechCredentialKind.NONE) {
+            true
+        } else {
+            runCatching {
+                prefs.edit().remove(kind.preferenceName()).commit()
+            }.getOrDefault(false)
+        }
 
     fun azureRegion(): String? =
         runCatching {
@@ -138,6 +144,7 @@ class HubSecretStore(context: Context) {
 
     private fun SpeechCredentialKind.preferenceName(): String =
         when (this) {
+            SpeechCredentialKind.NONE -> error("Credential NONE has no stored preference")
             SpeechCredentialKind.OPENAI -> PREF_OPENAI_KEY
             SpeechCredentialKind.ELEVENLABS -> PREF_ELEVENLABS_KEY
             SpeechCredentialKind.AZURE -> PREF_AZURE_KEY

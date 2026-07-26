@@ -1,6 +1,8 @@
 package com.anezium.rokidbus.phone
 
+import android.Manifest
 import android.app.Activity
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -183,14 +185,23 @@ class SpeechSettingsActivity : Activity() {
     }
 
     private fun renderLanguageSection() {
-        languageHeaderMeta.text = settings.selectedLanguage().summaryName.uppercase()
+        // The Android engine only auto-detects, so the grid goes read-only instead of rewriting
+        // the stored language — picking a cloud engine again brings the user's choice back.
+        val autoDetected = settings.selectedEngine()?.usesAndroidRecognizer == true
+        val effective = if (autoDetected) TranscriptionLanguage.AUTO else settings.selectedLanguage()
+        languageHeaderMeta.text = effective.summaryName.uppercase()
         languageGridHost.removeAllViews()
-        languageGridHost.addView(languageGrid(), NexusUi.block())
+        languageGridHost.addView(languageGrid(effective, autoDetected), NexusUi.block())
         languageNoteHost.removeAllViews()
-        settings.selectedLanguage().uiNote?.let { note ->
+        val note = if (autoDetected) {
+            "Android Speech picks the language up on its own. Choose a cloud engine to force one."
+        } else {
+            effective.uiNote
+        }
+        note?.let {
             languageNoteHost.addView(BusTheme.gap(this, 8))
             languageNoteHost.addView(
-                NexusUi.rowSub(this, note).apply { maxLines = 3 },
+                NexusUi.rowSub(this, it).apply { maxLines = 3 },
                 NexusUi.block(),
             )
         }
@@ -324,7 +335,10 @@ class SpeechSettingsActivity : Activity() {
 
     // --- Language ---
 
-    private fun languageGrid(): LinearLayout =
+    private fun languageGrid(
+        effective: TranscriptionLanguage,
+        readOnly: Boolean,
+    ): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val languages = TranscriptionLanguage.values().toList()
@@ -334,7 +348,7 @@ class SpeechSettingsActivity : Activity() {
                         orientation = LinearLayout.HORIZONTAL
                         row.forEachIndexed { index, language ->
                             addView(
-                                languageChip(language),
+                                languageChip(language, effective, readOnly),
                                 LinearLayout.LayoutParams(0, NexusUi.dp(this@SpeechSettingsActivity, 40), 1f).apply {
                                     if (index > 0) marginStart = NexusUi.dp(this@SpeechSettingsActivity, 8)
                                 },
@@ -356,22 +370,34 @@ class SpeechSettingsActivity : Activity() {
             }
         }
 
-    private fun languageChip(language: TranscriptionLanguage): TextView =
+    private fun languageChip(
+        language: TranscriptionLanguage,
+        effective: TranscriptionLanguage,
+        readOnly: Boolean,
+    ): TextView =
         TextView(this).apply {
             text = language.label
             textSize = 12f
             gravity = Gravity.CENTER
             includeFontPadding = false
             maxLines = 1
-            val selected = settings.selectedLanguage() == language
-            setTextColor(if (selected) NexusUi.GREEN else NexusUi.INK2)
-            background = if (selected) {
-                NexusUi.bordered(this@SpeechSettingsActivity, NexusUi.alpha(NexusUi.GREEN, 0x14), NexusUi.alpha(NexusUi.GREEN, 0x50), 11)
-            } else {
-                NexusUi.pressedBordered(this@SpeechSettingsActivity, NexusUi.PANEL, 11)
+            val selected = effective == language
+            setTextColor(
+                when {
+                    selected && readOnly -> NexusUi.GREEN_DIM
+                    selected -> NexusUi.GREEN
+                    readOnly -> NexusUi.INK4
+                    else -> NexusUi.INK2
+                },
+            )
+            background = when {
+                selected -> NexusUi.bordered(this@SpeechSettingsActivity, NexusUi.alpha(NexusUi.GREEN, 0x14), NexusUi.alpha(NexusUi.GREEN, 0x50), 11)
+                readOnly -> NexusUi.bordered(this@SpeechSettingsActivity, NexusUi.PANEL, NexusUi.LINE, 11)
+                else -> NexusUi.pressedBordered(this@SpeechSettingsActivity, NexusUi.PANEL, 11)
             }
-            isClickable = true
-            isFocusable = true
+            isClickable = !readOnly
+            isFocusable = !readOnly
+            if (readOnly) return@apply
             setOnClickListener {
                 if (settings.selectedLanguage() != language) {
                     settings.selectedLanguageId = language.id
@@ -696,6 +722,10 @@ class SpeechSettingsActivity : Activity() {
             BusHubService.cancelSpeechDictationTest()
             return
         }
+        if (settings.readiness(secrets) == SpeechReadiness.MISSING_MIC_PERMISSION) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_AUDIO)
+            return
+        }
         transcriptText = null
         transcriptFinal = false
         when (val result = BusHubService.startSpeechDictationTest(dictationListener)) {
@@ -773,6 +803,8 @@ class SpeechSettingsActivity : Activity() {
             SpeechReadiness.NO_ENGINE -> "Pick an engine above to get started."
             SpeechReadiness.MISSING_KEY -> "Add your ${settings.selectedEngine()?.provider?.displayName ?: "provider"} API key above."
             SpeechReadiness.MISSING_REGION -> "Add your Azure region above."
+            SpeechReadiness.MISSING_MIC_PERMISSION ->
+                "Android Speech needs the microphone permission — tap to allow it."
         }
 
     private fun renderReadiness() {
@@ -782,6 +814,7 @@ class SpeechSettingsActivity : Activity() {
             SpeechReadiness.NO_ENGINE -> "Pick engine"
             SpeechReadiness.MISSING_KEY -> "Add key"
             SpeechReadiness.MISSING_REGION -> "Add region"
+            SpeechReadiness.MISSING_MIC_PERMISSION -> "Allow mic"
         }.uppercase()
         readinessValue.setTextColor(
             if (readiness == SpeechReadiness.READY) NexusUi.GREEN_DIM else NexusUi.AMBER,
@@ -899,10 +932,33 @@ class SpeechSettingsActivity : Activity() {
                 NexusUi.dp(this@SpeechSettingsActivity, 44),
             )
         }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_RECORD_AUDIO) return
+        val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+        renderReadiness()
+        renderDictation()
+        if (granted) {
+            setStatus("Microphone allowed — tap to dictate.", NexusUi.INK2)
+        } else if (!shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
+            // Permanently denied: the system dialog will not come back, so send them to Settings.
+            setStatus("Allow the microphone in Android settings to use Android Speech.", NexusUi.AMBER)
+        } else {
+            setStatus(readinessGuidance(), NexusUi.AMBER)
+        }
+    }
 }
+
+private const val REQUEST_RECORD_AUDIO = 4101
 
 private fun SpeechProvider.credentialKindForUi(): SpeechCredentialKind =
     when (this) {
+        SpeechProvider.ANDROID -> SpeechCredentialKind.NONE
         SpeechProvider.OPENAI -> SpeechCredentialKind.OPENAI
         SpeechProvider.ELEVENLABS -> SpeechCredentialKind.ELEVENLABS
         SpeechProvider.AZURE -> SpeechCredentialKind.AZURE

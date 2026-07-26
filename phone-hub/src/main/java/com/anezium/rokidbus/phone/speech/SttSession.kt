@@ -29,6 +29,10 @@ interface SttSession {
     fun cancel()
 }
 
+internal interface SttStartFailureSource {
+    val startFailure: SttError?
+}
+
 interface SttSessionListener {
     fun onReady()
     fun onPartial(text: String)

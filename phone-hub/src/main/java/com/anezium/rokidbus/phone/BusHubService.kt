@@ -51,12 +51,14 @@ import com.anezium.rokidbus.phone.speech.InternalAudioAcquireResult
 import com.anezium.rokidbus.phone.speech.InternalAudioConsumer
 import com.anezium.rokidbus.phone.speech.InternalAudioStopReason
 import com.anezium.rokidbus.phone.speech.SpeechEndReason
+import com.anezium.rokidbus.phone.speech.SpeechProvider
 import com.anezium.rokidbus.phone.speech.SpeechSessionManager
 import com.anezium.rokidbus.phone.speech.SpeechSessionState
 import com.anezium.rokidbus.phone.speech.SpeechSettingsStore
 import com.anezium.rokidbus.phone.speech.SpeechStartResult
 import com.anezium.rokidbus.phone.speech.SpeechUtteranceListener
 import com.anezium.rokidbus.phone.speech.SttError
+import com.anezium.rokidbus.phone.speech.SttErrorKind
 import com.example.cxrglobal.CXRLink
 import com.example.cxrglobal.CxrDefs
 import com.example.cxrglobal.GlassInfo
@@ -215,6 +217,9 @@ class BusHubService : Service() {
     private lateinit var transitLegacyStateExporter: TransitLegacyStateExporter
     private lateinit var speechSettingsStore: SpeechSettingsStore
     private lateinit var speechSessionManager: SpeechSessionManager
+    @Volatile private var speechMicrophoneForegroundRequested = false
+    @Volatile private var speechMicrophoneForegroundActive = false
+    @Volatile private var speechMicrophoneForegroundFailure = ""
     @Volatile private var cxrConnected = false
     @Volatile private var glassBtConnected = false
     @Volatile private var glassesWorn = false
@@ -3081,14 +3086,79 @@ class BusHubService : Service() {
     private fun updateNotificationPreferences() =
         getSharedPreferences(UPDATE_NOTIFICATION_PREFERENCES, MODE_PRIVATE)
 
-    private fun startForegroundWithType() {
+    private fun startForegroundWithType(): SttError? {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_ID, "Connection status", NotificationManager.IMPORTANCE_LOW),
         )
         val state = linkState()
         lastNotifiedStatus = statusText(state)
-        startForeground(NOTIFICATION_ID, buildStatusNotification(state), ServiceInfoCompat.hubTypes())
+        val requestMicrophone = speechMicrophoneForegroundRequested
+        val result = runCatching {
+            startForeground(
+                NOTIFICATION_ID,
+                buildStatusNotification(state),
+                ServiceInfoCompat.hubTypes(includeMicrophone = requestMicrophone),
+            )
+        }
+        if (result.isSuccess) {
+            speechMicrophoneForegroundActive = requestMicrophone
+            speechMicrophoneForegroundFailure = ""
+            return null
+        }
+
+        val failure = result.exceptionOrNull()
+        speechMicrophoneForegroundActive = false
+        speechMicrophoneForegroundFailure = foregroundFailureDetail(failure)
+        Log.w(
+            TAG,
+            "Hub foreground promotion failed microphone=$requestMicrophone " +
+                "type=${failure?.javaClass?.simpleName.orEmpty()}",
+            failure,
+        )
+        if (requestMicrophone) {
+            runCatching {
+                startForeground(
+                    NOTIFICATION_ID,
+                    buildStatusNotification(state),
+                    ServiceInfoCompat.hubTypes(),
+                )
+            }.onFailure { fallbackFailure ->
+                Log.w(
+                    TAG,
+                    "Connected-device foreground fallback failed " +
+                        "type=${fallbackFailure.javaClass.simpleName}",
+                    fallbackFailure,
+                )
+            }
+            return SttError(
+                SttErrorKind.SOURCE_UNAVAILABLE,
+                SpeechProvider.ANDROID.displayName,
+                "Microphone foreground service is unavailable " +
+                    "(${speechMicrophoneForegroundFailure})",
+            )
+        }
+        return null
+    }
+
+    private fun requestSpeechMicrophoneForegroundOnMain(): SttError? {
+        speechMicrophoneForegroundRequested = true
+        val error = startForegroundWithType()
+        if (error != null) speechMicrophoneForegroundRequested = false
+        return error
+    }
+
+    private fun releaseSpeechMicrophoneForegroundOnMain() {
+        if (!speechMicrophoneForegroundRequested && !speechMicrophoneForegroundActive) return
+        speechMicrophoneForegroundRequested = false
+        startForegroundWithType()
+    }
+
+    private fun foregroundFailureDetail(failure: Throwable?): String {
+        if (failure == null) return "ForegroundServiceException"
+        val type = failure.javaClass.simpleName.ifBlank { "ForegroundServiceException" }
+        val message = failure.message?.trim().orEmpty()
+        return if (message.isBlank()) type else "$type: $message"
     }
 
     private fun buildStatusNotification(state: Int): Notification {
@@ -3467,6 +3537,20 @@ class BusHubService : Service() {
                 ?.takeIf { it::speechSessionManager.isInitialized }
                 ?.speechSessionManager
                 ?.isActive == true
+
+        internal fun requestSpeechMicrophoneForeground(): SttError? {
+            val service = activeInstance
+                ?: return SttError(
+                    SttErrorKind.SOURCE_UNAVAILABLE,
+                    SpeechProvider.ANDROID.displayName,
+                    "Phone hub service is not running",
+                )
+            return service.requestSpeechMicrophoneForegroundOnMain()
+        }
+
+        internal fun releaseSpeechMicrophoneForeground() {
+            activeInstance?.releaseSpeechMicrophoneForegroundOnMain()
+        }
 
         fun startWithToken(context: android.content.Context, token: String) {
             if (!canRunHub(context)) {

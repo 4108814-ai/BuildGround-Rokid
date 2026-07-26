@@ -24,6 +24,7 @@ internal object ApiRealtimeSpeechToText {
         require(engine.usesRealtime) { "${engine.id} is not a realtime STT engine" }
         val model = requireNotNull(engine.realtimeModelId)
         return when (engine.provider) {
+            SpeechProvider.ANDROID -> error("${engine.id} is not a realtime STT engine")
             SpeechProvider.OPENAI -> OpenAiRealtimeSpeechToTextSession(
                 client = client,
                 apiKey = secrets.apiKey(SpeechCredentialKind.OPENAI)?.trim().orEmpty(),

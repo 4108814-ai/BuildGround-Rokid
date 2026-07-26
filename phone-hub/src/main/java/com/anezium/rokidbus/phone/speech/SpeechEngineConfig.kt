@@ -1,16 +1,18 @@
-package com.anezium.rokidbus.phone.speech
+﻿package com.anezium.rokidbus.phone.speech
 
 import java.util.Locale
 
 enum class SpeechProvider(
     val displayName: String,
 ) {
+    ANDROID("Android"),
     OPENAI("OpenAI"),
     ELEVENLABS("ElevenLabs"),
     AZURE("Azure"),
 }
 
 enum class SpeechCredentialKind {
+    NONE,
     OPENAI,
     ELEVENLABS,
     AZURE,
@@ -27,6 +29,15 @@ enum class SpeechEngine(
     val completedAudioModelId: String? = null,
     val realtimeModelId: String? = null,
 ) {
+    ANDROID_RECOGNIZER(
+        id = "android_recognizer",
+        provider = SpeechProvider.ANDROID,
+        displayName = "Android Speech",
+        shortLabel = "Android",
+        choiceDescription = "Works straight away — no account, no API key, nothing to pay.",
+        choiceBadges = listOf("Live text", "No key", "Phone engine"),
+        credentialKind = SpeechCredentialKind.NONE,
+    ),
     OPENAI_GPT_REALTIME_WHISPER(
         id = "openai_gpt_realtime_whisper",
         provider = SpeechProvider.OPENAI,
@@ -92,7 +103,7 @@ enum class SpeechEngine(
         provider = SpeechProvider.AZURE,
         displayName = "Azure Speech to Text",
         shortLabel = "Azure STT",
-        choiceDescription = "Transcribes after you finish speaking — not realtime, no live text.",
+        choiceDescription = "Transcribes after you finish speaking â€” not realtime, no live text.",
         choiceBadges = listOf("Buffered", "Free 5 h/mo", "Cloud audio"),
         credentialKind = SpeechCredentialKind.AZURE,
         completedAudioModelId = "azure-conversation",
@@ -104,6 +115,9 @@ enum class SpeechEngine(
 
     val usesRealtime: Boolean
         get() = realtimeModelId != null
+
+    val usesAndroidRecognizer: Boolean
+        get() = provider == SpeechProvider.ANDROID
 
     companion object {
         fun fromId(id: String?): SpeechEngine? {

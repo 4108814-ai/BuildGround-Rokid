@@ -53,6 +53,7 @@ internal class ApiCompletedAudioSpeechToTextEngine(
         val wav = Pcm16Wav.encode(input.pcm16Mono, input.sampleRate)
         return try {
             when (engine.provider) {
+                SpeechProvider.ANDROID -> error("${engine.id} is not a buffered STT engine")
                 SpeechProvider.OPENAI -> transcribeOpenAi(model, wav, input.language)
                 SpeechProvider.ELEVENLABS -> transcribeElevenLabs(model, wav, input.language)
                 SpeechProvider.AZURE -> transcribeAzure(wav, input.language, input.languageTag)
