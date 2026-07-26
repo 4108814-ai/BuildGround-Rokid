@@ -13,6 +13,7 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -36,11 +37,13 @@ class AgentsSettingsActivity : Activity() {
     private lateinit var agentdPairing: EditText
     private lateinit var agentdSummary: TextView
     private lateinit var agentdConnection: TextView
+    private lateinit var agentdDot: View
     private lateinit var openClawEnabled: Switch
     private lateinit var openClawHost: EditText
     private lateinit var openClawPort: EditText
     private lateinit var openClawToken: EditText
     private lateinit var openClawConnection: TextView
+    private lateinit var openClawDot: View
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,8 +60,10 @@ class AgentsSettingsActivity : Activity() {
     private fun buildUi() {
         window.statusBarColor = NexusUi.BG
         window.navigationBarColor = NexusUi.BG
-        agentdEnabled = providerSwitch("Enable Claude Code")
-        openClawEnabled = providerSwitch("Enable OpenClaw")
+        agentdEnabled = Switch(this)
+        openClawEnabled = Switch(this)
+        agentdDot = NexusUi.dot(this)
+        openClawDot = NexusUi.dot(this)
         agentdPairing = NexusUi.field(this, "Paste nexus-agentd pairing JSON").apply {
             setSingleLine(false)
             minLines = 3
@@ -74,7 +79,7 @@ class AgentsSettingsActivity : Activity() {
             })
         }
         agentdSummary = NexusUi.cardBody(this, "No daemon paired.")
-        agentdConnection = NexusUi.rowSub(this, "DISCONNECTED")
+        agentdConnection = NexusUi.statusLine(this).apply { text = "DISCONNECTED" }
         openClawHost = NexusUi.field(this, "Host or ws(s)://host").apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         }
@@ -85,7 +90,7 @@ class AgentsSettingsActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             typeface = Typeface.DEFAULT
         }
-        openClawConnection = NexusUi.rowSub(this, "DISCONNECTED")
+        openClawConnection = NexusUi.statusLine(this).apply { text = "DISCONNECTED" }
 
         val content = NexusUi.contentColumn(this).apply {
             addView(
@@ -156,9 +161,9 @@ class AgentsSettingsActivity : Activity() {
     }
 
     private fun agentdCard() = NexusUi.card(this).apply {
-        addView(agentdEnabled, NexusUi.block())
+        addView(switchRow("Monitor sessions", agentdEnabled), NexusUi.block())
         addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
-        addView(agentdConnection, NexusUi.block())
+        addView(connectionRow(agentdDot, agentdConnection), NexusUi.block())
         addView(NexusUi.divider(this@AgentsSettingsActivity))
         addView(agentdPairing, NexusUi.block())
         addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
@@ -188,9 +193,9 @@ class AgentsSettingsActivity : Activity() {
     }
 
     private fun openClawCard() = NexusUi.card(this).apply {
-        addView(openClawEnabled, NexusUi.block())
+        addView(switchRow("Monitor sessions", openClawEnabled), NexusUi.block())
         addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
-        addView(openClawConnection, NexusUi.block())
+        addView(connectionRow(openClawDot, openClawConnection), NexusUi.block())
         addView(NexusUi.divider(this@AgentsSettingsActivity))
         addView(openClawHost, NexusUi.block())
         addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
@@ -234,12 +239,27 @@ class AgentsSettingsActivity : Activity() {
         )
     }
 
-    private fun providerSwitch(label: String) = Switch(this).apply {
-        text = label
-        textSize = 15f
-        setTextColor(NexusUi.INK)
+    private fun switchRow(label: String, switch: Switch) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        showText = true
+        addView(
+            NexusUi.rowTitle(this@AgentsSettingsActivity, label),
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        addView(switch)
+    }
+
+    private fun connectionRow(dot: View, label: TextView) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        val dotSize = (8 * resources.displayMetrics.density).toInt()
+        addView(
+            dot,
+            LinearLayout.LayoutParams(dotSize, dotSize).apply {
+                marginEnd = (8 * resources.displayMetrics.density).toInt()
+            },
+        )
+        addView(label)
     }
 
     private fun loadConfig() {
@@ -324,14 +344,38 @@ class AgentsSettingsActivity : Activity() {
     private fun observeConnections() {
         uiScope.launch {
             AgentsRuntime.store.connections.collectLatest { states ->
-                agentdConnection.text = states.getValue(AgentProvider.CLAUDE).displayText(
+                applyConnectionState(
+                    agentdDot,
+                    agentdConnection,
+                    states.getValue(AgentProvider.CLAUDE),
                     authFailure = "PAIRING INVALID",
                 )
-                openClawConnection.text = states.getValue(AgentProvider.OPENCLAW).displayText(
+                applyConnectionState(
+                    openClawDot,
+                    openClawConnection,
+                    states.getValue(AgentProvider.OPENCLAW),
                     authFailure = "AUTH FAILED",
                 )
             }
         }
+    }
+
+    private fun applyConnectionState(
+        dot: View,
+        label: TextView,
+        state: ProviderConnectionState,
+        authFailure: String,
+    ) {
+        label.text = state.displayText(authFailure)
+        NexusUi.setDotColor(
+            dot,
+            when (state.state) {
+                ConnectionState.CONNECTED -> NexusUi.GREEN
+                ConnectionState.CONNECTING -> NexusUi.AMBER
+                ConnectionState.AUTH_FAILED -> NexusUi.DANGER
+                ConnectionState.DISCONNECTED -> NexusUi.INK3
+            },
+        )
     }
 
     private fun openNotificationSettings() {
