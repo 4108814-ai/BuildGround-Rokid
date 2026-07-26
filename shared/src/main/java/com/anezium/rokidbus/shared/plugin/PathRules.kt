@@ -50,6 +50,19 @@ object PathRules {
      * banner the wearer dismissed, and what they pressed on it, is that
      * plugin's business and nobody else's.
      */
+    /**
+     * Replies the hub addresses to one plugin about something that plugin just
+     * did, rather than traffic anyone subscribes to. A plugin does not declare a
+     * receive prefix to hear the answer to its own banner, so these bypass the
+     * declared prefixes -- and stay owner-scoped, so they still reach nobody
+     * else. Requiring a prefix here fails silently, which is the worst way for a
+     * third-party plugin to discover it needed one.
+     */
+    fun isDirectReply(path: String): Boolean = when (normalizeAbsolute(path)) {
+        BusPaths.NOTICE_CLOSED, BusPaths.NOTICE_INPUT -> true
+        else -> false
+    }
+
     fun isOwnerScoped(path: String): Boolean = when (normalizeAbsolute(path)) {
         BusPaths.NOTICE_CLOSED, BusPaths.NOTICE_INPUT -> true
         else -> matchesPrefix(path, "/system/plugin")

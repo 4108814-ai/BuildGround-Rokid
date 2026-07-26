@@ -21,6 +21,8 @@ import com.anezium.rokidbus.shared.ImageSurfaceContract
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
 
 class HelloPluginService : NexusPluginService() {
+    private fun log(message: String) = android.util.Log.i("ROKIDBUS", message)
+
     private val state = HelloPluginState()
     private var surface: NexusSurfaceSession? = null
     private var speech: NexusSpeechSession? = null
@@ -201,16 +203,20 @@ class HelloPluginService : NexusPluginService() {
     private fun cycleDemoHud() {
         val client = nexusClient ?: return
         val next = (pinStep + 1) % 4
-        val sent = when (next) {
+        val result = when (next) {
             PIN_SMALL -> client.showPin(SMALL_PIN)
             PIN_MEDIUM -> client.showPin(MEDIUM_PIN)
             DEMO_NOTICE -> {
                 client.hidePin()
                 client.showNotice(DEMO_NOTICE_BAND)
             }
-            else -> NexusSdkResult.SENT
-        } == NexusSdkResult.SENT
-        if (sent) pinStep = next
+            else -> client.hidePin()
+        }
+        if (result != NexusSdkResult.SENT) log("HUD demo step $next refused: $result")
+        // Advance whatever happened. A step that could not go out leaves nothing on
+        // screen, and a reference plugin that wedges on it is worse than one that
+        // moves to the next thing on the next press.
+        pinStep = next
     }
 
     private companion object {

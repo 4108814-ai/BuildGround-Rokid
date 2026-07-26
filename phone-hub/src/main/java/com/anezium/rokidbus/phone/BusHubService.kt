@@ -241,6 +241,7 @@ class BusHubService : Service() {
     @Volatile private var lastNotifiedStatus: String? = null
     @Volatile private var remoteImageSurfaceVersion = 0
     @Volatile private var remotePinSurfaceVersion = 0
+    @Volatile private var remoteNoticeSurfaceVersion = 0
     @Volatile private var remoteMaxImageBytes = 0
     @Volatile private var remoteGlassesVersionName: String? = null
     @Volatile private var remoteGlassesSetupComplete = false
@@ -1287,14 +1288,22 @@ class BusHubService : Service() {
      * that has already been replaced belongs to nobody.
      */
     private fun handleGlassesNoticeInput(envelope: BusEnvelope) {
-        val owner = phoneNoticeState.ownerPluginId() ?: return
+        val owner = phoneNoticeState.ownerPluginId()
+        if (owner == null) {
+            // Silent drops here cost an evening once: the glasses claimed the key
+            // and sent it, and nothing downstream said why it went nowhere.
+            log("notice input dropped: no canonical notice on the phone")
+            return
+        }
         val expected = "$owner:${NoticeSurfaceContract.LOCAL_SURFACE_ID}"
         if (envelope.payload.optString("noticeId") != expected) {
             log("notice input ignored id=${envelope.payload.optString("noticeId")}")
             return
         }
         val payload = JSONObject(envelope.payload.toString()).put("pluginId", owner)
-        deliverLocal(envelope.copy(payload = payload))
+        if (!deliverLocal(envelope.copy(payload = payload))) {
+            log("notice input undelivered owner=$owner; no live registration")
+        }
     }
 
     private fun handleGlassesNoticeClosed(envelope: BusEnvelope) {
@@ -1592,6 +1601,10 @@ class BusHubService : Service() {
                 ProtectedPathDirection.RECEIVE,
             )
         ) return false
+        val addressed = registration.principal
+        if (addressed != null && PathRules.isDirectReply(envelope.path)) {
+            return envelope.payload.optString("pluginId") == addressed.descriptor.id
+        }
         if (registration.prefixes.none { PathRules.matchesPrefix(envelope.path, it) }) return false
         val principal = registration.principal ?: return true
         if (PathRules.isPluginPrivate(envelope.path, principal.descriptor.id)) return true
@@ -3777,6 +3790,15 @@ class BusHubService : Service() {
         if (remotePinSurfaceVersion == PinSurfaceContract.VERSION) {
             capabilities = capabilities or BusCapabilityBits.PIN_SURFACE
         }
+        // Gated on the link, unlike the pin above and for the mirror-image reason:
+        // a notice has no resend path because it is never worth delivering late,
+        // so a plugin must learn the glasses are unreachable before it composes a
+        // banner, not after.
+        if (remoteNoticeSurfaceVersion == NoticeSurfaceContract.VERSION &&
+            linkState() and LinkStateBits.SPP_DATA_UP != 0
+        ) {
+            capabilities = capabilities or BusCapabilityBits.NOTICE_SURFACE
+        }
         return capabilities
     }
 
@@ -3811,7 +3833,11 @@ class BusHubService : Service() {
             advertised.features and BusCapabilityBits.PIN_SURFACE != 0 &&
             advertised.pinSurfaceVersion == PinSurfaceContract.VERSION
         remoteImageSurfaceVersion = if (imageSupported) ImageSurfaceContract.VERSION else 0
+        val noticeSupported = advertised.protocolVersion == GlassesHubCapabilitiesContract.VERSION &&
+            advertised.features and BusCapabilityBits.NOTICE_SURFACE != 0 &&
+            advertised.noticeSurfaceVersion == NoticeSurfaceContract.VERSION
         remotePinSurfaceVersion = if (pinSupported) PinSurfaceContract.VERSION else 0
+        remoteNoticeSurfaceVersion = if (noticeSupported) NoticeSurfaceContract.VERSION else 0
         remoteMaxImageBytes = if (imageSupported) advertised.maxImageBytes else 0
         updateRemoteGlassesAppState(
             advertised.versionName,
