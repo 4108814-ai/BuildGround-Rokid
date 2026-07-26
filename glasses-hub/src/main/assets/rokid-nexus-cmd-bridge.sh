@@ -10,8 +10,16 @@ SEENFILE="$BASE/$NAME.seen"
 PENDING_DISABLE="$BASE/$NAME.pending-disable"
 CHANNEL="/sdcard/Android/data/com.anezium.rokidbus.glasses/files/cmd_bridge"
 DOORBELL="$CHANNEL/doorbell"
-VERSION="2026-07-26.1"
+VERSION="2026-07-26.4"
 CAPTURE_DIR="/sdcard/DCIM/Camera"
+SCRIPT_PATH="$BASE/$NAME.sh"
+PACKAGE="com.anezium.rokidbus.glasses"
+ASSET_PATH="assets/rokid-nexus-cmd-bridge.sh"
+# Split so the literal never appears twice in this file: the app renders the script by replacing
+# the one secret slot and refuses an asset that carries more than a single occurrence.
+PLACEHOLDER="__ROKID_NEXUS_BRIDGE_""SECRET_HEX__"
+SELF_UPDATE_INTERVAL=300
+SELF_UPDATE_SETTLE=3
 SECRET="__ROKID_NEXUS_BRIDGE_SECRET_HEX__"
 POLL_INTERVAL=1
 DISABLE_DELAY=2
@@ -390,6 +398,73 @@ cleanup_loop() {
   log_line "bridge loop stopped"
 }
 
+# The bridge is spawned by the self-arm ADB session, and on a device whose ADB key has gone stale
+# that session never opens again - so a bridge started months ago would keep running old code and
+# reject every command added since, with no way to replace it short of re-onboarding.
+#
+# It therefore updates itself, but only ever from the installed APK: the script is read straight
+# out of the signed package, so what runs as shell always comes from a build we signed, never from
+# a blob handed over at runtime. That distinction is the whole point - the fixed command whitelist
+# stays meaningful.
+self_update_if_needed() {
+  apk="$(pm path "$PACKAGE" 2>/dev/null | sed -n 's/^package://p' | head -n 1)"
+  if [ -z "$apk" ] || [ ! -f "$apk" ]; then
+    return 0
+  fi
+  candidate_version="$(unzip -p "$apk" "$ASSET_PATH" 2>/dev/null |
+    sed -n 's/^VERSION="\(.*\)"$/\1/p' | head -n 1)"
+  if [ -z "$candidate_version" ] || [ "$candidate_version" = "$VERSION" ]; then
+    return 0
+  fi
+
+  candidate="$BASE/$NAME.candidate.$$"
+  rendered="$BASE/$NAME.rendered.$$"
+  rm -f "$candidate" "$rendered"
+  if ! unzip -p "$apk" "$ASSET_PATH" > "$candidate" 2>/dev/null; then
+    rm -f "$candidate"
+    return 0
+  fi
+  # Refuse anything that is not recognisably this script with exactly one secret slot, then refuse
+  # anything the shell itself cannot parse: a botched hand-over would leave no bridge at all, and
+  # no ADB session to spawn a new one.
+  if [ "$(head -n 1 "$candidate")" != "#!/system/bin/sh" ] ||
+    [ "$(grep -c "$PLACEHOLDER" "$candidate")" != "1" ]; then
+    log_line "self-update rejected version=$candidate_version reason=shape"
+    rm -f "$candidate"
+    return 0
+  fi
+  if ! sed "s|$PLACEHOLDER|$SECRET|" "$candidate" > "$rendered" || ! sh -n "$rendered" 2>/dev/null; then
+    log_line "self-update rejected version=$candidate_version reason=syntax"
+    rm -f "$candidate" "$rendered"
+    return 0
+  fi
+  rm -f "$candidate"
+
+  cp "$SCRIPT_PATH" "$SCRIPT_PATH.bak" 2>/dev/null
+  if ! cp "$rendered" "$SCRIPT_PATH" 2>/dev/null; then
+    log_line "self-update failed version=$candidate_version reason=install"
+    rm -f "$rendered"
+    return 0
+  fi
+  chmod 700 "$SCRIPT_PATH" 2>/dev/null
+  rm -f "$rendered"
+
+  nohup sh "$SCRIPT_PATH" run >/dev/null 2>&1 &
+  successor="$!"
+  sleep "$SELF_UPDATE_SETTLE"
+  if is_bridge_pid "$successor"; then
+    log_line "self-update handover version=$VERSION->$candidate_version pid=$successor"
+    # The successor owns the pidfile, the doorbell and the channel now; leaving through the normal
+    # cleanup would delete them underneath it.
+    trap - INT TERM EXIT
+    exit 0
+  fi
+  log_line "self-update aborted version=$candidate_version reason=successor_died"
+  cp "$SCRIPT_PATH.bak" "$SCRIPT_PATH" 2>/dev/null
+  chmod 700 "$SCRIPT_PATH" 2>/dev/null
+  echo "$$" > "$PIDFILE"
+}
+
 loop_forever() {
   case "$SECRET" in
     *[!0-9a-f]*) exit 3 ;;
@@ -401,9 +476,20 @@ loop_forever() {
   echo "$VERSION" > "$VERSIONFILE"
   log_line "bridge loop started pid=$$ pollInterval=$POLL_INTERVAL"
   trap 'cleanup_loop; exit 0' INT TERM EXIT
+  last_update_check="$(date '+%s')"
   while true; do
-    echo "$(date '+%s')" > "$HEARTBEAT"
+    now="$(date '+%s')"
+    echo "$now" > "$HEARTBEAT"
     process_requests
+    case "$now" in
+      *[!0-9]*|"") ;;
+      *)
+        if [ "$((now - last_update_check))" -ge "$SELF_UPDATE_INTERVAL" ]; then
+          last_update_check="$now"
+          self_update_if_needed
+        fi
+        ;;
+    esac
     wait_for_doorbell_or_poll
   done
 }
