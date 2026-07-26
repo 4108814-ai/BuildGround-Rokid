@@ -89,7 +89,8 @@ class ProtectedPathAccessPolicyTest {
         }
         listOf(
             BusPaths.MEDIA_SYNC_STATUS,
-            BusPaths.MEDIA_SYNC_LINK_OFFER,
+            BusPaths.MEDIA_SYNC_XFER_FILE_CHUNK,
+            BusPaths.MEDIA_SYNC_CONFIG_REQUEST,
             BusPaths.MEDIA_SYNC_CONFIG,
             BusPaths.MEDIA_SYNC_TRIGGER,
             BusPaths.MEDIA_SYNC_STATE,

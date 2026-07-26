@@ -530,6 +530,7 @@ class BusHubService : Service() {
             sendToGlasses = { path, payload ->
                 sendRemote(BusEnvelope(path = path, payload = payload)) == null
             },
+            // Nothing photo sync sends from the phone is bulky; only the glasses stream bytes.
             publishStatus = { payload ->
                 deliverLocal(BusEnvelope(path = BusPaths.MEDIA_SYNC_STATUS, payload = payload))
             },
@@ -821,6 +822,11 @@ class BusHubService : Service() {
         if (envelope.path == BusPaths.HUB_CAPABILITIES) {
             recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
             updateRemoteCapabilities(envelope.payload)
+            // The glasses re-announce on every transport-up, including after a hub restart that
+            // wiped their photo-sync consent. Re-push it on the same edge.
+            if (::mediaSyncCoordinator.isInitialized) {
+                executor.execute { mediaSyncCoordinator.onLinkUp() }
+            }
             return
         }
         if (handleManualSelfArmResponse(envelope)) return
@@ -1170,14 +1176,26 @@ class BusHubService : Service() {
         direction = direction,
     )
 
-    /** Hub-to-hub photo-sync traffic: the link offer and the glasses engine's state reports. */
-    private fun handleMediaSyncRemote(envelope: BusEnvelope): Boolean = when (envelope.path) {
-        BusPaths.MEDIA_SYNC_LINK_OFFER -> {
-            executor.execute { mediaSyncCoordinator.onLinkOffer(envelope.payload) }
+    /** Hub-to-hub photo-sync traffic: engine state, the config request, and the data plane. */
+    private fun handleMediaSyncRemote(envelope: BusEnvelope): Boolean = when {
+        envelope.path == BusPaths.MEDIA_SYNC_STATE -> {
+            executor.execute { mediaSyncCoordinator.onGlassesState(envelope.payload) }
             true
         }
-        BusPaths.MEDIA_SYNC_STATE -> {
-            executor.execute { mediaSyncCoordinator.onGlassesState(envelope.payload) }
+        envelope.path == BusPaths.MEDIA_SYNC_CONFIG_REQUEST -> {
+            // A restarted glasses hub has lost its consent and the transport never bounced, so
+            // nothing would have re-pushed it. Answer instead of leaving it dormant.
+            executor.execute { mediaSyncCoordinator.onLinkUp() }
+            true
+        }
+        BusPaths.isMediaSyncTransferPath(envelope.path) -> {
+            executor.execute {
+                mediaSyncCoordinator.onTransferEnvelope(
+                    envelope.path,
+                    envelope.payload,
+                    envelope.binary,
+                )
+            }
             true
         }
         else -> false
@@ -2733,6 +2751,7 @@ class BusHubService : Service() {
             cameraCompanionController.onLinkLost()
         }
         if (state and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) == 0) {
+            if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.onLinkLost()
             remoteImageSurfaceVersion = 0
             remoteMaxImageBytes = 0
             // Keep the last-known setup state across link drops: powered-off glasses must

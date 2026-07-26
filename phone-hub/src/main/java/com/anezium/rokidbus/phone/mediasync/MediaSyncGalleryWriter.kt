@@ -5,7 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
 import com.anezium.rokidbus.shared.MediaSyncMediaFile
-import com.anezium.rokidbus.shared.MediaSyncProtocol
+import com.anezium.rokidbus.shared.MediaSyncTransferContract
 import java.io.Closeable
 import java.io.OutputStream
 import java.security.MessageDigest
@@ -100,7 +100,7 @@ private class AndroidMediaSyncGalleryTransfer(
     private val stream: OutputStream,
     private val logger: (String) -> Unit,
 ) : MediaSyncGalleryTransfer {
-    private val digest: MessageDigest = MediaSyncProtocol.newDigest()
+    private val digest: MessageDigest = MediaSyncTransferContract.newDigest()
     private var finished = false
 
     override fun append(buffer: ByteArray, length: Int) {
@@ -114,7 +114,7 @@ private class AndroidMediaSyncGalleryTransfer(
         val actual = runCatching {
             stream.flush()
             stream.close()
-            MediaSyncProtocol.hex(digest)
+            MediaSyncTransferContract.hex(digest)
         }.onFailure { logger("mediaSync gallery flush failed error=${it.message}") }.getOrNull()
         if (actual == null || !actual.equals(expectedSha256, ignoreCase = true)) {
             logger("mediaSync gallery checksum mismatch uri=$uri")

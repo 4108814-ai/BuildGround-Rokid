@@ -3,7 +3,7 @@ package com.anezium.rokidbus.phone.mediasync
 import android.content.Context
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.MediaSyncBlocker
-import com.anezium.rokidbus.shared.MediaSyncLinkOfferContract
+import com.anezium.rokidbus.shared.MediaSyncMode
 import com.anezium.rokidbus.shared.MediaSyncProgress
 import com.anezium.rokidbus.shared.MediaSyncResult
 import com.anezium.rokidbus.shared.MediaSyncRun
@@ -18,24 +18,11 @@ object MediaSyncBlockerMapping {
     fun fromGlassesReason(reason: String?): MediaSyncBlocker? = when (reason) {
         "storage_permission" -> MediaSyncBlocker.GLASSES_STORAGE_PERMISSION
         "camera_active" -> MediaSyncBlocker.CAMERA_ACTIVE
-        // The camera link parks its Wi-Fi Direct group for ~40 s after a session so warm reopens
-        // stay fast. Photo sync waits it out rather than stealing the radio back.
-        MediaSyncStatusContract.REASON_CAMERA_GROUP_PARKED -> MediaSyncBlocker.CAMERA_ACTIVE
-        // The glasses' Wi-Fi Direct framework did not enable in time — honest about the device.
-        "p2p_unavailable" -> MediaSyncBlocker.GLASSES_WIFI_DIRECT
         "link_down" -> MediaSyncBlocker.LINK_DOWN
         "nothing_pending" -> MediaSyncBlocker.NOTHING_PENDING
         "auto_sync_off" -> MediaSyncBlocker.AUTO_SYNC_OFF
         "not_charging" -> MediaSyncBlocker.NOT_CHARGING
         else -> null
-    }
-
-    fun fromLinkBlocker(blocker: MediaSyncLinkBlocker): MediaSyncBlocker = when (blocker) {
-        MediaSyncLinkBlocker.PHONE_WIFI_OFF -> MediaSyncBlocker.PHONE_WIFI_OFF
-        // Never claim Wi-Fi is off when it is on: a denied nearby-devices grant looks unfixable
-        // if the screen sends the wearer to the wrong switch.
-        MediaSyncLinkBlocker.MISSING_PERMISSION -> MediaSyncBlocker.PHONE_PERMISSION
-        MediaSyncLinkBlocker.NO_P2P_SERVICE -> MediaSyncBlocker.PHONE_WIFI_OFF
     }
 }
 
@@ -58,7 +45,7 @@ internal class MediaSyncCoordinator(
     private val store = MediaSyncSettingsStore(appContext)
     private val ledger = SyncLedger(SharedPreferencesSyncLedgerStorage(appContext))
     private val gallery: MediaSyncGalleryWriter = AndroidMediaSyncGalleryWriter(appContext, logger)
-    private val link = MediaSyncLinkClient(appContext, ledger, gallery, logger, clock)
+    private val staging = MediaSyncStagingStore(appContext)
 
     private val lock = Any()
     private var settings: MediaSyncSettings = store.loadSettings()
@@ -69,6 +56,7 @@ internal class MediaSyncCoordinator(
     private var progress = MediaSyncProgress()
     private var consented = false
     private var transferring = false
+    private var receiver: MediaSyncTransferReceiver? = null
 
     fun status(): MediaSyncStatus = synchronized(lock) {
         MediaSyncStatus(
@@ -105,7 +93,7 @@ internal class MediaSyncCoordinator(
             }
         } ?: return false
         logger(
-            "mediaSync settings autoSyncOnCharge=${next.autoSyncOnCharge} " +
+            "mediaSync settings mode=${next.mode.wireValue} " +
                 "deleteAfterSync=${next.deleteAfterSync}",
         )
         pushConfig()
@@ -132,12 +120,14 @@ internal class MediaSyncCoordinator(
     fun onGlassesState(payload: JSONObject) {
         val reported = payload.optString("state")
         val reason = payload.optString("reason").takeIf(String::isNotBlank)
+        var startingSessionId: String? = null
         synchronized(lock) {
             if (transferring) return@synchronized
             when (reported) {
                 "preparing" -> {
                     state = MediaSyncState.PREPARING
                     blocker = null
+                    startingSessionId = payload.optString("sessionId").takeIf(String::isNotBlank)
                 }
                 "idle", "ended" -> {
                     state = MediaSyncState.IDLE
@@ -146,15 +136,14 @@ internal class MediaSyncCoordinator(
             }
         }
         emitStatus()
+        startingSessionId?.let(::beginSession)
     }
 
-    /** `/mediasync/link/offer` from the glasses: credentials for this session's data plane. */
-    fun onLinkOffer(payload: JSONObject) {
-        val offer = MediaSyncLinkOfferContract.decode(payload)
-        if (offer == null) {
-            logger("mediaSync offer rejected reason=malformed")
-            return
-        }
+    /**
+     * The glasses opened a session and are waiting to be driven. Everything from here is ordinary
+     * bus traffic: no transport to negotiate, nothing that can fail before the first byte moves.
+     */
+    private fun beginSession(sessionId: String) {
         val deleteAfterSync = synchronized(lock) {
             if (!consented || transferring) return
             transferring = true
@@ -164,22 +153,34 @@ internal class MediaSyncCoordinator(
             settings.deleteAfterSync
         }
         emitStatus()
-        val blocked = link.start(
-            offer = offer,
+        val session = MediaSyncTransferReceiver(
+            sessionId = sessionId,
+            ledger = ledger,
+            gallery = gallery,
+            staging = staging,
             deleteAfterSync = deleteAfterSync,
+            clock = clock,
+            logger = logger,
+            send = sendToGlasses,
             onProgress = ::onProgress,
             onDeletionOutcome = ::onDeletionOutcome,
             onFinished = ::onRunFinished,
         )
-        if (blocked != null) {
-            logger("mediaSync link blocked reason=$blocked")
-            synchronized(lock) {
-                transferring = false
-                state = MediaSyncState.IDLE
-                blocker = MediaSyncBlockerMapping.fromLinkBlocker(blocked)
-            }
-            emitStatus()
-        }
+        synchronized(lock) { receiver = session }
+        logger("mediaSync session begin id=$sessionId deleteAfterSync=$deleteAfterSync")
+        session.start()
+    }
+
+    /** Data-plane traffic from the glasses, handed straight to the live session. */
+    fun onTransferEnvelope(path: String, payload: JSONObject, binary: ByteArray?) {
+        val session = synchronized(lock) { receiver } ?: return
+        session.onEnvelope(path, payload, binary)
+    }
+
+    /** Keeps the staged partials and reports honestly; the next session resumes from them. */
+    fun onLinkLost() {
+        val session = synchronized(lock) { receiver } ?: return
+        session.onLinkLost()
     }
 
     private fun onProgress(update: MediaSyncProgress) {
@@ -203,6 +204,7 @@ internal class MediaSyncCoordinator(
     private fun onRunFinished(run: MediaSyncRun) {
         synchronized(lock) {
             transferring = false
+            receiver = null
             state = MediaSyncState.IDLE
             progress = MediaSyncProgress()
             blocker = if (run.result == MediaSyncResult.UP_TO_DATE) {
@@ -224,7 +226,7 @@ internal class MediaSyncCoordinator(
         val payload = synchronized(lock) {
             JSONObject()
                 .put("version", 1)
-                .put("autoSyncOnCharge", settings.autoSyncOnCharge)
+                .put("syncMode", settings.mode.wireValue)
                 .put("consented", consented)
         }
         sendToGlasses(BusPaths.MEDIA_SYNC_CONFIG, payload)
@@ -235,7 +237,9 @@ internal class MediaSyncCoordinator(
             .onFailure { logger("mediaSync status publish failed error=${it.message}") }
     }
 
-    override fun close() = link.close()
+    override fun close() {
+        synchronized(lock) { receiver = null }
+    }
 }
 
 /** SharedPreferences-backed settings, run history and the observed deletion capability. */
@@ -244,13 +248,14 @@ internal class MediaSyncSettingsStore(context: Context) {
         .getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
     fun loadSettings(): MediaSyncSettings = MediaSyncSettings(
-        autoSyncOnCharge = preferences.getBoolean(KEY_AUTO_SYNC, true),
+        mode = MediaSyncMode.fromWireValue(preferences.getString(KEY_SYNC_MODE, null))
+            ?: MediaSyncMode.CHARGING,
         deleteAfterSync = preferences.getBoolean(KEY_DELETE_AFTER_SYNC, false),
     )
 
     fun saveSettings(settings: MediaSyncSettings) {
         preferences.edit()
-            .putBoolean(KEY_AUTO_SYNC, settings.autoSyncOnCharge)
+            .putString(KEY_SYNC_MODE, settings.mode.wireValue)
             .putBoolean(KEY_DELETE_AFTER_SYNC, settings.deleteAfterSync)
             .apply()
     }
@@ -280,7 +285,7 @@ internal class MediaSyncSettingsStore(context: Context) {
 
     private companion object {
         const val PREFERENCES_NAME = "nexus_media_sync"
-        const val KEY_AUTO_SYNC = "auto_sync_on_charge"
+        const val KEY_SYNC_MODE = "sync_mode"
         const val KEY_DELETE_AFTER_SYNC = "delete_after_sync"
         const val KEY_DELETION_SUPPORTED = "deletion_supported"
         const val KEY_HISTORY = "history_v1"

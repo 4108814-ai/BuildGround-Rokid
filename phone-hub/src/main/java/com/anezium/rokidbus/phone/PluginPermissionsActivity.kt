@@ -3,15 +3,12 @@ package com.anezium.rokidbus.phone
 import com.anezium.rokidbus.client.ui.NexusPluginIcons
 import com.anezium.rokidbus.client.ui.NexusUi
 import com.anezium.rokidbus.client.ui.PluginCustomIcon
-import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Typeface
-import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
-import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.ViewGroup
@@ -239,23 +236,7 @@ class PluginPermissionsActivity : Activity() {
     private fun applyDecision(principal: PhonePluginPrincipal, decision: () -> Unit) {
         decision()
         BusHubService.onPluginAuthorizationChanged(applicationContext, principal.grantKey())
-        requestNearbyWifiIfMediaSyncApproved(principal)
         render()
-    }
-
-    /**
-     * Photo sync joins the glasses' Wi-Fi Direct group from the hub process, which needs the
-     * nearby-Wi-Fi grant. Asking here — the moment the wearer approves the capability — keeps the
-     * prompt in context instead of firing at every app launch.
-     */
-    private fun requestNearbyWifiIfMediaSyncApproved(principal: PhonePluginPrincipal) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        val state = grantStore.stateFor(principal) as? PluginGrantState.Approved ?: return
-        if (PluginCapability.MEDIA_SYNC !in state.capabilities) return
-        if (checkSelfPermission(Manifest.permission.NEARBY_WIFI_DEVICES) ==
-            PackageManager.PERMISSION_GRANTED
-        ) return
-        requestPermissions(arrayOf(Manifest.permission.NEARBY_WIFI_DEVICES), NEARBY_WIFI_REQUEST)
     }
 
     private fun capabilityRow(
@@ -277,7 +258,7 @@ class PluginPermissionsActivity : Activity() {
             PluginCapability.MICROPHONE -> "Listen through the glasses microphone"
             PluginCapability.HTTP_PROXY -> "Fetch through the phone connection"
             PluginCapability.CAMERA -> "Only while the camera view is open"
-            PluginCapability.MEDIA_SYNC -> "Copy captures to this phone and manage sync"
+            PluginCapability.MEDIA_SYNC -> "Copy captures to this phone over the glasses link"
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -423,7 +404,6 @@ class PluginPermissionsActivity : Activity() {
         private const val EXTRA_PLUGIN_ID = "plugin_id"
         private const val PREFERENCES = "plugin_access_ui"
         private const val KEY_DEVELOPER_DETAILS = "developer_details"
-        private const val NEARBY_WIFI_REQUEST = 41
 
         fun intent(context: Context, target: PluginGrantTarget): Intent =
             Intent(context, PluginPermissionsActivity::class.java)
