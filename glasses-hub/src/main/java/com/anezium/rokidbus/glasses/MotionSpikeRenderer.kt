@@ -200,7 +200,7 @@ object MotionSpikeRenderer {
         view.showMessage(
             "Marie",
             "Je suis en route, dix minutes. Tu as toujours besoin du chargeur ?",
-            "tap pour répondre · retour pour ignorer",
+            "Tap pour répondre · Retour pour ignorer",
         )
         slide.snapTo(-banner.height().toFloat())
         fade.snapTo(0f)
@@ -250,18 +250,18 @@ object MotionSpikeRenderer {
         val view = panel ?: return
         view.scaleMorph = scaled
         morph.snapTo(0f)
-        view.showChip("TAXI", "8 min")
+        view.showChip("Taxi", "8 min")
         slide.snapTo(0f)
         fade.snapTo(0f)
         fade.animateTo(1f, HudMotion.STANDARD_MS, HudMotion.enter)
 
         handler.postDelayed({
-            view.showMessage("Votre taxi est arrivé", "Mercedes Classe E · GP-482-KR", "il vous attend 2 min")
+            view.showMessage("Votre taxi est arrivé", "Mercedes Classe E · GP-482-KR", "Il vous attend 2 min")
             morph.animateTo(1f, HudMotion.STANDARD_MS, HudMotion.enter)
         }, FLARE_CHIP_HOLD_MS)
 
         handler.postDelayed({
-            view.showChip("TAXI", "arrivé")
+            view.showChip("Taxi", "Arrivé")
             morph.animateTo(0f, HudMotion.EXIT_MS, HudMotion.exit)
         }, FLARE_CHIP_HOLD_MS + HudMotion.HOLD_MS)
 
@@ -277,7 +277,7 @@ object MotionSpikeRenderer {
     private fun playPulse() {
         val view = panel ?: return
         morph.snapTo(0f)
-        view.showChip("TAXI", "8 min")
+        view.showChip("Taxi", "8 min")
         slide.snapTo(0f)
         fade.snapTo(0f)
         fade.animateTo(1f, HudMotion.STANDARD_MS, HudMotion.enter)
@@ -439,7 +439,7 @@ object MotionSpikeRenderer {
         }
 
         fun setCountdown(remaining: Int) {
-            setFooter("envoi dans $remaining")
+            setFooter("Envoi dans $remaining")
             HudMotion.pulse(footer, peak = 1.06f)
         }
 
