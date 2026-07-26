@@ -45,6 +45,7 @@ object PathRules {
     fun requiredCapability(path: String): PluginCapability? = when (normalizeAbsolute(path)) {
         "/surface/show", "/surface/update", "/surface/hide",
         BusPaths.PIN_SHOW, BusPaths.PIN_HIDE,
+        BusPaths.NOTICE_SHOW, BusPaths.NOTICE_UPDATE, BusPaths.NOTICE_HIDE,
         -> PluginCapability.SURFACES
         "/audio/lease/acquire", "/audio/lease/release" -> PluginCapability.MICROPHONE
         "/stt/session/start", "/stt/session/stop" -> PluginCapability.STT
