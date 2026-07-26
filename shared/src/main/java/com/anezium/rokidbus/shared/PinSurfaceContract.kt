@@ -83,6 +83,15 @@ object PinSurfaceContract {
 
     const val MIN_TTL_MS = 1_000L
     const val MAX_TTL_MS = 86_400_000L
+
+    /**
+     * Applied when a plugin sends no `ttlMs`. A pin outlives its owner's process, so
+     * without a deadline a plugin killed before its hide would leave one on the glasses
+     * until the hub restarts. Thirty minutes matches what pins are for — a fact worth
+     * a corner for the length of an errand, not forever. Plugins that know better set
+     * their own; nothing here stops a 24h pin.
+     */
+    const val DEFAULT_TTL_MS = 1_800_000L
     const val MIN_SHOW_INTERVAL_MS = 500L
 
     const val ERROR_INVALID_PIN = "INVALID_PIN"
@@ -146,7 +155,7 @@ object PinSurfaceContract {
         }
 
         val ttlMs = when (val value = payload.opt("ttlMs")) {
-            null -> null
+            null -> DEFAULT_TTL_MS
             is Number -> integerLong(value)?.coerceIn(MIN_TTL_MS, MAX_TTL_MS)
                 ?: return invalid("ttlMs must be an integer")
             else -> return invalid("ttlMs must be an integer")

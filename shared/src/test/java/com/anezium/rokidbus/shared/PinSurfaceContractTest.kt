@@ -32,6 +32,22 @@ class PinSurfaceContractTest {
     }
 
     @Test
+    fun `a pin sent without a ttl still gets a deadline`() {
+        val result = PinSurfaceContract.validateShow(
+            JSONObject().put("kind", "pin").put("title", "AB-123-CD"),
+        )
+
+        assertTrue(result is PinSurfaceValidationResult.Valid)
+        val content = (result as PinSurfaceValidationResult.Valid).content
+        assertEquals(PinSurfaceContract.DEFAULT_TTL_MS, content.ttlMs)
+        // On the wire too, so the glasses-side timer sees it without knowing the default.
+        assertEquals(
+            PinSurfaceContract.DEFAULT_TTL_MS,
+            PinSurfaceContract.toPayload("rides:pin", content).getLong("ttlMs"),
+        )
+    }
+
+    @Test
     fun `accepts the medium tier and per line emphasis`() {
         val result = PinSurfaceContract.validateShow(
             JSONObject()

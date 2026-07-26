@@ -185,10 +185,13 @@ sends `hidePin`. Do not hold the bus connection open for the life of a pin;
 that violates the background policy in [PLUGINS.md](PLUGINS.md) and burns a
 process on three lines of text.
 
-Because of that, set `ttlMs` whenever the pin describes something with a
-natural end. It is the only thing bounding a pin whose owner never comes back —
-if your process is killed before it can `hidePin`, the TTL is what stops the
-pin becoming a permanent ghost.
+Because of that, every pin has a deadline. Send no `ttlMs` and the hub gives
+you **30 minutes** — pins are for facts worth a corner for the length of an
+errand, and an unbounded default would strand one on the glasses whenever a
+plugin is killed before it can `hidePin`. Set `ttlMs` explicitly when you know
+your own horizon (a countdown, an ETA, a shift), anywhere from one second to
+24 hours. Sending a fresh `showPin` restarts the clock, so a plugin that keeps
+updating never hits its deadline.
 
 Check the live `supportsPinSurface` value immediately before use. Both methods
 return `CAPABILITY_NOT_AVAILABLE` without sending unless the glasses announced

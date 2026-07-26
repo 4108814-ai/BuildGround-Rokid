@@ -323,8 +323,10 @@ data class NexusPinLine(
  * for [NexusPinSize.SMALL], 28 for [NexusPinSize.MEDIUM]). [lines] accepts plain
  * strings up to the tier's line count and length (2 x 28, or 3 x 32 for medium);
  * pass [richLines] instead to set per-line emphasis. At least one title or line
- * must remain non-empty after trimming. [ttlMs] is optional; wire values are
- * clamped to 1 second through 24 hours.
+ * must remain non-empty after trimming. [ttlMs] is optional and clamped to 1
+ * second through 24 hours; leave it null and the hub applies its 30-minute
+ * default, since a pin outlives the process that pushed it. Every `showPin`
+ * restarts the clock.
  */
 data class NexusPin(
     val title: String? = null,

@@ -200,7 +200,7 @@ class HelloPluginService : NexusPluginService() {
         const val PIN_SMALL = 1
         const val PIN_MEDIUM = 2
 
-        /** No `ttlMs`: stays until something hides or replaces it. */
+        /** No `ttlMs` of its own, so it takes the hub's 30-minute default. */
         val SMALL_PIN = NexusPin(
             title = "NEXUS PIN",
             lines = listOf("sample overlay"),

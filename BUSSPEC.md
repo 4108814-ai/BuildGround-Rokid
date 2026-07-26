@@ -251,9 +251,10 @@ tone: the title renders in the bright phosphor colour and lines render muted.
 explicitly, and the title is always bright. At least one title or line must be
 non-empty. `position` is optional and is one of `top-left`, `top-right`,
 `bottom-left`, or `bottom-right`; `top-right` is the default. `ttlMs` is
-optional and is clamped to `1,000..86,400,000`; omission means persistent. The
-glasses drop stale or duplicate `seq` values and defensively ellipsize every
-rendered row.
+optional and is clamped to `1,000..86,400,000`; omission means 30 minutes, and
+the hub writes that default onto the normalized payload so the glasses-side
+timer never has to know it. The glasses drop stale or duplicate `seq` values
+and defensively ellipsize every rendered row.
 
 The hub normalizes an accepted pin before forwarding it: trimmed text, the
 resolved `position`, `size` only when it is not `small`, and each line back to a

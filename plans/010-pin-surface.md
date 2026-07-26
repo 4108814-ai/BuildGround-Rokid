@@ -45,7 +45,11 @@ Payload (JSON, inside the standard envelope):
 - At least one of `title`/`lines` must be non-empty after trimming.
 - `position`: optional enum `top-left | top-right | bottom-left |
   bottom-right`, default `top-right`.
-- `ttlMs`: optional; clamped to [1_000, 86_400_000]. Absent = persistent.
+- `ttlMs`: optional; clamped to [1_000, 86_400_000]. **Absent = 30 minutes**, not
+  forever: a pin outlives its owner's process, so an unbounded default would let a
+  plugin killed before its hide strand one on the glasses until the hub restarts.
+  Thirty minutes matches what pins are for — the length of an errand. Plugins that
+  know their own horizon set it explicitly; a 24h pin is still allowed.
 - `seq`: monotonic per pin slot; glasses drop stale/duplicate seq (same rule
   as surfaces).
 
