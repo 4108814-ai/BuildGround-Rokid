@@ -413,100 +413,118 @@ in). Every `/mediasync/...` path is protected: it requires an approved, enabled
 `mediasync` grant, and the grant is also the *consent* — the hub engine stays
 dormant until at least one approved plugin holds it.
 
+**Transport: the Bluetooth bus itself.** Bytes ride in `BusEnvelope.binary`, the
+same SPP binary frame the HUD image channel uses, so there is no separate data
+plane to negotiate and photo sync needs no Wi-Fi at all. Measured ceiling is
+~64 KiB per ~180 ms (~0.36 MB/s): a photo takes 4-5 s, a video minutes. That is
+the deliberate trade — photo sync is a passive, charge-anchored background
+feature, so it may be slow, but it must never be fragile and must never crowd out
+whatever else the link is carrying. (The Wi-Fi Direct transport v1 started with
+was abandoned; the hardware findings are preserved at the end of this section.)
+
 Plugin-facing paths:
 
 | Path | Direction | Payload |
 |---|---|---|
-| `/mediasync/status` | hub → plugin (receive-only) | `MediaSyncStatusContract`: `state` (`idle`/`preparing`/`transferring`), optional `blocker`, `autoSyncOnCharge`, `deleteAfterSync`, `progress`, `history` (≤ 8 runs), `syncedTotal`, optional `deletionSupported` |
-| `/mediasync/settings` | plugin → hub | partial update `{version, autoSyncOnCharge?, deleteAfterSync?}`; an empty request is a refresh and is answered with a `/mediasync/status` push |
+| `/mediasync/status` | hub → plugin (receive-only) | `MediaSyncStatusContract`: `state` (`idle`/`preparing`/`transferring`), optional `blocker`, `syncMode`, `deleteAfterSync`, `progress`, `history` (≤ 8 runs), `syncedTotal`, optional `deletionSupported` |
+| `/mediasync/settings` | plugin → hub | partial update `{version, syncMode?, deleteAfterSync?}`; an empty request is a refresh, answered with a `/mediasync/status` push |
 | `/mediasync/now` | plugin → hub | `{version}`; relays a manual trigger to the glasses |
 
 Hub-to-hub paths, rejected outright when a plugin tries to originate them
-(`isHubOnlyMediaSyncPath`): `/mediasync/config` (phone → glasses:
-`autoSyncOnCharge` and `consented`), `/mediasync/trigger` (phone → glasses),
-`/mediasync/link/offer` (glasses → phone: `MediaSyncLinkOfferContract`), and
-`/mediasync/state` (glasses → phone: engine state, skip reason, per-session
-totals).
+(`isHubOnlyMediaSyncPath`): `/mediasync/config` (phone → glasses: `syncMode` and
+`consented`), `/mediasync/config/request` (glasses → phone), `/mediasync/trigger`
+(phone → glasses), `/mediasync/state` (glasses → phone), and the data plane under
+`/mediasync/xfer/…`.
 
-Triggers, evaluated glasses-side as one pure policy
-(`MediaSyncTriggerPolicy`): a charging edge, a bus connect while charging, or a
-manual request — each gated on a non-empty stable catalog, no live camera
-session, and glasses storage access. There is no per-capture instant sync in v1.
+**Sync modes.** `syncMode` is one of `always` (auto whenever the link is up and
+captures are pending), `charging` (auto only while the glasses charge — the
+default) and `manual` (no auto triggers). "Sync now" works in every mode, at any
+time. Triggers are evaluated glasses-side as one pure policy
+(`MediaSyncTriggerPolicy`): charging edge, bus connect, **new capture** (a
+debounced `FileObserver` on the capture directory), or manual — each gated on a
+non-empty stable catalog, no live camera session, and glasses storage access.
 
 A capture only enters the catalog once two scans at least 3 s apart agree on its
 size and mtime *and* the mtime is at least 5 s old, so an in-progress video
 recording can never be transferred.
 
-The data plane mirrors the camera link but never shares anything with it: its own
-`DIRECT-NS-` SSID prefix (the Lens janitor deletes `DIRECT-RN-` profiles), its own
-TCP port `38403` (the camera link owns `38401`), and its own framing
-(`MediaSyncProtocol`, magic `MSYN`, 20-byte header, 256 KiB chunks). The glasses
-are Group Owner and serve; the phone joins by credentials and *pulls*: catalog,
-then one file at a time, acking each only after the bytes are hashed, verified
-against the trailing `FILE_END` SHA-256 and published out of `IS_PENDING`. That
-ordering is the whole v1 resume model — an interrupted file restarts from zero
-next run, a completed file never travels twice, and partial-file resume is future
-work.
+**The data plane** (`/mediasync/xfer/…`, `MediaSyncTransferContract`): the phone
+pulls. It asks for the catalog, diffs it against its ledger, then requests one
+file at a time **with the byte offset it already holds**, and acks each file only
+after the bytes are staged, hashed against the trailing whole-file SHA-256 and
+published out of `IS_PENDING`. Partial files are staged in the hub's private
+storage rather than into the pending MediaStore row — the staged file's length
+*is* the resume offset, so there is no second bookkeeping to drift, and a
+multi-minute video survives interruption instead of restarting.
 
-Two asymmetries with the camera link are deliberate:
+**The politeness layer** is the heart of the feature, because the link is shared:
 
-- Photo sync never toggles the *phone's* Wi-Fi. If it is off the run ends with
-  the `phone_wifi_off` blocker and the next trigger retries; there is no
-  `lohs_reverse` equivalent in v1. A denied nearby-devices grant reports
-  `phone_permission`, never `phone_wifi_off` — sending the wearer to a switch
-  that is already on makes a fixable problem look unfixable.
-- On the glasses it *does* use the hub's existing silent Wi-Fi path
-  (`GlassesHub.requestHubWifi`, i.e. the signed command bridge with the
-  accessibility fallback) and releases it through the same ~40 s grace-off. A
-  camera session always wins: it blocks a sync from starting and aborts one in
-  flight with `ABORT{reason:"camera_active"}`. That deference extends to the
-  camera's *parked* group — the `DIRECT-RN-` group it keeps alive for ~40 s
-  after a session so warm reopens stay at 1.4 s instead of 5-7 s. A sync that
-  finds it standing refuses to remove it, reports
-  `camera_group_parked` on `/mediasync/state`, and waits for the next trigger.
+- Chunks are 32 KiB (half the image channel's proven 64 KiB), which halves how
+  long any other message can sit behind ours, for ~0.4% header overhead.
+- One chunk in flight: `SppServerManager.send` blocks until the frame is written,
+  so a returning call *is* the transport's confirmation. There is no
+  application-level per-chunk ack.
+- Before every chunk, `MediaSyncPolitenessPolicy` is consulted: a live camera
+  session aborts the session outright, a dropped link ends it, foreign traffic
+  seen in the last 400 ms yields for 1.5 s, and otherwise a chunk goes out
+  followed by a 40 ms idle gap. "Foreign" is every envelope crossing the link in
+  either direction whose path is not `/mediasync/xfer/…`, tracked by
+  `MediaSyncTrafficMonitor` from both hubs' send and receive paths.
+- Everything a pause interrupts is resumable, and status pushes are themselves
+  throttled (per file, otherwise at most every 2 s) so reporting never floods the
+  link the transfer is being careful with.
 
-**Group creation on this ROM.** The Wi-Fi Direct *framework* toggles
-independently of station Wi-Fi: it powers up lazily (~288 ms after station
-Wi-Fi, measured) and powers back **down when idle**. A `createGroup` issued off
-a bare `isWifiEnabled` check therefore lands in `P2pDisabledState` and returns
-`reason=0` even with station Wi-Fi on, location on and no existing group — the
-symptom that stalled the first device sessions. Creation must be gated on the
-`WIFI_P2P_STATE_CHANGED_ACTION` → `WIFI_P2P_STATE_ENABLED` broadcast (and/or
-`requestP2pState`), never on station Wi-Fi. `initialize()` nudges the framework
-awake; photo sync then waits for enabled (bounded by the camera link's own
-16 × 750 ms) before it creates, and if a create still returns `reason=0` it
-treats the framework as having dropped and waits for the next enabled signal
-rather than failing. On timeout it reports `p2p_unavailable`. **Any future P2P
-feature on this hardware must gate on the framework-enabled broadcast.**
-
-Config-based `createGroup` (caller-chosen SSID and passphrase) is *also*
-rejected here once the framework is up, again with `reason=0`, so photo sync
-uses the same ladder the camera link relies on: one configured attempt, then
-after 150 ms one no-config `createGroup`, taking whatever framework-generated
-credentials come back. The offer always carries the group's *actual*
-credentials, and those are recorded so a later session can recognise the group
-as ours.
-
-That recognition is the only ownership test there is: with framework-generated
-SSIDs the camera link's parked group is indistinguishable from any stranger's,
-so photo sync **never removes a group it did not create**. An unrecognised
-group defers the session with `camera_group_parked` and a later trigger
-retries; a parked group dies with the Wi-Fi grace period, so deferral converges
-on its own.
+Delete-after-sync is opt-in and off by default. The phone carries the flag in
+each file ack; the glasses attempt `File.delete()` then a MediaStore delete and
+report `deleted`, `already_gone`, `not_permitted` or `failed`. Under scoped
+storage a headless app cannot delete another app's media without an interactive
+consent dialog, so `not_permitted` is expected on some ROMs — it surfaces as
+`deletionSupported: false` in the status rather than being silently swallowed.
 
 Because the `:camera` process can die without ever sending `closed`, the main
 process reconciles a stale session lazily: the moment a sync would skip with
 `camera_active` it checks whether a `:camera` process actually exists and, only
 if it provably does not, releases the flag and re-evaluates. An unreadable
-process list counts as "still alive" — an unknown answer must never cancel a
-real camera session.
+process list counts as "still alive" — an unknown answer must never cancel a real
+camera session.
 
-Delete-after-sync is opt-in and off by default. The phone carries the flag in
-each `FILE_ACK`; the glasses attempt `File.delete()` then a MediaStore delete and
-report `deleted`, `already_gone`, `not_permitted` or `failed`. Under scoped
-storage a headless app cannot delete another app's media without an interactive
-consent dialog, so `not_permitted` is expected on some ROMs — it surfaces as
-`deletionSupported: false` in the status rather than being silently swallowed.
+A glasses hub restart wipes its in-memory consent while the CXR transport keeps
+running, so the phone would see no edge on which to re-push it. The glasses
+therefore ask (`/mediasync/config/request`) on engine start and on every link-up,
+and the phone also re-pushes config whenever the glasses re-announce
+`/system/hub/capabilities`. Fail-closed throughout: no consent, no sync.
+
+### Wi-Fi Direct on this hardware — findings (not used by photo sync v1)
+
+Photo sync originally moved bytes over an app-owned Wi-Fi Direct group, and that
+transport was abandoned after three stacked ROM landmines. None of this affects
+photo sync any more, but it will bite any future P2P feature on these glasses:
+
+1. **Config-based `createGroup` is rejected** (caller-chosen SSID/passphrase),
+   `reason=0`. The camera link only ever works here through the no-config
+   `createGroup(channel, listener)` overload, taking framework-generated
+   credentials. Any P2P feature needs that fallback, not just the builder.
+2. **The P2P framework powers up lazily and drops when idle.** It came up ~288 ms
+   *after* station Wi-Fi in measurement, and `createGroup` into
+   `P2pDisabledState` returns `reason=0` even with station Wi-Fi on, location on
+   and no existing group. Creation must be gated on the
+   `WIFI_P2P_STATE_CHANGED_ACTION` → `WIFI_P2P_STATE_ENABLED` broadcast, never on
+   `isWifiEnabled`.
+3. **Background callers need the location appop, not just the permission.**
+   `FINE_LOCATION` granted is not enough: the appop mode is `foreground`, so
+   `WifiP2pService` rejects `createGroup` from a background process with generic
+   `ERROR`. Confirmed by the same call succeeding with the hub's activity in the
+   foreground, and by `appops get FINE_LOCATION` showing a `rejectTime` matching
+   the failures. The camera link never hit this because `CameraActivity` is always
+   foreground while it creates its group. `appops set <pkg> FINE_LOCATION allow`
+   (plus `COARSE_LOCATION`) is the lever.
+4. Even with all three addressed, a final probe still returned `reason=2` (BUSY).
+
+Because framework-generated SSIDs make prefix-based ownership meaningless, such a
+feature must also never remove a group it did not create — the camera link's
+parked group (kept ~40 s so warm reopens cost 1.4 s instead of 5-7 s) is
+indistinguishable from a stranger's.
+
 
 ## Hub capabilities announcements
 

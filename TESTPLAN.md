@@ -521,49 +521,48 @@ adb -s $phone uninstall com.anezium.rokidbus.phoneprobe
 
 ## Photo Sync v1 on-device validation
 
-Nothing below is covered by unit tests; all of it needs both devices.
+Nothing below is covered by unit tests; all of it needs both devices. Photo sync
+runs over the Bluetooth bus — **no Wi-Fi is involved at any point**, on either
+device. If a test seems to need Wi-Fi, something is wrong.
 
-- Grant `READ_EXTERNAL_STORAGE` on the glasses (the hub asks on first open of
-  its own screen; `adb shell pm grant com.anezium.rokidbus.glasses
+- Grant `READ_EXTERNAL_STORAGE` on the glasses (the hub asks on first open of its
+  own screen; `adb shell pm grant com.anezium.rokidbus.glasses
   android.permission.READ_EXTERNAL_STORAGE` is the shortcut) and confirm the
   status stops reporting "Allow storage access on the glasses".
-- Install Photo Sync, approve `mediasync` in Plugin access, accept the
-  nearby-Wi-Fi prompt that follows, and confirm the hub only starts syncing
-  after that approval (before it, the glasses log `skip reason=not_consented`).
-- First sync = full backfill: plug the glasses in with the phone connected and
-  Wi-Fi on; confirm every capture in `/sdcard/DCIM/Camera` lands in
-  `Download/Hi Rokid/` with its original filename, beside Hi Rokid's own
-  imports.
+- Install Photo Sync, approve `mediasync` in Plugin access, and confirm the hub
+  only starts syncing after that approval (before it, the glasses log
+  `skip reason=not_consented`).
+- **Photos first**: with a few captures pending and the glasses charging, confirm
+  each lands in `Download/Hi Rokid/` with its original filename, beside Hi
+  Rokid's own imports, at roughly 4-5 s per photo.
+- **Then a video**: confirm it transfers to completion (minutes are expected) and
+  that progress in the plugin advances without flooding — status pushes should be
+  ~1 per file plus one every couple of seconds, not per chunk.
+- **Camera-open-during-sync**: start a video sync, then open the camera. The sync
+  must abort with `camera_active` within a chunk or two, the camera must behave
+  exactly as it does without photo sync, and the next trigger must **resume the
+  video from its offset** (glasses log `resuming name=… offset=…`), not restart
+  it. Verify the same for a mid-transfer link drop (walk out of range).
+- **Charge trigger**: with mode `While charging`, unplug, take a capture (nothing
+  should happen), then plug in and confirm the sync starts on the charging edge.
+- **Modes**: `Always` must sync a capture within a few seconds of taking it while
+  connected and off charge (this is the `FileObserver` trigger, ~2 s debounce
+  plus the stability settling window). `Manual only` must do nothing on any
+  automatic trigger while Sync now still works.
 - Re-trigger with nothing new: the run must end `up_to_date` with no transfer.
-- Delete a synced photo from the phone gallery, sync again: it must NOT come
-  back (the ledger is authoritative, not MediaStore presence).
-- Shoot a video, and while it is still recording start a sync: the video must
-  be absent from that session's catalog and appear only in a later one.
-- Open the camera plugin during a sync: the sync must abort with
-  `camera_active`, the camera link must behave exactly as before this feature
-  existed, and the next trigger must pick up the remaining files.
-- Turn the phone's Wi-Fi off and trigger: status must read "Turn on Wi-Fi to
-  sync" and the phone must NOT enable Wi-Fi by itself.
+- Delete a synced photo from the phone gallery, sync again: it must NOT come back
+  (the ledger is authoritative, not MediaStore presence).
+- Shoot a video and start a sync while it is still recording: the video must be
+  absent from that session's catalog and appear only in a later one.
+- **Politeness**: during a video sync, use the glasses normally — open a plugin
+  surface, scroll a feed. The HUD must stay responsive; the glasses log should
+  show the transfer yielding rather than the UI stuttering.
 - Enable delete-after-sync and sync one capture: check whether the file is
   actually gone from `/sdcard/DCIM/Camera`. If the ROM refuses, the settings
-  screen must show the amber "The glasses refused the last delete" line — that
-  is the expected honest outcome, not a bug to hide.
-- Kill the Photo Sync process mid-sync (`am force-stop`): the transfer must
-  keep running (it lives in the hub) and the screen must recover on reopen.
-- After a sync, confirm the glasses release Wi-Fi through the usual ~40 s
-  grace-off and that a camera session started inside that window still gets
-  Wi-Fi immediately.
-- Group creation: on a cold trigger (P2P framework idle) expect the group to
-  wait for `WIFI_P2P_STATE_ENABLED` before creating — no `create path=` line
-  should appear while `dumpsys wifip2p` shows `curState=P2pDisabledState`. Then
-  expect `configured create rejected reason=0` → `path=legacy` →
-  `group ready ssid=DIRECT-xy-...`. A session that logs `path=configured`
-  immediately (before the framework is enabled) and dies `group_create_failed_0`
-  is the readiness gate not holding.
-- P2P timeout: with Wi-Fi Direct forced to stay disabled, expect the session to
-  end `p2p_unavailable` after ~12 s (not an instant `reason=0` failure), phone
-  showing "Waiting for the glasses' Wi-Fi".
-- Close the camera, then trigger a sync inside the ~40 s park window: photo
-  sync must log `group deferred` and end with `camera_group_parked` — it must
-  never log `group removed`/`stale` for a group it did not create, and the next
-  camera open must still be a warm ~1.4 s reopen.
+  screen must show the amber "The glasses refused the last delete" line — that is
+  the expected honest outcome, not a bug to hide.
+- Kill the Photo Sync process mid-sync (`am force-stop`): the transfer must keep
+  running (it lives in the hub) and the screen must recover on reopen.
+- **Consent after a glasses hub restart**: force-stop only the glasses hub. When
+  it comes back it must request config and resume working without touching the
+  phone hub (this is what previously needed a phone-side force-stop).
