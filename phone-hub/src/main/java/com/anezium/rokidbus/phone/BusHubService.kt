@@ -2614,6 +2614,7 @@ class BusHubService : Service() {
 
     private fun handleManualSelfArmResponse(envelope: BusEnvelope): Boolean {
         if (!::manualPairingEngine.isInitialized) return false
+        manualPairingEngine.onGlassesConnectPort(envelope.payload.optInt("connectPort"))
         val errorCode = when (envelope.path) {
             BusPaths.GLASSES_SELFARM_MANUAL_REPLY -> if (
                 envelope.payload.optBoolean("accepted", false)

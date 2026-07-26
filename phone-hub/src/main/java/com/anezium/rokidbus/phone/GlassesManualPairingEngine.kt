@@ -122,6 +122,21 @@ internal class GlassesManualPairingEngine(
     }
 
     /** Correlates a glasses acknowledgement or `/error` with the active settings request. */
+    /**
+     * The connect port the glasses report over the bus.
+     *
+     * mDNS discovery is the documented way to find it and it simply does not survive a router that
+     * will not forward multicast — the pairing succeeds and then the setup dies looking for a
+     * service it cannot see. The glasses know the port; taking their word for it removes the
+     * network from the equation entirely.
+     */
+    @Volatile
+    private var reportedConnectPort: Int = 0
+
+    fun onGlassesConnectPort(port: Int) {
+        if (port in 1..65535) reportedConnectPort = port
+    }
+
     fun onManualControlResponse(requestId: String, errorCode: String?): Boolean {
         val pending = synchronized(lock) {
             val current = pendingControl
@@ -172,7 +187,12 @@ internal class GlassesManualPairingEngine(
 
                 stage = WorkStage.CONNECTING
                 transition(attempt, GlassesManualPairingState.CONNECTING)
-                val endpoint = backend.discoverConnectEndpoint(cleanHost)
+                val known = reportedConnectPort
+                val endpoint = if (known in 1..65535) {
+                    GlassesManualAdbEndpoint(cleanHost, known)
+                } else {
+                    backend.discoverConnectEndpoint(cleanHost)
+                }
                 session = backend.connect(endpoint)
                 if (!isCurrent(attempt)) {
                     session.close()

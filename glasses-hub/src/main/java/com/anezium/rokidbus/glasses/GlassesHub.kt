@@ -475,7 +475,11 @@ object GlassesHub {
                     payload = JSONObject()
                         .put("version", 1)
                         .put("action", action.wireValue)
-                        .put("accepted", true),
+                        .put("accepted", true)
+                        // The phone otherwise has to find this port by mDNS, and a router that
+                        // does not forward multicast makes the whole manual setup fail after a
+                        // perfectly good pairing. We already know it here; send it.
+                        .putOpt("connectPort", wirelessConnectPort()),
                 ),
             )
         }
@@ -486,6 +490,10 @@ object GlassesHub {
         }
         // Completion (and therefore acknowledgement) is asynchronous for the six-tap action.
     }
+
+    /** The live Wireless Debugging connect port, or null when the daemon is not listening. */
+    private fun wirelessConnectPort(): Int? =
+        SelfArmWirelessAdbController.readWirelessPort().takeIf { it > 0 }
 
     private fun SelfArmManualAction.requiresDeveloperOptions(): Boolean =
         this == SelfArmManualAction.OPEN_DEVELOPER_OPTIONS ||
