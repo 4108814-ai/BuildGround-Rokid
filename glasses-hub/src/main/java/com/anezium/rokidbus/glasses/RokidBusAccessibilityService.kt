@@ -49,6 +49,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
         SurfaceOverlayRenderer.onServiceConnected(this)
         PinOverlayRenderer.onServiceConnected(this)
         LauncherOverlayRenderer.onServiceConnected(this)
+        MotionSpikeRenderer.onServiceConnected(this)
         GlassesHub.start(applicationContext)
         AccessibilityRearmWatcher.start(applicationContext, "accessibility_service_connected")
         // If a manual pairing was awaiting the phone's arm when the ROM tore the service down,
@@ -185,6 +186,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
         LauncherOverlayRenderer.onServiceDestroyed(this)
         PinOverlayRenderer.onServiceDestroyed(this)
         SurfaceOverlayRenderer.onServiceDestroyed(this)
+        MotionSpikeRenderer.onServiceDestroyed(this)
         SurfaceController.cancelRingInput()
         RingFocusBroadcastCoordinator.onServiceDestroyed(this)
         consumedDownKeys.clear()
