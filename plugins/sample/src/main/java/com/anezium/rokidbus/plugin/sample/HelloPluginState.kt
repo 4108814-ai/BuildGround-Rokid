@@ -285,5 +285,7 @@ internal fun wrapDictationTranscript(text: String): List<String> {
 private fun normalizeSpeechText(text: String): String =
     text.trim().replace(Regex("\\s+"), " ")
 
-private const val DICTATION_LINE_LENGTH = 44
+// The HUD renderer re-wraps anything longer, so this only has to match what the optic
+// actually shows (measured at roughly 29 characters) for the six-line tail to be honest.
+private const val DICTATION_LINE_LENGTH = 28
 private const val DICTATION_LINE_TAIL = 6

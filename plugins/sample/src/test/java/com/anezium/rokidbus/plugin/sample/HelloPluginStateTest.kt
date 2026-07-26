@@ -59,25 +59,25 @@ class HelloPluginStateTest {
     }
 
     @Test
-    fun `transcript wraps on words and hard splits long words at 44 characters`() {
+    fun `transcript wraps on words and hard splits long words at the hud width`() {
         assertEquals(
-            listOf("one two", "x".repeat(39), "three"),
+            listOf("one two", "x".repeat(28), "${"x".repeat(11)} three"),
             wrapDictationTranscript("one two ${"x".repeat(39)} three"),
         )
         assertEquals(
-            listOf("x".repeat(44), "x"),
+            listOf("x".repeat(28), "x".repeat(17)),
             wrapDictationTranscript("x".repeat(45)),
         )
     }
 
     @Test
     fun `transcript keeps only the last six wrapped lines`() {
-        val words = (1..7).joinToString(" ") { "${it}${"x".repeat(39)}" }
+        val words = (1..8).joinToString(" ") { "${it}${"x".repeat(19)}" }
         val lines = wrapDictationTranscript(words)
 
         assertEquals(6, lines.size)
-        assertTrue(lines.first().startsWith("2"))
-        assertTrue(lines.last().startsWith("7"))
+        assertTrue(lines.first().startsWith("3"))
+        assertTrue(lines.last().startsWith("8"))
         assertFalse(lines.any { it.startsWith("1") })
     }
 
