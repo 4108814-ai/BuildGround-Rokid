@@ -200,18 +200,25 @@ class HelloPluginService : NexusPluginService() {
         const val PIN_SMALL = 1
         const val PIN_MEDIUM = 2
 
+        /** No `ttlMs`: stays until something hides or replaces it. */
         val SMALL_PIN = NexusPin(
             title = "NEXUS PIN",
             lines = listOf("sample overlay"),
         )
 
+        /**
+         * Shows the three emphasis levels, and carries a short `ttlMs` so the demo
+         * also exercises self-expiry — the only thing bounding a pin whose owner
+         * pushed it and went dormant without ever coming back to hide it.
+         */
         val MEDIUM_PIN = NexusPin(
             title = "NEXUS PIN · MEDIUM",
             size = NexusPinSize.MEDIUM,
+            ttlMs = 20_000L,
             richLines = listOf(
                 NexusPinLine("bright headline row", NexusPinEmphasis.BRIGHT),
                 NexusPinLine("default body row"),
-                NexusPinLine("dim footnote row", NexusPinEmphasis.DIM),
+                NexusPinLine("clears itself in 20s", NexusPinEmphasis.DIM),
             ),
         )
     }
