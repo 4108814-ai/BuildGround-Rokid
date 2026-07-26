@@ -90,7 +90,13 @@ internal class SelfArmLocalAdbBootstrapper(
         val failure = AtomicReference<Throwable?>()
         val pairingThread = Thread {
             try {
-                runBlocking { Kadb.pair(LOCALHOST, port, code, "Rokid Nexus") }
+                // The name must not contain a space. adbd stores a paired key as
+                // "<base64> <name>" in a single field and splits it back on whitespace, so a name
+                // with a space makes the entry unreadable: adbd logs `Invalid base64 key` and then
+                // refuses *every* TLS handshake, poisoning the whole store. The symptom is that
+                // pairing works and the session opens once, while every later re-arm fails with
+                // CERTIFICATE_VERIFY_FAILED. Keep the host-style single token used elsewhere.
+                runBlocking { Kadb.pair(LOCALHOST, port, code, PAIRING_NAME) }
             } catch (throwable: Throwable) {
                 failure.set(throwable)
             } finally {
@@ -123,6 +129,8 @@ internal class SelfArmLocalAdbBootstrapper(
 
     companion object {
         private const val TAG = "NexusWirelessSetup"
+        /** Single token by construction — see [pairWirelessDebugging] for why a space breaks adbd. */
+        private const val PAIRING_NAME = "rokid-nexus@glasses"
         private const val LOCALHOST = "127.0.0.1"
         private const val CONNECT_TIMEOUT_MS = 2_000
         private const val SHELL_TIMEOUT_MS = 8_000
