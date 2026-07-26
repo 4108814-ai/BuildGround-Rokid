@@ -119,15 +119,5 @@
             </intent-filter>
         </receiver>
 
-        <!-- Spike only: drives the HUD motion demo so it can be filmed through
-             the optics. Comes back out before any of this merges. -->
-        <receiver
-            android:name=".MotionSpikeReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.anezium.rokidbus.glasses.MOTION" />
-            </intent-filter>
-        </receiver>
-
     </application>
 </manifest>

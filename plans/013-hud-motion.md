@@ -139,23 +139,25 @@ words ("Listening…", "Sent", "Envoi dans 3"). Those should move into
 `strings.xml` when 011 makes them real, rather than being translated in place
 in a renderer.
 
-## What is keeper and what is scaffolding
+## What shipped, and what the spike was
 
-Keeper: `HudMotion`, `HudMotionValue`, `HudWaveformView`, `HudFrameMeter`.
+`HudMotion` and `HudMotionValue` are consumed by the notice band (011), which
+is what earned this layer its place in the hub. `HudWaveformView` and
+`HudFrameMeter` ship unused on purpose: the waveform is what the Relay voice
+reply draws into once the microphone work lands, and the frame meter is how the
+next renderer question gets answered with the same four numbers rather than an
+impression.
 
-Scaffolding, removed when 011 gives this layer a real consumer:
-`MotionSpikeRenderer`, `MotionSpikeReceiver`, its manifest entry, and the two
-hooks in `RokidBusAccessibilityService`. The receiver is exported so `adb` can
-drive it, which is on its own reason not to carry it into a merged hub.
+The spike itself is gone — `MotionSpikeRenderer`, `MotionSpikeReceiver`, its
+exported manifest entry and the two service hooks were removed once 011 gave
+the layer a real consumer. It had done its job: it answered the frame-budget
+question on the real overlay window, and it let the motion be looked at through
+the optics before a single protocol decision depended on it.
 
-Driving the spike:
-
-```
-adb -s <glasses> shell am broadcast \
-  -a com.anezium.rokidbus.glasses.MOTION \
-  -n com.anezium.rokidbus.glasses/.MotionSpikeReceiver \
-  --es seq <relay|taxi|taxi-scale|pulse|loop|off>
-```
+One lesson from it is worth keeping. The spike fed the glasses directly,
+skipping the phone, and that is exactly why three faults in the phone-side path
+survived until the first real end-to-end test. A shortcut that bypasses a layer
+hides the bugs in that layer.
 
 ## Open
 
