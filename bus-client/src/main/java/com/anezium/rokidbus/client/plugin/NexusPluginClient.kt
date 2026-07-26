@@ -45,9 +45,14 @@ class NexusPluginClient internal constructor(
         get() = currentLinkState and LinkStateBits.SPP_DATA_UP != 0 &&
             hubCapabilities and BusCapabilityBits.IMAGE_SURFACE != 0
 
+    /**
+     * Whether these glasses can show a pin — not whether one would appear this instant.
+     * Unlike [supportsImageSurface] this ignores the link: a pin pushed while the glasses
+     * are asleep is held by the hub and delivered when they come back, so refusing here
+     * would strand exactly the background plugins pins exist for.
+     */
     val supportsPinSurface: Boolean
-        get() = currentLinkState and LinkStateBits.SPP_DATA_UP != 0 &&
-            hubCapabilities and BusCapabilityBits.PIN_SURFACE != 0
+        get() = hubCapabilities and BusCapabilityBits.PIN_SURFACE != 0
 
     fun showPin(pin: NexusPin): NexusSdkResult {
         pinPreflight()?.let { return it }
@@ -196,6 +201,12 @@ class NexusPluginClient internal constructor(
     override fun onRegistrationState(result: Int) {
         if (closed) return
         registrationState = result
+        // Approval is the moment a fire-and-forget plugin acts on — connect, push a pin,
+        // disconnect — so capabilities must be true by then. Leaving this to the first
+        // onLinkState is a race, and the loser reads every capability as absent.
+        if (result == PluginRegistrationResult.APPROVED) {
+            hubCapabilities = transport.capabilities()
+        }
         if (result != PluginRegistrationResult.APPROVED) {
             approvedCapabilities = emptySet()
             terminateAudioSession(

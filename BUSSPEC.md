@@ -301,7 +301,9 @@ Stable pin errors returned on `/error` are:
 - `INVALID_PIN`: field shape, local id, per-tier text cap, or enum validation
   (`position`, `size`, `emphasis`) failed.
 - `PIN_RATE_LIMITED`: a plugin's previous accepted show was less than 500 ms ago.
-- `CAPABILITY_NOT_AVAILABLE`: pin v1 was not announced or SPP is down.
+- `CAPABILITY_NOT_AVAILABLE`: pin v1 was never announced by these glasses. Not
+  returned merely because the link is down — a show sent while the glasses are
+  asleep is accepted and delivered on the next announce.
 
 Timed-line anchor:
 
@@ -705,9 +707,12 @@ omit it and newer phones treat the missing field as an unknown installed version
 older payloads omit it and newer phones default the missing field to `false`. A glasses
 hub linked during the transition re-announces capabilities so the phone sees it live.
 The phone hub exposes `IMAGE_SURFACE` and `PIN_SURFACE` to local plugins only
-after receiving their valid versioned announcements and only while
-`SPP_DATA_UP` is live. It clears the remote
-announcement when all glasses links are down. Capability changes are surfaced by
+after receiving their valid versioned announcements. `IMAGE_SURFACE` additionally
+requires `SPP_DATA_UP` and is cleared when all glasses links drop. `PIN_SURFACE`
+is not: it survives link drops, because a pin has canonical phone-side state and
+an announce-time resend, so one pushed while the glasses are asleep is held and
+delivered on reconnect rather than refused. A later announce overwrites the
+remembered value. Capability changes are surfaced by
 another link-state callback so clients refresh `capabilities()`; callers must not
 cache a one-time Binder result. Old glasses hubs do not announce the bit, so the
 plugin API version remains 3 and image/pin calls fail locally with

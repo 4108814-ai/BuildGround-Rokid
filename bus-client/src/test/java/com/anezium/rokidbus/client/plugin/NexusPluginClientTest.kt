@@ -217,6 +217,24 @@ class NexusPluginClientTest {
     }
 
     @Test
+    fun `a pin can be pushed as soon as registration is approved`() {
+        // The fire-and-forget shape: connect, push on approval, disconnect. No onLinkState
+        // arrives first, and a plugin that waited for one would sit there forever.
+        val (client, transport, _) = fixture()
+        transport.featureBits = BusCapabilityBits.PIN_SURFACE
+        transport.listener.onMessage(
+            BusPaths.PLUGIN_REGISTRATION,
+            "pin-registration",
+            payload()
+                .put("result", PluginRegistrationResult.APPROVED)
+                .put("capabilities", "surfaces"),
+        )
+
+        assertEquals(NexusSdkResult.SENT, client.showPin(NexusPin(title = "NEXUS PIN")))
+        assertEquals(BusPaths.PIN_SHOW, transport.sends[0].first)
+    }
+
+    @Test
     fun `medium pins carry the size tier and per line emphasis`() {
         val (client, transport, _) = fixture()
         transport.featureBits = BusCapabilityBits.PIN_SURFACE
@@ -254,7 +272,7 @@ class NexusPluginClientTest {
     }
 
     @Test
-    fun `pin calls require approval grant live spp and feature bit`() {
+    fun `pin calls require approval grant and feature bit but not a live link`() {
         val (unapproved, _, _) = fixture()
         assertEquals(NexusSdkResult.NOT_REGISTERED, unapproved.showPin(NexusPin(title = "pin")))
 
@@ -281,9 +299,11 @@ class NexusPluginClientTest {
         transport.listener.onLinkState(LinkStateBits.SPP_DATA_UP)
         assertEquals(NexusSdkResult.CAPABILITY_NOT_AVAILABLE, client.showPin(NexusPin(title = "pin")))
 
+        // SPP down is not a refusal: the hub holds the pin and delivers it on reconnect.
+        // Only the glasses being incapable of pins at all earns CAPABILITY_NOT_AVAILABLE.
         transport.featureBits = BusCapabilityBits.PIN_SURFACE
         transport.listener.onLinkState(LinkStateBits.CXR_CONTROL_UP)
-        assertEquals(NexusSdkResult.CAPABILITY_NOT_AVAILABLE, client.hidePin())
+        assertEquals(NexusSdkResult.SENT, client.hidePin())
     }
 
     @Test

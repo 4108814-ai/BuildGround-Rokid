@@ -195,8 +195,13 @@ updating never hits its deadline.
 
 Check the live `supportsPinSurface` value immediately before use. Both methods
 return `CAPABILITY_NOT_AVAILABLE` without sending unless the glasses announced
-pin v1 and SPP is live. Old glasses therefore continue to work without a
-plugin API bump.
+pin v1. Old glasses therefore continue to work without a plugin API bump.
+
+**You do not need the glasses to be awake.** `supportsPinSurface` says these
+glasses can show a pin, not that one would appear this second. Push yours when
+your event happens; if the glasses are off or out of range the hub holds it and
+delivers it when they come back. So `CAPABILITY_NOT_AVAILABLE` means one thing —
+this pair cannot show pins at all — and retrying will not change it.
 
 ```kotlin
 val result = nexusClient?.showPin(

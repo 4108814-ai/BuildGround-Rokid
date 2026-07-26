@@ -94,10 +94,18 @@ defensively but must never receive oversized payloads from a compliant hub.
   CAMERA_LOHS_REVERSE_REQUIRED — undocumented in BUSSPEC at the time this plan
   was written — are taken). The glasses announce adds `"pinSurfaceVersion": 1`
   to `/system/hub/capabilities`.
-- The phone hub exposes the bit to plugins only after a valid announcement and
-  only while `SPP_DATA_UP` is live — mirror the `IMAGE_SURFACE` gating exactly,
-  including clearing on link-down and the "callers must not cache
-  capabilities()" model.
+- The phone hub exposes the bit after a valid announcement, and **keeps it across
+  link drops** — unlike `IMAGE_SURFACE`. The bit means "these glasses can show a
+  pin", not "a pin would go out this instant". A pin pushed while the glasses are
+  asleep is accepted into canonical state and delivered by the existing announce
+  resend; the TTL runs from the `show`, so nothing stale surfaces late. An image
+  gets neither, so it still refuses on link-down. The next announce overwrites the
+  remembered value, so pairing older glasses corrects itself. The "callers must not
+  cache capabilities()" model still holds.
+- `CAPABILITY_NOT_AVAILABLE` therefore means one thing only: these glasses cannot
+  show pins. It is a permanent answer, and a plugin that gets it should give up
+  rather than retry — which is exactly what it could not conclude when the same
+  code also meant "asleep, try later".
 - User grant: pins are covered by the existing `surfaces` grant. **No new
   descriptor capability, no grant-UI change** (same decision as image
   surfaces). Path rules map `/pin/*` to the `surfaces` capability.

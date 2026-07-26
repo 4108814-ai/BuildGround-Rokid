@@ -1179,7 +1179,14 @@ class BusHubService : Service() {
                     }
                     val forwarded = envelope.copy(payload = result.pin.payload)
                     recordLocalRoute(forwarded, senderUid, sender, PluginBusJournal.Verdict.OK)
-                    sendRemote(forwarded)?.let { deliverError(sender.replyBinder, envelope.id, it) }
+                    // Glasses asleep: hold it rather than fail the plugin. It is already
+                    // canonical state, and the announce resend delivers it on link-up. The
+                    // TTL still runs from now, so a stale pin never surfaces late.
+                    if (pinLinkUp()) {
+                        sendRemote(forwarded)?.let { deliverError(sender.replyBinder, envelope.id, it) }
+                    } else {
+                        log("pin held owner=$pluginId reason=link_down")
+                    }
                 }
             }
             BusPaths.PIN_HIDE -> {
@@ -1212,7 +1219,13 @@ class BusHubService : Service() {
                         schedulePinExpiry()
                         val forwarded = envelope.copy(payload = result.payload)
                         recordLocalRoute(forwarded, senderUid, sender, PluginBusJournal.Verdict.OK)
-                        sendRemote(forwarded)?.let { deliverError(sender.replyBinder, envelope.id, it) }
+                        // Same as show: the slot is already empty phone-side, and the
+                        // empty-slot assert on reconnect stops the glasses keeping a ghost.
+                        if (pinLinkUp()) {
+                            sendRemote(forwarded)?.let { deliverError(sender.replyBinder, envelope.id, it) }
+                        } else {
+                            log("pin hide held owner=$pluginId reason=link_down")
+                        }
                     }
                 }
             }
@@ -2060,6 +2073,10 @@ class BusHubService : Service() {
         }
     }
 
+    /** Whether a pin envelope can go out right now. State is kept either way. */
+    private fun pinLinkUp(): Boolean =
+        linkState() and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) != 0
+
     private fun schedulePinExpiry() {
         pinHandler.removeCallbacks(pinExpiryTick)
         val deadline = phonePinState.expiryDeadlineMs() ?: return
@@ -2073,7 +2090,7 @@ class BusHubService : Service() {
             is PhonePinClearResult.Cleared -> {
                 pinHandler.removeCallbacks(pinExpiryTick)
                 log("pin expired owner=${result.payload.optString("ownerPluginId")}")
-                if (linkState() and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) != 0) {
+                if (pinLinkUp()) {
                     sendRemote(BusEnvelope(path = BusPaths.PIN_HIDE, payload = result.payload))
                 }
             }
@@ -2085,7 +2102,7 @@ class BusHubService : Service() {
         if (result !is PhonePinClearResult.Cleared) return
         pinHandler.removeCallbacks(pinExpiryTick)
         log("pin cleared owner=$pluginId reason=$reason")
-        if (linkState() and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) != 0) {
+        if (pinLinkUp()) {
             sendRemote(BusEnvelope(path = BusPaths.PIN_HIDE, payload = result.payload))
         }
     }
@@ -3460,8 +3477,13 @@ class BusHubService : Service() {
         if (state and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) == 0) {
             if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.onLinkLost()
             remoteImageSurfaceVersion = 0
-            remotePinSurfaceVersion = 0
             remoteMaxImageBytes = 0
+            // remotePinSurfaceVersion deliberately survives, for the same reason as the
+            // setup state below: pin support is a property of the glasses, not of the link,
+            // and a plugin waking while they are off must still be able to leave a pin
+            // waiting for them. The next announce overwrites it, so swapping in older
+            // glasses corrects itself. Image support is not kept — an image has no
+            // canonical state to resend, so it must refuse while the link is down.
             // Keep the last-known setup state across link drops: powered-off glasses must
             // not re-open the setup step. Only a live announcement may report false.
             updateRemoteGlassesAppState(null, setupComplete = remoteGlassesSetupComplete)
@@ -3521,9 +3543,12 @@ class BusHubService : Service() {
         ) {
             capabilities = capabilities or BusCapabilityBits.IMAGE_SURFACE
         }
-        if (remotePinSurfaceVersion == PinSurfaceContract.VERSION &&
-            linkState() and LinkStateBits.SPP_DATA_UP != 0
-        ) {
+        // Deliberately not gated on the link, unlike IMAGE_SURFACE above: the bit means
+        // "these glasses can show a pin", not "a pin would go out this instant". A pin has
+        // canonical phone-side state and a resend path, so one pushed while the glasses are
+        // asleep is held and delivered on the next announce. An image has neither, so it
+        // still has to refuse when the link is down.
+        if (remotePinSurfaceVersion == PinSurfaceContract.VERSION) {
             capabilities = capabilities or BusCapabilityBits.PIN_SURFACE
         }
         return capabilities
