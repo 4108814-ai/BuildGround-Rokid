@@ -18,6 +18,16 @@ interface NexusPluginCallbacks {
      * Not delivered when the plugin is what disappeared.
      */
     fun onNoticeClosed(reason: NexusNoticeCloseReason) = Unit
+
+    /**
+     * The wearer answered this plugin's interactive notice. Arrives whether or
+     * not the plugin has a surface open, which is what the notice tier exists
+     * for: a plugin can be dormant, say one thing, and be answered.
+     *
+     * Back is never delivered here. It dismisses the band, always, and a plugin
+     * cannot take it.
+     */
+    fun onNoticeInput(event: NexusInputEvent) = Unit
     fun onRegistrationState(result: Int)
     fun onMessage(path: String, id: String, payload: JSONObject) = Unit
     fun onBinary(path: String, id: String, payload: JSONObject, data: ByteArray) = Unit

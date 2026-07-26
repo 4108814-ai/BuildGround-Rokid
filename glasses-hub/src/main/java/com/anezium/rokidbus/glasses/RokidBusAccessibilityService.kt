@@ -131,6 +131,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
                 }
                 when {
                     noticeConsumesBack(event) -> true
+                    noticeConsumesConfirm(event) -> true
                     LauncherOverlayRenderer.handleKeyEvent(event) -> true
                     SurfaceController.handleKeyEvent(event) -> true
                     else -> false
@@ -158,6 +159,26 @@ class RokidBusAccessibilityService : AccessibilityService() {
             event.action == KeyEvent.ACTION_DOWN &&
             NoticeController.dismissFromBack()
 
+    /**
+     * Confirm reaches the owner of an interactive notice even with no surface
+     * open, which is the whole point of the tier: until now every input route
+     * in this hub was gated on there being an active surface, so a dormant
+     * plugin could be shown but never answered.
+     *
+     * Nothing else is claimed. Scroll, the launcher gesture and every other key
+     * fall through to exactly the chain they used before.
+     */
+    private fun noticeConsumesConfirm(event: KeyEvent): Boolean =
+        event.action == KeyEvent.ACTION_DOWN &&
+            event.keyCode in NOTICE_CONFIRM_KEYS &&
+            NoticeController.handleConfirm(event.keyCode)
+
+    private val NOTICE_CONFIRM_KEYS = setOf(
+        KeyEvent.KEYCODE_ENTER,
+        KeyEvent.KEYCODE_DPAD_CENTER,
+        TripleTapDetector.KEYCODE_NOTIFICATION,
+    )
+
     private fun handleRingKeyEvent(event: KeyEvent): Boolean {
         // Preserve the raw R08 DOWN/UP pair even if its translated action hides
         // the current owner before the physical UP arrives.
@@ -166,14 +187,22 @@ class RokidBusAccessibilityService : AccessibilityService() {
         }
         val launcherShown = LauncherOverlayRenderer.isShown()
         val surfaceActive = SurfaceController.activeSurface() != null
-        if (!launcherShown && !surfaceActive) return false
+        val noticeClaims = NoticeController.claimsInput()
+        if (!launcherShown && !surfaceActive && !noticeClaims) return false
 
         if (event.action != KeyEvent.ACTION_DOWN) return true
         if (event.repeatCount == 0) {
-            if (launcherShown) {
-                LauncherOverlayRenderer.handleRingKey(event.keyCode, event.eventTime)
-            } else {
-                SurfaceController.handleRingKey(event.keyCode, event.eventTime)
+            val ringTap = event.keyCode == RingSurfaceInputPolicy.RING_KEYCODE_TAP
+            when {
+                launcherShown ->
+                    LauncherOverlayRenderer.handleRingKey(event.keyCode, event.eventTime)
+                // The band takes the tap and nothing else. Scroll keeps reaching
+                // the surface underneath, so a notice never freezes the ring.
+                noticeClaims && ringTap ->
+                    NoticeController.handleRingKey(event.keyCode, event.eventTime)
+                surfaceActive ->
+                    SurfaceController.handleRingKey(event.keyCode, event.eventTime)
+                else -> Unit
             }
         }
         consumedDownKeys.add(event.keyCode)
@@ -206,6 +235,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
         NoticeOverlayRenderer.onServiceDestroyed(this)
         MotionSpikeRenderer.onServiceDestroyed(this)
         SurfaceController.cancelRingInput()
+        NoticeController.cancelRingInput()
         RingFocusBroadcastCoordinator.onServiceDestroyed(this)
         consumedDownKeys.clear()
         super.onDestroy()
@@ -213,7 +243,16 @@ class RokidBusAccessibilityService : AccessibilityService() {
 
     private fun flushPendingTaps() {
         val tapCount = tripleTapDetector.consumeExpiredTapCount(SystemClock.uptimeMillis())
-        if (tapCount <= 0 || SurfaceController.activeSurface() == null) return
+        if (tapCount <= 0) return
+        // A notice sits above the surface, so taps that were waiting on the
+        // triple-tap window belong to it while it is up.
+        if (NoticeController.claimsInput()) {
+            repeat(tapCount) {
+                NoticeController.handleConfirm(TripleTapDetector.KEYCODE_NOTIFICATION)
+            }
+            return
+        }
+        if (SurfaceController.activeSurface() == null) return
         repeat(tapCount) {
             SurfaceController.forwardSurfaceInput(
                 TripleTapDetector.KEYCODE_NOTIFICATION,

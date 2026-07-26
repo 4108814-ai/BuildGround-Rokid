@@ -518,9 +518,23 @@ The window is never focusable and never touchable, and it never keeps the
 screen on or wakes the display. A notice that arrives on a dark screen is
 missed; that is correct for v1 and matches the pin rule.
 
-BACK always dismisses, platform-side, and is never forwarded to the plugin.
-There is no `handlesBack` for notices and there never will be: a plugin must
-not be able to hold the wearer inside a banner.
+### Input claim
+
+While a notice with `interactive: true` is visible, and only then:
+
+- **Confirm** — center tap, ENTER, or the temple key — is claimed and forwarded
+  to the owner as `/notice/input`, owner-scoped like `/notice/closed`. This
+  works with no surface open, which is the capability the tier adds: until now
+  every input route in the glasses hub was gated on an active surface, so a
+  dormant plugin could be shown but never answered.
+- **BACK always dismisses**, platform-side, and is never forwarded. There is no
+  `handlesBack` for notices and there never will be: a plugin must not be able
+  to hold the wearer inside a banner. A double tap on the ring means the same.
+- **Everything else passes through unchanged** — ring scroll, the launcher
+  gesture, every other key. A band claims two gestures, not the glasses. A
+  surface underneath stays scrollable while a notice is up, and the DOWN/UP
+  bookkeeping that consumes an orphaned UP applies here too, because a notice
+  routinely expires between the two halves of a press.
 
 ## Camera contract
 

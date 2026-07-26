@@ -3,6 +3,7 @@ package com.anezium.rokidbus.glasses
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.view.KeyEvent
 import com.anezium.rokidbus.shared.BusEnvelope
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.NoticeCloseReason
@@ -10,6 +11,7 @@ import com.anezium.rokidbus.shared.NoticeSurfaceContent
 import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import com.anezium.rokidbus.shared.NoticeSurfacePatchResult
 import com.anezium.rokidbus.shared.NoticeSurfaceValidationResult
+import org.json.JSONObject
 import java.util.concurrent.CopyOnWriteArrayList
 
 internal data class NexusNoticeSurface(
@@ -113,6 +115,8 @@ internal object NoticeController {
     private val listeners = CopyOnWriteArrayList<(NexusNoticeSurface?) -> Unit>()
     private var expiry: Runnable? = null
     private var cameraOverlayActive = false
+    private val ringInputPolicy = RingSurfaceInputPolicy()
+    private val ringTapExpiry = Runnable(::resolveRingTap)
 
     fun activeNotice(): NexusNoticeSurface? = state.activeNotice()
 
@@ -153,6 +157,63 @@ internal object NoticeController {
         if (visibleNotice() == null) return false
         runOnMain { applyDecision(state.close(NoticeCloseReason.USER)) }
         return true
+    }
+
+    /**
+     * Whether a notice is up and asked for a gesture. Only then does anything
+     * below claim a key, and only the two keys that mean confirm and dismiss:
+     * everything else keeps reaching whatever is underneath, because a banner
+     * is not a reason for the glasses to stop responding.
+     */
+    fun claimsInput(): Boolean = visibleNotice()?.content?.interactive == true
+
+    /** The wearer confirmed. The owner hears about it; nobody else does. */
+    fun handleConfirm(keyCode: Int): Boolean {
+        val notice = visibleNotice()?.takeIf { it.content.interactive } ?: return false
+        forwardInput(notice.surfaceId, keyCode)
+        return true
+    }
+
+    /**
+     * Ring input for a visible interactive notice. Only the tap is routed here;
+     * the caller keeps sending scroll to whatever is underneath, so a surface
+     * behind the band stays usable while it is up.
+     */
+    fun handleRingKey(keyCode: Int, eventTimeMs: Long): Boolean {
+        if (!claimsInput()) return false
+        ringInputPolicy.onKeyDown(keyCode, eventTimeMs)
+        main.removeCallbacks(ringTapExpiry)
+        main.postDelayed(ringTapExpiry, RingTapPolicy.DEFAULT_WINDOW_MS + 1L)
+        return true
+    }
+
+    fun cancelRingInput() {
+        runOnMain {
+            main.removeCallbacks(ringTapExpiry)
+            ringInputPolicy.reset()
+        }
+    }
+
+    private fun resolveRingTap() {
+        when (ringInputPolicy.resolveExpired(SystemClock.elapsedRealtime())) {
+            is RingSurfaceInputPolicy.Resolution.Forward -> {
+                val notice = visibleNotice()?.takeIf { it.content.interactive } ?: return
+                forwardInput(notice.surfaceId, RingSurfaceInputPolicy.KEYCODE_ENTER)
+            }
+            // A double tap on the ring is the wearer's dismiss, same as BACK.
+            RingSurfaceInputPolicy.Resolution.Back -> dismissFromBack()
+            RingSurfaceInputPolicy.Resolution.Ignore, null -> Unit
+        }
+    }
+
+    private fun forwardInput(surfaceId: String, keyCode: Int) {
+        GlassesHub.sendToPhone(
+            BusPaths.NOTICE_INPUT,
+            JSONObject()
+                .put("noticeId", surfaceId)
+                .put("keyCode", keyCode)
+                .put("action", KeyEvent.ACTION_DOWN),
+        )
     }
 
     fun setCameraOverlayActive(active: Boolean) {
@@ -218,6 +279,8 @@ internal object NoticeController {
             }
             is NoticeStateDecision.Closed -> {
                 cancelExpiry()
+                main.removeCallbacks(ringTapExpiry)
+                ringInputPolicy.reset()
                 reportClosed(decision.surfaceId, decision.reason)
                 notifyChanged()
             }

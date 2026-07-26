@@ -49,7 +49,8 @@ class MotionSpikeReceiver : BroadcastReceiver() {
                 .put("kind", NoticeSurfaceContract.KIND)
                 .put("title", "Marie")
                 .put("body", "Je suis en route, dix minutes. Tu as toujours besoin du chargeur ?")
-                .put("footer", "Retour pour ignorer")
+                .put("footer", "Tap pour répondre · Retour pour ignorer")
+                .put("interactive", true)
                 .put("ttlMs", 12_000L)
             BusPaths.NOTICE_UPDATE -> payload.put("footer", "J'écoute…")
         }

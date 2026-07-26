@@ -289,6 +289,18 @@ class NexusPluginClient internal constructor(
         if (closed || payload.optString("pluginId") != pluginId || !rememberEvent(id)) return
         if (routeSpeechMessage(path, payload)) return
         if (routeAudioMessage(path, payload)) return
+        if (path == BusPaths.NOTICE_INPUT) {
+            if (isApproved) {
+                callbacks.onNoticeInput(
+                    NexusInputEvent(
+                        surfaceId = NoticeSurfaceContract.LOCAL_SURFACE_ID,
+                        keyCode = payload.optInt("keyCode"),
+                        action = payload.optInt("action"),
+                    ),
+                )
+            }
+            return
+        }
         if (path == BusPaths.NOTICE_CLOSED) {
             NexusNoticeCloseReason.fromWire(payload.optString("reason"))
                 ?.let(callbacks::onNoticeClosed)

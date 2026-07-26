@@ -976,6 +976,11 @@ class BusHubService : Service() {
             recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
             return
         }
+        if (envelope.path == BusPaths.NOTICE_INPUT) {
+            recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
+            handleGlassesNoticeInput(envelope)
+            return
+        }
         if (envelope.path == BusPaths.NOTICE_CLOSED) {
             recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
             handleGlassesNoticeClosed(envelope)
@@ -1274,6 +1279,22 @@ class BusHubService : Service() {
             .closedPayload("$pluginId:${NoticeSurfaceContract.LOCAL_SURFACE_ID}", reason)
             .put("pluginId", pluginId)
         deliverLocal(BusEnvelope(path = BusPaths.NOTICE_CLOSED, payload = payload))
+    }
+
+    /**
+     * The wearer answered a banner. Only the plugin that raised it hears about
+     * it, and only while it still owns the slot: an input arriving for a notice
+     * that has already been replaced belongs to nobody.
+     */
+    private fun handleGlassesNoticeInput(envelope: BusEnvelope) {
+        val owner = phoneNoticeState.ownerPluginId() ?: return
+        val expected = "$owner:${NoticeSurfaceContract.LOCAL_SURFACE_ID}"
+        if (envelope.payload.optString("noticeId") != expected) {
+            log("notice input ignored id=${envelope.payload.optString("noticeId")}")
+            return
+        }
+        val payload = JSONObject(envelope.payload.toString()).put("pluginId", owner)
+        deliverLocal(envelope.copy(payload = payload))
     }
 
     private fun handleGlassesNoticeClosed(envelope: BusEnvelope) {

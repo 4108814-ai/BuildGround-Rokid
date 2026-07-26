@@ -4,6 +4,7 @@ import android.view.KeyEvent
 import com.anezium.rokidbus.client.plugin.NexusCard
 import com.anezium.rokidbus.client.plugin.NexusImage
 import com.anezium.rokidbus.client.plugin.NexusNotice
+import com.anezium.rokidbus.client.plugin.NexusNoticeUpdate
 import com.anezium.rokidbus.client.plugin.NexusPin
 import com.anezium.rokidbus.client.plugin.NexusPinEmphasis
 import com.anezium.rokidbus.client.plugin.NexusPinLine
@@ -184,6 +185,15 @@ class HelloPluginService : NexusPluginService() {
     }
 
     /**
+     * The answer to a tap on the band, with no surface involved. This is what
+     * the notice tier is for: until now a plugin could only be reached while it
+     * held a screen open.
+     */
+    override fun onNexusNoticeInput(event: NexusInputEvent) {
+        nexusClient?.updateNotice(NexusNoticeUpdate(footer = "Answered. Back to dismiss"))
+    }
+
+    /**
      * Walks the ambient HUD tiers: both pin sizes, then a notice, then nothing.
      * The notice needs no hide step of its own -- it expires on its own deadline,
      * which is the difference between the two tiers in one gesture.
@@ -210,16 +220,13 @@ class HelloPluginService : NexusPluginService() {
         const val PIN_MEDIUM = 2
         const val DEMO_NOTICE = 3
 
-        /**
-         * Interactive is left false: claiming input is the next slice, and a
-         * reference that promises a tap it cannot answer would be worse than one
-         * that says nothing.
-         */
+        /** Interactive: the tap is answered below, with no surface open. */
         val DEMO_NOTICE_BAND = NexusNotice(
             title = "Nexus notice",
             body = "A band that arrives, says one thing, and leaves on its own deadline.",
-            footer = "back to dismiss",
-            ttlMs = 6_000L,
+            footer = "Tap to answer · Back to dismiss",
+            interactive = true,
+            ttlMs = 8_000L,
         )
 
         /** No `ttlMs` of its own, so it takes the hub's 30-minute default. */
