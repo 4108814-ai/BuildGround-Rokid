@@ -1189,13 +1189,17 @@ class BusHubService : Service() {
             true
         }
         BusPaths.isMediaSyncTransferPath(envelope.path) -> {
-            executor.execute {
-                mediaSyncCoordinator.onTransferEnvelope(
-                    envelope.path,
-                    envelope.payload,
-                    envelope.binary,
-                )
-            }
+            // Deliberately NOT `executor`: that is a cached thread pool, and dispatching an
+            // ordered byte stream onto it lets chunks race each other into the staging file.
+            // Every chunk still lands exactly once, so lengths stay right while content is
+            // scrambled - which is precisely how this failed on device. The coordinator owns a
+            // single-threaded data plane; handing it envelopes from this one reader thread is
+            // what preserves wire order.
+            mediaSyncCoordinator.onTransferEnvelope(
+                envelope.path,
+                envelope.payload,
+                envelope.binary,
+            )
             true
         }
         else -> false

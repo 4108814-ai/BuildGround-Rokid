@@ -19,11 +19,7 @@ import java.io.InputStream
  *
  * The cost is one extra copy at publish time, which is paid once per file and never on the link.
  */
-internal class MediaSyncStagingStore(
-    context: Context,
-    root: File = File(context.applicationContext.filesDir, DIRECTORY),
-) {
-    private val directory = root
+internal class MediaSyncStagingStore(private val directory: File) {
 
     /** How many bytes of [name] are already held. Doubles as the resume offset. */
     fun receivedBytes(name: String): Long {
@@ -82,9 +78,12 @@ internal class MediaSyncStagingStore(
         return File(directory, "$name$SUFFIX")
     }
 
-    private companion object {
-        const val DIRECTORY = "mediasync-staging"
-        const val SUFFIX = ".part"
-        const val BUFFER_BYTES = 64 * 1024
+    companion object {
+        private const val DIRECTORY = "mediasync-staging"
+        private const val SUFFIX = ".part"
+        private const val BUFFER_BYTES = 64 * 1024
+
+        fun directoryFor(context: Context): File =
+            File(context.applicationContext.filesDir, DIRECTORY)
     }
 }

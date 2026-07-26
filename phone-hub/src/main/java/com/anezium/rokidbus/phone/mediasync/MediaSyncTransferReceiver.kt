@@ -47,6 +47,7 @@ internal class MediaSyncTransferReceiver(
     private var expectedOffset = 0L
     private var lastProgressAtMillis = 0L
     private var awaitingDeleteResult = false
+    private var consecutiveHashFailures = 0
 
     fun start() {
         send(BusPaths.MEDIA_SYNC_XFER_CATALOG_REQUEST, MediaSyncTransferContract.sessionJson(sessionId))
@@ -98,7 +99,13 @@ internal class MediaSyncTransferReceiver(
         if (index >= pending.size) {
             send(BusPaths.MEDIA_SYNC_XFER_BYE, MediaSyncTransferContract.sessionJson(sessionId))
             finish(
-                if (filesFailed == 0) MediaSyncResult.COMPLETED else MediaSyncResult.PARTIAL,
+                when {
+                    filesFailed == 0 -> MediaSyncResult.COMPLETED
+                    // "Partial" has to mean some of it worked; a run where nothing arrived is a
+                    // failure and should say so.
+                    filesSynced > 0 -> MediaSyncResult.PARTIAL
+                    else -> MediaSyncResult.FAILED
+                },
                 if (truncated) "More captures remain; sync again" else null,
             )
             return
@@ -177,14 +184,35 @@ internal class MediaSyncTransferReceiver(
         val item = current ?: return
         if (MediaSyncTransferContract.name(payload) != item.name) return
         val expectedSha = payload.optString("sha256")
+        val staged = staging.receivedBytes(item.name)
         val actualSha = staging.sha256(item.name)
+        // One line that makes a length-class bug obvious the moment it appears, instead of it
+        // hiding behind a checksum failure that says nothing about which way it went wrong.
+        logger("mediaSync file end name=${item.name} staged=$staged expected=${item.sizeBytes}")
         if (expectedSha.isBlank() || actualSha == null || !actualSha.equals(expectedSha, true)) {
-            logger("mediaSync checksum mismatch name=${item.name}")
+            logger("mediaSync checksum mismatch name=${item.name} staged=$staged")
             staging.discard(item.name)
             acknowledge(item.name, ok = false)
+            consecutiveHashFailures += 1
+            if (consecutiveHashFailures >= MAX_CONSECUTIVE_HASH_FAILURES) {
+                // Something is wrong with the pipe itself; grinding through the rest of the
+                // catalog would just corrupt time as well as bytes.
+                logger("mediaSync aborting: $consecutiveHashFailures consecutive checksum failures")
+                send(
+                    BusPaths.MEDIA_SYNC_XFER_ABORT,
+                    MediaSyncTransferContract.abort(sessionId, "checksum_failures"),
+                )
+                filesFailed += 1
+                finish(
+                    if (filesSynced > 0) MediaSyncResult.PARTIAL else MediaSyncResult.FAILED,
+                    "Transfers keep arriving corrupted",
+                )
+                return
+            }
             failCurrent()
             return
         }
+        consecutiveHashFailures = 0
         if (!publishToGallery(item, expectedSha)) {
             acknowledge(item.name, ok = false)
             failCurrent()
@@ -320,6 +348,7 @@ internal class MediaSyncTransferReceiver(
         const val OUTCOME_ALREADY_GONE = "already_gone"
         const val OUTCOME_NOT_PERMITTED = "not_permitted"
         const val COPY_BUFFER_BYTES = 64 * 1024
+        const val MAX_CONSECUTIVE_HASH_FAILURES = 3
         const val PROGRESS_INTERVAL_MS = 2_000L
     }
 }

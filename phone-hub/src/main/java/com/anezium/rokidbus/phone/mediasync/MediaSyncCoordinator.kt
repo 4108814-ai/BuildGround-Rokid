@@ -12,6 +12,7 @@ import com.anezium.rokidbus.shared.MediaSyncState
 import com.anezium.rokidbus.shared.MediaSyncStatus
 import com.anezium.rokidbus.shared.MediaSyncStatusContract
 import org.json.JSONObject
+import java.util.concurrent.Executors
 
 /** Translates the glasses engine's skip reasons into the one line the settings screen shows. */
 object MediaSyncBlockerMapping {
@@ -45,7 +46,16 @@ internal class MediaSyncCoordinator(
     private val store = MediaSyncSettingsStore(appContext)
     private val ledger = SyncLedger(SharedPreferencesSyncLedgerStorage(appContext))
     private val gallery: MediaSyncGalleryWriter = AndroidMediaSyncGalleryWriter(appContext, logger)
-    private val staging = MediaSyncStagingStore(appContext)
+    private val staging = MediaSyncStagingStore(MediaSyncStagingStore.directoryFor(appContext))
+
+    /**
+     * The data plane is an ordered byte stream, so it gets one thread and keeps it. The SPP reader
+     * is a single producer submitting in wire order, and a single-threaded FIFO consumer is what
+     * makes "chunk N is appended before chunk N+1" a property of the code rather than a hope.
+     */
+    private val transferExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "media-sync-receive").apply { isDaemon = true }
+    }
 
     private val lock = Any()
     private var settings: MediaSyncSettings = store.loadSettings()
@@ -168,19 +178,29 @@ internal class MediaSyncCoordinator(
         )
         synchronized(lock) { receiver = session }
         logger("mediaSync session begin id=$sessionId deleteAfterSync=$deleteAfterSync")
-        session.start()
+        // Start on the receive thread too, so nothing in the session ever runs anywhere else.
+        runCatching { transferExecutor.execute { session.start() } }
+            .onFailure { logger("mediaSync session start rejected") }
     }
 
-    /** Data-plane traffic from the glasses, handed straight to the live session. */
+    /** Data-plane traffic from the glasses, serialised onto the receive thread in wire order. */
     fun onTransferEnvelope(path: String, payload: JSONObject, binary: ByteArray?) {
-        val session = synchronized(lock) { receiver } ?: return
-        session.onEnvelope(path, payload, binary)
+        runCatching {
+            transferExecutor.execute {
+                val session = synchronized(lock) { receiver } ?: return@execute
+                session.onEnvelope(path, payload, binary)
+            }
+        }.onFailure { logger("mediaSync transfer dispatch rejected path=$path") }
     }
 
     /** Keeps the staged partials and reports honestly; the next session resumes from them. */
     fun onLinkLost() {
-        val session = synchronized(lock) { receiver } ?: return
-        session.onLinkLost()
+        runCatching {
+            transferExecutor.execute {
+                val session = synchronized(lock) { receiver } ?: return@execute
+                session.onLinkLost()
+            }
+        }.onFailure { logger("mediaSync link-lost dispatch rejected") }
     }
 
     private fun onProgress(update: MediaSyncProgress) {
@@ -239,6 +259,7 @@ internal class MediaSyncCoordinator(
 
     override fun close() {
         synchronized(lock) { receiver = null }
+        transferExecutor.shutdownNow()
     }
 }
 
