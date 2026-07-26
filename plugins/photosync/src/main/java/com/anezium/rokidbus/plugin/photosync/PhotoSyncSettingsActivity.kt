@@ -30,10 +30,13 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * One screen: what sync is doing, the two switches that govern it, and the recent runs.
+ * One screen: what sync is doing right now, how it should run, and what it has done.
  *
- * Binding the plugin service while this screen is visible is what gives the screen a live bus
- * registration; the moment it closes the plugin goes dormant again while the hub keeps syncing.
+ * Two rules shape the code. Everything that changes while you watch — the headline, the gauge, the
+ * counters, the selected mode — is a field that gets patched in place, so a status arriving twice a
+ * second never rebuilds the screen or throws away a scroll position. And the screen never waits
+ * passively: it asks for status the moment it opens, on every resume, and on a slow heartbeat, so
+ * a missed push can't leave it frozen on a stale line.
  */
 class PhotoSyncSettingsActivity : Activity() {
     private val main = Handler(Looper.getMainLooper())
@@ -44,20 +47,47 @@ class PhotoSyncSettingsActivity : Activity() {
     private var unobserveStatus: (() -> Unit)? = null
     private var status: MediaSyncStatus? = null
     private var bound = false
+    private var visible = false
 
-    // Progress arrives once per file. Patching the status card in place stops the screen from
-    // rebuilding — and throwing away the wearer's scroll position — several times a second.
-    private var renderedKey: String? = null
+    // Live views, patched in place rather than rebuilt.
+    private var dotView: View? = null
     private var headlineView: TextView? = null
     private var detailView: TextView? = null
-    private var dotView: View? = null
-    private var syncedValue: TextView? = null
+    private var gaugeFill: View? = null
+    private var gaugeRest: View? = null
+    private var gaugeRow: LinearLayout? = null
+    private var galleryValue: TextView? = null
     private var syncButton: Button? = null
+    private var deleteSwitch: Switch? = null
+    private var deleteNote: TextView? = null
+    private val modeRows = LinkedHashMap<MediaSyncMode, ModeRow>()
+
+    private var renderedKey: String? = null
+
+    /** A tapped mode shows as selected immediately; the hub's next push confirms or corrects it. */
+    private var pendingMode: MediaSyncMode? = null
+
+    /** True only while controls are being set from a hub push, so echoes never travel back. */
+    private var mirroringHubState = false
+
+    private val heartbeat = object : Runnable {
+        override fun run() {
+            runtime?.refresh()
+            if (visible) main.postDelayed(this, HEARTBEAT_MS)
+        }
+    }
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) = attachRuntime()
         override fun onServiceDisconnected(name: ComponentName?) = attachRuntime()
     }
+
+    private class ModeRow(
+        val root: LinearLayout,
+        val mark: View,
+        val title: TextView,
+        val subtitle: TextView,
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -80,12 +110,12 @@ class PhotoSyncSettingsActivity : Activity() {
             )
         }
         setContentView(root)
-        renderedKey = structureKey(null)
         render()
     }
 
     override fun onStart() {
         super.onStart()
+        visible = true
         bound = bindService(
             Intent(this, PhotoSyncPluginService::class.java),
             connection,
@@ -94,7 +124,16 @@ class PhotoSyncSettingsActivity : Activity() {
         unobserveRuntime = PhotoSyncPluginService.observeRuntime { main.post(::attachRuntime) }
     }
 
+    override fun onResume() {
+        super.onResume()
+        runtime?.refresh()
+        main.removeCallbacks(heartbeat)
+        main.postDelayed(heartbeat, HEARTBEAT_MS)
+    }
+
     override fun onStop() {
+        visible = false
+        main.removeCallbacks(heartbeat)
         unobserveRuntime?.invoke()
         unobserveRuntime = null
         unobserveStatus?.invoke()
@@ -119,115 +158,71 @@ class PhotoSyncSettingsActivity : Activity() {
 
     private fun onStatus(updated: MediaSyncStatus?) {
         status = updated
+        if (updated != null && updated.settings.mode == pendingMode) pendingMode = null
         val key = structureKey(updated)
         if (key == renderedKey) {
             applyStatus(updated)
             return
         }
-        renderedKey = key
         render()
     }
 
-    /** Only these fields change the shape of the screen; everything else is a text swap. */
+    /**
+     * Only what changes the shape of the screen belongs here. Progress, headlines, counters and
+     * the selected mode are all patched in place, so a transfer pushing status every couple of
+     * seconds never rebuilds anything.
+     */
     private fun structureKey(current: MediaSyncStatus?): String = when (current) {
-        null -> "disconnected"
+        null -> "waiting"
         else -> listOf(
-            current.settings.mode,
-            current.settings.deleteAfterSync,
-            current.deletionSupported,
-            current.history.joinToString(",") { "${it.finishedAtMillis}/${it.result.wireValue}" },
+            current.deletionSupported == false,
+            current.history.size,
+            current.history.firstOrNull()?.finishedAtMillis ?: 0L,
         ).joinToString("|")
     }
 
     private fun render() {
         val current = status
+        renderedKey = structureKey(current)
+        modeRows.clear()
         content.removeAllViews()
+
         content.addView(
             NexusUi.cardBody(
                 this,
-                "Photos and videos you capture on the glasses copy themselves into your phone " +
-                    "gallery, in the same Hi Rokid album. They travel over the glasses " +
-                    "connection, so no Wi-Fi is needed.",
+                "Captures from the glasses land in your phone gallery, in the same Hi Rokid " +
+                    "album. They travel over the glasses connection — no Wi-Fi needed.",
             ),
             NexusUi.block(),
         )
-        content.addView(BusTheme.gap(this, 18))
+        content.addView(BusTheme.gap(this, 20))
 
         content.addView(NexusUi.sectionRow(this, "Status"), NexusUi.block())
         content.addView(BusTheme.gap(this, 10))
         content.addView(statusCard(), NexusUi.block())
 
-        content.addView(BusTheme.gap(this, 22))
-        content.addView(NexusUi.sectionRow(this, "Automatic"), NexusUi.block())
+        content.addView(BusTheme.gap(this, 24))
+        content.addView(NexusUi.sectionRow(this, "When to sync"), NexusUi.block())
         content.addView(BusTheme.gap(this, 10))
-        val mode = current?.settings?.mode ?: MediaSyncMode.CHARGING
-        listOf(
-            Triple(MediaSyncMode.ALWAYS, "Always", "Syncs as soon as you capture"),
-            Triple(MediaSyncMode.CHARGING, "While charging", "Syncs when the glasses are on the charger"),
-            Triple(MediaSyncMode.MANUAL, "Manual only", "Only when you tap Sync now"),
-        ).forEachIndexed { index, (option, title, subtitle) ->
-            if (index > 0) content.addView(BusTheme.gap(this, 8))
-            content.addView(
-                choiceRow(
-                    title = title,
-                    subtitle = subtitle,
-                    selected = option == mode,
-                    enabled = current != null,
-                    onSelected = { runtime?.setSyncMode(option) },
-                ),
-                NexusUi.block(),
-            )
-        }
-        content.addView(BusTheme.gap(this, 8))
-        content.addView(
-            toggleRow(
-                title = "Delete from glasses after sync",
-                subtitle = "Frees glasses storage. A capture is removed only once it is safely " +
-                    "in your phone gallery.",
-                checked = current?.settings?.deleteAfterSync ?: false,
-                enabled = current != null,
-                onChanged = { enabled -> runtime?.setDeleteAfterSync(enabled) },
-            ),
-            NexusUi.block(),
-        )
-        if (current?.deletionSupported == false) {
+        MODES.forEach { (mode, copy) ->
+            val row = modeRow(mode, copy.first, copy.second)
+            modeRows[mode] = row
+            content.addView(row.root, NexusUi.block())
             content.addView(BusTheme.gap(this, 8))
-            content.addView(
-                NexusUi.metaLabel(
-                    this,
-                    "The glasses refused the last delete — captures stay on the glasses.",
-                    NexusUi.AMBER,
-                ),
-                NexusUi.block(),
-            )
         }
 
-        content.addView(BusTheme.gap(this, 22))
-        content.addView(NexusUi.sectionRow(this, "Recent syncs"), NexusUi.block())
+        content.addView(BusTheme.gap(this, 14))
+        content.addView(NexusUi.sectionRow(this, "Glasses storage"), NexusUi.block())
         content.addView(BusTheme.gap(this, 10))
-        val history = current?.history.orEmpty()
-        if (history.isEmpty()) {
-            content.addView(
-                NexusUi.card(this).apply {
-                    addView(
-                        NexusUi.cardBody(
-                            this@PhotoSyncSettingsActivity,
-                            "Nothing yet. The first sync copies everything already on the glasses.",
-                        ),
-                        NexusUi.block(),
-                    )
-                },
-                NexusUi.block(),
-            )
-        } else {
-            history.forEachIndexed { index, run ->
-                if (index > 0) content.addView(BusTheme.gap(this, 8))
-                content.addView(
-                    historyRow(PhotoSyncCopy.describe(run), timestamp(run.finishedAtMillis)),
-                    NexusUi.block(),
-                )
-            }
-        }
+        content.addView(deleteCard(current), NexusUi.block())
+
+        content.addView(BusTheme.gap(this, 24))
+        content.addView(
+            NexusUi.sectionRow(this, "Recent syncs", current?.history?.size?.takeIf { it > 0 }?.let { "$it" }),
+            NexusUi.block(),
+        )
+        content.addView(BusTheme.gap(this, 10))
+        content.addView(historyCard(current), NexusUi.block())
 
         content.addView(BusTheme.gap(this, 24))
         content.addView(NexusUi.sectionRow(this, "Plugin"), NexusUi.block())
@@ -238,37 +233,31 @@ class PhotoSyncSettingsActivity : Activity() {
             },
             NexusUi.block(),
         )
-        applyStatus(current)
-    }
 
-    private fun applyStatus(current: MediaSyncStatus?) {
-        headlineView?.text = PhotoSyncCopy.headline(current)
-        dotView?.let { NexusUi.setDotColor(it, dotColor(current)) }
-        val detail = PhotoSyncCopy.detail(current)
-        detailView?.apply {
-            text = detail.orEmpty()
-            visibility = if (detail == null) View.GONE else View.VISIBLE
-        }
-        syncedValue?.text = current
-            ?.let { "${it.syncedTotal} ${if (it.syncedTotal == 1) "file" else "files"}" }
-            ?: "—"
-        syncButton?.let { button ->
-            val ready = current != null && current.state == MediaSyncState.IDLE
-            button.isEnabled = ready
-            button.alpha = if (ready) 1f else 0.45f
-        }
+        applyStatus(current)
     }
 
     private fun statusCard(): LinearLayout = NexusUi.card(this).apply {
         val dot = NexusUi.dot(this@PhotoSyncSettingsActivity).also { dotView = it }
-        val headline = NexusUi.statusLine(this@PhotoSyncSettingsActivity).also { headlineView = it }
-        val detail = NexusUi.rowSub(this@PhotoSyncSettingsActivity, "").also { detailView = it }
-        val synced = NexusUi.rowValue(this@PhotoSyncSettingsActivity).also { syncedValue = it }
+        val headline = NexusUi.statusLine(this@PhotoSyncSettingsActivity).apply {
+            textSize = 15f
+            setTextColor(NexusUi.INK)
+            isSingleLine = true
+        }.also { headlineView = it }
+
         addView(
             LinearLayout(this@PhotoSyncSettingsActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                addView(dot)
+                // A bare View measures wrap_content as match_parent, so the dot needs a real size
+                // or it swallows the whole card and squeezes the headline to nothing.
+                addView(
+                    dot,
+                    LinearLayout.LayoutParams(
+                        NexusUi.dp(this@PhotoSyncSettingsActivity, 9),
+                        NexusUi.dp(this@PhotoSyncSettingsActivity, 9),
+                    ),
+                )
                 addView(
                     headline,
                     LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -278,11 +267,28 @@ class PhotoSyncSettingsActivity : Activity() {
             },
             NexusUi.block(),
         )
-        addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 6))
-        addView(detail, NexusUi.block())
-        addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 12))
-        addView(NexusUi.divider(this@PhotoSyncSettingsActivity), NexusUi.block())
-        addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 12))
+
+        addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 7))
+        addView(
+            NexusUi.rowSub(this@PhotoSyncSettingsActivity, "").also { detailView = it },
+            NexusUi.block(),
+        )
+
+        // Gauge and its spacing hide as one, or an idle card keeps a hole where they were.
+        addView(
+            LinearLayout(this@PhotoSyncSettingsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gaugeRow = this
+                addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 12))
+                addView(gauge(), NexusUi.block())
+            },
+            NexusUi.block(),
+        )
+
+        addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 14))
+        addView(NexusUi.divider(this@PhotoSyncSettingsActivity))
+        addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 14))
+
         addView(
             LinearLayout(this@PhotoSyncSettingsActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -291,160 +297,286 @@ class PhotoSyncSettingsActivity : Activity() {
                     NexusUi.rowLabel(this@PhotoSyncSettingsActivity, "In your gallery"),
                     LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
                 )
-                addView(synced)
+                addView(
+                    NexusUi.rowValue(this@PhotoSyncSettingsActivity).also { galleryValue = it },
+                )
             },
             NexusUi.block(),
         )
+
         addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 14))
-        addView(syncNowButton(), NexusUi.block())
+        addView(
+            NexusUi.pillButton(this@PhotoSyncSettingsActivity, "Sync now").apply {
+                syncButton = this
+                setOnClickListener {
+                    runtime?.syncNow()
+                    isEnabled = false
+                    alpha = DISABLED_ALPHA
+                    headlineView?.text = "Starting…"
+                }
+            },
+            NexusUi.block(),
+        )
     }
 
-    private fun syncNowButton(): Button = NexusUi.pillButton(this, "Sync now").apply {
-        syncButton = this
-        setOnClickListener {
-            runtime?.syncNow()
-            isEnabled = false
-            alpha = 0.45f
-        }
+    /** A two-part weighted track: the fill grows, the remainder shrinks, no measuring needed. */
+    private fun gauge(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        background = NexusUi.rounded(this@PhotoSyncSettingsActivity, NexusUi.LINE, 3)
+        val height = NexusUi.dp(this@PhotoSyncSettingsActivity, 5)
+        addView(
+            View(this@PhotoSyncSettingsActivity).apply {
+                background = NexusUi.rounded(this@PhotoSyncSettingsActivity, NexusUi.GREEN, 3)
+                gaugeFill = this
+            },
+            LinearLayout.LayoutParams(0, height, 0f),
+        )
+        addView(
+            View(this@PhotoSyncSettingsActivity).apply { gaugeRest = this },
+            LinearLayout.LayoutParams(0, height, 1f),
+        )
     }
 
-    private fun dotColor(current: MediaSyncStatus?): Int = when {
-        current == null -> NexusUi.INK3
-        current.state != MediaSyncState.IDLE -> NexusUi.GREEN
-        current.blocker == null || current.blocker == MediaSyncBlocker.NOTHING_PENDING ->
-            NexusUi.GREEN_DIM
-        current.blocker == MediaSyncBlocker.NOT_CHARGING ||
-            current.blocker == MediaSyncBlocker.LINK_DOWN ||
-            current.blocker == MediaSyncBlocker.CAMERA_ACTIVE -> NexusUi.INK3
-        else -> NexusUi.AMBER
-    }
-
-    private fun historyRow(title: String, subtitle: String): LinearLayout =
-        LinearLayout(this).apply {
+    private fun modeRow(mode: MediaSyncMode, title: String, subtitle: String): ModeRow {
+        val mark = View(this)
+        val titleView = NexusUi.rowTitle(this, title)
+        val subtitleView = wrappingSub(subtitle)
+        val root = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = NexusUi.bordered(
-                this@PhotoSyncSettingsActivity,
-                NexusUi.PANEL,
-                NexusUi.LINE,
-                15,
-            )
             setPadding(
                 NexusUi.dp(this@PhotoSyncSettingsActivity, 15),
-                NexusUi.dp(this@PhotoSyncSettingsActivity, 12),
+                NexusUi.dp(this@PhotoSyncSettingsActivity, 13),
                 NexusUi.dp(this@PhotoSyncSettingsActivity, 15),
-                NexusUi.dp(this@PhotoSyncSettingsActivity, 12),
+                NexusUi.dp(this@PhotoSyncSettingsActivity, 13),
+            )
+            isClickable = true
+            addView(
+                mark,
+                LinearLayout.LayoutParams(
+                    NexusUi.dp(this@PhotoSyncSettingsActivity, 10),
+                    NexusUi.dp(this@PhotoSyncSettingsActivity, 10),
+                ),
             )
             addView(
                 LinearLayout(this@PhotoSyncSettingsActivity).apply {
                     orientation = LinearLayout.VERTICAL
-                    addView(NexusUi.rowTitle(this@PhotoSyncSettingsActivity, title))
+                    addView(titleView)
                     addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 3))
-                    addView(NexusUi.rowSub(this@PhotoSyncSettingsActivity, subtitle))
+                    addView(subtitleView)
                 },
-                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginStart = NexusUi.dp(this@PhotoSyncSettingsActivity, 13)
+                },
+            )
+            setOnClickListener {
+                if (runtime == null) return@setOnClickListener
+                pendingMode = mode
+                applySelectedMode(mode)
+                runtime?.setSyncMode(mode)
+            }
+        }
+        return ModeRow(root, mark, titleView, subtitleView)
+    }
+
+    private fun deleteCard(current: MediaSyncStatus?): LinearLayout = NexusUi.card(this).apply {
+        addView(
+            LinearLayout(this@PhotoSyncSettingsActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(
+                    LinearLayout(this@PhotoSyncSettingsActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        addView(
+                            NexusUi.rowTitle(
+                                this@PhotoSyncSettingsActivity,
+                                "Delete from glasses after sync",
+                            ),
+                        )
+                        addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 3))
+                        addView(
+                            wrappingSub(
+                                "Frees space on the glasses. A capture is removed only once it " +
+                                    "is safely in your gallery.",
+                            ),
+                        )
+                    },
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        marginEnd = NexusUi.dp(this@PhotoSyncSettingsActivity, 12)
+                    },
+                )
+                addView(
+                    Switch(this@PhotoSyncSettingsActivity).apply {
+                        deleteSwitch = this
+                        thumbTintList = ColorStateList(
+                            arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                            intArrayOf(NexusUi.GREEN, NexusUi.INK3),
+                        )
+                        trackTintList = ColorStateList(
+                            arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                            intArrayOf(NexusUi.GREEN_DIM, NexusUi.LINE),
+                        )
+                        // Deleting the wearer's captures is the one destructive setting here, so
+                        // it may only ever change from a real gesture. `isPressed` is too loose a
+                        // guard for that — the flag below is set only while the screen mirrors a
+                        // hub push, so an echo can never travel back as a fresh instruction.
+                        setOnCheckedChangeListener { _, value ->
+                            if (!mirroringHubState) runtime?.setDeleteAfterSync(value)
+                        }
+                    },
+                )
+            },
+            NexusUi.block(),
+        )
+        if (current?.deletionSupported == false) {
+            addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 10))
+            addView(
+                wrappingSub("The glasses refused the last delete — captures stayed on the glasses.")
+                    .apply {
+                        setTextColor(NexusUi.AMBER)
+                        deleteNote = this
+                    },
+                NexusUi.block(),
+            )
+        } else {
+            deleteNote = null
+        }
+    }
+
+    private fun historyCard(current: MediaSyncStatus?): LinearLayout = NexusUi.card(this).apply {
+        val history = current?.history.orEmpty()
+        if (history.isEmpty()) {
+            addView(
+                NexusUi.cardBody(
+                    this@PhotoSyncSettingsActivity,
+                    "Nothing yet. The first sync copies everything already on the glasses.",
+                ),
+                NexusUi.block(),
+            )
+            return@apply
+        }
+        history.take(MAX_HISTORY_ROWS).forEachIndexed { index, run ->
+            if (index > 0) {
+                addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 11))
+                addView(NexusUi.divider(this@PhotoSyncSettingsActivity))
+                addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 11))
+            }
+            addView(
+                LinearLayout(this@PhotoSyncSettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(
+                        NexusUi.rowLabel(
+                            this@PhotoSyncSettingsActivity,
+                            PhotoSyncCopy.describe(run),
+                        ),
+                        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                    )
+                    addView(
+                        NexusUi.metaLabel(
+                            this@PhotoSyncSettingsActivity,
+                            timestamp(run.finishedAtMillis),
+                        ),
+                    )
+                },
+                NexusUi.block(),
             )
         }
+    }
 
-    /**
-     * Exclusive choice, in the kit's vocabulary: a pressable row with the same dot the status card
-     * uses as its selection mark. Chips (the Store's precedent) cannot carry a sub-line, and each
-     * of these three needs one to be understandable.
-     */
-    private fun choiceRow(
-        title: String,
-        subtitle: String,
-        selected: Boolean,
-        enabled: Boolean,
-        onSelected: () -> Unit,
-    ): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        background = if (selected) {
-            NexusUi.bordered(this@PhotoSyncSettingsActivity, NexusUi.PANEL, NexusUi.GREEN_DIM, 15)
-        } else {
-            NexusUi.pressedBordered(this@PhotoSyncSettingsActivity, NexusUi.PANEL, 15)
+    private fun applyStatus(current: MediaSyncStatus?) {
+        mirroringHubState = true
+        try {
+            mirrorStatus(current)
+        } finally {
+            mirroringHubState = false
         }
-        setPadding(
-            NexusUi.dp(this@PhotoSyncSettingsActivity, 15),
-            NexusUi.dp(this@PhotoSyncSettingsActivity, 12),
-            NexusUi.dp(this@PhotoSyncSettingsActivity, 15),
-            NexusUi.dp(this@PhotoSyncSettingsActivity, 12),
-        )
-        alpha = if (enabled) 1f else 0.5f
-        isClickable = enabled
-        isFocusable = enabled
-        if (enabled) setOnClickListener { if (!selected) onSelected() }
-        addView(
-            NexusUi.dot(this@PhotoSyncSettingsActivity).also {
-                NexusUi.setDotColor(it, if (selected) NexusUi.GREEN else NexusUi.LINE)
-            },
-        )
-        addView(
-            LinearLayout(this@PhotoSyncSettingsActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(NexusUi.rowTitle(this@PhotoSyncSettingsActivity, title))
-                addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 3))
-                addView(wrappingSubtitle(subtitle))
-            },
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = NexusUi.dp(this@PhotoSyncSettingsActivity, 12)
-            },
-        )
     }
 
-    private fun toggleRow(
-        title: String,
-        subtitle: String,
-        checked: Boolean,
-        enabled: Boolean,
-        onChanged: (Boolean) -> Unit,
-    ): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        background = NexusUi.bordered(this@PhotoSyncSettingsActivity, NexusUi.PANEL, NexusUi.LINE, 15)
-        setPadding(
-            NexusUi.dp(this@PhotoSyncSettingsActivity, 15),
-            NexusUi.dp(this@PhotoSyncSettingsActivity, 10),
-            NexusUi.dp(this@PhotoSyncSettingsActivity, 15),
-            NexusUi.dp(this@PhotoSyncSettingsActivity, 10),
-        )
-        alpha = if (enabled) 1f else 0.5f
-        addView(
-            LinearLayout(this@PhotoSyncSettingsActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(NexusUi.rowTitle(this@PhotoSyncSettingsActivity, title))
-                addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 3))
-                addView(wrappingSubtitle(subtitle))
-            },
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginEnd = NexusUi.dp(this@PhotoSyncSettingsActivity, 12)
-            },
-        )
-        addView(
-            Switch(this@PhotoSyncSettingsActivity).apply {
-                isChecked = checked
-                isEnabled = enabled
-                thumbTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(NexusUi.GREEN, NexusUi.INK3),
-                )
-                trackTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(NexusUi.GREEN_DIM, NexusUi.LINE),
-                )
-                // Only a real press sends: re-rendering from a hub push must not echo back.
-                setOnCheckedChangeListener { view, value -> if (view.isPressed) onChanged(value) }
-            },
-        )
+    private fun mirrorStatus(current: MediaSyncStatus?) {
+        headlineView?.text = PhotoSyncCopy.headline(current)
+        dotView?.let { NexusUi.setDotColor(it, dotColor(current)) }
+
+        val detail = PhotoSyncCopy.detail(current)
+        detailView?.apply {
+            text = detail.orEmpty()
+            visibility = if (detail == null) View.GONE else View.VISIBLE
+        }
+
+        val transferring = current?.state == MediaSyncState.TRANSFERRING
+        val total = current?.progress?.bytesTotal ?: 0L
+        val fraction = if (transferring && total > 0L) {
+            (current!!.progress.bytesDone.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+        gaugeRow?.visibility = if (transferring) View.VISIBLE else View.GONE
+        setGauge(fraction)
+
+        galleryValue?.text = current?.let {
+            "${it.syncedTotal} ${if (it.syncedTotal == 1) "file" else "files"}"
+        } ?: "—"
+
+        syncButton?.let { button ->
+            val ready = current != null && current.state == MediaSyncState.IDLE
+            button.text = if (transferring) "Syncing…" else "Sync now"
+            button.isEnabled = ready
+            button.alpha = if (ready) 1f else DISABLED_ALPHA
+        }
+
+        applySelectedMode(pendingMode ?: current?.settings?.mode)
+        deleteSwitch?.apply {
+            isEnabled = current != null
+            alpha = if (current != null) 1f else DISABLED_ALPHA
+            val target = current?.settings?.deleteAfterSync ?: false
+            if (isChecked != target) isChecked = target
+        }
     }
 
-    /** [NexusUi.rowSub] is single-line by design; the delete warning needs to wrap. */
-    private fun wrappingSubtitle(label: String): TextView =
+    private fun applySelectedMode(selected: MediaSyncMode?) {
+        modeRows.forEach { (mode, row) ->
+            val active = mode == selected
+            row.mark.background = NexusUi.rounded(
+                this,
+                if (active) NexusUi.GREEN else NexusUi.LINE,
+                5,
+            )
+            row.title.setTextColor(if (active) NexusUi.INK else NexusUi.INK2)
+            row.subtitle.setTextColor(if (active) NexusUi.INK2 else NexusUi.INK3)
+            row.root.background = NexusUi.bordered(
+                this,
+                if (active) NexusUi.CARD else NexusUi.PANEL,
+                if (active) NexusUi.GREEN_DIM else NexusUi.LINE,
+                15,
+            )
+            row.root.alpha = if (runtime == null) DISABLED_ALPHA else 1f
+        }
+    }
+
+    private fun setGauge(fraction: Float) {
+        val fill = gaugeFill?.layoutParams as? LinearLayout.LayoutParams ?: return
+        val rest = gaugeRest?.layoutParams as? LinearLayout.LayoutParams ?: return
+        fill.weight = fraction
+        rest.weight = 1f - fraction
+        gaugeFill?.layoutParams = fill
+        gaugeRest?.layoutParams = rest
+    }
+
+    private fun dotColor(current: MediaSyncStatus?): Int = when {
+        current == null -> NexusUi.INK4
+        current.state != MediaSyncState.IDLE -> NexusUi.GREEN
+        current.blocker == null -> NexusUi.GREEN_DIM
+        current.blocker in QUIET_BLOCKERS -> NexusUi.INK3
+        else -> NexusUi.AMBER
+    }
+
+    /** [NexusUi.rowSub] is single-line by design; these explanations need to wrap. */
+    private fun wrappingSub(label: String): TextView =
         NexusUi.rowSub(this, label).apply {
             isSingleLine = false
             maxLines = 3
             ellipsize = null
+            setLineSpacing(NexusUi.dp(this@PhotoSyncSettingsActivity, 2).toFloat(), 1f)
         }
 
     private fun timestamp(millis: Long): String =
@@ -456,6 +588,25 @@ class PhotoSyncSettingsActivity : Activity() {
         }.getOrDefault("").ifBlank { "1.0" }
 
     private companion object {
+        const val HEARTBEAT_MS = 4_000L
+        const val DISABLED_ALPHA = 0.45f
+        const val MAX_HISTORY_ROWS = 4
+
         val timeFormat = SimpleDateFormat("d MMM · HH:mm", Locale.getDefault())
+
+        /** Nothing is wrong, sync simply has no reason to run — the dot stays quiet, not amber. */
+        val QUIET_BLOCKERS = setOf(
+            MediaSyncBlocker.NOTHING_PENDING,
+            MediaSyncBlocker.NOT_CHARGING,
+            MediaSyncBlocker.AUTO_SYNC_OFF,
+            MediaSyncBlocker.LINK_DOWN,
+            MediaSyncBlocker.CAMERA_ACTIVE,
+        )
+
+        val MODES = listOf(
+            MediaSyncMode.ALWAYS to ("Always" to "Syncs as soon as you capture"),
+            MediaSyncMode.CHARGING to ("While charging" to "Syncs when the glasses are on the charger"),
+            MediaSyncMode.MANUAL to ("Manual only" to "Syncs only when you tap Sync now"),
+        )
     }
 }

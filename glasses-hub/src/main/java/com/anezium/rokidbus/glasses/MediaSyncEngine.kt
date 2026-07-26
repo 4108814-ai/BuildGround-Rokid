@@ -115,6 +115,29 @@ internal object MediaSyncEngine {
             .onFailure { logError("mediaSync capture observer start failed", it) }
         captureObserver = observer
         logSync("capture observer watching ${directory.absolutePath}")
+        startAlwaysSafetyScan()
+    }
+
+    /**
+     * The observer is the fast path, not a guarantee: inotify on this shared-storage mount misses
+     * events written by other apps often enough to matter — measured here, a small capture fired
+     * and a large one did not. ALWAYS mode promises "syncs as soon as you capture", so a slow scan
+     * backs the observer up; a missed event then costs a minute rather than lasting until the next
+     * reconnect. Other modes need nothing: they already have their own trigger.
+     */
+    private fun startAlwaysSafetyScan() {
+        runCatching {
+            executor.scheduleWithFixedDelay(
+                {
+                    if (mode == MediaSyncMode.ALWAYS && consented && linkUp && session == null) {
+                        attempt(MediaSyncTrigger.NEW_CAPTURE, quiet = true)
+                    }
+                },
+                ALWAYS_SCAN_INTERVAL_MS,
+                ALWAYS_SCAN_INTERVAL_MS,
+                TimeUnit.MILLISECONDS,
+            )
+        }.onFailure { logError("mediaSync safety scan unavailable", it) }
     }
 
     /** Debounced: one photo fires several file events and a video fires many. */
@@ -162,7 +185,15 @@ internal object MediaSyncEngine {
         GlassesHub.sendToPhone(BusPaths.MEDIA_SYNC_CONFIG_REQUEST, JSONObject().put("version", 1))
     }
 
-    private fun attempt(trigger: MediaSyncTrigger, reconciled: Boolean = false) {
+    /**
+     * [quiet] is for the periodic ALWAYS scan: it runs whether or not anything happened, so its
+     * "nothing to do" answer is the normal case and must not fill the log with it.
+     */
+    private fun attempt(
+        trigger: MediaSyncTrigger,
+        reconciled: Boolean = false,
+        quiet: Boolean = false,
+    ) {
         val context = appContext ?: return
         val catalog = catalog ?: return
         if (!consented) {
@@ -195,11 +226,13 @@ internal object MediaSyncEngine {
                     // flag would block every sync until the whole hub restarts.
                     logSync("camera session stale, camera process gone; releasing")
                     GlassesHub.resetCameraSession()
-                    attempt(trigger, reconciled = true)
+                    attempt(trigger, reconciled = true, quiet = quiet)
                     return
                 }
-                logSync("skip trigger=$trigger reason=${decision.reason}")
-                reportState("idle", reason = decision.reason.name.lowercase())
+                if (!quiet) {
+                    logSync("skip trigger=$trigger reason=${decision.reason}")
+                    reportState("idle", reason = decision.reason.name.lowercase())
+                }
                 if (decision.reason == MediaSyncSkipReason.NOTHING_PENDING && scan.settling) {
                     scheduleSettlingRecheck(trigger)
                 }
@@ -367,4 +400,7 @@ internal object MediaSyncEngine {
 
     @Suppress("DEPRECATION")
     private const val CAPTURE_EVENTS = FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO
+
+    /** Backs up the capture observer in ALWAYS mode; a missed event costs a minute, not a session. */
+    private const val ALWAYS_SCAN_INTERVAL_MS = 60_000L
 }

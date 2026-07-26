@@ -95,18 +95,33 @@ internal class MediaSyncCoordinator(
 
     fun onLinkUp() = pushConfig()
 
+    /**
+     * Applies a settings request, or answers a bare one with the current status.
+     *
+     * The settings screen refreshes through this path, so an unchanged request must stay free:
+     * it neither rewrites preferences nor pushes config across the link photo sync is otherwise
+     * careful not to crowd. Only a real change travels to the glasses.
+     */
     fun applySettings(payload: JSONObject): Boolean {
-        val next = synchronized(lock) {
-            MediaSyncStatusContract.applySettingsRequest(settings, payload)?.also {
-                settings = it
-                store.saveSettings(it)
+        val changed = synchronized(lock) {
+            val next = MediaSyncStatusContract.applySettingsRequest(settings, payload)
+                ?: return false
+            if (next == settings) {
+                false
+            } else {
+                settings = next
+                store.saveSettings(next)
+                true
             }
-        } ?: return false
-        logger(
-            "mediaSync settings mode=${next.mode.wireValue} " +
-                "deleteAfterSync=${next.deleteAfterSync}",
-        )
-        pushConfig()
+        }
+        if (changed) {
+            val current = synchronized(lock) { settings }
+            logger(
+                "mediaSync settings mode=${current.mode.wireValue} " +
+                    "deleteAfterSync=${current.deleteAfterSync}",
+            )
+            pushConfig()
+        }
         emitStatus()
         return true
     }

@@ -531,9 +531,7 @@ class BusHubService : Service() {
                 sendRemote(BusEnvelope(path = path, payload = payload)) == null
             },
             // Nothing photo sync sends from the phone is bulky; only the glasses stream bytes.
-            publishStatus = { payload ->
-                deliverLocal(BusEnvelope(path = BusPaths.MEDIA_SYNC_STATUS, payload = payload))
-            },
+            publishStatus = ::publishMediaSyncStatus,
             logger = ::log,
         )
         refreshMediaSyncConsent()
@@ -1175,6 +1173,26 @@ class BusHubService : Service() {
         grantState = principal?.let(pluginGrantStore::stateFor),
         direction = direction,
     )
+
+    /**
+     * Photo-sync status, delivered one registration at a time.
+     *
+     * The plugin SDK drops any message whose payload lacks its own pluginId, so a single broadcast
+     * copy was swallowed before it ever reached the settings screen — the screen sat on
+     * "Connecting to Rokid Nexus" forever while the hub synced perfectly. Stamping each recipient's
+     * id in is what makes status visible; [registrationMatches] still decides who may receive it.
+     */
+    private fun publishMediaSyncStatus(payload: JSONObject) {
+        registrations.forEach { registration ->
+            val pluginId = registration.principal?.descriptor?.id ?: return@forEach
+            val stamped = runCatching { JSONObject(payload.toString()).put("pluginId", pluginId) }
+                .getOrNull() ?: return@forEach
+            deliverLocal(
+                BusEnvelope(path = BusPaths.MEDIA_SYNC_STATUS, payload = stamped),
+                targetBinder = registration.callbackBinder,
+            )
+        }
+    }
 
     /** Hub-to-hub photo-sync traffic: engine state, the config request, and the data plane. */
     private fun handleMediaSyncRemote(envelope: BusEnvelope): Boolean = when {
