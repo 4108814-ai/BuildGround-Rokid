@@ -12,6 +12,12 @@ data class PluginDescriptor(
     val launchable: Boolean,
     val iconKey: String? = null,
     val iconDrawableResId: Int? = null,
+    /**
+     * String-array resource holding this plugin's own HUD glyphs, resolved
+     * cross-package by the hub. The array is parsed by `GlyphContract`; a
+     * plugin that declares none simply has no custom glyphs.
+     */
+    val glyphsResId: Int? = null,
 ) {
     companion object {
         private val idPattern = Regex("[a-z][a-z0-9._-]{2,63}")
@@ -31,6 +37,7 @@ object PluginDescriptorParser {
         BusConstants.META_PLUGIN_DISPLAY_NAME,
         BusConstants.META_PLUGIN_ICON,
         BusConstants.META_PLUGIN_ICON_DRAWABLE,
+        BusConstants.META_PLUGIN_GLYPHS,
         BusConstants.META_PLUGIN_API_VERSION,
         BusConstants.META_PLUGIN_CAPABILITIES,
         BusConstants.META_PLUGIN_RECEIVE_PREFIXES,
@@ -103,6 +110,10 @@ object PluginDescriptorParser {
             ?.trim()
             ?.toIntOrNull()
             ?.takeIf { it != 0 }
+        val glyphsResId = values[BusConstants.META_PLUGIN_GLYPHS]
+            ?.trim()
+            ?.toIntOrNull()
+            ?.takeIf { it != 0 }
         val launchable = when (values[BusConstants.META_PLUGIN_LAUNCHABLE]?.trim()?.lowercase()) {
             null, "", "true" -> true
             "false" -> false
@@ -119,6 +130,7 @@ object PluginDescriptorParser {
                 launchable = launchable,
                 iconKey = iconKey,
                 iconDrawableResId = iconDrawableResId,
+                glyphsResId = glyphsResId,
             ),
         )
     }

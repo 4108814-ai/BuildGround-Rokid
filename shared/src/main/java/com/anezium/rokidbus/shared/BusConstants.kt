@@ -14,6 +14,13 @@ object BusConstants {
     const val META_PLUGIN_DISPLAY_NAME = "com.anezium.rokidbus.plugin.DISPLAY_NAME"
     const val META_PLUGIN_ICON = "com.anezium.rokidbus.plugin.ICON"
     const val META_PLUGIN_ICON_DRAWABLE = "com.anezium.rokidbus.plugin.ICON_DRAWABLE"
+
+    /**
+     * A string-array resource of `name|pathData` entries: the plugin's own HUD
+     * glyphs, which the hub reads cross-package and forwards to the glasses.
+     * See [GlyphContract].
+     */
+    const val META_PLUGIN_GLYPHS = "com.anezium.rokidbus.plugin.GLYPHS"
     const val META_PLUGIN_API_VERSION = "com.anezium.rokidbus.plugin.API_VERSION"
     const val META_PLUGIN_CAPABILITIES = "com.anezium.rokidbus.plugin.CAPABILITIES"
     const val META_PLUGIN_RECEIVE_PREFIXES = "com.anezium.rokidbus.plugin.RECEIVE_PREFIXES"

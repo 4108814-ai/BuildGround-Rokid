@@ -1,6 +1,7 @@
 package com.anezium.rokidbus.client.ui
 
 import com.anezium.rokidbus.client.R
+import com.anezium.rokidbus.shared.GlyphContract
 
 /**
  * The HUD's shared vocabulary of **state** glyphs.
@@ -23,10 +24,7 @@ import com.anezium.rokidbus.client.R
 object NexusGlyphs {
 
     /** Drawn when a glyph is absent, malformed, or newer than this build. */
-    const val FALLBACK = "dot"
-
-    /** Longest accepted token. Well past anything the set will plausibly need. */
-    const val MAX_LENGTH = 24
+    const val FALLBACK = GlyphContract.FALLBACK_GLYPH
 
     /**
      * Every glyph this build can draw. A plugin may send a value outside this
@@ -42,21 +40,12 @@ object NexusGlyphs {
     fun isBuiltIn(glyph: String?): Boolean = drawables.containsKey(glyph?.trim())
 
     /**
-     * Shape check only — not a membership check.
-     *
-     * Lowercase, `a-z` and single inner hyphens, no leading or trailing hyphen,
-     * at most [MAX_LENGTH] characters. This is what a hub should validate:
-     * reject gibberish, pass everything else through to the renderer's
-     * fallback. Validating membership instead would turn every future glyph
-     * into a hard version gate for plugins.
+     * Shape check only — not a membership check. See
+     * [GlyphContract.isWellFormedName] for why, and note that the rule lives
+     * there rather than here so the hubs, the SDK and the renderer cannot drift
+     * into disagreeing about what a glyph name is.
      */
-    fun wellFormed(glyph: String?): Boolean {
-        val value = glyph?.trim().orEmpty()
-        if (value.isEmpty() || value.length > MAX_LENGTH) return false
-        if (value.startsWith('-') || value.endsWith('-')) return false
-        if (value.contains("--")) return false
-        return value.all { it in 'a'..'z' || it == '-' }
-    }
+    fun wellFormed(glyph: String?): Boolean = GlyphContract.isWellFormedName(glyph)
 
     // Wire values stay kebab-case; Android resource names cannot contain a
     // hyphen, so the two spellings differ on purpose and only here.
