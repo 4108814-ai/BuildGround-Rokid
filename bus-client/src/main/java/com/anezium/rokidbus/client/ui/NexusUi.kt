@@ -1,6 +1,7 @@
 package com.anezium.rokidbus.client.ui
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -381,6 +382,11 @@ object NexusUi {
     fun iconTileImage(context: Context, resId: Int, sizeDp: Int = 34): ImageView =
         ImageView(context).apply {
             setImageResource(resId)
+            // Tint, like every other path that renders a plugin mark. Without
+            // this a plugin's own settings header was the one place a mark came
+            // out untinted, which pushed authors to bake the accent into the
+            // asset and drift off the monochrome design system to do it.
+            imageTintList = ColorStateList.valueOf(GREEN)
             val pad = dp(context, if (sizeDp > 40) 12 else 8)
             setPadding(pad, pad, pad, pad)
             background = rounded(context, alpha(GREEN, 0x14), if (sizeDp > 34) 11 else 9)

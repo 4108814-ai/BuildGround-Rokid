@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Up, over the top, back down. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M8,20 L8,11 A4,4 0 0 1 16,11 L16,17 M16,17 L13.2,13.6 M16,17 L18.8,13.6"
+        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mirror of turn-left. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M9,20 L9,12 A3,3 0 0 1 12,9 L17,9 M17,9 L13.4,5.4 M17,9 L13.4,12.6"
+        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

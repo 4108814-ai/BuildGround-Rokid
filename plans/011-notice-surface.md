@@ -1,6 +1,6 @@
 # Plan 011 — Notice surface (transient interactive banner)
 
-Status: draft spec, awaiting go. Depends on 010 (pin surface, shipped).
+Status: shipped in 1.0.46. Depends on 010 (pin surface, shipped).
 
 ## Goal
 

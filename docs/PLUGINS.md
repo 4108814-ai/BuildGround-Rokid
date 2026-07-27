@@ -111,11 +111,14 @@ from the plugin package:
     android:resource="@drawable/my_glyph" />
 ```
 
-Use a monochrome silhouette, ideally a `VectorDrawable` with alpha, one color,
-and a transparent background. Nexus loads the resource cross-package and tints
-it green; a full-color logo will render as a green blob. If a recognized
-built-in key and a custom drawable are both declared, the built-in wins. If
-neither can be resolved, Nexus uses the grid glyph.
+Follow the design system in [GLYPHS.md](GLYPHS.md): a 24×24 `VectorDrawable`,
+stroked at 1.7, in `#FF4DFF8C` and no other colour. Every render path tints
+what it draws, so the source colour is moot — authoring it in the phosphor
+anyway keeps one rule instead of two, and `NexusGlyphArtTest` checks it. A
+full-colour logo will render as a green blob.
+
+If a recognized built-in key and a custom drawable are both declared, the
+built-in wins. If neither can be resolved, Nexus uses the grid glyph.
 
 ## 3. Service and runtime
 
