@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Past ninety: the arrow comes back down. -->
+<!-- Past ninety: the shaft rises high, then doubles back down. The bend must sit
+     well above the head or the two fuse into a wedge at HUD size. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:pathData="M16,20 L16,11 L8.5,14.5 M8.5,14.5 L13.1,13.9 M8.5,14.5 L11.4,10.8"
+    <path android:pathData="M14.5,21 L14.5,10 L6.5,15.5 M6.5,15.5 L9.9,15.2 M6.5,15.5 L8,12.4"
         android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
 </vector>

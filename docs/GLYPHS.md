@@ -40,6 +40,22 @@ These are enforced. A vector that breaks one fails the build.
 </vector>
 ```
 
+## Never render one below 32dp
+
+Measured, not guessed: rendered at 24, 36 and 48 px, the maneuver family stops
+being distinguishable at 24. `turn-sharp-left` collapses into the same few lit
+pixels as `turn-left`, and `roundabout` — a circle, an entry and an exit inside
+24 units — turns to mush. At 36 both read cleanly.
+
+This is a floor on the *renderer*, not a licence to simplify the glyphs. Drawing
+`roundabout` with fewer strokes to survive 24dp would mean drawing something
+that is no longer a roundabout. A chip that wants a maneuver glyph gives it
+32dp or it does not show one.
+
+If you add a glyph, render it at 24, 36 and 48 against the ones it will sit
+next to before believing it works. A glyph that only reads at 96dp is a glyph
+that does not read.
+
 ## What is left to your judgement
 
 The invariants are a floor, not a template. Craft inside them is expected:
