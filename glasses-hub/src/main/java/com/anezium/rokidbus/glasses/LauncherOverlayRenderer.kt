@@ -79,7 +79,7 @@ object LauncherOverlayRenderer {
                 PixelFormat.TRANSLUCENT,
             )
             manager.addView(next, params)
-            PinOverlayRenderer.ensureOnTop()
+            HudOverlayStack.reassert()
         }
         if (unsubscribeLauncher == null) {
             unsubscribeLauncher = GlassesHub.observeLauncher { entries ->
