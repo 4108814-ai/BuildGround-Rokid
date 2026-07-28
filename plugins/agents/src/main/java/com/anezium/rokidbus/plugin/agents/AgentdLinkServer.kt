@@ -62,6 +62,7 @@ class AgentdLinkServer(
             client.also { client = null }
         }?.close()
         store.setConnection(AgentProvider.CLAUDE, ConnectionState.DISCONNECTED)
+        store.clearApprovals(AgentProvider.CLAUDE)
         if (clearSessions) store.replaceProvider(AgentProvider.CLAUDE, emptyList())
     }
 
@@ -71,6 +72,10 @@ class AgentdLinkServer(
 
     fun closeDetail() {
         send(AgentdProtocolCodec.DETAIL_CLOSE)
+    }
+
+    fun decideApproval(requestId: String, decision: ApprovalDecision) {
+        send(AgentdProtocolCodec.approvalDecision(requestId, decision))
     }
 
     /** Callers are UI/service threads; Android forbids socket writes there. */
@@ -128,7 +133,8 @@ class AgentdLinkServer(
                         )
                         true
                     }
-                    AgentdInboundDecision.AuthRejected -> {
+                    is AgentdInboundDecision.AuthRejected -> {
+                        connection.send(AgentdProtocolCodec.helloReject(decision.reason))
                         // Anyone on the network can knock on this door, so a
                         // stranger being turned away must not repaint the state
                         // of a link that is working.
@@ -168,6 +174,7 @@ class AgentdLinkServer(
                     "waiting for a computer",
                 )
                 store.replaceProvider(AgentProvider.CLAUDE, emptyList())
+                store.clearApprovals(AgentProvider.CLAUDE)
             }
         }
     }
@@ -195,6 +202,8 @@ class AgentdLinkServer(
                 store.setConversation(AgentProvider.CLAUDE, action.sessionId, action.messages)
             is AgentdAction.DetailAppend ->
                 store.appendConversation(AgentProvider.CLAUDE, action.sessionId, action.message)
+            is AgentdAction.ApprovalRequested -> store.upsertApproval(action.approval)
+            is AgentdAction.ApprovalResolved -> store.resolveApproval(action.requestId)
             is AgentdAction.Send -> connection.send(action.text)
             is AgentdAction.Hello,
             is AgentdAction.HelloAcknowledged,
@@ -268,7 +277,7 @@ internal sealed interface AgentdInboundDecision {
     ) : AgentdInboundDecision
 
     data class Frame(val action: AgentdAction) : AgentdInboundDecision
-    data object AuthRejected : AgentdInboundDecision
+    data class AuthRejected(val reason: String) : AgentdInboundDecision
     data object ProtocolRejected : AgentdInboundDecision
 }
 
@@ -290,7 +299,11 @@ internal class AgentdInboundGate(
                         newlyTrusted = result == MachineTrustResult.NEWLY_TRUSTED,
                     )
                 }
-                MachineTrustResult.REJECTED -> AgentdInboundDecision.AuthRejected
+                MachineTrustResult.REJECTED_BAD_TOKEN,
+                MachineTrustResult.REJECTED_NOT_INVITED,
+                -> AgentdInboundDecision.AuthRejected(
+                    result.rejectionReason ?: AgentdProtocolCodec.REJECT_UNKNOWN_MACHINE,
+                )
             }
         }
         return if (action is AgentdAction.Hello) {

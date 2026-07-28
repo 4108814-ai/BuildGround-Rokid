@@ -65,10 +65,19 @@ object AgentdPairingParser {
     }
 }
 
-internal enum class MachineTrustResult {
+internal enum class MachineTrustResult(val rejectionReason: String? = null) {
     TRUSTED,
     NEWLY_TRUSTED,
-    REJECTED,
+
+    /** We know this machine id, under a different token. */
+    REJECTED_BAD_TOKEN(AgentdProtocolCodec.REJECT_BAD_TOKEN),
+
+    /** A stranger, and the wearer is not holding the door open. */
+    REJECTED_NOT_INVITED(AgentdProtocolCodec.REJECT_UNKNOWN_MACHINE),
+    ;
+
+    val isRejection: Boolean
+        get() = rejectionReason != null
 }
 
 internal fun decideMachineTrust(
@@ -78,9 +87,9 @@ internal fun decideMachineTrust(
     presentedToken: String,
 ): MachineTrustResult = when {
     knownToken != null && knownToken == presentedToken -> MachineTrustResult.TRUSTED
-    knownToken != null -> MachineTrustResult.REJECTED
+    knownToken != null -> MachineTrustResult.REJECTED_BAD_TOKEN
     !hasAnyTrustedMachine || linkWindowOpen -> MachineTrustResult.NEWLY_TRUSTED
-    else -> MachineTrustResult.REJECTED
+    else -> MachineTrustResult.REJECTED_NOT_INVITED
 }
 
 internal fun linkWindowDeadline(now: Long): Long =

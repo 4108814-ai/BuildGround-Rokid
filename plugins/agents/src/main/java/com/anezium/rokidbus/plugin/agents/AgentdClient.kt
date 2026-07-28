@@ -38,6 +38,10 @@ class AgentdClient(
         sockets.current()?.send(AgentdProtocolCodec.DETAIL_CLOSE)
     }
 
+    fun decideApproval(requestId: String, decision: ApprovalDecision) {
+        sockets.current()?.send(AgentdProtocolCodec.approvalDecision(requestId, decision))
+    }
+
     @Synchronized
     fun start(config: AgentdConfig) {
         loopJob?.cancel()
@@ -56,6 +60,7 @@ class AgentdClient(
         loopJob = null
         sockets.advance().previous?.cancel()
         store.setConnection(AgentProvider.CLAUDE, ConnectionState.DISCONNECTED)
+        store.clearApprovals(AgentProvider.CLAUDE)
         if (clearSessions) store.replaceProvider(AgentProvider.CLAUDE, emptyList())
     }
 
@@ -180,6 +185,12 @@ class AgentdClient(
                                 action.message,
                             )
                         }
+                    }
+                    is AgentdAction.ApprovalRequested -> {
+                        if (connected.get()) store.upsertApproval(action.approval)
+                    }
+                    is AgentdAction.ApprovalResolved -> {
+                        if (connected.get()) store.resolveApproval(action.requestId)
                     }
                     is AgentdAction.Send -> {
                         if (action.text == AgentdProtocolCodec.REFRESH) {

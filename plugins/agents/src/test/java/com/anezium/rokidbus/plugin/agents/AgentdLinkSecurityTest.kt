@@ -52,10 +52,13 @@ class AgentdLinkSecurityTest {
         var calls = 0
         val gate = AgentdInboundGate {
             calls += 1
-            MachineTrustResult.REJECTED
+            MachineTrustResult.REJECTED_NOT_INVITED
         }
 
-        assertEquals(AgentdInboundDecision.AuthRejected, gate.receive(hello))
+        assertEquals(
+            AgentdInboundDecision.AuthRejected(AgentdProtocolCodec.REJECT_UNKNOWN_MACHINE),
+            gate.receive(hello),
+        )
         assertEquals(
             AgentdInboundDecision.ProtocolRejected,
             gate.receive(AgentdAction.Removed(1L, "s1")),
@@ -70,7 +73,7 @@ class AgentdLinkSecurityTest {
             decideMachineTrust("secret", true, false, "secret"),
         )
         assertEquals(
-            MachineTrustResult.REJECTED,
+            MachineTrustResult.REJECTED_BAD_TOKEN,
             decideMachineTrust("secret", true, true, "attacker"),
         )
         assertEquals(
@@ -82,7 +85,7 @@ class AgentdLinkSecurityTest {
             decideMachineTrust(null, true, true, "armed"),
         )
         assertEquals(
-            MachineTrustResult.REJECTED,
+            MachineTrustResult.REJECTED_NOT_INVITED,
             decideMachineTrust(null, true, false, "not-armed"),
         )
     }

@@ -16,6 +16,8 @@ sealed interface AgentdAction {
     data class Removed(val seq: Long, val sessionId: String) : AgentdAction
     data class Detail(val sessionId: String, val messages: List<AgentMessage>) : AgentdAction
     data class DetailAppend(val sessionId: String, val message: AgentMessage) : AgentdAction
+    data class ApprovalRequested(val approval: AgentApproval) : AgentdAction
+    data class ApprovalResolved(val requestId: String) : AgentdAction
     data class Send(val text: String) : AgentdAction
     data object Ignore : AgentdAction
 }
@@ -136,6 +138,31 @@ class AgentdProtocolCodec {
                 detailMessageCounts[sessionId] = messageCount + 1
                 AgentdAction.DetailAppend(sessionId, message)
             }
+            // Approvals carry no seq either: a held tool call is answered by its
+            // own id, and must survive a gap in the session stream.
+            "approval_request" -> {
+                if (json.intOrNull("v") != 1) return AgentdAction.Ignore
+                val requestId = json.identifierOrNull("requestId") ?: return AgentdAction.Ignore
+                val sessionId = json.identifierOrNull("sessionId") ?: return AgentdAction.Ignore
+                val summary = json.nullableString("summary", MAX_HUD_LABEL_CHARS)
+                    ?: return AgentdAction.Ignore
+                AgentdAction.ApprovalRequested(
+                    AgentApproval(
+                        requestId = requestId,
+                        sessionId = sessionId,
+                        provider = AgentProvider.CLAUDE,
+                        tool = json.nullableString("tool", MAX_WIRE_TYPE_CHARS).orEmpty(),
+                        summary = summary,
+                        detail = json.nullableString("detail", MAX_HUD_TEXT_CHARS),
+                        createdAt = json.longOrNull("createdAt"),
+                    ),
+                )
+            }
+            "approval_resolved" -> {
+                if (json.intOrNull("v") != 1) return AgentdAction.Ignore
+                val requestId = json.identifierOrNull("requestId") ?: return AgentdAction.Ignore
+                AgentdAction.ApprovalResolved(requestId)
+            }
             "ping" -> AgentdAction.Send(
                 JSONObject()
                     .put("type", "pong")
@@ -169,6 +196,28 @@ class AgentdProtocolCodec {
             .put("type", "detail_open")
             .put("sessionId", sessionId)
             .toString()
+
+        /** The wearer answered a held tool call. */
+        fun approvalDecision(requestId: String, decision: ApprovalDecision): String = JSONObject()
+            .put("type", "approval_decision")
+            .put("v", 1)
+            .put("requestId", requestId)
+            .put("decision", decision.wireValue)
+            .toString()
+
+        /**
+         * Said out loud before hanging up on a computer we will not talk to.
+         * Closing in silence leaves the operator watching a reconnect loop with
+         * no way to know the phone is refusing them on purpose.
+         */
+        fun helloReject(reason: String): String = JSONObject()
+            .put("type", "hello_reject")
+            .put("v", 1)
+            .put("reason", reason)
+            .toString()
+
+        const val REJECT_UNKNOWN_MACHINE = "unknown_machine"
+        const val REJECT_BAD_TOKEN = "bad_token"
     }
 }
 

@@ -59,6 +59,36 @@ data class AgentSession(
             ?: id
 }
 
+enum class ApprovalDecision(val wireValue: String) {
+    ALLOW("allow"),
+    DENY("deny"),
+}
+
+/**
+ * A tool call an agent is holding still for, waiting on the wearer.
+ *
+ * This is the only thing in the product that is *decidable* rather than
+ * observable, so it is kept apart from [AgentPendingRequest]: that one is what
+ * monitoring inferred about a session, this one is a live question with an
+ * identity to answer.
+ */
+data class AgentApproval(
+    val requestId: String,
+    val sessionId: String,
+    val provider: AgentProvider,
+    val tool: String,
+    val summary: String,
+    val detail: String? = null,
+    val createdAt: Long? = null,
+) {
+    val sessionKey: String
+        get() = "${provider.wireValue}:$sessionId"
+
+    companion object {
+        const val MAX_PENDING = 32
+    }
+}
+
 enum class MessageRole(val wireValue: String, val label: String) {
     USER("user", "YOU"),
     ASSISTANT("assistant", "CC"),

@@ -48,6 +48,11 @@ class AgentsPluginService : NexusPluginService() {
     private var scrollBack = 0
     private var ageTicker: Job? = null
 
+    /** The held tool call the wearer is answering, if they are answering one. */
+    private var decidingRequestId: String? = null
+    private var decisionChoice = ApprovalDecision.ALLOW
+    private var decisionOpenedAt = 0L
+
     override fun onCreate() {
         super.onCreate()
         serviceScope.launch {
@@ -107,6 +112,10 @@ class AgentsPluginService : NexusPluginService() {
 
     override fun onNexusInput(event: NexusInputEvent) {
         if (event.action != KeyEvent.ACTION_DOWN) return
+        if (decidingRequestId != null) {
+            onDecisionInput(event)
+            return
+        }
         val conversation = AgentsRuntime.store.conversation.value
         when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_UP ->
@@ -115,7 +124,7 @@ class AgentsPluginService : NexusPluginService() {
                 if (conversation != null) scrollConversation(-1) else moveSelection(+1)
             KeyEvent.KEYCODE_ENTER,
             KeyEvent.KEYCODE_DPAD_CENTER,
-            -> if (conversation == null) enterConversation()
+            -> if (conversation == null) enterSelected()
             KeyEvent.KEYCODE_BACK ->
                 if (conversation != null) {
                     leaveConversation()
@@ -123,6 +132,23 @@ class AgentsPluginService : NexusPluginService() {
                 } else {
                     surface?.hide()
                 }
+        }
+    }
+
+    private fun onDecisionInput(event: NexusInputEvent) {
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+                decisionChoice = when (decisionChoice) {
+                    ApprovalDecision.ALLOW -> ApprovalDecision.DENY
+                    ApprovalDecision.DENY -> ApprovalDecision.ALLOW
+                }
+                render(show = false)
+            }
+            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER -> confirmDecision()
+            KeyEvent.KEYCODE_BACK -> {
+                decidingRequestId = null
+                render(show = false)
+            }
         }
     }
 
@@ -223,12 +249,43 @@ class AgentsPluginService : NexusPluginService() {
         render(show = false)
     }
 
-    private fun enterConversation() {
+    /** ENTER means "deal with this": answer what is waiting, or read the rest. */
+    private fun enterSelected() {
         val sessions = AgentsRuntime.store.sessions.value
         val session = sessions.getOrNull(selectedIndexIn(sessions)) ?: return
+        val approval = AgentsRuntime.store.approvalFor(session.key)
+        if (approval != null) {
+            openDecision(approval)
+        } else {
+            openConversation(session)
+        }
+    }
+
+    private fun openConversation(session: AgentSession) {
         scrollBack = 0
         AgentsRuntime.store.openConversation(session)
         AgentsMonitorService.openDetail(applicationContext, session)
+        render(show = false)
+    }
+
+    private fun openDecision(approval: AgentApproval) {
+        decidingRequestId = approval.requestId
+        decisionChoice = ApprovalDecision.ALLOW
+        decisionOpenedAt = System.currentTimeMillis()
+        render(show = false)
+    }
+
+    /**
+     * The touchpad's double tap is two ENTER downs a few dozen milliseconds
+     * apart, and the second one would land on a freshly opened decision. Nothing
+     * an agent asked for gets approved by a gesture aimed at opening it.
+     */
+    private fun confirmDecision() {
+        val requestId = decidingRequestId ?: return
+        if (System.currentTimeMillis() - decisionOpenedAt < DECISION_GUARD_MS) return
+        if (AgentsRuntime.store.approvals.value.none { it.requestId == requestId }) return
+        AgentsMonitorService.decideApproval(applicationContext, requestId, decisionChoice)
+        decidingRequestId = null
         render(show = false)
     }
 
@@ -250,8 +307,73 @@ class AgentsPluginService : NexusPluginService() {
         if (show) activeSurface.showCard(card) else activeSurface.updateCard(card)
     }
 
-    private fun buildCard(): NexusCard =
-        AgentsRuntime.store.conversation.value?.let(::conversationCard) ?: sessionsCard()
+    private fun buildCard(): NexusCard {
+        decidingRequestId?.let { return decisionCard(it) }
+        return AgentsRuntime.store.conversation.value?.let(::conversationCard) ?: sessionsCard()
+    }
+
+    // ----------------------------------------------------------------- decide
+
+    /**
+     * The one screen in this product that does something rather than show
+     * something. It says what will run, in the agent's own words, and offers
+     * exactly two answers — no third path, no "always allow", nothing that turns
+     * a glance into a standing permission.
+     */
+    private fun decisionCard(requestId: String): NexusCard {
+        val approval = AgentsRuntime.store.approvals.value
+            .firstOrNull { it.requestId == requestId }
+            ?: return expiredDecisionCard()
+        val session = AgentsRuntime.store.sessions.value
+            .firstOrNull { it.key == approval.sessionKey }
+        val rows = buildList {
+            add(
+                NexusCardLine(
+                    text = approval.summary.singleLine(238),
+                    badge = approval.tool.take(6).ifBlank { "ASK" },
+                    tone = NexusRowTone.BODY,
+                ),
+            )
+            approval.detail
+                ?.takeIf { it.isNotBlank() && it != approval.summary }
+                ?.let { add(NexusCardLine(text = it.singleLine(238), tone = NexusRowTone.BODY)) }
+            add(choiceRow("Allow", "let it run", ApprovalDecision.ALLOW))
+            add(choiceRow("Deny", "tell the agent no", ApprovalDecision.DENY))
+        }
+        return card(
+            title = session?.displayTitle?.singleLine(110) ?: "Permission",
+            subtitle = listOfNotNull(
+                approval.tool.takeIf(String::isNotBlank),
+                session?.project?.takeIf(String::isNotBlank),
+                "waiting for you",
+            ).joinToString(" · ").take(120),
+            rows = rows,
+            footer = "UP/DOWN choose · ENTER confirm · BACK later",
+        )
+    }
+
+    private fun choiceRow(label: String, sub: String, choice: ApprovalDecision): NexusCardLine {
+        val picked = decisionChoice == choice
+        return NexusCardLine(
+            text = label,
+            sub = sub,
+            selected = picked,
+            tone = if (picked) NexusRowTone.ALERT else NexusRowTone.DIM,
+        )
+    }
+
+    private fun expiredDecisionCard(): NexusCard = card(
+        title = "Too late",
+        subtitle = "the agent stopped waiting",
+        rows = listOf(
+            NexusCardLine(
+                text = "This request is gone",
+                sub = "it timed out, or it was answered on the computer",
+                tone = NexusRowTone.DIM,
+            ),
+        ),
+        footer = "BACK to the list",
+    )
 
     // ---------------------------------------------------------------- sessions
 
@@ -336,8 +458,13 @@ class AgentsPluginService : NexusPluginService() {
         AgentStatus.IDLE, AgentStatus.DONE -> session.project?.takeIf(String::isNotBlank)
     }
 
-    /** Rewrites the stock Claude notification wording into a board-sized phrase. */
+    /**
+     * Rewrites the stock Claude notification wording into a board-sized phrase.
+     * A live approval outranks it: that one is the agent's actual question,
+     * where the other is what monitoring inferred about the session.
+     */
     private fun pendingSummary(session: AgentSession): String {
+        AgentsRuntime.store.approvalFor(session.key)?.let { return it.summary.singleLine(160) }
         val raw = session.pendingRequest?.summary?.singleLine(160) ?: return "needs you"
         PERMISSION_PATTERN.find(raw)?.let { return "wants to run ${it.groupValues[1]}" }
         if (raw.contains("waiting for your input", ignoreCase = true)) return "waiting for you"
@@ -502,6 +629,9 @@ class AgentsPluginService : NexusPluginService() {
         private const val NOTICE_BODY_CHARS = 240
         private const val ATTENTION_TTL_MS = 12_000L
         private const val SHORT_TTL_MS = 8_000L
+
+        /** Long enough to swallow a double tap, short enough to never be felt. */
+        private const val DECISION_GUARD_MS = 600L
         private val PERMISSION_PATTERN =
             Regex("permission to use ([\\w.-]+)", RegexOption.IGNORE_CASE)
     }

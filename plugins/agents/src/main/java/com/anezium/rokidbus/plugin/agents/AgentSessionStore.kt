@@ -18,7 +18,9 @@ class AgentSessionStore {
     )
 
     private val _conversation = MutableStateFlow<AgentConversation?>(null)
+    private val _approvals = MutableStateFlow<List<AgentApproval>>(emptyList())
 
+    val approvals: StateFlow<List<AgentApproval>> = _approvals.asStateFlow()
     val sessions: StateFlow<List<AgentSession>> = _sessions.asStateFlow()
     val connections: StateFlow<Map<AgentProvider, ProviderConnectionState>> =
         _connections.asStateFlow()
@@ -117,6 +119,34 @@ class AgentSessionStore {
         publish(nowMs)
         return dropped
     }
+
+    // ------------------------------------------------------------- approvals
+
+    @Synchronized
+    fun upsertApproval(approval: AgentApproval) {
+        val without = _approvals.value.filterNot { it.requestId == approval.requestId }
+        // Oldest out first: a request nobody answered is the one least likely to
+        // still matter, and the wearer should never be handed a stale question.
+        _approvals.value = (without + approval).takeLast(AgentApproval.MAX_PENDING)
+    }
+
+    @Synchronized
+    fun resolveApproval(requestId: String) {
+        _approvals.value = _approvals.value.filterNot { it.requestId == requestId }
+    }
+
+    /**
+     * A provider that went away takes its questions with it: the daemon replays
+     * everything still pending once it is back, so keeping them would only offer
+     * the wearer decisions that can no longer be delivered.
+     */
+    @Synchronized
+    fun clearApprovals(provider: AgentProvider) {
+        _approvals.value = _approvals.value.filterNot { it.provider == provider }
+    }
+
+    fun approvalFor(sessionKey: String): AgentApproval? =
+        _approvals.value.firstOrNull { it.sessionKey == sessionKey }
 
     @Synchronized
     fun setConnection(

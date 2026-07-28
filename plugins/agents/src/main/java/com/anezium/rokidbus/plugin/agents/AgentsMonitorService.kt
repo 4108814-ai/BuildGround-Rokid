@@ -83,6 +83,18 @@ class AgentsMonitorService : Service() {
                 agentdClient.closeDetail()
                 linkServer.closeDetail()
             }
+            ACTION_DECIDE_APPROVAL -> {
+                val requestId = intent.getStringExtra(EXTRA_REQUEST_ID)
+                val decision = ApprovalDecision.values()
+                    .firstOrNull { it.wireValue == intent.getStringExtra(EXTRA_DECISION) }
+                if (requestId != null && decision != null) {
+                    agentdClient.decideApproval(requestId, decision)
+                    linkServer.decideApproval(requestId, decision)
+                    // The wearer answered: the question is gone from the board
+                    // whether or not the daemon's acknowledgement makes it back.
+                    AgentsRuntime.store.resolveApproval(requestId)
+                }
+            }
             else -> reconcile()
         }
         return START_STICKY
@@ -228,7 +240,11 @@ class AgentsMonitorService : Service() {
             "com.anezium.rokidbus.plugin.agents.action.OPEN_DETAIL"
         const val ACTION_CLOSE_DETAIL =
             "com.anezium.rokidbus.plugin.agents.action.CLOSE_DETAIL"
+        const val ACTION_DECIDE_APPROVAL =
+            "com.anezium.rokidbus.plugin.agents.action.DECIDE_APPROVAL"
         const val EXTRA_SESSION_ID = "sessionId"
+        const val EXTRA_REQUEST_ID = "requestId"
+        const val EXTRA_DECISION = "decision"
         private const val MONITOR_NOTIFICATION_ID = 3101
         private const val TEST_WINDOW_MS = 15_000L
         private const val PRUNE_INTERVAL_MS = 60_000L
@@ -255,6 +271,17 @@ class AgentsMonitorService : Service() {
                 Intent(context, AgentsMonitorService::class.java)
                     .setAction(ACTION_OPEN_DETAIL)
                     .putExtra(EXTRA_SESSION_ID, session.id),
+            )
+        }
+
+        /** The wearer answered a held tool call on the glasses. */
+        fun decideApproval(context: Context, requestId: String, decision: ApprovalDecision) {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, AgentsMonitorService::class.java)
+                    .setAction(ACTION_DECIDE_APPROVAL)
+                    .putExtra(EXTRA_REQUEST_ID, requestId)
+                    .putExtra(EXTRA_DECISION, decision.wireValue),
             )
         }
 
