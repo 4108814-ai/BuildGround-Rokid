@@ -19,8 +19,10 @@ import com.anezium.rokidbus.client.ui.BusTheme
  * piece, and leaves.
  *
  * The window is full-screen and the band is a child inside it. That is not
- * decoration — animating the window's own layout params flickers on this
- * hardware, so the window stays put and only child bounds move. See plan 013.
+ * decoration: `updateViewLayout` is an IPC round-trip to `system_server`, so
+ * driving it per frame races against the view's own frame production, and a
+ * window can only translate and resize a rectangle where a view can also fade,
+ * clip and morph. The window stays put and only child bounds move. See plan 013.
  *
  * Like the pin and like Relay's own overlay, the window is never focusable and
  * never touchable: it does not steal focus from what is underneath, and the

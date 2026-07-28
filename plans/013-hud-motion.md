@@ -74,6 +74,15 @@ same four numbers the WebView spike reported.
 - MUST NOT animate window layout params. One container window sized to the
   union of every state, animating child bounds inside it.
 
+  The reason is capability and generic Android, not a measurement on this
+  hardware — the table below compares two animations *inside* a fixed window and
+  says nothing about moving one. `updateViewLayout` is an IPC round-trip to
+  `system_server`, so driving it ~60×/s races against the view's own frame
+  production and lets bounds and content land on different frames. A window can
+  only translate and resize a rectangle; a view can also rotate, clip, deform,
+  fade, and drive several elements at once. If some future animation genuinely
+  wants a moving window, measure it — `HudFrameMeter` exists for that.
+
 ## Measured
 
 Glasses hub 1.0.44, release-signed, real `TYPE_ACCESSIBILITY_OVERLAY` over the
