@@ -291,6 +291,10 @@ flare and permits at most one flare per activity every 10 seconds; a throttled
 flare becomes a pulse and is never queued. Do not use `significant` for distance
 countdown ticks.
 
+By default, an idle expanded panel collapses to its chip after about 10 seconds.
+The wearer can keep the primary activity expanded from Nexus phone Settings.
+That is a platform preference; no plugin API can read, set, or override it.
+
 The platform can keep two activities and one pin in stable corners. Exactly one
 activity is primary: the most recently significant one, or the oldest started
 one when none is significant. A third start replaces the

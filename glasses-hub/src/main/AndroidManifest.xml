@@ -103,6 +103,10 @@
         </receiver>
 
         <receiver
+            android:name=".CameraOverlayVisibilityReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".SelfArmWirelessBootstrapReceiver"
             android:exported="false"
             android:permission="com.anezium.rokidbus.glasses.permission.START_SELFARM_WIRELESS">

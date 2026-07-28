@@ -640,8 +640,9 @@ is not stored as activity state and is not replayed after a camera overlay or a
 reconnect.
 
 The glasses hub drops a stale or duplicate `seq`. The phone hub accepts at most
-four `/activity/update` messages per second per plugin; start and end do not let
-a plugin bypass validation or ownership checks.
+four `/activity/update` messages per second per plugin. Start and end are not
+charged to that update budget; they retain their validation and ownership
+checks.
 
 ### Platform presentations
 
@@ -726,18 +727,19 @@ that emits `/activity/closed`.
 
 On a glasses capability re-announce, the phone first sends a fresh,
 hub-generated clear-all sentinel on `/activity/end` for wire ID
-`nexus-hub:activity`, before resending canonical activities:
+`@nexus-hub:activity`, before resending canonical activities:
 
 ```json
 {
-  "surfaceId": "nexus-hub:activity",
+  "surfaceId": "@nexus-hub:activity",
   "localSurfaceId": "activity",
-  "ownerPluginId": "nexus-hub",
+  "ownerPluginId": "@nexus-hub",
   "seq": 104
 }
 ```
 
-The glasses treats that reserved end as an empty-slot assertion: it clears all
+The owner starts with `@`, which is outside the plugin-id grammar, so a plugin
+end cannot collide with the empty-slot assertion. The glasses clears all
 rendered activities and advances the sequence floor before accepting the
 resends. Each resend carries the remaining `maxDurationMs`, not the original
 duration; a sub-minute remainder uses the start contract's 60-second wire floor
@@ -994,7 +996,9 @@ unknown fields are ignorable in both directions, so fields only ever get added.
 - Phone → glasses (`PhoneHubCapabilitiesContract`): `version`, `features` bits
   (including `CAMERA_CONSUMER_READY`), and `cameraConsumerName` — the display
   name the glasses launcher uses for the synthesized camera entry (present
-  only while a consumer is ready, ≤ 80 chars).
+  only while a consumer is ready, ≤ 80 chars). The additive
+  `activityAlwaysExpanded` boolean carries the wearer's platform setting; it
+  defaults to `false` when absent and is never plugin-controlled.
 
 ## Transport selection (hub-side routing)
 

@@ -297,8 +297,9 @@ class PhoneActivityStateTest {
         val assertEmpty = state.emptySlotAssertPayload()
         val payloads = state.payloadsForResend()
 
-        assertEquals("nexus-hub:activity", assertEmpty.getString("surfaceId"))
-        assertEquals("nexus-hub", assertEmpty.getString("ownerPluginId"))
+        assertEquals("@nexus-hub:activity", assertEmpty.getString("surfaceId"))
+        assertEquals("@nexus-hub", assertEmpty.getString("ownerPluginId"))
+        assertTrue(ActivitySurfaceContract.isEmptySlotAssert(assertEmpty))
         assertEquals(setOf("alpha:activity", "beta:activity"), payloads.map {
             it.getString("surfaceId")
         }.toSet())

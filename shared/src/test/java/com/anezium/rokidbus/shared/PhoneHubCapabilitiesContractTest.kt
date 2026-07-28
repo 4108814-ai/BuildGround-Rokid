@@ -41,4 +41,23 @@ class PhoneHubCapabilitiesContractTest {
         assertEquals(BusCapabilityBits.CAMERA_CONSUMER_READY, parsed.features)
         assertEquals("Lens", parsed.cameraConsumerName)
     }
+
+    @Test
+    fun `activity form-factor preference is additive and defaults collapsed`() {
+        val legacy = PhoneHubCapabilitiesContract.parse(JSONObject().put("features", 0))
+        assertFalse(legacy.activityAlwaysExpanded)
+
+        val payload = PhoneHubCapabilitiesContract.toJson(
+            PhoneHubCapabilitiesContract.create(
+                features = 0,
+                cameraConsumerName = null,
+                activityAlwaysExpanded = true,
+            ),
+        )
+        assertEquals(true, payload.getBoolean("activityAlwaysExpanded"))
+        assertEquals(
+            true,
+            PhoneHubCapabilitiesContract.parse(payload).activityAlwaysExpanded,
+        )
+    }
 }

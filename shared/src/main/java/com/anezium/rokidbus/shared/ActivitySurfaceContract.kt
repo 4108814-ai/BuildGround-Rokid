@@ -93,6 +93,8 @@ object ActivitySurfaceContract {
     const val KIND = "activity"
     const val VERSION = 1
     const val LOCAL_SURFACE_ID = "activity"
+    /** Hub-only reconnect marker. The leading '@' is not legal in a plugin id. */
+    const val EMPTY_ASSERT_OWNER_PLUGIN_ID = "@nexus-hub"
 
     const val MAX_PRIMARY_CHARS = 12
     const val MAX_SECONDARY_CHARS = 28
@@ -109,6 +111,18 @@ object ActivitySurfaceContract {
     const val ERROR_INVALID_ACTIVITY = "INVALID_ACTIVITY"
     const val ERROR_ACTIVITY_RATE_LIMITED = "ACTIVITY_RATE_LIMITED"
     const val ERROR_CAPABILITY_NOT_AVAILABLE = "CAPABILITY_NOT_AVAILABLE"
+
+    fun emptySlotAssertPayload(seq: Long): JSONObject = JSONObject()
+        .put("surfaceId", "$EMPTY_ASSERT_OWNER_PLUGIN_ID:$LOCAL_SURFACE_ID")
+        .put("localSurfaceId", LOCAL_SURFACE_ID)
+        .put("ownerPluginId", EMPTY_ASSERT_OWNER_PLUGIN_ID)
+        .put("seq", seq)
+
+    fun isEmptySlotAssert(payload: JSONObject): Boolean =
+        payload.optString("surfaceId") ==
+            "$EMPTY_ASSERT_OWNER_PLUGIN_ID:$LOCAL_SURFACE_ID" &&
+            payload.optString("localSurfaceId") == LOCAL_SURFACE_ID &&
+            payload.optString("ownerPluginId") == EMPTY_ASSERT_OWNER_PLUGIN_ID
 
     fun validateStart(payload: JSONObject): ActivitySurfaceValidationResult {
         if (payload.opt("kind") != KIND) return invalid("kind must be activity")
@@ -159,9 +173,7 @@ object ActivitySurfaceContract {
             is ReadResult.Invalid -> return invalid(result.reason)
             ReadResult.Absent -> null
         }
-        if (payload.has("significant") && payload.opt("significant") !is Boolean) {
-            return invalid("significant must be a boolean")
-        }
+        if (payload.has("significant")) return invalid("significant is update-only")
 
         return ActivitySurfaceValidationResult.Valid(
             ActivitySurfaceContent(

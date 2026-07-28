@@ -48,7 +48,9 @@ class RokidBusAccessibilityService : AccessibilityService() {
         )
         SurfaceOverlayRenderer.onServiceConnected(this)
         PinOverlayRenderer.onServiceConnected(this)
-        ActivityController.onServiceConnected(applicationContext)
+        ActivityController.onServiceConnected(applicationContext) {
+            performGlobalAction(GLOBAL_ACTION_BACK)
+        }
         ActivityOverlayRenderer.onServiceConnected(this)
         NoticeOverlayRenderer.onServiceConnected(this)
         LauncherOverlayRenderer.onServiceConnected(this)

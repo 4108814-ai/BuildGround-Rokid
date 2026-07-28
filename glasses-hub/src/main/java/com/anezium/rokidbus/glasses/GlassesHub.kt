@@ -68,9 +68,6 @@ object GlassesHub {
     // reference would drag MediaSyncEngine's class init (and its executor thread) in with it.
     private val cameraSessionTracker = CameraSessionTracker { active ->
         MediaSyncEngine.onCameraSessionChanged(active)
-        // CameraActivity runs in :camera. This callback is the main-process
-        // visibility edge consumed by the accessibility overlay renderer.
-        ActivityController.setCameraOverlayActive(active)
     }
     private val autoEnrollAttempted = AtomicBoolean(false)
     private val wifiEnableA11yInFlight = AtomicBoolean(false)
@@ -775,7 +772,11 @@ object GlassesHub {
         val next = PhoneHubCapabilitiesContract.create(
             features = supportedPhoneCameraCapabilities(advertised.features),
             cameraConsumerName = advertised.cameraConsumerName,
+            activityAlwaysExpanded = advertised.activityAlwaysExpanded,
         )
+        appContext?.let {
+            ActivityController.setAlwaysExpanded(it, next.activityAlwaysExpanded)
+        }
         val previous = remotePhoneCapabilities
         if (next == previous) return
         remotePhoneCapabilities = next

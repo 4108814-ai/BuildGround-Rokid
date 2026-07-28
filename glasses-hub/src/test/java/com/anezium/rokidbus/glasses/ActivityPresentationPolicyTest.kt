@@ -117,6 +117,55 @@ class ActivityPresentationPolicyTest {
     }
 
     @Test
+    fun `delayed activity tap remains bound to its idle primary session`() {
+        val captured = ActivityInputTarget(
+            "maps:activity",
+            startedOrder = 7,
+            actionId = "reroute",
+        )
+
+        assertTrue(
+            canResolveActivityTap(
+                captured,
+                current = captured,
+                idleLayerStillOwned = true,
+            ),
+        )
+        assertFalse(
+            canResolveActivityTap(
+                captured,
+                current = captured.copy(startedOrder = 8),
+                idleLayerStillOwned = true,
+            ),
+        )
+        assertTrue(
+            canResolveActivityTap(
+                captured,
+                current = captured.copy(actionId = "cancel"),
+                idleLayerStillOwned = true,
+            ),
+        )
+        assertFalse(
+            canResolveActivityTap(
+                captured,
+                current = ActivityInputTarget(
+                    "ride:activity",
+                    startedOrder = 7,
+                    actionId = "reroute",
+                ),
+                idleLayerStillOwned = true,
+            ),
+        )
+        assertFalse(
+            canResolveActivityTap(
+                captured,
+                current = captured,
+                idleLayerStillOwned = false,
+            ),
+        )
+    }
+
+    @Test
     fun `corner allocation reserves the pin and keeps stable activity corners`() {
         val allocated = allocateActivityCorners(
             activityIdsInOrder = listOf("maps:activity", "ride:activity"),

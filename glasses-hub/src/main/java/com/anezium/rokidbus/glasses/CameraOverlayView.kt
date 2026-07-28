@@ -15,6 +15,7 @@ import android.text.TextUtils
 import android.util.AttributeSet
 import android.util.Log
 import android.view.View
+import android.os.Binder
 import com.anezium.rokidbus.shared.CameraOverlayItem
 import kotlin.math.max
 import kotlin.math.min
@@ -27,6 +28,7 @@ internal class CameraOverlayView @JvmOverloads constructor(
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0,
 ) : View(context, attrs, defStyleAttr) {
+    private val activityVisibilityToken = Binder()
     private val density = resources.displayMetrics.density
     private val scaledDensity = resources.displayMetrics.scaledDensity
     private val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
@@ -108,9 +110,11 @@ internal class CameraOverlayView @JvmOverloads constructor(
         super.onAttachedToWindow()
         PinController.setCameraOverlayActive(true)
         NoticeController.setCameraOverlayActive(true)
+        CameraOverlayVisibilityBridge.report(context, activityVisibilityToken, true)
     }
 
     override fun onDetachedFromWindow() {
+        CameraOverlayVisibilityBridge.report(context, activityVisibilityToken, false)
         PinController.setCameraOverlayActive(false)
         NoticeController.setCameraOverlayActive(false)
         super.onDetachedFromWindow()

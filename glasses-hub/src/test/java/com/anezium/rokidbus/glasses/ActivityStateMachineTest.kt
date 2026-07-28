@@ -46,6 +46,10 @@ class ActivityStateMachineTest {
             ).primary?.activity?.content?.primary,
         )
 
+        val partialClear = state.clearAll(10)
+        assertTrue(partialClear is ActivityMutation.Cleared)
+        assertTrue((partialClear as ActivityMutation.Cleared).surfaceIds.isEmpty())
+        assertEquals(setOf("maps:activity"), state.surfaceIds())
         assertTrue(state.clearAll(20) is ActivityMutation.Cleared)
         assertTrue(
             state.start("maps:activity", "maps", 19, content("ghost"), now)
@@ -58,6 +62,25 @@ class ActivityStateMachineTest {
         assertTrue(state.end("maps:activity", 22) is ActivityMutation.Removed)
         assertTrue(state.end("maps:activity", 21) is ActivityMutation.DroppedStale)
         assertTrue(state.surfaceIds().isEmpty())
+    }
+
+    @Test
+    fun `delayed clear removes older ghosts while preserving newer resend starts`() {
+        state.start("ghost:activity", "ghost", 10, content("stale"), now)
+        state.start("maps:activity", "maps", 20, content("fresh"), now)
+
+        val mutation = state.clearAll(15)
+
+        assertEquals(
+            listOf("ghost:activity"),
+            (mutation as ActivityMutation.Cleared).surfaceIds,
+        )
+        assertEquals(setOf("maps:activity"), state.surfaceIds())
+        assertTrue(
+            state.start("late:activity", "late", 14, content("ghost"), now)
+                is ActivityMutation.DroppedStale,
+        )
+        assertEquals(setOf("maps:activity"), state.surfaceIds())
     }
 
     @Test

@@ -34,6 +34,11 @@ import com.anezium.rokidbus.shared.PinSurfaceSize
  * views. The WindowManager layout is never animated or updated.
  */
 internal object ActivityOverlayRenderer {
+    private data class FlareSession(
+        val surfaceId: String,
+        val startedOrder: Long,
+    )
+
     private val main = Handler(Looper.getMainLooper())
     private var service: AccessibilityService? = null
     private var windowManager: WindowManager? = null
@@ -44,7 +49,7 @@ internal object ActivityOverlayRenderer {
     private val processedMotionTokens = mutableMapOf<String, Long>()
     private var flareGeneration = 0L
     private var flareCollapse: Runnable? = null
-    private var activeFlareId: String? = null
+    private var activeFlare: FlareSession? = null
     private var latestState = ActivityRenderState()
 
     fun onServiceConnected(service: AccessibilityService) {
@@ -96,11 +101,15 @@ internal object ActivityOverlayRenderer {
         }
         val activeService = service ?: return
         val container = ensureWindow(activeService) ?: return
-        activeFlareId?.let { surfaceId ->
+        activeFlare?.let { flare ->
             // A flare is a timed presentation event, not a property every
             // subsequent state publish repeats. Keep it running across content,
-            // pin, and context publishes; only removal/hiding interrupts it.
-            val stillCurrent = visible.any { it.activity.surfaceId == surfaceId }
+            // pin, and context publishes; removal, hiding, or a same-owner
+            // activity restart interrupts the old session.
+            val stillCurrent = visible.any {
+                it.activity.surfaceId == flare.surfaceId &&
+                    it.activity.startedOrder == flare.startedOrder
+            }
             if (!stillCurrent) cancelFlare()
         }
 
@@ -114,23 +123,39 @@ internal object ActivityOverlayRenderer {
                 nodes[item.activity.surfaceId] = it
                 container.addView(it, cornerParams(activeService, item.activity.corner))
             }
-            node.layoutParams = cornerParams(activeService, item.activity.corner)
+            val flareInProgress = activeFlare?.let { flare ->
+                item.activity.surfaceId == flare.surfaceId &&
+                    item.activity.startedOrder == flare.startedOrder
+            } == true
             val previousToken = processedMotionTokens[item.activity.surfaceId] ?: Long.MIN_VALUE
             val newMotion = item.activity.motionToken > previousToken
-            node.render(
-                item = item,
-                chipGlyph = GlassesHub.activityGlyphDrawable(
+            val startsFlare = item.presentation == ActivityPresentation.FLARE && newMotion
+            if (flareInProgress) {
+                // The reverse animation must return to the exact anchor from
+                // which the flare expanded. Defer content-driven width and
+                // corner changes until the collapse completes; render() below
+                // is called again with latestState at that point.
+            } else {
+                node.layoutParams = cornerParams(activeService, item.activity.corner)
+                val chipGlyph = GlassesHub.activityGlyphDrawable(
                     activeService,
                     item.activity.ownerPluginId,
                     item.activity.content.glyph,
-                ),
-                panelGlyph = GlassesHub.activityGlyphDrawable(
+                )
+                val panelGlyph = GlassesHub.activityGlyphDrawable(
                     activeService,
                     item.activity.ownerPluginId,
                     item.activity.content.glyph,
-                ),
-            )
-            if (item.activity.surfaceId == activeFlareId) node.showChip()
+                )
+                if (startsFlare) {
+                    // Preserve the already-visible panel/chip until the band
+                    // begins animating. Switching form here would expose a
+                    // one-frame panel-to-chip snap before the next pre-draw.
+                    node.renderContent(item, chipGlyph, panelGlyph)
+                } else {
+                    node.render(item, chipGlyph, panelGlyph)
+                }
+            }
             when (item.presentation) {
                 ActivityPresentation.PULSE -> {
                     if (newMotion) HudMotion.pulse(node.chip)
@@ -147,7 +172,53 @@ internal object ActivityOverlayRenderer {
                 processedMotionTokens[item.activity.surfaceId] = item.activity.motionToken
             }
         }
-        pendingFlare?.let { (item, node) -> startFlare(item, node) }
+        if (activeFlare != null) flareBand?.bringToFront()
+        pendingFlare?.let { (item, node) ->
+            settleSupersededFlare(item, activeService)
+            startFlare(item, node)
+        }
+    }
+
+    /**
+     * A different activity may win primary while the previous primary is
+     * mid-flare. That old node was deliberately frozen so its reverse motion
+     * could return to the original anchor, but replacing the flare means there
+     * will be no reverse completion to render its latest steady form.
+     *
+     * Settle it before [startFlare] cancels the old transforms; both operations
+     * happen in the same main-loop turn, so no stale panel is exposed between
+     * them.
+     */
+    private fun settleSupersededFlare(
+        nextItem: ActivityRenderItem,
+        context: Context,
+    ) {
+        val superseded = activeFlare ?: return
+        if (
+            superseded.surfaceId == nextItem.activity.surfaceId &&
+            superseded.startedOrder == nextItem.activity.startedOrder
+        ) {
+            return
+        }
+        val settledItem = latestState.items.firstOrNull { item ->
+            item.activity.surfaceId == superseded.surfaceId &&
+                item.activity.startedOrder == superseded.startedOrder
+        } ?: return
+        val settledNode = nodes[superseded.surfaceId] ?: return
+        settledNode.layoutParams = cornerParams(context, settledItem.activity.corner)
+        settledNode.render(
+            item = settledItem,
+            chipGlyph = GlassesHub.activityGlyphDrawable(
+                context,
+                settledItem.activity.ownerPluginId,
+                settledItem.activity.content.glyph,
+            ),
+            panelGlyph = GlassesHub.activityGlyphDrawable(
+                context,
+                settledItem.activity.ownerPluginId,
+                settledItem.activity.content.glyph,
+            ),
+        )
     }
 
     private fun ensureWindow(service: AccessibilityService): FrameLayout? {
@@ -184,8 +255,10 @@ internal object ActivityOverlayRenderer {
         val band = flareBand ?: return
         cancelFlare()
         val generation = ++flareGeneration
-        activeFlareId = item.activity.surfaceId
-        node.showChip()
+        activeFlare = FlareSession(
+            surfaceId = item.activity.surfaceId,
+            startedOrder = item.activity.startedOrder,
+        )
         val content = item.activity.content
         band.render(
             titleText = content.primary,
@@ -200,6 +273,7 @@ internal object ActivityOverlayRenderer {
                 content.glyph,
             ),
         )
+        band.bringToFront()
         band.visibility = View.VISIBLE
         band.alpha = 0f
         band.scaleX = 0.45f
@@ -257,7 +331,6 @@ internal object ActivityOverlayRenderer {
         if (generation != flareGeneration) return
         flareCollapse = null
         node.visibility = View.VISIBLE
-        node.showChip()
         node.animate().cancel()
         band.animate().cancel()
         node.animate()
@@ -284,7 +357,7 @@ internal object ActivityOverlayRenderer {
                 band.translationY = 0f
                 band.scaleX = 1f
                 band.scaleY = 1f
-                activeFlareId = null
+                activeFlare = null
                 // Restore the platform-selected steady presentation (panel or
                 // chip) after the mandated reverse collapse finishes.
                 render(latestState)
@@ -294,7 +367,7 @@ internal object ActivityOverlayRenderer {
 
     private fun cancelFlare() {
         flareGeneration++
-        activeFlareId = null
+        activeFlare = null
         flareCollapse?.let(main::removeCallbacks)
         flareCollapse = null
         nodes.values.forEach { node ->
@@ -371,9 +444,31 @@ internal object ActivityOverlayRenderer {
                     LayoutParams.WRAP_CONTENT,
                 ),
             )
+            showChip()
         }
 
         fun render(
+            item: ActivityRenderItem,
+            chipGlyph: Drawable,
+            panelGlyph: Drawable,
+        ) {
+            renderContent(item, chipGlyph, panelGlyph)
+            visibility = if (item.presentation == ActivityPresentation.HIDDEN) {
+                View.GONE
+            } else {
+                View.VISIBLE
+            }
+            when (item.presentation) {
+                ActivityPresentation.PANEL -> showPanel()
+                ActivityPresentation.CHIP,
+                ActivityPresentation.FLARE,
+                ActivityPresentation.PULSE,
+                ActivityPresentation.HIDDEN,
+                -> showChip()
+            }
+        }
+
+        fun renderContent(
             item: ActivityRenderItem,
             chipGlyph: Drawable,
             panelGlyph: Drawable,
@@ -392,19 +487,6 @@ internal object ActivityOverlayRenderer {
                 mainGlyph = panelGlyph,
                 selectedActionIndex = item.activity.selectedActionIndex,
             )
-            visibility = if (item.presentation == ActivityPresentation.HIDDEN) {
-                View.GONE
-            } else {
-                View.VISIBLE
-            }
-            when (item.presentation) {
-                ActivityPresentation.PANEL -> showPanel()
-                ActivityPresentation.CHIP,
-                ActivityPresentation.FLARE,
-                ActivityPresentation.PULSE,
-                ActivityPresentation.HIDDEN,
-                -> showChip()
-            }
         }
 
         fun showChip() {

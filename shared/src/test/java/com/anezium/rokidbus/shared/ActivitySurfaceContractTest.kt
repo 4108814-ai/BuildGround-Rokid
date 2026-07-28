@@ -1,5 +1,6 @@
 package com.anezium.rokidbus.shared
 
+import com.anezium.rokidbus.shared.plugin.PluginDescriptor
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -9,6 +10,27 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ActivitySurfaceContractTest {
+    @Test
+    fun `empty slot assert uses an owner that no plugin can claim`() {
+        val marker = ActivitySurfaceContract.emptySlotAssertPayload(seq = 42)
+
+        assertTrue(ActivitySurfaceContract.isEmptySlotAssert(marker))
+        assertFalse(
+            PluginDescriptor.isValidId(
+                ActivitySurfaceContract.EMPTY_ASSERT_OWNER_PLUGIN_ID,
+            ),
+        )
+        assertFalse(
+            ActivitySurfaceContract.isEmptySlotAssert(
+                JSONObject()
+                    .put("surfaceId", "nexus-hub:activity")
+                    .put("localSurfaceId", "activity")
+                    .put("ownerPluginId", "nexus-hub")
+                    .put("seq", 43),
+            ),
+        )
+    }
+
     @Test
     fun `protocol constants remain wire stable`() {
         assertEquals(1, ActivitySurfaceContract.VERSION)
@@ -48,8 +70,7 @@ class ActivitySurfaceContractTest {
                             .put("label", "  Mute  "),
                     ),
                 )
-                .put("maxDurationMs", 1L)
-                .put("significant", true),
+                .put("maxDurationMs", 1L),
         )
 
         val content = (result as ActivitySurfaceValidationResult.Valid).content
@@ -311,13 +332,14 @@ class ActivitySurfaceContractTest {
     }
 
     @Test
-    fun `required fields and significant shapes fail closed`() {
+    fun `required fields and update-only significant fail closed`() {
         val invalid = listOf(
             JSONObject().put("kind", "activity").put("primary", "4 min"),
             JSONObject().put("kind", "activity").put("glyph", "timer"),
             startPayload().put("kind", "pin"),
             startPayload().put("glyph", "Turn_Left"),
             startPayload().put("primary", "   "),
+            startPayload().put("significant", true),
             startPayload().put("significant", "yes"),
         )
         invalid.forEach { payload ->

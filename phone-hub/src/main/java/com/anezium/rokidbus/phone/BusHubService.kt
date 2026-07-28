@@ -4128,6 +4128,8 @@ class BusHubService : Service() {
         val announced = PhoneHubCapabilitiesContract.create(
             features = phoneCameraCapabilities(),
             cameraConsumerName = cameraConsumerReadiness.resolveApproved()?.descriptor?.displayName,
+            activityAlwaysExpanded =
+                PhoneActivityPresentationSettings(this).isAlwaysExpanded(),
         )
         if (announced == lastAnnouncedPhoneCapabilities) return
         val envelope = BusEnvelope(
@@ -4386,6 +4388,10 @@ class BusHubService : Service() {
         fun onPluginAuthorizationChanged(context: android.content.Context, key: PluginGrantKey) {
             PhoneClientSupervisor.onPrincipalRevoked(context.applicationContext, key)
             activeInstance?.authorizationChanged(key)
+        }
+
+        internal fun onActivityPresentationPreferenceChanged() {
+            activeInstance?.announcePhoneCapabilities()
         }
 
         fun pluginCatalog(context: android.content.Context): PluginCatalog =

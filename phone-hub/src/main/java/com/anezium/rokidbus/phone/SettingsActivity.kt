@@ -148,6 +148,8 @@ class SettingsActivity : Activity() {
             addView(speechRow(), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 10))
             addView(phoneBatteryBadgeRow(), NexusUi.block())
+            addView(BusTheme.gap(this@SettingsActivity, 10))
+            addView(activityPresentationRow(), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 28))
             addView(NexusUi.sectionRow(this@SettingsActivity, "Advanced"), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 12))
@@ -497,6 +499,51 @@ class SettingsActivity : Activity() {
                         intArrayOf(NexusUi.GREEN_DIM, NexusUi.LINE),
                     )
                     setOnCheckedChangeListener { _, enabled -> store.setEnabled(enabled) }
+                },
+            )
+        }
+
+    private fun activityPresentationRow(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = NexusUi.bordered(this@SettingsActivity, NexusUi.PANEL, NexusUi.LINE, 15)
+            setPadding(
+                NexusUi.dp(this@SettingsActivity, 15),
+                NexusUi.dp(this@SettingsActivity, 10),
+                NexusUi.dp(this@SettingsActivity, 15),
+                NexusUi.dp(this@SettingsActivity, 10),
+            )
+            val settings = PhoneActivityPresentationSettings(this@SettingsActivity)
+            addView(
+                LinearLayout(this@SettingsActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(NexusUi.rowTitle(this@SettingsActivity, "Keep activities expanded"))
+                    addView(BusTheme.gap(this@SettingsActivity, 3))
+                    addView(
+                        NexusUi.rowSub(
+                            this@SettingsActivity,
+                            "Keep the primary activity panel open on glasses",
+                        ),
+                    )
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            addView(
+                Switch(this@SettingsActivity).apply {
+                    isChecked = settings.isAlwaysExpanded()
+                    thumbTintList = ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(NexusUi.GREEN, NexusUi.INK3),
+                    )
+                    trackTintList = ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(NexusUi.GREEN_DIM, NexusUi.LINE),
+                    )
+                    setOnCheckedChangeListener { _, enabled ->
+                        settings.setAlwaysExpanded(enabled)
+                        BusHubService.onActivityPresentationPreferenceChanged()
+                    }
                 },
             )
         }

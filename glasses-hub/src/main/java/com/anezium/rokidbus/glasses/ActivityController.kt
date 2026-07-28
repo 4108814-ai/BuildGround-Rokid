@@ -193,14 +193,18 @@ internal class ActivityStateMachine {
     /**
      * A reserved hub-owned `/activity/end` is the multi-slot empty assertion.
      * Its sequence is also a watermark, so delayed starts from before reconnect
-     * cannot recreate a ghost after the clear.
+     * cannot recreate a ghost after the clear. A delayed assertion may arrive
+     * after one of the fresh resend starts, so it removes only residents at or
+     * below its watermark and preserves newer canonical state.
      */
     fun clearAll(seq: Long): ActivityMutation {
         if (seq <= globalClearSeq) return ActivityMutation.DroppedStale
         globalClearSeq = seq
-        val cleared = residents.keys.toList()
-        residents.clear()
-        corners = emptyMap()
+        val cleared = residents.values
+            .filter { resident -> resident.seq <= seq }
+            .map(Resident::surfaceId)
+        cleared.forEach(residents::remove)
+        if (cleared.isNotEmpty()) corners = corners - cleared.toSet()
         return ActivityMutation.Cleared(cleared)
     }
 
@@ -384,10 +388,13 @@ internal object ActivityController {
     private var pinUnsubscribe: (() -> Unit)? = null
     private var cameraOverlayActive = false
     private var latestRender = ActivityRenderState()
+    private var pendingRingTapTarget: ActivityInputTarget? = null
+    private var performRingBack: (() -> Unit)? = null
 
-    fun onServiceConnected(context: Context) {
+    fun onServiceConnected(context: Context, performRingBack: () -> Unit) {
         runOnMain {
             this.context = context.applicationContext
+            this.performRingBack = performRingBack
             surfaceUnsubscribe?.invoke()
             pinUnsubscribe?.invoke()
             surfaceUnsubscribe = SurfaceController.observe { contextChanged() }
@@ -404,6 +411,7 @@ internal object ActivityController {
             pinUnsubscribe = null
             cancelRingInput()
             cancelDeadline()
+            performRingBack = null
             context = null
         }
     }
@@ -442,10 +450,12 @@ internal object ActivityController {
         runOnMain(::contextChanged)
     }
 
-    fun setAlwaysExpanded(enabled: Boolean) {
-        val appContext = context ?: return
+    fun setAlwaysExpanded(context: Context, enabled: Boolean) {
+        val appContext = context.applicationContext
         ActivityPresentationSettings.setAlwaysExpanded(appContext, enabled)
-        runOnMain(::contextChanged)
+        runOnMain {
+            if (this.context != null) contextChanged()
+        }
     }
 
     fun claimsInput(): Boolean =
@@ -501,6 +511,9 @@ internal object ActivityController {
             RingSurfaceInputPolicy.RING_KEYCODE_FORWARD -> moveSelection(1)
             RingSurfaceInputPolicy.RING_KEYCODE_BACKWARD -> moveSelection(-1)
             RingSurfaceInputPolicy.RING_KEYCODE_TAP -> {
+                if (pendingRingTapTarget == null) {
+                    pendingRingTapTarget = currentInputTarget()
+                }
                 ringTapPolicy.onTap(eventTimeMs)
                 main.removeCallbacks(ringTapExpiry)
                 main.postDelayed(ringTapExpiry, RingTapPolicy.DEFAULT_WINDOW_MS + 1L)
@@ -513,6 +526,7 @@ internal object ActivityController {
     fun cancelRingInput() {
         main.removeCallbacks(ringTapExpiry)
         ringTapPolicy.reset()
+        pendingRingTapTarget = null
     }
 
     private fun start(envelope: BusEnvelope) {
@@ -578,7 +592,7 @@ internal object ActivityController {
     private fun end(envelope: BusEnvelope) {
         val payload = envelope.payload
         val seq = payload.optLong("seq", Long.MIN_VALUE)
-        if (isEmptySlotAssert(payload)) {
+        if (ActivitySurfaceContract.isEmptySlotAssert(payload)) {
             when (state.clearAll(seq)) {
                 is ActivityMutation.Cleared -> publish()
                 ActivityMutation.DroppedStale -> log("activity empty assert dropped stale")
@@ -672,6 +686,10 @@ internal object ActivityController {
 
     private fun fireOrOpen(): Boolean {
         val surfaceId = latestRender.primary?.activity?.surfaceId ?: return false
+        return fireOrOpen(surfaceId)
+    }
+
+    private fun fireOrOpen(surfaceId: String): Boolean {
         val action = state.selectedAction(surfaceId)
         if (action != null) {
             GlassesHub.sendToPhone(
@@ -686,12 +704,47 @@ internal object ActivityController {
         return true
     }
 
+    private fun fireCaptured(target: ActivityInputTarget): Boolean {
+        target.actionId?.let { actionId ->
+            GlassesHub.sendToPhone(
+                BusPaths.ACTIVITY_ACTION,
+                ActivitySurfaceContract.actionPayload(target.activityId, actionId),
+            )
+            return true
+        }
+        val owner = state.ownerPluginId(target.activityId) ?: return false
+        val result = GlassesHub.openLauncherEntry(owner)
+        log("activity owner open result: $result")
+        return true
+    }
+
+    private fun currentInputTarget(): ActivityInputTarget? =
+        latestRender.primary?.activity?.let { activity ->
+            ActivityInputTarget(
+                activityId = activity.surfaceId,
+                startedOrder = activity.startedOrder,
+                actionId = state.selectedAction(activity.surfaceId)?.id,
+            )
+        }
+
     private fun resolveRingTap() {
+        val target = pendingRingTapTarget
+        pendingRingTapTarget = null
         when (ringTapPolicy.resolveExpired(SystemClock.elapsedRealtime())) {
-            RingTapPolicy.Resolution.SINGLE -> fireOrOpen()
-            // An activity never claims BACK. A double tap is therefore only a
-            // cancelled confirmation, not a hidden dismissal gesture.
-            RingTapPolicy.Resolution.DOUBLE,
+            RingTapPolicy.Resolution.SINGLE -> {
+                if (
+                    canResolveActivityTap(
+                        captured = target,
+                        current = currentInputTarget(),
+                        idleLayerStillOwned = claimsInput(),
+                    )
+                ) {
+                    fireCaptured(target!!)
+                }
+            }
+            // Activities do not dismiss on BACK. Preserve the ring's existing
+            // double-tap translation by returning it to the system instead.
+            RingTapPolicy.Resolution.DOUBLE -> performRingBack?.invoke()
             RingTapPolicy.Resolution.IGNORE,
             null,
             -> Unit
@@ -713,14 +766,7 @@ internal object ActivityController {
         return surfaceId to ownerPluginId
     }
 
-    private fun isEmptySlotAssert(payload: org.json.JSONObject): Boolean =
-        payload.optString("ownerPluginId") == EMPTY_ASSERT_OWNER &&
-            payload.optString("surfaceId") ==
-            "$EMPTY_ASSERT_OWNER:${ActivitySurfaceContract.LOCAL_SURFACE_ID}"
-
     private fun runOnMain(block: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block)
     }
-
-    private const val EMPTY_ASSERT_OWNER = "nexus-hub"
 }

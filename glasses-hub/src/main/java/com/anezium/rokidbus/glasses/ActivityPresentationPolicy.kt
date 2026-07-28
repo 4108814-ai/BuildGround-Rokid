@@ -60,6 +60,28 @@ internal data class ActivityPrimaryCandidate(
     val lastSignificantOrder: Long?,
 )
 
+/** Session identity captured when a delayed ring tap begins. */
+internal data class ActivityInputTarget(
+    val activityId: String,
+    val startedOrder: Long,
+    val actionId: String?,
+)
+
+/**
+ * A delayed confirmation remains owned only while the same activity session
+ * is still primary on the idle input layer.
+ */
+internal fun canResolveActivityTap(
+    captured: ActivityInputTarget?,
+    current: ActivityInputTarget?,
+    idleLayerStillOwned: Boolean,
+): Boolean =
+    idleLayerStillOwned &&
+        captured != null &&
+        current != null &&
+        captured.activityId == current.activityId &&
+        captured.startedOrder == current.startedOrder
+
 /**
  * Selects the singular expanded activity.
  *

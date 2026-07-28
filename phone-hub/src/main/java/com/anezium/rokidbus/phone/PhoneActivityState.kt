@@ -312,17 +312,12 @@ internal class PhoneActivityState(
      * Hub-owned global clear sentinel sent before reconnect resends.
      *
      * Activities are multi-slot, so an owner-specific end cannot remove ghosts left by a
-     * previous phone process. The glasses controller treats this reserved owner as clear-all.
+     * previous phone process. Its owner is deliberately outside the plugin-id grammar, so an
+     * ordinary plugin end can never be mistaken for this clear-all marker.
      */
     @Synchronized
-    fun emptySlotAssertPayload(): JSONObject = JSONObject()
-        .put(
-            "surfaceId",
-            "$HUB_OWNER_ID:${ActivitySurfaceContract.LOCAL_SURFACE_ID}",
-        )
-        .put("localSurfaceId", ActivitySurfaceContract.LOCAL_SURFACE_ID)
-        .put("ownerPluginId", HUB_OWNER_ID)
-        .put("seq", sequence.incrementAndGet())
+    fun emptySlotAssertPayload(): JSONObject =
+        ActivitySurfaceContract.emptySlotAssertPayload(sequence.incrementAndGet())
 
     private fun hasExpectedIdentity(ownerPluginId: String, payload: JSONObject): Boolean =
         payload.optString("surfaceId") == activityId(ownerPluginId) &&
