@@ -378,9 +378,7 @@ class MainActivity : Activity() {
         selected: Boolean,
     ): View {
         val icon = ImageView(this).apply {
-            setImageResource(
-                com.anezium.rokidbus.client.ui.NexusPluginIcons.drawableFor(entry.iconKey, entry.id),
-            )
+            setImageDrawable(GlassesHub.launcherDrawable(this@MainActivity, entry))
             layoutParams = LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(14) }
         }
         val label = text(18f, if (selected) BusTheme.phosphor else BusTheme.text, bold = selected).apply {

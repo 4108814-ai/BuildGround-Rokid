@@ -40,21 +40,44 @@ These are enforced. A vector that breaks one fails the build.
 </vector>
 ```
 
-## Never render one below 32dp
+## Size floors: what the glyph has to survive
 
 Measured, not guessed: rendered at 24, 36 and 48 px, the maneuver family stops
 being distinguishable at 24. `turn-sharp-left` collapses into the same few lit
 pixels as `turn-left`, and `roundabout` — a circle, an entry and an exit inside
 24 units — turns to mush. At 36 both read cleanly.
 
-This is a floor on the *renderer*, not a licence to simplify the glyphs. Drawing
-`roundabout` with fewer strokes to survive 24dp would mean drawing something
-that is no longer a roundabout. A chip that wants a maneuver glyph gives it
-32dp or it does not show one.
+**A glyph with siblings needs 32dp.** That covers the maneuvers and the
+transport controls: their job is not to be recognised but to be told apart from
+something that looks almost the same. A chip that wants one gives it 32dp or it
+does not show one.
 
-If you add a glyph, render it at 24, 36 and 48 against the ones it will sit
-next to before believing it works. A glyph that only reads at 96dp is a glyph
-that does not read.
+This is a floor on the *renderer*, not a licence to simplify the glyphs.
+Drawing `roundabout` with fewer strokes to survive 24dp would mean drawing
+something that is no longer a roundabout.
+
+**A glyph with no sibling can go smaller, if it was drawn for it.** `phone` in
+the status badge renders at 13dp — the exact size of the ROM's own indicators,
+because a badge that respected the 32dp floor would tower over the row it is
+trying to disappear into.
+
+`phone` also carries this section's second lesson: **a silhouette has to be
+unmistakable in its surroundings, not just within our set — and it has to be
+of this decade.** It took three draws. The first was a narrow rounded pill:
+honest to the object, unique among our glyphs, and unreadable in place — next
+to a percentage, one element from the ROM's own battery pill, it read as a
+second battery. The second overcorrected into a handset: nothing says "phone"
+harder, but it is a rotary-era object on AR glasses, and in a status row a
+handset means *call in progress*. The shipped draw is the phone the wearer
+actually owns — a wide flat slab (13 of 24 units; the pill's narrowness was
+half its problem) with a home dash for a screen cue. When your glyph lands
+next to marks you do not own, check what *they* make it look like, and what
+the *row* makes it mean.
+
+If you add a glyph, render it at 13, 24, 36 and 48 against the ones it will sit
+next to — including the ROM's, if it lands in the status row — before believing
+it works. A glyph that only reads at 96dp is a glyph that does not read, and a
+glyph you have not seen at its smallest is a glyph you have not finished.
 
 ## What is left to your judgement
 
@@ -77,7 +100,8 @@ They look the same and mean different things. Do not mix them up.
 
 **Plugin icon — identity.** Who is speaking. Chosen once, per plugin. Prefer a
 built-in key (`docs/PLUGINS.md` lists them); if none fits, ship your own
-drawable via `com.anezium.rokidbus.plugin.ICON_DRAWABLE`. Files are named
+geometry with `com.anezium.rokidbus.plugin.GLYPHS` and keep the matching phone
+drawable in `com.anezium.rokidbus.plugin.ICON_DRAWABLE`. Files are named
 `nexus_glyph_<plugin>.xml` in the plugin, and `ic_plugin_<key>.xml` for the
 built-in set.
 
@@ -86,6 +110,33 @@ session: one route emits `turn-left`, `straight`, `turn-right`, `arrive` within
 minutes. These belong to the platform, not to a plugin, which is what keeps the
 HUD coherent when several plugins are live at once. Files are named
 `ic_glyph_<name>.xml`; the registry is `NexusGlyphs`.
+
+## Custom plugin glyphs
+
+A plugin declares custom geometry as a string-array of `name|pathData`
+entries, then points its service metadata at that array:
+
+```xml
+<string-array name="nexus_glyphs">
+    <item>my-mark|M4,4 L20,20</item>
+</string-array>
+
+<meta-data
+    android:name="com.anezium.rokidbus.plugin.GLYPHS"
+    android:resource="@array/nexus_glyphs" />
+```
+
+The plugin owns only the 24-unit path geometry. Nexus always supplies the
+green colour, 1.7 stroke, round caps and joins, bounds, and placement. A plugin
+may declare at most 8 glyphs, each path may contain at most 1024 characters,
+and names use lowercase letters with single inner hyphens.
+
+For a launcher identity, set `com.anezium.rokidbus.plugin.ICON` to the custom
+glyph's name. Built-in icon keys still win; otherwise the glasses look up that
+name inside the declaring plugin's namespace. Two plugins may therefore both
+declare `my-mark` without colliding. An unknown state-glyph name renders as
+`dot`; a missing launcher custom mark keeps the launcher's existing
+legacy/grid fallback.
 
 ## The glyph set
 
@@ -99,7 +150,7 @@ the only place the two spellings differ.
 `turn-slight-right` `turn-sharp-left` `turn-sharp-right` `u-turn` `roundabout`
 `arrive`
 
-**State** — `package` `walk` `timer`
+**State** — `package` `walk` `timer` `phone`
 
 **Fallback** — `dot`
 

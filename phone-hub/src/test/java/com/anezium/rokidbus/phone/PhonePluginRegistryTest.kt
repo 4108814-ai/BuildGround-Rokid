@@ -1,8 +1,14 @@
 package com.anezium.rokidbus.phone
 
+import android.content.ComponentName
 import com.anezium.rokidbus.shared.BusCapabilityBits
+import com.anezium.rokidbus.shared.BusConstants
 import com.anezium.rokidbus.shared.BusEnvelope
 import com.anezium.rokidbus.shared.BusPaths
+import com.anezium.rokidbus.shared.FrameProtocol
+import com.anezium.rokidbus.shared.GlyphContract
+import com.anezium.rokidbus.shared.plugin.PluginCapability
+import com.anezium.rokidbus.shared.plugin.PluginDescriptor
 import org.json.JSONObject
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -101,16 +107,135 @@ class PhonePluginRegistryTest {
         registry.close()
     }
 
+    @Test
+    fun `launcher list payload stays unchanged when plugins have no glyphs`() {
+        val principal = principal("hello", launchable = true, iconKey = "star")
+        val catalog = PluginCatalog(
+            listOf(catalogEntry(principal, PluginCatalogState.ENABLED, launchable = true)),
+        )
+        val sent = mutableListOf<BusEnvelope>()
+        val registry = registry(
+            sendEnvelope = { envelope ->
+                sent += envelope
+                null
+            },
+            catalogProvider = { catalog },
+            glyphReader = { emptyList() },
+        )
+
+        registry.syncLauncherList()
+
+        val actual = sent.single()
+        val expected = BusEnvelope(
+            path = BusPaths.LAUNCHER_LIST,
+            id = actual.id,
+            payload = JSONObject().put(
+                "plugins",
+                org.json.JSONArray().put(
+                    JSONObject()
+                        .put("id", "hello")
+                        .put("displayName", "Hello")
+                        .put("iconKey", "star"),
+                ),
+            ),
+        )
+        assertArrayEquals(FrameProtocol.toJsonBytes(expected), FrameProtocol.toJsonBytes(actual))
+        registry.close()
+    }
+
+    @Test
+    fun `only enabled principals emit glyph envelopes including headless plugins`() {
+        val enabled = principal("photosync", launchable = false, iconKey = "photosync", glyphsResId = 10)
+        val pending = principal("pending", launchable = true, iconKey = "pending", glyphsResId = 11)
+        val catalog = PluginCatalog(
+            listOf(
+                catalogEntry(enabled, PluginCatalogState.ENABLED, launchable = false),
+                catalogEntry(pending, PluginCatalogState.PENDING, launchable = false),
+            ),
+        )
+        val photosyncPath =
+            "M2,9 A2,2 0 0 1 4,7 L7.2,7 L8.5,4.8 L13.5,4.8 L14.8,7 L18,7 " +
+                "A2,2 0 0 1 20,9 L20,17 A2,2 0 0 1 18,19 L4,19 A2,2 0 0 1 2,17 Z " +
+                "M7.8,13 A3.2,3.2 0 1 0 14.2,13 A3.2,3.2 0 1 0 7.8,13 " +
+                "M18.6,5.6 L18.6,1.6 M18.6,1.6 L16.4,3.8 M18.6,1.6 L20.8,3.8"
+        val readerCalls = mutableListOf<String>()
+        val sent = mutableListOf<BusEnvelope>()
+        val registry = registry(
+            sendEnvelope = { envelope ->
+                sent += envelope
+                null
+            },
+            catalogProvider = { catalog },
+            glyphReader = { principal ->
+                readerCalls += principal.descriptor.id
+                listOf(GlyphContract.CustomGlyph("photosync", photosyncPath))
+            },
+        )
+
+        registry.syncLauncherList()
+
+        assertEquals(listOf(BusPaths.LAUNCHER_LIST, BusPaths.LAUNCHER_GLYPHS), sent.map { it.path })
+        assertEquals(listOf("photosync"), readerCalls)
+        val glyphEnvelope = sent.last()
+        assertEquals("photosync", glyphEnvelope.payload.getString("pluginId"))
+        val glyph = glyphEnvelope.payload.getJSONArray("glyphs").getJSONObject(0)
+        assertEquals("photosync", glyph.getString("name"))
+        assertEquals(photosyncPath, glyph.getString("pathData"))
+        assertTrue(FrameProtocol.toJsonBytes(glyphEnvelope).size < BusConstants.CXR_CONTROL_MAX_BYTES)
+        registry.close()
+    }
+
     private fun registry(
         sendEnvelope: (BusEnvelope) -> String? = { null },
         capabilitiesProvider: () -> Int = { 0 },
         journal: PluginBusJournal? = null,
+        catalogProvider: (() -> PluginCatalog)? = null,
+        glyphReader: ((PhonePluginPrincipal) -> List<GlyphContract.CustomGlyph>)? = null,
     ) = PhonePluginRegistry(
         context = RuntimeEnvironment.getApplication(),
         plugins = emptyList(),
         sendEnvelope = sendEnvelope,
         capabilitiesProvider = capabilitiesProvider,
         logger = {},
+        catalogProvider = catalogProvider,
         journal = journal,
+        glyphReader = glyphReader,
+    )
+
+    private fun principal(
+        id: String,
+        launchable: Boolean,
+        iconKey: String,
+        glyphsResId: Int? = null,
+    ) = PhonePluginPrincipal(
+        packageName = "dev.example.$id",
+        serviceComponent = ComponentName("dev.example.$id", "dev.example.$id.PluginService"),
+        uid = id.hashCode(),
+        signingDigestSha256 = "digest-$id",
+        descriptor = PluginDescriptor(
+            id = id,
+            displayName = id.replaceFirstChar(Char::uppercase),
+            apiVersion = BusConstants.API_VERSION,
+            requestedCapabilities = if (launchable) setOf(PluginCapability.SURFACES) else emptySet(),
+            receivePrefixes = listOf("/plugin/$id", "/system/plugin"),
+            settingsActivity = null,
+            launchable = launchable,
+            iconKey = iconKey,
+            glyphsResId = glyphsResId,
+        ),
+    )
+
+    private fun catalogEntry(
+        principal: PhonePluginPrincipal,
+        state: PluginCatalogState,
+        launchable: Boolean,
+    ) = PluginCatalogEntry(
+        catalogKey = "external:${principal.packageName}:${principal.descriptor.id}",
+        id = principal.descriptor.id,
+        displayName = principal.descriptor.displayName,
+        state = state,
+        launchable = launchable,
+        iconKey = principal.descriptor.iconKey,
+        principal = principal,
     )
 }

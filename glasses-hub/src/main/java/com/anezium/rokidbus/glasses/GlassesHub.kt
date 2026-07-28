@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.graphics.drawable.Drawable
 import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.IBinder
@@ -13,12 +14,14 @@ import android.provider.Settings
 import com.anezium.rokidbus.client.IBusCallback
 import com.anezium.rokidbus.client.IBusService
 import com.anezium.rokidbus.client.PluginRegistrationResult
+import com.anezium.rokidbus.client.ui.NexusPluginIcons
 import com.anezium.rokidbus.shared.BusCapabilityBits
 import com.anezium.rokidbus.shared.BusConstants
 import com.anezium.rokidbus.shared.BusEnvelope
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.FrameProtocol
 import com.anezium.rokidbus.shared.GlassesHubCapabilitiesContract
+import com.anezium.rokidbus.shared.GlyphContract
 import com.anezium.rokidbus.shared.ImageSurfaceContract
 import com.anezium.rokidbus.shared.LinkStateBits
 import com.anezium.rokidbus.shared.PhoneHubCapabilities
@@ -57,6 +60,7 @@ object GlassesHub {
     private val started = AtomicBoolean(false)
     private val registrations = CopyOnWriteArrayList<Registration>()
     private val launcherListeners = CopyOnWriteArrayList<(List<LauncherEntry>) -> Unit>()
+    private val pluginGlyphCache = PluginGlyphCache()
     private val wifiOwnership = GlassesWifiOwnership()
     // A lambda, not a method reference: the :camera process also loads this object, and a
     // reference would drag MediaSyncEngine's class init (and its executor thread) in with it.
@@ -184,6 +188,10 @@ object GlassesHub {
             updateLauncherEntries(envelope.payload)
             return
         }
+        if (envelope.path == BusPaths.LAUNCHER_GLYPHS) {
+            updateLauncherGlyphs(envelope.payload)
+            return
+        }
         if (deliverLocal(envelope)) return
         if (envelope.path == BusPaths.ERROR) {
             log("dropping undeliverable remote error id=${envelope.id}")
@@ -252,6 +260,18 @@ object GlassesHub {
     }
 
     internal fun launcherEntryOpensSurface(pluginId: String): Boolean = pluginId != CAMERA_LAUNCHER_ID
+
+    fun launcherDrawable(context: Context, entry: LauncherEntry): Drawable {
+        NexusPluginIcons.drawableForBuiltIn(entry.iconKey)?.let { resourceId ->
+            return requireNotNull(context.getDrawable(resourceId))
+        }
+        entry.iconKey?.let { iconKey ->
+            pluginGlyphCache.drawableFor(entry.id, iconKey)?.let { return it }
+        }
+        return requireNotNull(
+            context.getDrawable(NexusPluginIcons.drawableFor(entry.iconKey, entry.id)),
+        )
+    }
 
     fun sendSurfaceInput(payload: JSONObject): String? =
         sendRemote(BusEnvelope(path = BusPaths.SURFACE_INPUT, payload = payload))
@@ -610,6 +630,39 @@ object GlassesHub {
         launcherEntries = entries
         notifyLauncherEntries()
         log("launcher list synced count=${entries.size}")
+    }
+
+    private fun updateLauncherGlyphs(payload: JSONObject) {
+        val pluginId = payload.optString("pluginId")
+        if (pluginId.isBlank()) {
+            log("launcher glyphs rejected reason=INVALID_PLUGIN_ID")
+            return
+        }
+        val array = payload.optJSONArray("glyphs")
+        if (array == null) {
+            log("launcher glyphs rejected id=$pluginId reason=INVALID_GLYPH_ARRAY")
+            return
+        }
+        val entries = buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index)
+                if (item == null) {
+                    log("launcher glyphs rejected id=$pluginId reason=INVALID_GLYPH_ENTRY")
+                    return
+                }
+                add("${item.optString("name")}|${item.optString("pathData")}")
+            }
+        }
+        when (val result = GlyphContract.parse(entries)) {
+            is GlyphContract.ParseResult.Valid -> {
+                pluginGlyphCache.put(pluginId, result.glyphs)
+                notifyLauncherEntries()
+                log("launcher glyphs synced id=$pluginId count=${result.glyphs.size}")
+            }
+            is GlyphContract.ParseResult.Invalid -> {
+                log("launcher glyphs rejected id=$pluginId reason=${result.reason}")
+            }
+        }
     }
 
     private fun sendRemote(envelope: BusEnvelope): String? {

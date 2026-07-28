@@ -5,6 +5,7 @@ import android.view.KeyEvent
 import com.anezium.rokidbus.shared.BusCapabilityBits
 import com.anezium.rokidbus.shared.BusEnvelope
 import com.anezium.rokidbus.shared.BusPaths
+import com.anezium.rokidbus.shared.GlyphContract
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
 import com.anezium.rokidbus.shared.plugin.NexusPlugin
 import com.anezium.rokidbus.shared.plugin.NexusPluginHost
@@ -26,6 +27,7 @@ class PhonePluginRegistry(
     private val catalogProvider: (() -> PluginCatalog)? = null,
     private val externalController: ExternalPluginController? = null,
     private val journal: PluginBusJournal? = null,
+    glyphReader: ((PhonePluginPrincipal) -> List<GlyphContract.CustomGlyph>)? = null,
 ) : NexusPluginHost {
     private data class Subscription(
         val pathPrefix: String,
@@ -35,6 +37,7 @@ class PhonePluginRegistry(
     private val subscriptions = CopyOnWriteArrayList<Subscription>()
     private val pluginsById = linkedMapOf<String, NexusPlugin>()
     private val builtInPlugins = plugins.toList()
+    private val glyphReader = glyphReader ?: PluginGlyphReader(context, logger)::read
     private val pluginExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "nexus-plugin")
     }
@@ -152,12 +155,13 @@ class PhonePluginRegistry(
     }
 
     fun syncLauncherList() {
+        val catalog = catalog()
         send(
             BusPaths.LAUNCHER_LIST,
             JSONObject().put(
                 "plugins",
                 JSONArray().also { array ->
-                    catalog().launchableEntries.forEach { entry ->
+                    catalog.launchableEntries.forEach { entry ->
                         array.put(
                             JSONObject()
                                 .put("id", entry.id)
@@ -168,6 +172,30 @@ class PhonePluginRegistry(
                 },
             ),
         )
+        catalog.entries.forEach { entry ->
+            val principal = entry.principal
+                ?.takeIf { entry.state == PluginCatalogState.ENABLED }
+                ?: return@forEach
+            val glyphs = glyphReader(principal)
+            if (glyphs.isEmpty()) return@forEach
+            send(
+                BusPaths.LAUNCHER_GLYPHS,
+                JSONObject()
+                    .put("pluginId", principal.descriptor.id)
+                    .put(
+                        "glyphs",
+                        JSONArray().also { array ->
+                            glyphs.forEach { glyph ->
+                                array.put(
+                                    JSONObject()
+                                        .put("name", glyph.name)
+                                        .put("pathData", glyph.pathData),
+                                )
+                            }
+                        },
+                    ),
+            )
+        }
     }
 
     fun close() {

@@ -36,6 +36,7 @@ class PhonePluginDiscoveryTest {
                     extraMetadata = listOf(
                         BusConstants.META_PLUGIN_ICON to "STAR",
                         BusConstants.META_PLUGIN_ICON_DRAWABLE to "2131230890",
+                        BusConstants.META_PLUGIN_GLYPHS to "2131230891",
                     ),
                 ),
             ),
@@ -47,6 +48,7 @@ class PhonePluginDiscoveryTest {
         assertEquals("hello", principal.descriptor.id)
         assertEquals("star", principal.descriptor.iconKey)
         assertEquals(2131230890, principal.descriptor.iconDrawableResId)
+        assertEquals(2131230891, principal.descriptor.glyphsResId)
         assertEquals(64, principal.signingDigestSha256.length)
     }
 

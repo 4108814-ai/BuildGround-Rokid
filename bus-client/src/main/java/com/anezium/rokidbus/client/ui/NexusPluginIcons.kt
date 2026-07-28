@@ -28,7 +28,7 @@ object NexusPluginIcons {
     )
 
     fun drawableFor(iconKey: String?, pluginId: String? = null): Int {
-        val explicitIcon = drawableForBuiltInKey(iconKey)
+        val explicitIcon = drawableForBuiltIn(iconKey)
         if (explicitIcon != null) return explicitIcon
 
         return drawableForLegacyPlugin(pluginId)
@@ -42,7 +42,7 @@ object NexusPluginIcons {
         customLoader: (PluginCustomIcon) -> T,
         fallbackResId: Int? = null,
     ): T {
-        drawableForBuiltInKey(iconKey)?.let { return builtInLoader(it) }
+        drawableForBuiltIn(iconKey)?.let { return builtInLoader(it) }
         if (customIcon != null) {
             try {
                 return customLoader(customIcon)
@@ -67,7 +67,7 @@ object NexusPluginIcons {
         }
     }
 
-    private fun drawableForBuiltInKey(iconKey: String?): Int? =
+    fun drawableForBuiltIn(iconKey: String?): Int? =
         when (iconKey) {
             "music" -> R.drawable.ic_plugin_music
             "disc" -> R.drawable.ic_plugin_disc

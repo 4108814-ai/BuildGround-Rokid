@@ -81,6 +81,8 @@ dependencies { implementation(project(":bus-client")) }   // SDK: bus client + N
             <meta-data android:name="com.anezium.rokidbus.plugin.ID" android:value="myid" />
             <meta-data android:name="com.anezium.rokidbus.plugin.DISPLAY_NAME" android:value="My Plugin" />
             <meta-data android:name="com.anezium.rokidbus.plugin.ICON" android:value="star" />
+            <!-- Optional string-array of name|pathData custom HUD glyphs. -->
+            <meta-data android:name="com.anezium.rokidbus.plugin.GLYPHS" android:resource="@array/nexus_glyphs" />
             <meta-data android:name="com.anezium.rokidbus.plugin.API_VERSION" android:value="3" />
             <meta-data android:name="com.anezium.rokidbus.plugin.CAPABILITIES" android:value="surfaces,stt" />
             <meta-data android:name="com.anezium.rokidbus.plugin.RECEIVE_PREFIXES" android:value="/plugin/myid,/system/plugin,/stt" />
@@ -102,13 +104,26 @@ Prefer the built-in `ICON` metadata shown above. Supported keys are `music`,
 `clock`, `star`, `heart`, `game`, `globe`, `bell`, `terminal`, `grid`, `map`,
 `bolt`, and `bookmark`.
 
-For an identity that does not fit that set, omit `ICON` and supply a drawable
-from the plugin package:
+For an identity that does not fit that set, use a custom name for `ICON`,
+declare the same name in `META_PLUGIN_GLYPHS`, and keep a drawable in the
+plugin package for phone-side rendering. Photos Sync is the complete pattern:
 
 ```xml
+<!-- res/values/nexus_glyphs.xml -->
+<string-array name="nexus_glyphs">
+    <item>photosync|M2,9 A2,2 0 0 1 4,7 L7.2,7 L8.5,4.8 L13.5,4.8 L14.8,7 L18,7 A2,2 0 0 1 20,9 L20,17 A2,2 0 0 1 18,19 L4,19 A2,2 0 0 1 2,17 Z M7.8,13 A3.2,3.2 0 1 0 14.2,13 A3.2,3.2 0 1 0 7.8,13 M18.6,5.6 L18.6,1.6 M18.6,1.6 L16.4,3.8 M18.6,1.6 L20.8,3.8</item>
+</string-array>
+
+<!-- AndroidManifest.xml, on the plugin service -->
+<meta-data
+    android:name="com.anezium.rokidbus.plugin.ICON"
+    android:value="photosync" />
 <meta-data
     android:name="com.anezium.rokidbus.plugin.ICON_DRAWABLE"
-    android:resource="@drawable/my_glyph" />
+    android:resource="@drawable/nexus_glyph_photosync" />
+<meta-data
+    android:name="com.anezium.rokidbus.plugin.GLYPHS"
+    android:resource="@array/nexus_glyphs" />
 ```
 
 Follow the design system in [GLYPHS.md](GLYPHS.md): a 24×24 `VectorDrawable`,
@@ -117,8 +132,12 @@ what it draws, so the source colour is moot — authoring it in the phosphor
 anyway keeps one rule instead of two, and `NexusGlyphArtTest` checks it. A
 full-colour logo will render as a green blob.
 
-If a recognized built-in key and a custom drawable are both declared, the
-built-in wins. If neither can be resolved, Nexus uses the grid glyph.
+The phone resolves an unknown `ICON` key through `ICON_DRAWABLE`, so adding the
+custom name does not change its appearance. The glasses resolve a recognized
+built-in first, then a custom glyph with the same name under that plugin ID,
+then the legacy plugin table/grid fallback. Custom arrays are capped at 8
+glyphs and 1024 path characters per glyph; malformed or unavailable resources
+are ignored without removing the plugin from the launcher.
 
 ## 3. Service and runtime
 

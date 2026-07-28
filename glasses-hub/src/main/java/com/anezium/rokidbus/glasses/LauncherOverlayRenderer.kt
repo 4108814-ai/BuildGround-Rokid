@@ -24,7 +24,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
-import com.anezium.rokidbus.client.ui.NexusPluginIcons
 
 object LauncherOverlayRenderer {
     private const val KEYCODE_PROG_BLUE = 186
@@ -291,7 +290,7 @@ object LauncherOverlayRenderer {
             selected: Boolean,
         ): View {
             val icon = ImageView(context).apply {
-                setImageResource(NexusPluginIcons.drawableFor(entry.iconKey, entry.id))
+                setImageDrawable(GlassesHub.launcherDrawable(context, entry))
                 layoutParams = LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(14) }
             }
             val label = monoText(18f, if (selected) BusTheme.phosphor else BusTheme.text, bold = selected).apply {

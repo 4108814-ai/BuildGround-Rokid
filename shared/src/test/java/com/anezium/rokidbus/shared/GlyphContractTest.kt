@@ -25,6 +25,20 @@ class GlyphContractTest {
     }
 
     @Test
+    fun `parses the actual photosync concatenated path`() {
+        val pathData =
+            "M2,9 A2,2 0 0 1 4,7 L7.2,7 L8.5,4.8 L13.5,4.8 L14.8,7 L18,7 " +
+                "A2,2 0 0 1 20,9 L20,17 A2,2 0 0 1 18,19 L4,19 A2,2 0 0 1 2,17 Z " +
+                "M7.8,13 A3.2,3.2 0 1 0 14.2,13 A3.2,3.2 0 1 0 7.8,13 " +
+                "M18.6,5.6 L18.6,1.6 M18.6,1.6 L16.4,3.8 M18.6,1.6 L20.8,3.8"
+
+        val result = GlyphContract.parse(listOf("photosync|$pathData"))
+
+        val glyphs = (result as GlyphContract.ParseResult.Valid).glyphs
+        assertEquals(listOf(GlyphContract.CustomGlyph("photosync", pathData)), glyphs)
+    }
+
+    @Test
     fun `names are shape-checked, never membership-checked`() {
         // A name this build has never heard of is valid on purpose: it renders
         // as a dot rather than being refused, which is what keeps the set

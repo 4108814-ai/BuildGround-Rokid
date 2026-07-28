@@ -51,6 +51,7 @@ object BusPaths {
     const val NOTICE_INPUT = "/notice/input"
     const val NOTICE_CLOSED = "/notice/closed"
     const val LAUNCHER_LIST = "/launcher/list"
+    const val LAUNCHER_GLYPHS = "/launcher/glyphs"
     const val LAUNCHER_OPEN = "/launcher/open"
     const val CAMERA_SESSION_STATE = "/camera/session/state"
     const val CAMERA_LINK_OFFER = "/camera/link/offer"
