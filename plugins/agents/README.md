@@ -14,13 +14,26 @@ on the glasses.
 - OpenClaw: enter the Gateway host, port (default `18789`), and token. A host
   may include `ws://` or `wss://`; a plain host uses `ws://`.
 - Each provider has an independent enable switch and connection test.
-- Android 13 and newer asks for notification permission when provider settings
-  are saved. The settings screen also links to the system notification page.
+- **Agents holds no notification permission and posts nothing on the phone.**
+  The permission is deliberately absent from the manifest, so Android keeps the
+  monitoring foreground service running but never shows its notification.
 
-Settings, auth tokens, the OpenClaw device seed, notification fingerprints, and
-the Gateway-issued device token use the plugin's private
-`nexus_plugin_agents` `SharedPreferences`. This follows Transit’s existing
-plain-`SharedPreferences` pattern; no token or pairing payload is logged.
+Settings, auth tokens, the OpenClaw device seed, alert fingerprints, and the
+Gateway-issued device token use the plugin's private `nexus_plugin_agents`
+`SharedPreferences`. This follows Transit’s existing plain-`SharedPreferences`
+pattern; no token or pairing payload is logged.
+
+### Linking a computer
+
+The daemon dials the phone, so the phone decides who is allowed in:
+
+- The **first** computer ever links itself — nothing exists yet to impersonate,
+  and this is what keeps the zero-setup path zero-setup.
+- Every computer **after** that must arrive while the wearer holds the door
+  open: *Link a computer* on the settings screen opens a two-minute window.
+- A known computer presenting the **wrong token is refused**, and its stored
+  token is never overwritten.
+- A new link is announced on the glasses, never on the phone.
 
 The current OpenClaw protocol requires device identity in addition to the
 shared Gateway token. On the first remote connection, approve the new
@@ -29,17 +42,24 @@ normally a one-time step.
 
 ## HUD and background behavior
 
-The HUD is a typed `NexusCard` with `NexusCardLine` rows. The first row contains
-status counts and provider connection indicators; each following row contains
-the `CC` or `OC` marker, title, status, and (when applicable) a one-line pending
-request summary. No preformatted text surface is used.
+The HUD is a typed `NexusCard` with `NexusCardLine` list rows: a title, an
+optional second line saying what the session is doing to you or for you, a tone
+carrying its urgency, and a selection flag. No preformatted text surface is used.
 
-DPAD up/down changes the selected row, ENTER is intentionally a no-op in Phase
-1, and BACK hides the root surface. A transition into `needs_you` sends one
-`showCard` request while the surface is hidden. The Nexus hub either adopts it
-on an idle HUD or rejects it as busy; the SDK does not expose the asynchronous
-`SURFACE_BUSY` result to the plugin, so the attempt is deliberately not
-retried.
+DPAD up/down moves the selection, ENTER opens the selected session's
+conversation, and BACK leaves the conversation or hides the surface. The
+selection is held **by session key, not row index**: the board re-sorts itself
+as agents work, so a positional cursor would drift onto a different session
+between looking and pressing.
+
+A session that starts asking for the wearer raises an **interactive notice** —
+the band from hub 1.0.46 — rather than fighting for the whole surface. Several
+sessions asking at once become one band, and a tap on it opens the board on the
+session that rang. The fingerprint that stops an alert repeating is committed
+only once the hub has taken the notice, so an alert that could not be delivered
+is offered again on the next update instead of being silently marked as sent.
+Nothing is queued for glasses that are asleep: the session simply stays at the
+top of the board, which is where the wearer will look.
 
 Unlike ordinary dormant Nexus plugins, this product explicitly requires a
 monitoring foreground service and phone alerts while its HUD is closed. The
@@ -60,7 +80,11 @@ Implemented exactly:
 - `ping`/`pong`;
 - close `4401` as non-retrying `auth_failed`, and jittered 1/2/4/5-second
   reconnects for other closes and network failures;
-- ignored unknown message types.
+- ignored unknown message types;
+- the conversation exchange: the plugin sends `detail_open` with a session id
+  when the wearer opens a session and `detail_close` when they leave, and the
+  daemon answers with one `detail` carrying the recent messages followed by
+  `detail_append` for each new one while the view stays open.
 
 Every reconnect resets sequence state, sends a fresh hello immediately, and
 waits for a new authoritative snapshot.
@@ -171,3 +195,12 @@ JSON choice as Transit, plus the repository’s existing OkHttp `4.12.0`.
   explicit connection test, or a Nexus HUD open, as required for Phase 1.
 - No approve/deny, prompt answering, session spawning, voice, or command send
   path exists.
+- **Monitoring is not real-time while the phone is in Doze.** A foreground
+  service keeps the process alive but does not exempt it from Doze's network
+  restrictions, so a screen-off, stationary, unplugged phone may not see a
+  transition until a maintenance window. With no phone notification by design,
+  the alert arrives when the wearer next looks at the board.
+- The device identity is signed by a hand-written Ed25519 implementation. Its
+  signatures are RFC 8032 conformant but the arithmetic is not constant-time,
+  which is acceptable on a private tailnet and must be replaced with a vetted
+  library before any public release.

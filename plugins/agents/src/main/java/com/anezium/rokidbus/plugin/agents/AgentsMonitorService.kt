@@ -12,12 +12,19 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
+/**
+ * Holds the connections to the agent providers while the HUD is closed.
+ *
+ * This service says nothing. It posts no alert, no summary, no progress: the
+ * only notification it builds is the one `startForeground` requires, and the app
+ * holds no notification permission, so Android never shows it. Everything the
+ * wearer needs to know reaches them on the glasses, raised by
+ * [AgentsPluginService].
+ */
 class AgentsMonitorService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val configStore by lazy { AgentsConfigStore(applicationContext) }
@@ -36,33 +43,22 @@ class AgentsMonitorService : Service() {
     }
     private val linkServer by lazy {
         AgentdLinkServer(AgentsRuntime.store, configStore, serviceScope) { machineName ->
-            notifications.notifyMachineTrusted(machineName)
+            AgentsRuntime.announceLinkedMachine(machineName)
         }
     }
     private var runningAgentd: AgentdConfig? = null
     private var runningOpenClaw: OpenClawConfig? = null
     private var temporaryAgentd: Job? = null
     private var temporaryOpenClaw: Job? = null
-    private var previousSessions: List<AgentSession> = emptyList()
-    private val decisionEngine by lazy {
-        NotificationDecisionEngine(
-            readFingerprint = configStore::notificationFingerprint,
-            writeFingerprint = configStore::saveNotificationFingerprint,
-        )
-    }
 
     override fun onCreate() {
         super.onCreate()
         notifications.createChannels()
-        startForeground(
-            MONITOR_NOTIFICATION_ID,
-            notifications.monitorNotification("Starting connections"),
-        )
-        observeRuntime()
+        startForeground(MONITOR_NOTIFICATION_ID, notifications.monitorNotification())
         serviceScope.launch {
             while (true) {
                 delay(PRUNE_INTERVAL_MS)
-                AgentsRuntime.store.prune()
+                configStore.forgetNotificationFingerprints(AgentsRuntime.store.prune())
             }
         }
     }
@@ -100,7 +96,7 @@ class AgentsMonitorService : Service() {
         agentdClient.stop(clearSessions = true)
         linkServer.stop(clearSessions = true)
         openClawClient.stop(clearSessions = true)
-        stopService(Intent(this, AgentsPluginService::class.java))
+        releasePluginService()
         httpClient.dispatcher.executorService.shutdown()
         serviceScope.cancel()
         super.onDestroy()
@@ -119,6 +115,13 @@ class AgentsMonitorService : Service() {
         // Pairing data is the away-from-home path (we dial the daemon over the
         // tailnet). With none configured we simply listen: the daemon finds us.
         val wantedAgentd = config.agentd?.takeIf { config.agentdEnabled && it.configured }
+        // A test started while the provider was off installs a timer that stops
+        // it again. Enabling the provider in the meantime must disarm that timer,
+        // or it fires later and kills a connection nobody asked it to touch.
+        if (config.agentdEnabled) {
+            temporaryAgentd?.cancel()
+            temporaryAgentd = null
+        }
         if (wantedAgentd != runningAgentd) {
             if (wantedAgentd == null) {
                 agentdClient.stop(clearSessions = true)
@@ -131,6 +134,10 @@ class AgentsMonitorService : Service() {
             linkServer.start()
         } else {
             linkServer.stop(clearSessions = wantedAgentd == null)
+        }
+        if (config.openClawEnabled) {
+            temporaryOpenClaw?.cancel()
+            temporaryOpenClaw = null
         }
         val wantedOpenClaw = config.openClaw?.takeIf { config.openClawEnabled && it.configured }
         if (wantedOpenClaw != runningOpenClaw) {
@@ -149,9 +156,12 @@ class AgentsMonitorService : Service() {
         agentdClient.start(pairing)
         runningAgentd = if (config.agentdEnabled) pairing else null
         temporaryAgentd?.cancel()
+        temporaryAgentd = null
         if (!config.agentdEnabled) {
             temporaryAgentd = serviceScope.launch {
                 delay(TEST_WINDOW_MS)
+                // Enabled during the window: the permanent client owns it now.
+                if (configStore.load().agentdEnabled) return@launch
                 agentdClient.stop(clearSessions = true)
                 temporaryAgentd = null
                 stopIfNoConfiguredProvider()
@@ -165,9 +175,11 @@ class AgentsMonitorService : Service() {
         openClawClient.start(gateway)
         runningOpenClaw = if (config.openClawEnabled) gateway else null
         temporaryOpenClaw?.cancel()
+        temporaryOpenClaw = null
         if (!config.openClawEnabled) {
             temporaryOpenClaw = serviceScope.launch {
                 delay(TEST_WINDOW_MS)
+                if (configStore.load().openClawEnabled) return@launch
                 openClawClient.stop(clearSessions = true)
                 temporaryOpenClaw = null
                 stopIfNoConfiguredProvider()
@@ -186,53 +198,23 @@ class AgentsMonitorService : Service() {
 
     private fun stopMonitoring() {
         agentdClient.stop(clearSessions = true)
+        linkServer.stop(clearSessions = true)
         openClawClient.stop(clearSessions = true)
         runningAgentd = null
         runningOpenClaw = null
-        stopService(Intent(this, AgentsPluginService::class.java))
+        releasePluginService()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
-    private fun observeRuntime() {
-        serviceScope.launch {
-            AgentsRuntime.store.sessions.collectLatest { current ->
-                val enabled = configStore.load()
-                val visiblePrevious = previousSessions.filter { session ->
-                    session.provider == AgentProvider.CLAUDE && enabled.agentdEnabled ||
-                        session.provider == AgentProvider.OPENCLAW && enabled.openClawEnabled
-                }
-                val visibleCurrent = current.filter { session ->
-                    session.provider == AgentProvider.CLAUDE && enabled.agentdEnabled ||
-                        session.provider == AgentProvider.OPENCLAW && enabled.openClawEnabled
-                }
-                decisionEngine.transitions(visiblePrevious, visibleCurrent).forEach { decision ->
-                    notifications.notifySession(decision)
-                    if (decision.session.status == AgentStatus.NEEDS_YOU) {
-                        startService(
-                            Intent(this@AgentsMonitorService, AgentsPluginService::class.java)
-                                .setAction(AgentsPluginService.ACTION_ATTENTION),
-                        )
-                    }
-                }
-                previousSessions = current
-            }
-        }
-        serviceScope.launch {
-            combine(
-                AgentsRuntime.store.connections,
-                AgentsRuntime.store.sessions,
-            ) { connections, sessions ->
-                val cc = connections.getValue(AgentProvider.CLAUDE).state.shortLabel()
-                val oc = connections.getValue(AgentProvider.OPENCLAW).state.shortLabel()
-                "$cc CC · $oc OC · ${sessions.size} sessions"
-            }.collectLatest { summary ->
-                getSystemService(android.app.NotificationManager::class.java).notify(
-                    MONITOR_NOTIFICATION_ID,
-                    notifications.monitorNotification(summary),
-                )
-            }
-        }
+    /**
+     * The plugin service is the hub's to own while a surface is up. We only
+     * started it to keep a bus client alive for alerts, so we only take that
+     * back when the wearer is not actually looking at it.
+     */
+    private fun releasePluginService() {
+        if (AgentsRuntime.hudOpen) return
+        stopService(Intent(this, AgentsPluginService::class.java))
     }
 
     companion object {
@@ -259,7 +241,9 @@ class AgentsMonitorService : Service() {
                 ContextCompat.startForegroundService(context, intent)
             } else {
                 context.stopService(intent)
-                context.stopService(Intent(context, AgentsPluginService::class.java))
+                if (!AgentsRuntime.hudOpen) {
+                    context.stopService(Intent(context, AgentsPluginService::class.java))
+                }
             }
         }
 
@@ -293,11 +277,4 @@ class AgentsMonitorService : Service() {
             )
         }
     }
-}
-
-private fun ConnectionState.shortLabel(): String = when (this) {
-    ConnectionState.CONNECTED -> "ON"
-    ConnectionState.CONNECTING -> "WAIT"
-    ConnectionState.AUTH_FAILED -> "AUTH"
-    ConnectionState.DISCONNECTED -> "OFF"
 }

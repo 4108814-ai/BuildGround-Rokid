@@ -1,14 +1,10 @@
 package com.anezium.rokidbus.plugin.agents
 
-import android.Manifest
 import android.app.Activity
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
@@ -25,9 +21,12 @@ import com.anezium.rokidbus.client.ui.NexusPluginIcons
 import com.anezium.rokidbus.client.ui.NexusUi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class AgentsSettingsActivity : Activity() {
@@ -39,12 +38,17 @@ class AgentsSettingsActivity : Activity() {
     private lateinit var agentdConnection: TextView
     private lateinit var agentdDot: View
     private lateinit var machinesLine: TextView
+    private lateinit var linkTitle: TextView
+    private lateinit var linkSub: TextView
+    private lateinit var awayBlock: LinearLayout
+    private lateinit var awayDisclosure: TextView
     private lateinit var openClawEnabled: Switch
     private lateinit var openClawHost: EditText
     private lateinit var openClawPort: EditText
     private lateinit var openClawToken: EditText
     private lateinit var openClawConnection: TextView
     private lateinit var openClawDot: View
+    private var linkCountdown: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,6 +60,11 @@ class AgentsSettingsActivity : Activity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        renderLinkState()
+    }
+
     override fun onDestroy() {
         uiScope.cancel()
         super.onDestroy()
@@ -64,11 +73,11 @@ class AgentsSettingsActivity : Activity() {
     private fun buildUi() {
         window.statusBarColor = NexusUi.BG
         window.navigationBarColor = NexusUi.BG
-        agentdEnabled = Switch(this)
-        openClawEnabled = Switch(this)
+        agentdEnabled = NexusUi.switch(this)
+        openClawEnabled = NexusUi.switch(this)
         agentdDot = NexusUi.dot(this)
         openClawDot = NexusUi.dot(this)
-        agentdPairing = NexusUi.field(this, "Away from home: paste pairing JSON (optional)").apply {
+        agentdPairing = NexusUi.field(this, "Paste the pairing line from nexus-agentd").apply {
             setSingleLine(false)
             minLines = 3
             maxLines = 6
@@ -83,6 +92,8 @@ class AgentsSettingsActivity : Activity() {
             })
         }
         machinesLine = NexusUi.rowSub(this, "No computer linked yet")
+        linkTitle = NexusUi.rowTitle(this, "Link a computer")
+        linkSub = NexusUi.rowSub(this, "Opens for two minutes while your computer says hello")
         agentdSummary = NexusUi.cardBody(this, "No daemon paired.")
         agentdConnection = NexusUi.statusLine(this).apply { text = "DISCONNECTED" }
         openClawHost = NexusUi.field(this, "Host or ws(s)://host").apply {
@@ -101,7 +112,9 @@ class AgentsSettingsActivity : Activity() {
             addView(
                 NexusUi.cardBody(
                     this@AgentsSettingsActivity,
-                    "Read-only mission control for Claude Code and OpenClaw sessions.",
+                    "Read-only mission control for Claude Code and OpenClaw sessions. " +
+                        "Agents never notifies this phone — when a session needs you, " +
+                        "it says so on your glasses.",
                 ),
                 NexusUi.block(),
             )
@@ -113,30 +126,6 @@ class AgentsSettingsActivity : Activity() {
             addView(NexusUi.sectionRow(this@AgentsSettingsActivity, "OpenClaw"), NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
             addView(openClawCard(), NexusUi.block())
-            addView(BusTheme.gap(this@AgentsSettingsActivity, 22))
-            addView(NexusUi.sectionRow(this@AgentsSettingsActivity, "Notifications"), NexusUi.block())
-            addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
-            addView(
-                NexusUi.pressableCard(this@AgentsSettingsActivity).apply {
-                    setOnClickListener { openNotificationSettings() }
-                    addView(
-                        LinearLayout(this@AgentsSettingsActivity).apply {
-                            orientation = LinearLayout.VERTICAL
-                            addView(NexusUi.rowTitle(this@AgentsSettingsActivity, "Notification settings"))
-                            addView(BusTheme.gap(this@AgentsSettingsActivity, 4))
-                            addView(
-                                NexusUi.rowSub(
-                                    this@AgentsSettingsActivity,
-                                    "Allow Agent sessions alerts and control the monitor notification",
-                                ),
-                            )
-                        },
-                        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-                    )
-                    addView(NexusUi.rowSub(this@AgentsSettingsActivity, "OPEN ›"))
-                },
-                NexusUi.block(),
-            )
             addView(BusTheme.gap(this@AgentsSettingsActivity, 24))
             addView(NexusUi.sectionRow(this@AgentsSettingsActivity, "Plugin"), NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
@@ -166,7 +155,15 @@ class AgentsSettingsActivity : Activity() {
     }
 
     private fun agentdCard() = NexusUi.card(this).apply {
-        addView(switchRow("Monitor sessions", agentdEnabled), NexusUi.block())
+        addView(
+            NexusUi.switchRow(
+                this@AgentsSettingsActivity,
+                "Monitor sessions",
+                "Watch the Claude Code sessions running on your computers",
+                agentdEnabled,
+            ),
+            NexusUi.block(),
+        )
         addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
         addView(connectionRow(agentdDot, agentdConnection), NexusUi.block())
         addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
@@ -181,19 +178,10 @@ class AgentsSettingsActivity : Activity() {
         addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
         addView(machinesLine, NexusUi.block())
         addView(NexusUi.divider(this@AgentsSettingsActivity))
-        addView(agentdPairing, NexusUi.block())
-        addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
-        addView(agentdSummary, NexusUi.block())
+        addView(linkCard(), NexusUi.block())
         addView(BusTheme.gap(this@AgentsSettingsActivity, 12))
-        addView(
-            actionRow(
-                primary = "Save",
-                onPrimary = { saveAgentd(test = false) },
-                secondary = "Test connection",
-                onSecondary = { saveAgentd(test = true) },
-            ),
-            NexusUi.block(),
-        )
+        addView(awayDisclosureRow(), NexusUi.block())
+        addView(awayBlock(), NexusUi.block())
         addView(
             NexusUi.textButton(this@AgentsSettingsActivity, "Forget computers", danger = true).apply {
                 setOnClickListener {
@@ -203,6 +191,7 @@ class AgentsSettingsActivity : Activity() {
                     agentdSummary.text = "No daemon paired."
                     machinesLine.text = "No computer linked yet"
                     AgentsMonitorService.reconcile(applicationContext)
+                    renderLinkState()
                     toast("Linked computers forgotten.")
                 }
             },
@@ -210,8 +199,74 @@ class AgentsSettingsActivity : Activity() {
         )
     }
 
+    /**
+     * The pairing act. The first computer ever is taken on trust — there is
+     * nothing yet to impersonate — but every one after it has to arrive while
+     * the wearer is holding this door open.
+     */
+    private fun linkCard() = NexusUi.pressableCard(this).apply {
+        setOnClickListener {
+            configStore.armLinkWindow()
+            AgentsMonitorService.reconcile(applicationContext)
+            renderLinkState()
+        }
+        addView(
+            LinearLayout(this@AgentsSettingsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(linkTitle)
+                addView(BusTheme.gap(this@AgentsSettingsActivity, 4))
+                addView(linkSub)
+            },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        addView(NexusUi.chevron(this@AgentsSettingsActivity))
+    }
+
+    private fun awayDisclosureRow(): TextView {
+        awayDisclosure = NexusUi.rowSub(this, AWAY_CLOSED).apply {
+            setPadding(0, NexusUi.dp(this@AgentsSettingsActivity, 6), 0, 0)
+            setOnClickListener {
+                val opening = awayBlock.visibility != View.VISIBLE
+                awayBlock.visibility = if (opening) View.VISIBLE else View.GONE
+                text = if (opening) AWAY_OPEN else AWAY_CLOSED
+            }
+        }
+        return awayDisclosure
+    }
+
+    /** Dialling out over a tailnet: the exception, folded away until asked for. */
+    private fun awayBlock(): LinearLayout {
+        awayBlock = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
+            addView(agentdPairing, NexusUi.block())
+            addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
+            addView(agentdSummary, NexusUi.block())
+            addView(BusTheme.gap(this@AgentsSettingsActivity, 12))
+            addView(
+                actionRow(
+                    primary = "Save",
+                    onPrimary = { saveAgentd(test = false) },
+                    secondary = "Test connection",
+                    onSecondary = { saveAgentd(test = true) },
+                ),
+                NexusUi.block(),
+            )
+        }
+        return awayBlock
+    }
+
     private fun openClawCard() = NexusUi.card(this).apply {
-        addView(switchRow("Monitor sessions", openClawEnabled), NexusUi.block())
+        addView(
+            NexusUi.switchRow(
+                this@AgentsSettingsActivity,
+                "Monitor sessions",
+                "Watch the sessions on your OpenClaw gateway",
+                openClawEnabled,
+            ),
+            NexusUi.block(),
+        )
         addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
         addView(connectionRow(openClawDot, openClawConnection), NexusUi.block())
         addView(NexusUi.divider(this@AgentsSettingsActivity))
@@ -257,24 +312,14 @@ class AgentsSettingsActivity : Activity() {
         )
     }
 
-    private fun switchRow(label: String, switch: Switch) = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        addView(
-            NexusUi.rowTitle(this@AgentsSettingsActivity, label),
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-        )
-        addView(switch)
-    }
-
     private fun connectionRow(dot: View, label: TextView) = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        val dotSize = (8 * resources.displayMetrics.density).toInt()
+        val dotSize = NexusUi.dp(this@AgentsSettingsActivity, 8)
         addView(
             dot,
             LinearLayout.LayoutParams(dotSize, dotSize).apply {
-                marginEnd = (8 * resources.displayMetrics.density).toInt()
+                marginEnd = NexusUi.dp(this@AgentsSettingsActivity, 8)
             },
         )
         addView(label)
@@ -282,12 +327,6 @@ class AgentsSettingsActivity : Activity() {
 
     private fun loadConfig() {
         val config = configStore.load()
-        val machines = configStore.trustedMachineNames()
-        machinesLine.text = if (machines.isEmpty()) {
-            "No computer linked yet"
-        } else {
-            "Linked: ${machines.joinToString(", ")}"
-        }
         agentdEnabled.isChecked = config.agentdEnabled
         agentdSummary.text = config.agentd?.let {
             "${it.name} · ${it.host}:${it.port}"
@@ -298,6 +337,34 @@ class AgentsSettingsActivity : Activity() {
             (config.openClaw?.port ?: OpenClawConfig.DEFAULT_PORT).toString(),
         )
         openClawToken.setText(config.openClaw?.token.orEmpty())
+        renderLinkState()
+    }
+
+    /** One line that answers "is my computer going to get in right now?". */
+    private fun renderLinkState() {
+        linkCountdown?.cancel()
+        machinesLine.text = configStore.trustedMachineNames().let { machines ->
+            if (machines.isEmpty()) "No computer linked yet" else "Linked: ${machines.joinToString(", ")}"
+        }
+        if (!configStore.isLinkWindowOpen()) {
+            linkTitle.text = "Link a computer"
+            linkSub.text = if (configStore.trustedMachineNames().isEmpty()) {
+                "Or just start nexus-agentd — the first computer links itself"
+            } else {
+                "Opens for two minutes while your computer says hello"
+            }
+            return
+        }
+        linkTitle.text = "Waiting for a computer…"
+        linkCountdown = uiScope.launch {
+            while (isActive && configStore.isLinkWindowOpen()) {
+                val left = configStore.linkWindowRemainingMs() / 1000L
+                linkSub.text =
+                    "Start nexus-agentd now · closes in %d:%02d".format(left / 60, left % 60)
+                delay(1_000L)
+            }
+            renderLinkState()
+        }
     }
 
     private fun renderPairingPreview(raw: String) {
@@ -335,7 +402,6 @@ class AgentsSettingsActivity : Activity() {
         configStore.saveAgentd(config, agentdEnabled.isChecked)
         agentdPairing.text.clear()
         agentdSummary.text = "Paired: ${config.name} · ${config.host}:${config.port}"
-        requestNotificationPermissionIfNeeded()
         if (test) {
             AgentsMonitorService.test(applicationContext, AgentProvider.CLAUDE)
             toast("Testing Claude Code connection…")
@@ -355,7 +421,6 @@ class AgentsSettingsActivity : Activity() {
         }
         val config = OpenClawConfig(host, checkNotNull(port), token)
         configStore.saveOpenClaw(config, openClawEnabled.isChecked)
-        requestNotificationPermissionIfNeeded()
         if (test) {
             AgentsMonitorService.test(applicationContext, AgentProvider.OPENCLAW)
             toast("Testing OpenClaw connection…")
@@ -382,6 +447,9 @@ class AgentsSettingsActivity : Activity() {
                 )
             }
         }
+        uiScope.launch {
+            AgentsRuntime.linkedMachines.collect { renderLinkState() }
+        }
     }
 
     private fun applyConnectionState(
@@ -402,31 +470,13 @@ class AgentsSettingsActivity : Activity() {
         )
     }
 
-    private fun openNotificationSettings() {
-        startActivity(
-            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName),
-        )
-    }
-
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(
-                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                NOTIFICATION_PERMISSION_REQUEST,
-            )
-        }
-    }
-
     private fun toast(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
     private companion object {
-        const val NOTIFICATION_PERMISSION_REQUEST = 81
+        const val AWAY_CLOSED = "AWAY FROM HOME ›"
+        const val AWAY_OPEN = "AWAY FROM HOME ⌄"
     }
 }
 

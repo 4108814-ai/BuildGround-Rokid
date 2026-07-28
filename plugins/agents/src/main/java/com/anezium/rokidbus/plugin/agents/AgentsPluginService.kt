@@ -4,8 +4,10 @@ import android.content.Intent
 import android.view.KeyEvent
 import com.anezium.rokidbus.client.plugin.NexusCard
 import com.anezium.rokidbus.client.plugin.NexusCardLine
+import com.anezium.rokidbus.client.plugin.NexusNotice
 import com.anezium.rokidbus.client.plugin.NexusPluginService
 import com.anezium.rokidbus.client.plugin.NexusRowTone
+import com.anezium.rokidbus.client.plugin.NexusSdkResult
 import com.anezium.rokidbus.client.plugin.NexusSurfaceSession
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
 import kotlinx.coroutines.CoroutineScope
@@ -22,9 +24,25 @@ import java.security.MessageDigest
 
 class AgentsPluginService : NexusPluginService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val configStore by lazy { AgentsConfigStore(applicationContext) }
+    private val attention by lazy {
+        AttentionDecisionEngine(
+            readFingerprint = configStore::notificationFingerprint,
+            writeFingerprint = configStore::saveNotificationFingerprint,
+        )
+    }
     private var surface: NexusSurfaceSession? = null
     private var surfaceShown = false
-    private var selectedIndex = 0
+
+    /**
+     * The wearer's place in the list is a session, not a row number: the board
+     * re-sorts itself under them as agents work, so a positional cursor would
+     * quietly drift onto a different session between looking and pressing.
+     */
+    private var selectedKey: String? = null
+
+    /** The session the last band was about, so a tap lands on it. */
+    private var noticeTargetKey: String? = null
 
     /** 0 keeps the conversation pinned to its newest message. */
     private var scrollBack = 0
@@ -40,30 +58,30 @@ class AgentsPluginService : NexusPluginService() {
             ) { _, _, _ -> Unit }
                 .collectLatest {
                     if (surfaceShown) render(show = false)
+                    raiseAttention()
                 }
         }
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_ATTENTION && !surfaceShown) {
-            mainExecutor.execute {
-                if (!surfaceShown &&
-                    AgentsRuntime.store.sessions.value.any {
-                        it.status == AgentStatus.NEEDS_YOU
-                    }
-                ) {
-                    // Whatever the wearer was reading, the alert takes the surface.
-                    leaveConversation()
-                    attemptAdoption()
-                }
+        serviceScope.launch {
+            AgentsRuntime.linkedMachines.collect { machineName ->
+                val client = nexusClient ?: return@collect
+                if (!client.supportsNoticeSurface) return@collect
+                client.showNotice(
+                    NexusNotice(
+                        title = "Computer linked",
+                        body = "$machineName · its sessions appear here".singleLine(
+                            NOTICE_BODY_CHARS,
+                        ),
+                        ttlMs = SHORT_TTL_MS,
+                    ),
+                )
             }
         }
-        return START_NOT_STICKY
     }
 
     override fun onNexusOpen() {
         surface = nexusSurfaceSession(SURFACE_ID)
         surfaceShown = true
+        AgentsRuntime.hudOpen = true
         render(show = true)
         ageTicker?.cancel()
         ageTicker = serviceScope.launch {
@@ -72,7 +90,7 @@ class AgentsPluginService : NexusPluginService() {
                 if (surfaceShown) render(show = false)
             }
         }
-        if (AgentsConfigStore(applicationContext).load().shouldMonitor) {
+        if (configStore.load().shouldMonitor) {
             AgentsMonitorService.reconcile(applicationContext)
         }
     }
@@ -81,6 +99,7 @@ class AgentsPluginService : NexusPluginService() {
         ageTicker?.cancel()
         ageTicker = null
         surfaceShown = false
+        AgentsRuntime.hudOpen = false
         leaveConversation()
         surface?.hide()
         surface = null
@@ -107,17 +126,92 @@ class AgentsPluginService : NexusPluginService() {
         }
     }
 
+    /** A tap on the band means "show me": open the board on the session that rang. */
+    override fun onNexusNoticeInput(event: NexusInputEvent) {
+        if (event.action != KeyEvent.ACTION_DOWN) return
+        if (event.keyCode != KeyEvent.KEYCODE_ENTER &&
+            event.keyCode != KeyEvent.KEYCODE_DPAD_CENTER
+        ) {
+            return
+        }
+        noticeTargetKey?.let { selectedKey = it }
+        if (!surfaceShown) attemptAdoption()
+    }
+
     override fun onDestroy() {
         serviceScope.cancel()
         surfaceShown = false
+        AgentsRuntime.hudOpen = false
         surface = null
         super.onDestroy()
     }
 
+    // ----------------------------------------------------------------- alerts
+
+    /**
+     * The phone stays silent by design, so this band is the only interruption
+     * Agents ever makes. It is raised at most one at a time — several sessions
+     * asking at once become one line, because a queue of bands is not an alert,
+     * it is a nuisance — and the fingerprint is only committed once the hub has
+     * actually taken the notice, so an alert that could not be delivered is
+     * offered again on the next update instead of being lost.
+     */
+    private fun raiseAttention() {
+        val client = nexusClient ?: return
+        if (!client.supportsNoticeSurface) return
+        val pending = attention.pending(AgentsRuntime.store.sessions.value)
+        if (pending.isEmpty()) return
+        val notice = if (pending.size == 1) singleNotice(pending.single()) else groupNotice(pending)
+        if (client.showNotice(notice) != NexusSdkResult.SENT) return
+        noticeTargetKey = pending.first().session.key
+        pending.forEach(attention::commit)
+    }
+
+    private fun singleNotice(item: AgentAttention): NexusNotice {
+        val session = item.session
+        return NexusNotice(
+            title = session.displayTitle.singleLine(NOTICE_TITLE_CHARS),
+            body = when (session.status) {
+                AgentStatus.ERROR ->
+                    (session.statusDetail ?: "stopped with an error").singleLine(NOTICE_BODY_CHARS)
+                else -> pendingSummary(session).singleLine(NOTICE_BODY_CHARS)
+            },
+            footer = "TAP open",
+            interactive = true,
+            ttlMs = if (session.status == AgentStatus.NEEDS_YOU) {
+                ATTENTION_TTL_MS
+            } else {
+                SHORT_TTL_MS
+            },
+        )
+    }
+
+    private fun groupNotice(items: List<AgentAttention>): NexusNotice {
+        val waiting = items.count { it.session.status == AgentStatus.NEEDS_YOU }
+        val failed = items.count { it.session.status == AgentStatus.ERROR }
+        val parts = listOfNotNull(
+            waiting.takeIf { it > 0 }?.let { "$it waiting for you" },
+            failed.takeIf { it > 0 }?.let { "$it failed" },
+        )
+        return NexusNotice(
+            title = "Agents",
+            body = parts.joinToString(" · ").singleLine(NOTICE_BODY_CHARS),
+            footer = "TAP open",
+            interactive = true,
+            ttlMs = ATTENTION_TTL_MS,
+        )
+    }
+
+    // -------------------------------------------------------------- selection
+
+    private fun selectedIndexIn(sessions: List<AgentSession>): Int =
+        sessions.indexOfFirst { it.key == selectedKey }.takeIf { it >= 0 } ?: 0
+
     private fun moveSelection(delta: Int) {
-        val count = AgentsRuntime.store.sessions.value.size
-        if (count > 0) {
-            selectedIndex = (selectedIndex + delta).coerceIn(0, count - 1)
+        val sessions = AgentsRuntime.store.sessions.value
+        if (sessions.isNotEmpty()) {
+            val next = (selectedIndexIn(sessions) + delta).coerceIn(0, sessions.lastIndex)
+            selectedKey = sessions[next].key
         }
         render(show = false)
     }
@@ -130,7 +224,8 @@ class AgentsPluginService : NexusPluginService() {
     }
 
     private fun enterConversation() {
-        val session = AgentsRuntime.store.sessions.value.getOrNull(selectedIndex) ?: return
+        val sessions = AgentsRuntime.store.sessions.value
+        val session = sessions.getOrNull(selectedIndexIn(sessions)) ?: return
         scrollBack = 0
         AgentsRuntime.store.openConversation(session)
         AgentsMonitorService.openDetail(applicationContext, session)
@@ -145,7 +240,7 @@ class AgentsPluginService : NexusPluginService() {
     }
 
     private fun attemptAdoption() {
-        val adoptionSurface = surface ?: nexusSurfaceSession(SURFACE_ID).also { surface = it }
+        val adoptionSurface = surface ?: nexusSurfaceSession(SURFACE_ID)?.also { surface = it }
         adoptionSurface?.showCard(buildCard())
     }
 
@@ -164,8 +259,9 @@ class AgentsPluginService : NexusPluginService() {
         val now = System.currentTimeMillis()
         val sessions = AgentsRuntime.store.sessions.value
         val connections = AgentsRuntime.store.connections.value
-        val config = AgentsConfigStore(applicationContext).load()
-        selectedIndex = selectedIndex.coerceIn(0, (sessions.size - 1).coerceAtLeast(0))
+        val config = configStore.load()
+        val selectedIndex = selectedIndexIn(sessions)
+        selectedKey = sessions.getOrNull(selectedIndex)?.key
 
         val alerts = buildList {
             if (config.agentdEnabled &&
@@ -397,13 +493,15 @@ class AgentsPluginService : NexusPluginService() {
     companion object {
         const val ACTION_MONITOR_ACTIVE =
             "com.anezium.rokidbus.plugin.agents.action.MONITOR_ACTIVE"
-        const val ACTION_ATTENTION =
-            "com.anezium.rokidbus.plugin.agents.action.ATTENTION"
         private const val SURFACE_ID = "agents"
         private const val VISIBLE_SESSION_ROWS = 6
         private const val MIN_SESSION_ROWS = 4
         private const val DETAIL_VISIBLE_ROWS = 5
         private const val AGE_TICK_MS = 60_000L
+        private const val NOTICE_TITLE_CHARS = 32
+        private const val NOTICE_BODY_CHARS = 240
+        private const val ATTENTION_TTL_MS = 12_000L
+        private const val SHORT_TTL_MS = 8_000L
         private val PERMISSION_PATTERN =
             Regex("permission to use ([\\w.-]+)", RegexOption.IGNORE_CASE)
     }

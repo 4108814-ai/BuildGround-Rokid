@@ -2,7 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
+        POST_NOTIFICATIONS is deliberately absent. Agents alerts belong on the
+        glasses, never in the phone's shade. Without the permission Android keeps
+        the monitoring foreground service running but never shows its notification,
+        which is exactly the behaviour we want.
+    -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />

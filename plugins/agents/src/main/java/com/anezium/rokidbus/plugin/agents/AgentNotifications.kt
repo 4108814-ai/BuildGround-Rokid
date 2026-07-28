@@ -1,95 +1,50 @@
 package com.anezium.rokidbus.plugin.agents
 
-import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 
+/**
+ * The one notification this plugin is allowed to build.
+ *
+ * Agents says nothing on the phone. Everything an agent needs from the wearer
+ * reaches them on the glasses, where they are already looking. The only object
+ * left here is the notification `startForeground` demands in exchange for a
+ * background connection — and since the app does not hold POST_NOTIFICATIONS,
+ * Android never shows it in the shade. It exists to satisfy an API, not to be
+ * read: the wearer sees the service only where Android insists, in the system's
+ * own running-apps panel.
+ */
 class AgentNotifications(private val context: Context) {
     fun createChannels() {
-        val manager = context.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(
-                SESSION_CHANNEL_ID,
-                "Agent sessions",
-                NotificationManager.IMPORTANCE_DEFAULT,
-            ),
-        )
-        manager.createNotificationChannel(
+        context.getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(
                 MONITOR_CHANNEL_ID,
                 "Agent monitor",
-                NotificationManager.IMPORTANCE_LOW,
+                NotificationManager.IMPORTANCE_MIN,
             ).apply {
                 setShowBadge(false)
                 setSound(null, null)
                 enableVibration(false)
+                enableLights(false)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_SECRET
             },
         )
     }
 
-    fun notifySession(decision: AgentNotificationDecision) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            return
-        }
-        val session = decision.session
-        val summary = when (session.status) {
-            AgentStatus.NEEDS_YOU -> session.pendingRequest?.summary
-            AgentStatus.ERROR -> session.statusDetail
-            else -> null
-        }?.singleLine(180)
-        val text = buildString {
-            append(session.status.wireValue.replace('_', ' '))
-            if (!summary.isNullOrBlank()) append(" · ").append(summary)
-        }
-        val notification = NotificationCompat.Builder(context, SESSION_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_agents)
-            .setContentTitle(session.displayTitle.singleLine(120))
-            .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setAutoCancel(true)
-            .setCategory(NotificationCompat.CATEGORY_STATUS)
-            .setContentIntent(settingsPendingIntent())
-            .build()
-        NotificationManagerCompat.from(context).notify(session.key.hashCode(), notification)
-    }
-
-    /** First contact from a computer: tell the wearer who just linked up. */
-    fun notifyMachineTrusted(machineName: String) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            return
-        }
-        val notification = NotificationCompat.Builder(context, SESSION_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_agents)
-            .setContentTitle("$machineName is now linked")
-            .setContentText("Its Claude Code sessions appear on your glasses")
-            .setCategory(NotificationCompat.CATEGORY_STATUS)
-            .setAutoCancel(true)
-            .setContentIntent(settingsPendingIntent())
-            .build()
-        NotificationManagerCompat.from(context).notify(machineName.hashCode(), notification)
-    }
-
-    fun monitorNotification(summary: String) =
+    fun monitorNotification(): android.app.Notification =
         NotificationCompat.Builder(context, MONITOR_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_agents)
             .setContentTitle("Nexus Agents")
-            .setContentText(summary)
+            .setContentText("Watching your agent sessions")
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setSilent(true)
+            .setShowWhen(false)
             .setOngoing(true)
-            .setOnlyAlertOnce(true)
             .setContentIntent(settingsPendingIntent())
             .build()
 
@@ -101,7 +56,6 @@ class AgentNotifications(private val context: Context) {
     )
 
     companion object {
-        const val SESSION_CHANNEL_ID = "nexus_agent_sessions"
         const val MONITOR_CHANNEL_ID = "nexus_agent_monitor"
     }
 }
