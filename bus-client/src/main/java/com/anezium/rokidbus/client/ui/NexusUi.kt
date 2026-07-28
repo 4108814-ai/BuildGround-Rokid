@@ -24,6 +24,7 @@ import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 /**
  * Phone-app widget kit and palette.
@@ -482,6 +483,51 @@ object NexusUi {
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
             )
             addView(rowSub(context, "REMOVE ›").apply { setTextColor(DANGER) })
+        }
+
+    /**
+     * The system switch, wearing our palette. A stock [Switch] paints itself with
+     * the OEM accent — blue on one phone, purple on another — which is the one
+     * control that gives a Nexus card away as a generic Android form.
+     */
+    fun switch(context: Context): Switch =
+        Switch(context).apply {
+            thumbTintList = ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                intArrayOf(GREEN, INK3),
+            )
+            trackTintList = ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                intArrayOf(GREEN_DIM, LINE),
+            )
+        }
+
+    /**
+     * Label on the left, switch on the right: the canonical toggle row. [sub]
+     * carries the consequence of flipping it, which most toggles need and most
+     * screens forget.
+     */
+    fun switchRow(
+        context: Context,
+        label: String,
+        sub: String? = null,
+        control: Switch = switch(context),
+    ): LinearLayout =
+        LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(
+                LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(rowTitle(context, label))
+                    if (sub != null) {
+                        addView(BusTheme.gap(context, 4))
+                        addView(rowSub(context, sub))
+                    }
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            addView(control)
         }
 
     fun field(context: Context, hintText: String): EditText =

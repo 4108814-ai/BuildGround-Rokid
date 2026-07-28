@@ -5,7 +5,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
-import android.content.res.ColorStateList
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -409,16 +408,8 @@ class PhotoSyncSettingsActivity : Activity() {
                     },
                 )
                 addView(
-                    Switch(this@PhotoSyncSettingsActivity).apply {
+                    NexusUi.switch(this@PhotoSyncSettingsActivity).apply {
                         deleteSwitch = this
-                        thumbTintList = ColorStateList(
-                            arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                            intArrayOf(NexusUi.GREEN, NexusUi.INK3),
-                        )
-                        trackTintList = ColorStateList(
-                            arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                            intArrayOf(NexusUi.GREEN_DIM, NexusUi.LINE),
-                        )
                         // Deleting the wearer's captures is the one destructive setting here, so
                         // it may only ever change from a real gesture. `isPressed` is too loose a
                         // guard for that — the flag below is set only while the screen mirrors a
