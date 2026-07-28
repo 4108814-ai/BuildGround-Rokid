@@ -37,7 +37,7 @@ class NexusGlyphArtTest {
         // bus-client and land on a HUD next to icons they did not draw.
         val pluginGlyphs = File("../plugins").walkTopDown()
             .filter { it.isFile && it.name.startsWith("nexus_glyph_") && it.extension == "xml" }
-            .filterNot { it.path.contains("/build/") }
+            .filterNot { it.invariantSeparatorsPath.contains("/build/") }
             .sortedBy { it.path }
             .toList()
         assertTrue("no plugin glyphs found", pluginGlyphs.isNotEmpty())

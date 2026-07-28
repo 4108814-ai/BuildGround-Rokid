@@ -38,6 +38,22 @@ dependencies {
     testImplementation("org.json:json:20240303")
 }
 
+// NexusGlyphArtTest and NexusGlyphWirePathTest read the plugin marks off disk,
+// outside anything Gradle knows this module depends on. Without this the tasks
+// stay UP-TO-DATE when a plugin's glyph changes, so the two tests that exist to
+// catch drift report green on a drifted tree. CI starts clean and would still
+// have caught it; this is what makes a local run tell the truth too.
+tasks.withType<Test>().configureEach {
+    inputs.files(
+        fileTree("../plugins") {
+            include("**/res/**/nexus_glyph*.xml")
+            exclude("**/build/**")
+        },
+    )
+        .withPropertyName("pluginGlyphSources")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
 afterEvaluate {
     publishing {
         publications {
