@@ -46,7 +46,13 @@ starts from a system that can already draw and address what it needs:
   the first consumer.
 - **Notice z-order.** `HudOverlayStack` owns the order (ambient first, most
   interruptive last); a visible notice is no longer buried by the launcher.
-  **Not verified on hardware** — window z-order is not unit-testable.
+  **Verified on hardware** (1.0.47, 2026-07-28): with the band up, opening the
+  launcher over it leaves it visible for its full TTL. Worth recording how,
+  because the first two attempts proved nothing — the band has an 8 s life and
+  both runs opened the launcher after it had already expired, so the two were
+  never on screen together. The launcher is reached by triple-tap, which the
+  input chain handles ahead of everything else; reaching for BACK instead
+  dismisses the notice and makes the case untestable.
 
 ## The activity object
 
