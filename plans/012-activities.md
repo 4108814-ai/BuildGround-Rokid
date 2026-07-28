@@ -1,6 +1,7 @@
 # Plan 012 — Activities (unified live-process layer)
 
-Status: spec, decided except the screen-awake question. Depends on 010 (pin
+Status: spec fully decided; the layer is built and not yet run on hardware.
+Depends on 010 (pin
 surface, shipped), 011 (notice surface, banner mechanics and window machinery),
 and the glyph foundations landed on `plan-012-foundations`.
 
@@ -343,6 +344,8 @@ they are also the case for corners rather than a single slot.
   `SurfaceController` active-surface logic, `RingSurfaceInputPolicy`,
   `RingFocusCoordinator`, or the back-failsafe.
 - MUST NOT claim BACK or take window focus.
+- MUST NOT keep the screen on. Waking it is allowed under the hub's cap; holding
+  it awake is not, for any kind.
 - MUST NOT add a user grant / descriptor capability or bump the plugin API
   version.
 - MUST NOT touch self-arm or camera code beyond the existing overlay-visibility
@@ -381,21 +384,27 @@ they are also the case for corners rather than a single slot.
   the pin keeps its corner and an activity takes a free one. Shipped pin
   behaviour is unchanged.
 
-## Still open
+## Waking the display — decided
 
-- **May an activity wake the display?** Every HUD kind is currently forbidden
-  from keeping the screen on, and this plan inherits that rule. Turn-by-turn
-  navigation is the first case where it is arguably wrong, and the premise is
-  unverified: Hi Rokid's own notifications *appear* to wake the display, which
-  would make our rule self-imposed rather than a platform constraint. **Needs a
-  hardware observation before it can be decided.**
+**An activity may wake the display, under a cap it does not control.**
 
-  Proposal if confirmed: a per-activity `wakeDisplay` flag, hub-capped (at most
-  one wake per 30 s, and only on a `significant` update, so a maneuver change
-  qualifies and a distance countdown does not), plus a per-plugin wearer
-  setting. Not a blanket permission — a parcel tracker relighting the display
-  every three minutes while the wearer walks is not a missed notification, it is
-  something blinking in their eye.
+The premise was checked on hardware (2026-07-28): Hi Rokid's own notifications
+do light the screen. Our rule against it was therefore self-imposed, not a
+platform constraint — which is the only reason it was worth reopening. Every
+other HUD kind keeps the rule; an activity is the one case with a real argument,
+because a maneuver the wearer cannot see is a maneuver missed.
+
+- A per-activity `wakeDisplay` flag, requested on start.
+- Hub-capped: **at most one wake per 30 s**, and **only on a `significant`
+  update**. A maneuver change qualifies; a distance countdown does not. The cap
+  lives in the hub, so a plugin cannot raise it by asking more often — the
+  throttle is logged like the flare throttle.
+- A per-plugin wearer setting, off being always available.
+
+Not a blanket permission, and deliberately not a `FLAG_KEEP_SCREEN_ON`: a parcel
+tracker relighting the display every three minutes while the wearer walks is not
+a missed notification, it is something blinking in their eye. Keeping the screen
+on outright stays forbidden for every kind, activities included.
 
 ## Deferred to plan 014
 
