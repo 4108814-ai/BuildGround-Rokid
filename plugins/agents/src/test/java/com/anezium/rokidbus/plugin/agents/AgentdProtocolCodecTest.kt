@@ -18,6 +18,66 @@ class AgentdProtocolCodecTest {
     }
 
     @Test
+    fun theLinkCarriesMoreThanOneHarness() {
+        val codec = AgentdProtocolCodec()
+        val snapshot = codec.parse(
+            """{"type":"snapshot","seq":1,"sessions":[
+                {"id":"s1","provider":"claude","status":"idle"},
+                {"id":"s2","provider":"codex","status":"working"},
+                {"id":"s3","provider":"nonsense","status":"idle"},
+                {"id":"s4","status":"idle"}
+            ]}""",
+        ) as AgentdAction.Snapshot
+
+        // An unknown harness is dropped; a session with no provider at all comes
+        // from a daemon older than this plugin, which only ever meant Claude.
+        assertEquals(
+            listOf(
+                "s1" to AgentProvider.CLAUDE,
+                "s2" to AgentProvider.CODEX,
+                "s4" to AgentProvider.CLAUDE,
+            ),
+            snapshot.sessions.map { it.id to it.provider },
+        )
+
+        val approval = codec.parse(
+            """{"type":"approval_request","v":1,"requestId":"r1","provider":"codex",
+                "sessionId":"s2","tool":"shell","summary":"npm test"}""",
+        ) as AgentdAction.ApprovalRequested
+        assertEquals(AgentProvider.CODEX, approval.approval.provider)
+        assertEquals("codex:s2", approval.approval.sessionKey)
+
+        val removed = codec.parse(
+            """{"type":"session_removed","seq":2,"provider":"codex","sessionId":"s2"}""",
+        ) as AgentdAction.Removed
+        assertEquals(AgentProvider.CODEX, removed.provider)
+    }
+
+    @Test
+    fun sameSessionIdInTwoHarnessesStaysTwoSessions() {
+        val codec = AgentdProtocolCodec()
+        val snapshot = codec.parse(
+            """{"type":"snapshot","seq":1,"sessions":[
+                {"id":"same","provider":"claude","status":"idle"},
+                {"id":"same","provider":"codex","status":"idle"}
+            ]}""",
+        ) as AgentdAction.Snapshot
+        assertEquals(2, snapshot.sessions.size)
+
+        // Detail is only accepted for a session the codec has seen, and seeing
+        // one harness's id must not vouch for the other's.
+        val detail = codec.parse(
+            """{"type":"detail","provider":"codex","sessionId":"same","messages":[{"role":"user","text":"hi"}]}""",
+        ) as AgentdAction.Detail
+        assertEquals(AgentProvider.CODEX, detail.provider)
+        assertTrue(
+            codec.parse(
+                """{"type":"detail","provider":"openclaw","sessionId":"same","messages":[]}""",
+            ) is AgentdAction.Ignore,
+        )
+    }
+
+    @Test
     fun snapshotUpsertAndRemovedAreParsed() {
         val codec = AgentdProtocolCodec()
         val helloAck = codec.parse(

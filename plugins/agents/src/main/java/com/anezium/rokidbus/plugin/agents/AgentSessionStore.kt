@@ -81,6 +81,26 @@ class AgentSessionStore {
         publish(nowMs)
     }
 
+    /**
+     * One snapshot, several harnesses. The daemon link speaks for every provider
+     * it monitors, so its snapshot is authoritative for all of them at once —
+     * replacing them one at a time would leave a harness the daemon just stopped
+     * watching sitting on the board forever.
+     */
+    @Synchronized
+    fun replaceLinkSessions(
+        providers: Set<AgentProvider>,
+        sessions: List<AgentSession>,
+        nowMs: Long = System.currentTimeMillis(),
+    ) {
+        providers.forEach { provider ->
+            val replacement = linkedMapOf<String, AgentSession>()
+            sessions.filter { it.provider == provider }.forEach { replacement[it.id] = it }
+            providerSessions[provider] = replacement
+        }
+        publish(nowMs)
+    }
+
     @Synchronized
     fun upsert(session: AgentSession, nowMs: Long = System.currentTimeMillis()) {
         providerSessions.getValue(session.provider)[session.id] = session
@@ -141,8 +161,8 @@ class AgentSessionStore {
      * the wearer decisions that can no longer be delivered.
      */
     @Synchronized
-    fun clearApprovals(provider: AgentProvider) {
-        _approvals.value = _approvals.value.filterNot { it.provider == provider }
+    fun clearApprovals(providers: Set<AgentProvider>) {
+        _approvals.value = _approvals.value.filterNot { it.provider in providers }
     }
 
     fun approvalFor(sessionKey: String): AgentApproval? =

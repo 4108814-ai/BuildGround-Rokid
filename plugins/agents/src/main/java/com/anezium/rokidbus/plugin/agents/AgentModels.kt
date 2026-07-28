@@ -5,7 +5,21 @@ enum class AgentProvider(
     val marker: String,
 ) {
     CLAUDE("claude", "CC"),
+    CODEX("codex", "CX"),
     OPENCLAW("openclaw", "OC"),
+    ;
+
+    companion object {
+        fun fromWire(value: String?): AgentProvider? =
+            values().firstOrNull { it.wireValue == value }
+
+        /**
+         * The providers the daemon link speaks for. A snapshot from it is
+         * authoritative for all of them at once, while OpenClaw arrives on its
+         * own connection and must never be touched by one.
+         */
+        val AGENTD_PROVIDERS = setOf(CLAUDE, CODEX)
+    }
 }
 
 enum class AgentStatus(val wireValue: String) {

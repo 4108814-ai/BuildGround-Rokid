@@ -295,7 +295,9 @@ class AgentsMonitorService : Service() {
 
         fun test(context: Context, provider: AgentProvider) {
             val action = when (provider) {
-                AgentProvider.CLAUDE -> ACTION_TEST_AGENTD
+                // Codex arrives over the daemon's link, so testing it is testing
+                // the daemon: there is no second connection to prove.
+                AgentProvider.CLAUDE, AgentProvider.CODEX -> ACTION_TEST_AGENTD
                 AgentProvider.OPENCLAW -> ACTION_TEST_OPENCLAW
             }
             ContextCompat.startForegroundService(

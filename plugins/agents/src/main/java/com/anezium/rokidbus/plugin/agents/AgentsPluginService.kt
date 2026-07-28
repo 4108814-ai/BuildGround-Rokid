@@ -638,6 +638,9 @@ class AgentsPluginService : NexusPluginService() {
 }
 
 private fun AgentProvider.enabledIn(config: AgentsConfig): Boolean = when (this) {
-    AgentProvider.CLAUDE -> config.agentdEnabled
+    // Codex rides the daemon link rather than a connection of its own, so it is
+    // on exactly when the daemon is. It gets its own switch when the settings
+    // screen learns to offer a choice of harness.
+    AgentProvider.CLAUDE, AgentProvider.CODEX -> config.agentdEnabled
     AgentProvider.OPENCLAW -> config.openClawEnabled
 }

@@ -60,8 +60,10 @@ class AgentdClient(
         loopJob = null
         sockets.advance().previous?.cancel()
         store.setConnection(AgentProvider.CLAUDE, ConnectionState.DISCONNECTED)
-        store.clearApprovals(AgentProvider.CLAUDE)
-        if (clearSessions) store.replaceProvider(AgentProvider.CLAUDE, emptyList())
+        store.clearApprovals(AgentProvider.AGENTD_PROVIDERS)
+        if (clearSessions) {
+            store.replaceLinkSessions(AgentProvider.AGENTD_PROVIDERS, emptyList())
+        }
     }
 
     private suspend fun runConnectionLoop(config: AgentdConfig, generation: Long) {
@@ -156,7 +158,10 @@ class AgentdClient(
                     is AgentdAction.Snapshot -> {
                         if (!connected.get()) return
                         deadlines.clear(DEADLINE_SNAPSHOT)
-                        store.replaceProvider(AgentProvider.CLAUDE, action.sessions)
+                        store.replaceLinkSessions(
+                            AgentProvider.AGENTD_PROVIDERS,
+                            action.sessions,
+                        )
                         // A fresh connection knows nothing of the open conversation.
                         openSessionId?.let { webSocket.send(AgentdProtocolCodec.detailOpen(it)) }
                     }
@@ -165,13 +170,13 @@ class AgentdClient(
                     }
                     is AgentdAction.Removed -> {
                         if (connected.get()) {
-                            store.remove(AgentProvider.CLAUDE, action.sessionId)
+                            store.remove(action.provider, action.sessionId)
                         }
                     }
                     is AgentdAction.Detail -> {
                         if (connected.get()) {
                             store.setConversation(
-                                AgentProvider.CLAUDE,
+                                action.provider,
                                 action.sessionId,
                                 action.messages,
                             )
@@ -180,7 +185,7 @@ class AgentdClient(
                     is AgentdAction.DetailAppend -> {
                         if (connected.get()) {
                             store.appendConversation(
-                                AgentProvider.CLAUDE,
+                                action.provider,
                                 action.sessionId,
                                 action.message,
                             )

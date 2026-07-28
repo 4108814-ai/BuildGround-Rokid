@@ -62,8 +62,8 @@ class AgentdLinkServer(
             client.also { client = null }
         }?.close()
         store.setConnection(AgentProvider.CLAUDE, ConnectionState.DISCONNECTED)
-        store.clearApprovals(AgentProvider.CLAUDE)
-        if (clearSessions) store.replaceProvider(AgentProvider.CLAUDE, emptyList())
+        store.clearApprovals(AgentProvider.AGENTD_PROVIDERS)
+        if (clearSessions) store.replaceLinkSessions(AgentProvider.AGENTD_PROVIDERS, emptyList())
     }
 
     fun openDetail(sessionId: String) {
@@ -173,8 +173,8 @@ class AgentdLinkServer(
                     ConnectionState.CONNECTING,
                     "waiting for a computer",
                 )
-                store.replaceProvider(AgentProvider.CLAUDE, emptyList())
-                store.clearApprovals(AgentProvider.CLAUDE)
+                store.replaceLinkSessions(AgentProvider.AGENTD_PROVIDERS, emptyList())
+                store.clearApprovals(AgentProvider.AGENTD_PROVIDERS)
             }
         }
     }
@@ -195,13 +195,13 @@ class AgentdLinkServer(
     ) {
         when (action) {
             is AgentdAction.Snapshot ->
-                store.replaceProvider(AgentProvider.CLAUDE, action.sessions)
+                store.replaceLinkSessions(AgentProvider.AGENTD_PROVIDERS, action.sessions)
             is AgentdAction.Upsert -> store.upsert(action.session)
-            is AgentdAction.Removed -> store.remove(AgentProvider.CLAUDE, action.sessionId)
+            is AgentdAction.Removed -> store.remove(action.provider, action.sessionId)
             is AgentdAction.Detail ->
-                store.setConversation(AgentProvider.CLAUDE, action.sessionId, action.messages)
+                store.setConversation(action.provider, action.sessionId, action.messages)
             is AgentdAction.DetailAppend ->
-                store.appendConversation(AgentProvider.CLAUDE, action.sessionId, action.message)
+                store.appendConversation(action.provider, action.sessionId, action.message)
             is AgentdAction.ApprovalRequested -> store.upsertApproval(action.approval)
             is AgentdAction.ApprovalResolved -> store.resolveApproval(action.requestId)
             is AgentdAction.Send -> connection.send(action.text)

@@ -13,9 +13,23 @@ sealed interface AgentdAction {
     data class HelloAcknowledged(val machineName: String?) : AgentdAction
     data class Snapshot(val seq: Long, val sessions: List<AgentSession>) : AgentdAction
     data class Upsert(val seq: Long, val session: AgentSession) : AgentdAction
-    data class Removed(val seq: Long, val sessionId: String) : AgentdAction
-    data class Detail(val sessionId: String, val messages: List<AgentMessage>) : AgentdAction
-    data class DetailAppend(val sessionId: String, val message: AgentMessage) : AgentdAction
+    data class Removed(
+        val seq: Long,
+        val provider: AgentProvider,
+        val sessionId: String,
+    ) : AgentdAction
+
+    data class Detail(
+        val provider: AgentProvider,
+        val sessionId: String,
+        val messages: List<AgentMessage>,
+    ) : AgentdAction
+
+    data class DetailAppend(
+        val provider: AgentProvider,
+        val sessionId: String,
+        val message: AgentMessage,
+    ) : AgentdAction
     data class ApprovalRequested(val approval: AgentApproval) : AgentdAction
     data class ApprovalResolved(val requestId: String) : AgentdAction
     data class Send(val text: String) : AgentdAction
@@ -85,7 +99,7 @@ class AgentdProtocolCodec {
                 val sessionsJson = json.opt("sessions") as? JSONArray ?: return gapAction()
                 val sessions = sessionsJson.toSessions()
                 sessionIds.clear()
-                sessions.mapTo(sessionIds, AgentSession::id)
+                sessions.mapTo(sessionIds) { sessionKey(it.provider, it.id) }
                 lastSeq = seq
                 awaitingSnapshot = false
                 refreshRequested = false
@@ -97,52 +111,59 @@ class AgentdProtocolCodec {
                 val session = json.optJSONObject("session")?.toAgentSession()
                     ?: return AgentdAction.Ignore
                 lastSeq = seq
-                if (session.id !in sessionIds && sessionIds.size >= MAX_SESSIONS_PER_PROVIDER) {
+                val key = sessionKey(session.provider, session.id)
+                if (key !in sessionIds && sessionIds.size >= MAX_SESSIONS_PER_PROVIDER) {
                     return AgentdAction.Ignore
                 }
-                sessionIds += session.id
+                sessionIds += key
                 AgentdAction.Upsert(seq, session)
             }
             "session_removed" -> {
                 val seq = json.longOrNull("seq") ?: return AgentdAction.Ignore
                 if (!acceptDelta(seq)) return gapAction()
+                val provider = json.linkProvider() ?: return AgentdAction.Ignore
                 val sessionId = json.identifierOrNull("sessionId") ?: return AgentdAction.Ignore
                 lastSeq = seq
-                sessionIds -= sessionId
-                detailMessageCounts.remove(sessionId)
-                AgentdAction.Removed(seq, sessionId)
+                sessionIds -= sessionKey(provider, sessionId)
+                detailMessageCounts.remove(sessionKey(provider, sessionId))
+                AgentdAction.Removed(seq, provider, sessionId)
             }
             // Conversation payloads carry no seq: they are a reply to the
             // wearer opening a session, never part of the session stream.
             "detail" -> {
+                val provider = json.linkProvider() ?: return AgentdAction.Ignore
                 val sessionId = json.identifierOrNull("sessionId")
                     ?: return AgentdAction.Ignore
-                if (sessionId !in sessionIds) return AgentdAction.Ignore
+                val key = sessionKey(provider, sessionId)
+                if (key !in sessionIds) return AgentdAction.Ignore
                 val messagesJson = json.opt("messages") as? JSONArray
                     ?: return AgentdAction.Ignore
                 val messages = messagesJson.toMessages()
-                detailMessageCounts[sessionId] = messages.size
-                AgentdAction.Detail(sessionId, messages)
+                detailMessageCounts[key] = messages.size
+                AgentdAction.Detail(provider, sessionId, messages)
             }
             "detail_append" -> {
+                val provider = json.linkProvider() ?: return AgentdAction.Ignore
                 val sessionId = json.identifierOrNull("sessionId")
                     ?: return AgentdAction.Ignore
-                if (sessionId !in sessionIds) return AgentdAction.Ignore
-                val messageCount = detailMessageCounts[sessionId]
+                val key = sessionKey(provider, sessionId)
+                if (key !in sessionIds) return AgentdAction.Ignore
+                val messageCount = detailMessageCounts[key]
                     ?: return AgentdAction.Ignore
                 if (messageCount >= MAX_DETAIL_MESSAGES) {
                     return AgentdAction.Ignore
                 }
                 val message = json.optJSONObject("message")?.toAgentMessage()
                     ?: return AgentdAction.Ignore
-                detailMessageCounts[sessionId] = messageCount + 1
-                AgentdAction.DetailAppend(sessionId, message)
+                detailMessageCounts[key] = messageCount + 1
+                AgentdAction.DetailAppend(provider, sessionId, message)
             }
             // Approvals carry no seq either: a held tool call is answered by its
             // own id, and must survive a gap in the session stream.
             "approval_request" -> {
                 if (json.intOrNull("v") != 1) return AgentdAction.Ignore
                 val requestId = json.identifierOrNull("requestId") ?: return AgentdAction.Ignore
+                val provider = json.linkProvider() ?: return AgentdAction.Ignore
                 val sessionId = json.identifierOrNull("sessionId") ?: return AgentdAction.Ignore
                 val summary = json.nullableString("summary", MAX_HUD_LABEL_CHARS)
                     ?: return AgentdAction.Ignore
@@ -150,7 +171,7 @@ class AgentdProtocolCodec {
                     AgentApproval(
                         requestId = requestId,
                         sessionId = sessionId,
-                        provider = AgentProvider.CLAUDE,
+                        provider = provider,
                         tool = json.nullableString("tool", MAX_WIRE_TYPE_CHARS).orEmpty(),
                         summary = summary,
                         detail = json.nullableString("detail", MAX_HUD_TEXT_CHARS),
@@ -218,7 +239,21 @@ class AgentdProtocolCodec {
 
         const val REJECT_UNKNOWN_MACHINE = "unknown_machine"
         const val REJECT_BAD_TOKEN = "bad_token"
+
+        /** Ids are only unique within a harness, so nothing is tracked without one. */
+        internal fun sessionKey(provider: AgentProvider, sessionId: String): String =
+            "${provider.wireValue}:$sessionId"
     }
+}
+
+/**
+ * Which harness a daemon frame is about. Absent means Claude: that is what the
+ * link carried before it learned to speak for anything else, and an old daemon
+ * must keep working against a new plugin.
+ */
+private fun JSONObject.linkProvider(): AgentProvider? {
+    val raw = nullableString("provider", MAX_WIRE_TYPE_CHARS) ?: return AgentProvider.CLAUDE
+    return AgentProvider.fromWire(raw)?.takeIf { it in AgentProvider.AGENTD_PROVIDERS }
 }
 
 private fun JSONArray?.toMessages(): List<AgentMessage> {
@@ -254,9 +289,9 @@ private fun JSONArray?.toSessions(): List<AgentSession> {
 
 private fun JSONObject.toAgentSession(): AgentSession? {
     val id = identifierOrNull("id") ?: return null
-    if (nullableString("provider", MAX_WIRE_TYPE_CHARS) != AgentProvider.CLAUDE.wireValue) {
-        return null
-    }
+    // The daemon speaks for more than one harness now. An absent provider is a
+    // daemon older than this plugin, and it only ever had Claude to talk about.
+    val provider = linkProvider() ?: return null
     val wireStatus = nullableString("status", MAX_WIRE_TYPE_CHARS) ?: return null
     val status = AgentStatus.values().firstOrNull { it.wireValue == wireStatus } ?: AgentStatus.IDLE
     val turnJson = optJSONObject("turn")
@@ -271,7 +306,7 @@ private fun JSONObject.toAgentSession(): AgentSession? {
     }
     return AgentSession(
         id = id,
-        provider = AgentProvider.CLAUDE,
+        provider = provider,
         machineId = identifierOrNull("machineId"),
         machineName = nullableString("machineName", MAX_HUD_LABEL_CHARS),
         title = nullableString("title", MAX_HUD_LABEL_CHARS),

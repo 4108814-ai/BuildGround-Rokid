@@ -61,7 +61,7 @@ class AgentdLinkSecurityTest {
         )
         assertEquals(
             AgentdInboundDecision.ProtocolRejected,
-            gate.receive(AgentdAction.Removed(1L, "s1")),
+            gate.receive(AgentdAction.Removed(1L, AgentProvider.CLAUDE, "s1")),
         )
         assertEquals(1, calls)
     }
