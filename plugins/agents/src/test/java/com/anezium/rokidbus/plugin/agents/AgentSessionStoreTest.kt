@@ -38,7 +38,7 @@ class AgentSessionStoreTest {
         )
 
         assertEquals(
-            listOf("need-old", "need-new", "working-new", "working-old", "idle", "error"),
+            listOf("need-old", "need-new", "error", "working-new", "working-old", "idle"),
             store.sessions.value.map(AgentSession::id),
         )
     }
@@ -69,6 +69,28 @@ class AgentSessionStoreTest {
 
         assertFalse(store.sessions.value.any { it.id == "expired" })
         assertEquals(listOf("kept", "unknown-time"), store.sessions.value.map(AgentSession::id))
+    }
+
+    @Test
+    fun pruneForgetsExpiredSessionsInsteadOfOnlyHidingThem() {
+        val now = 2_000_000L
+        val store = AgentSessionStore()
+        val expired = session(
+            "expired",
+            AgentProvider.CLAUDE,
+            AgentStatus.DONE,
+            activity = now - AgentSessionStore.DONE_RETENTION_MS - 1,
+        )
+        store.replaceProvider(
+            AgentProvider.CLAUDE,
+            listOf(expired, session("live", AgentProvider.CLAUDE, AgentStatus.WORKING, activity = now)),
+            now,
+        )
+
+        assertEquals(setOf(expired.key), store.prune(now))
+        // Gone for good: pruning again has nothing left to drop.
+        assertEquals(emptySet<String>(), store.prune(now))
+        assertEquals(listOf("live"), store.sessions.value.map(AgentSession::id))
     }
 
     private fun session(

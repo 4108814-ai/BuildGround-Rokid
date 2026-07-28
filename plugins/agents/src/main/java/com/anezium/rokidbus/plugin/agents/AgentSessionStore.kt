@@ -1,7 +1,11 @@
 package com.anezium.rokidbus.plugin.agents
 
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 class AgentSessionStore {
@@ -91,9 +95,27 @@ class AgentSessionStore {
         publish(nowMs)
     }
 
+    /**
+     * Drops what has aged out for good. Hiding an expired session from the
+     * published list was never enough: it stayed in [providerSessions] for the
+     * lifetime of the process, so a long-lived daemon churning through sessions
+     * grew the map forever and made every publish a little slower.
+     *
+     * Returns the keys that were let go, so callers can forget what they were
+     * remembering about them.
+     */
     @Synchronized
-    fun prune(nowMs: Long = System.currentTimeMillis()) {
+    fun prune(nowMs: Long = System.currentTimeMillis()): Set<String> {
+        val dropped = mutableSetOf<String>()
+        providerSessions.values.forEach { sessions ->
+            val expired = sessions.values.filter { it.hasExpired(nowMs) }
+            expired.forEach { session ->
+                sessions.remove(session.id)
+                dropped += session.key
+            }
+        }
         publish(nowMs)
+        return dropped
     }
 
     @Synchronized
@@ -111,25 +133,29 @@ class AgentSessionStore {
         val retained = providerSessions.values
             .asSequence()
             .flatMap { it.values.asSequence() }
-            .filterNot { session ->
-                session.status == AgentStatus.DONE &&
-                    session.lastActivityAt?.let { activity ->
-                        nowMs >= activity && nowMs - activity > DONE_RETENTION_MS
-                    } == true
-            }
+            .filterNot { it.hasExpired(nowMs) }
             .sortedWith(SESSION_COMPARATOR)
             .toList()
         _sessions.value = retained
     }
 
+    private fun AgentSession.hasExpired(nowMs: Long): Boolean =
+        status == AgentStatus.DONE &&
+            lastActivityAt?.let { nowMs >= it && nowMs - it > DONE_RETENTION_MS } == true
+
     companion object {
         const val DONE_RETENTION_MS = 30 * 60 * 1_000L
 
+        /**
+         * Attention first. A failed session used to sort below idle ones while
+         * being rendered in alert and raising a band — the order contradicted
+         * everything else the product said about it.
+         */
         private val STATUS_RANK = mapOf(
             AgentStatus.NEEDS_YOU to 0,
-            AgentStatus.WORKING to 1,
-            AgentStatus.IDLE to 2,
-            AgentStatus.ERROR to 3,
+            AgentStatus.ERROR to 1,
+            AgentStatus.WORKING to 2,
+            AgentStatus.IDLE to 3,
             AgentStatus.DONE to 4,
         )
 
@@ -164,4 +190,31 @@ class AgentSessionStore {
 
 object AgentsRuntime {
     val store = AgentSessionStore()
+
+    /**
+     * True while the hub has the plugin's surface open. The monitor service
+     * stops the plugin service when it has nothing left to watch, and doing that
+     * under a surface the wearer is reading tears down the bus client outside
+     * the hub's own open/close lifecycle.
+     */
+    @Volatile
+    var hudOpen: Boolean = false
+
+    private val _linkedMachines = MutableSharedFlow<String>(
+        replay = 1,
+        extraBufferCapacity = 4,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /**
+     * A computer just linked itself for the first time. The connection is owned
+     * by the monitor service and the glasses are owned by the plugin service, so
+     * this is how the news crosses: replayed once, because the link can land
+     * before the plugin service is listening.
+     */
+    val linkedMachines: SharedFlow<String> = _linkedMachines.asSharedFlow()
+
+    fun announceLinkedMachine(machineName: String) {
+        _linkedMachines.tryEmit(machineName)
+    }
 }
