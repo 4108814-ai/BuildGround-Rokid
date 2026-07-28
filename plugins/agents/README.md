@@ -52,6 +52,22 @@ selection is held **by session key, not row index**: the board re-sorts itself
 as agents work, so a positional cursor would drift onto a different session
 between looking and pressing.
 
+### Answering a held tool call
+
+Claude Code's `PreToolUse` hook blocks while it waits, and `nexus-agentd` offers
+that wait to the phone. A session with a live request shows what it wants on the
+board; ENTER opens the question rather than the transcript, with the command in
+the agent's own words and two answers — Allow and Deny. There is no *always
+allow*, no third path, and nothing that turns one glance into a standing
+permission.
+
+ENTER is ignored for the first 600 ms of that screen: the touchpad's double tap
+is two ENTER downs a few dozen milliseconds apart, and the second would
+otherwise land on a decision the wearer had only just opened.
+
+If nobody answers, the daemon's timeout expires and Claude asks on the computer
+as it always would. Being away means being asked later, never being decided for.
+
 A session that starts asking for the wearer raises an **interactive notice** —
 the band from hub 1.0.46 — rather than fighting for the whole surface. Several
 sessions asking at once become one band, and a tap on it opens the board on the
