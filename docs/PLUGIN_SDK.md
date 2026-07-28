@@ -429,7 +429,8 @@ what it is doing on the same band:
 override fun onNexusNoticeAction(id: String) {
     if (id != "reply") return
     // The row is already gone from the band; from here it is a display.
-    nexusClient?.updateNotice(NexusNoticeUpdate(body = "Listening…"))
+    // Empty string clears the footer — the "scroll to choose" hint is spent.
+    nexusClient?.updateNotice(NexusNoticeUpdate(body = "Listening…", footer = ""))
     startDictation(
         onPartial = { text -> nexusClient?.updateNotice(NexusNoticeUpdate(body = text)) },
         onSent = {
@@ -440,8 +441,11 @@ override fun onNexusNoticeAction(id: String) {
 }
 ```
 
-`updateNotice` has patch semantics — a field you set replaces its value, one you
-leave out keeps it, an empty string clears it. Actions are the exception:
+`updateNotice` has patch semantics, and they hold all the way to the glasses:
+**null keeps a field, an empty string clears it**, and a field you leave out is
+one the wearer keeps seeing. The hub relays your patch rather than its own copy
+of the band, so `footer = ""` really does take the footer off the band and
+`interactive = false` really does stop it asking. Actions are the exception:
 passing a non-empty list replaces the whole row, while an empty list leaves the
 current row alone rather than clearing it. The wearer's selection follows its
 action id across a replacement, so reordering your answers does not move their

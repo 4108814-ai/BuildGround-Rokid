@@ -11,6 +11,12 @@ import java.util.concurrent.atomic.AtomicLong
 internal data class CanonicalPhoneNotice(
     val ownerPluginId: String,
     val content: NoticeSurfaceContent,
+    /**
+     * What the glasses are sent for the event that produced this notice: full
+     * state for a show, the owner's stamped patch for an update. The glasses
+     * validate either with the same reader, and only the patch form can carry a
+     * clear -- so only the patch form is honest about an update.
+     */
     val payload: JSONObject,
     /** Restarted by every accepted update. */
     val ttlDeadlineMs: Long,
@@ -142,7 +148,16 @@ internal class PhoneNoticeState(
         }
         val notice = current.copy(
             content = patched,
-            payload = normalized(surfaceId, ownerPluginId, patched, answered),
+            // The owner's patch, stamped, rather than a re-serialisation of the
+            // canonical state above. The phone still holds the authority -- the
+            // patch was validated, applied, and could have been rejected before
+            // reaching here -- but what travels is what the owner actually said,
+            // so a field they cleared arrives as a cleared field instead of an
+            // absent one the glasses would read as "leave it alone".
+            payload = stamped(
+                NoticeSurfaceContract.toUpdatePayload(surfaceId, patch.patch),
+                ownerPluginId,
+            ),
             ttlDeadlineMs = now + patched.ttlMs,
             answered = answered,
         )
@@ -230,29 +245,24 @@ internal class PhoneNoticeState(
     fun expiryDeadlineMs(): Long? = active?.deadlineMs
 
     /**
-     * The canonical payload the glasses receive.
-     *
-     * An answered notice is sent with neither its actions nor its interactive
-     * flag. The glasses apply an update as a patch, and a patch carrying either
-     * of those fields is the owner asking again -- so echoing them back on an
-     * ordinary text update would reopen, under the wearer, a question they have
-     * already answered. Both are omitted when empty or false by [toPayload], so
-     * stripping them here is simply their absence from the patch.
+     * Full state for a show. A show is always a fresh, unanswered question, so
+     * there is nothing here to strip: what the owner sent is what the glasses
+     * get.
      */
     private fun normalized(
         surfaceId: String,
         ownerPluginId: String,
         content: NoticeSurfaceContent,
-        answered: Boolean = false,
-    ): JSONObject = NoticeSurfaceContract
-        .toPayload(
-            surfaceId,
-            if (answered) {
-                content.copy(interactive = false, actions = emptyList())
-            } else {
-                content
-            },
-        )
+    ): JSONObject = stamped(
+        NoticeSurfaceContract.toPayload(surfaceId, content),
+        ownerPluginId,
+    )
+
+    /**
+     * The hub's own fields, added to whatever is going out. A plugin can supply
+     * neither a trusted owner nor a sequence.
+     */
+    private fun stamped(payload: JSONObject, ownerPluginId: String): JSONObject = payload
         .put("localSurfaceId", NoticeSurfaceContract.LOCAL_SURFACE_ID)
         .put("ownerPluginId", ownerPluginId)
         .put("seq", sequence.incrementAndGet())

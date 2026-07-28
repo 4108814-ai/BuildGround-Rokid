@@ -252,6 +252,11 @@ object NoticeSurfaceContract {
         )
     }
 
+    /**
+     * Full state, for a show. Optional fields that are empty, false, or an
+     * empty list are omitted, which is safe here because a show replaces
+     * everything: absent means "this notice does not have one".
+     */
     fun toPayload(surfaceId: String, content: NoticeSurfaceContent): JSONObject = JSONObject()
         .put("surfaceId", surfaceId)
         .put("kind", KIND)
@@ -268,6 +273,30 @@ object NoticeSurfaceContract {
             // for byte the way it did. An activity always sends its array; a
             // notice cannot, because its payload is the compatibility surface.
             if (content.actions.isNotEmpty()) put("actions", actionsJson(content.actions))
+        }
+
+    /**
+     * The wire form of a validated update: exactly the fields the owner sent,
+     * with a present-but-empty value carrying the clear.
+     *
+     * An update is a patch all the way down, so the hub relays this rather than
+     * re-serialising its canonical state with [toPayload]. That serialisation
+     * omits an empty footer, a false flag, and an empty row -- and on a patch an
+     * absent key means "leave it alone", so every clear an owner sent used to
+     * arrive at the glasses as a no-op.
+     *
+     * Round-trips through [validateUpdate]: an empty string clears text the same
+     * way JSON null does, and both are how the patch spells a cleared field.
+     */
+    fun toUpdatePayload(surfaceId: String, patch: NoticeSurfacePatch): JSONObject = JSONObject()
+        .put("surfaceId", surfaceId)
+        .apply {
+            patch.title?.let { put("title", it.value.orEmpty()) }
+            patch.body?.let { put("body", it.value.orEmpty()) }
+            patch.footer?.let { put("footer", it.value.orEmpty()) }
+            patch.interactive?.let { put("interactive", it.value) }
+            patch.actions?.let { put("actions", actionsJson(it.value)) }
+            patch.ttlMs?.let { put("ttlMs", it.value.coerceIn(MIN_TTL_MS, MAX_TTL_MS)) }
         }
 
     /**

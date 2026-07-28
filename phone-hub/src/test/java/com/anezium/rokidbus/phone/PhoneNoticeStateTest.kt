@@ -227,24 +227,77 @@ class PhoneNoticeStateTest {
     }
 
     /**
-     * The glasses read an update as a patch, and a patch carrying either the row
-     * or the interactive flag is a new question there. Forwarding what the
-     * wearer already answered, on an ordinary text update, would put the
-     * question back in front of them.
+     * The forwarded update is the owner's patch, stamped -- not a
+     * re-serialisation of canonical state. Only the patch form can say "clear
+     * this", because on the receiving side an absent key means "leave it".
      */
     @Test
-    fun `an answered notice is forwarded without its row or its flag`() {
+    fun `an update forwards the owner's patch, stamped with the hub's fields`() {
+        state.show("relay", showPayload("relay").put("interactive", true))
+
+        val accepted = state.update("relay", JSONObject().put("body", "Five out"))
+
+        val payload = (accepted as PhoneNoticeUpdateResult.Accepted).notice.payload
+        assertEquals(
+            setOf("surfaceId", "body", "localSurfaceId", "ownerPluginId", "seq"),
+            payload.keys().asSequence().toSet(),
+        )
+        assertEquals(noticeId, payload.getString("surfaceId"))
+        assertEquals(NoticeSurfaceContract.LOCAL_SURFACE_ID, payload.getString("localSurfaceId"))
+        assertEquals("relay", payload.getString("ownerPluginId"))
+        assertEquals("Five out", payload.getString("body"))
+        assertEquals(2L, payload.getLong("seq"))
+    }
+
+    @Test
+    fun `a cleared field travels as a cleared field`() {
+        state.show(
+            "relay",
+            showPayload("relay").put("footer", "tap to reply").put("interactive", true),
+        )
+
+        val accepted = state.update(
+            "relay",
+            JSONObject().put("footer", "").put("interactive", false),
+        )
+
+        val payload = (accepted as PhoneNoticeUpdateResult.Accepted).notice.payload
+        // Present-and-empty, not absent. Absent is what used to reach the
+        // glasses, and absent means "leave it alone".
+        assertTrue(payload.has("footer"))
+        assertEquals("", payload.getString("footer"))
+        assertTrue(payload.has("interactive"))
+        assertFalse(payload.getBoolean("interactive"))
+        assertNull(accepted.notice.content.footer)
+        assertFalse(accepted.notice.content.interactive)
+    }
+
+    @Test
+    fun `an emptied row travels as an empty row`() {
+        state.show("relay", showPayload("relay").put("actions", actions()))
+
+        val accepted = state.update("relay", JSONObject().put("actions", JSONArray()))
+
+        val payload = (accepted as PhoneNoticeUpdateResult.Accepted).notice.payload
+        assertTrue(payload.has("actions"))
+        assertEquals(0, payload.getJSONArray("actions").length())
+        assertTrue(accepted.notice.content.actions.isEmpty())
+    }
+
+    /**
+     * The property that used to need an explicit strip, now free: a text-only
+     * patch simply does not carry the fields that reopen a question. Pinned
+     * anyway, because the wearer being re-asked something they already answered
+     * is exactly the failure this whole rule exists to prevent.
+     */
+    @Test
+    fun `a text-only update to an answered notice carries neither interactivity field`() {
         state.show(
             "relay",
             showPayload("relay").put("interactive", true).put("actions", actions()),
         )
-        val shown = state.update("relay", JSONObject().put("body", "Still asking"))
-        assertTrue(
-            (shown as PhoneNoticeUpdateResult.Accepted).notice.payload.has("actions"),
-        )
-        assertTrue(shown.notice.payload.has("interactive"))
-
         state.takeAnswer(noticeId, "reply")
+
         val answered = state.update("relay", JSONObject().put("body", "Sending"))
 
         val payload = (answered as PhoneNoticeUpdateResult.Accepted).notice.payload
@@ -258,6 +311,26 @@ class PhoneNoticeStateTest {
             state.takeAnswer(noticeId, "reply"),
         )
         assertEquals(PhoneNoticeActionResult.AlreadyAnswered, state.takeInputAnswer(noticeId))
+    }
+
+    @Test
+    fun `an invalid patch is rejected before anything is forwarded`() {
+        state.show("relay", showPayload("relay"))
+        val before = state.ownerPluginId()
+
+        val rejected = state.update(
+            "relay",
+            JSONObject().put("footer", "x".repeat(NoticeSurfaceContract.MAX_FOOTER_CHARS + 1)),
+        )
+
+        assertTrue(rejected is PhoneNoticeUpdateResult.Rejected)
+        assertEquals(before, state.ownerPluginId())
+        // Emptying the band of all its text is refused for the same reason: the
+        // patch never becomes something the glasses are asked to apply.
+        assertTrue(
+            state.update("relay", JSONObject().put("title", "").put("body", ""))
+                is PhoneNoticeUpdateResult.Rejected,
+        )
     }
 
     private val noticeId = "relay:${NoticeSurfaceContract.LOCAL_SURFACE_ID}"

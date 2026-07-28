@@ -420,6 +420,70 @@ class NoticeStateMachineTest {
         assertTrue(state.answer(CONFIRM_KEY) is NoticeStateDecision.Ignored)
     }
 
+    /**
+     * The band's half of the trip a clear makes. The phone relays the owner's
+     * patch instead of re-serialising its state, so a cleared field arrives as
+     * a present-and-empty field and lands here as an actual clear.
+     */
+    @Test
+    fun `a cleared footer survives the trip to the band`() {
+        val state = NoticeStateMachine()
+        state.show(
+            "relay:notice",
+            seq = 1,
+            content = content(footer = "tap to reply"),
+            nowMs = 0L,
+        )
+
+        val decision = state.update(
+            "relay:notice",
+            seq = 2,
+            patch = relayed(NoticeSurfacePatch(footer = NoticeField(null))),
+            nowMs = 0L,
+        )
+
+        assertNull((decision as NoticeStateDecision.Updated).notice.content.footer)
+        assertEquals("Marie", decision.notice.content.title)
+    }
+
+    @Test
+    fun `un-asking stops an unanswered band claiming anything`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(interactive = true), nowMs = 0L)
+        assertTrue(state.activeNotice()!!.expectsInput)
+
+        val decision = state.update(
+            "relay:notice",
+            seq = 2,
+            patch = relayed(NoticeSurfacePatch(interactive = NoticeField(false))),
+            nowMs = 0L,
+        )
+
+        val notice = (decision as NoticeStateDecision.Updated).notice
+        assertFalse(notice.content.interactive)
+        // Nothing to claim, so the tap reaches whatever is under the band.
+        assertFalse(notice.expectsInput)
+        assertTrue(state.answer(CONFIRM_KEY) is NoticeStateDecision.Ignored)
+    }
+
+    @Test
+    fun `a relayed empty row clears the band's actions`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(actions = threeActions()), nowMs = 0L)
+
+        val decision = state.update(
+            "relay:notice",
+            seq = 2,
+            patch = relayed(NoticeSurfacePatch(actions = NoticeField(emptyList()))),
+            nowMs = 0L,
+        )
+
+        val notice = (decision as NoticeStateDecision.Updated).notice
+        assertTrue(notice.liveActions.isEmpty())
+        assertTrue(state.moveSelection(1) is NoticeStateDecision.Ignored)
+        assertTrue(state.answer(CONFIRM_KEY) is NoticeStateDecision.Ignored)
+    }
+
     @Test
     fun `the index helpers wrap and refuse to invent a selection`() {
         assertEquals(0, nextNoticeActionIndex(current = 2, delta = 1, count = 3))
@@ -439,6 +503,15 @@ class NoticeStateMachineTest {
     /** `KeyEvent.KEYCODE_ENTER`, spelled out so the test needs no framework. */
     private val CONFIRM_KEY = 66
 
+    /**
+     * The patch the phone's relay produces for a clear, as the glasses'
+     * validator hands it back. Built directly rather than round-tripped through
+     * `toUpdatePayload`, because this module's unit tests have no real
+     * `org.json`; that the serialisation actually yields this patch is pinned in
+     * `NoticeSurfaceContractTest`.
+     */
+    private fun relayed(patch: NoticeSurfacePatch): NoticeSurfacePatch = patch
+
     private fun moved(state: NoticeStateMachine, delta: Int): Int =
         (state.moveSelection(delta) as NoticeStateDecision.Updated).notice.selectedActionIndex
 
@@ -454,11 +527,12 @@ class NoticeStateMachineTest {
     private fun content(
         ttlMs: Long = 8_000L,
         interactive: Boolean = false,
+        footer: String? = null,
         actions: List<NoticeAction> = emptyList(),
     ) = NoticeSurfaceContent(
         title = "Marie",
         body = "On my way",
-        footer = null,
+        footer = footer,
         interactive = interactive,
         actions = actions,
         ttlMs = ttlMs,

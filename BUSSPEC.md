@@ -440,6 +440,17 @@ Phone to glasses:
   the plugin that owns the slot and only while a band is actually visible,
   otherwise ignored with a log rather than an error — an update racing a
   deadline that fired a frame earlier is ordinary.
+
+  **The phone relays the owner's validated patch**, stamped with the hub's own
+  fields — the wire `surfaceId` `<pluginId>:notice`, `localSurfaceId`,
+  `ownerPluginId`, and a fresh `seq` — rather than re-serialising its canonical
+  state. Absent-versus-present is therefore end-to-end: what the owner left out
+  is what the glasses leave alone, and what the owner sent empty is what the
+  glasses clear. Re-serialising could not express a clear at all, because full
+  state omits an empty footer, a false flag, and an empty row, and an absent key
+  on a patch means "leave it". The phone still validates first and still rejects
+  an invalid patch before anything travels; authority did not move, only the
+  shape of what it forwards.
 - `/notice/hide` — clears it. Owner only.
 
 Glasses to phone to plugin:
@@ -451,16 +462,17 @@ Glasses to phone to plugin:
   plugin-supplied identifier. Sent instead of `/notice/input` whenever the band
   carries actions, and **at most once per question**.
 
+- `/notice/closed` — `{noticeId, reason}` with `reason` in
+  `user | timeout | owner | replaced | disconnect`. Delivered exactly once per
+  notice, including when the owner hid it itself. Not delivered when the owner
+  is what disappeared.
+
 Both replies go through the same gate on the phone hub: the notice must be the
 one it currently holds, it must actually have asked for a gesture, and it only
 answers once — an action id it never offered, a pick that raced a replacement,
 and a second reply of either kind are all refused. The refusals log distinct
 reasons, `not_current` and `already_answered`, because they mean different
 things.
-- `/notice/closed` — `{noticeId, reason}` with `reason` in
-  `user | timeout | owner | replaced | disconnect`. Delivered exactly once per
-  notice, including when the owner hid it itself. Not delivered when the owner
-  is what disappeared.
 
 Notice traffic coming back is **owner-scoped**: the hub delivers it only to the
 plugin named by `pluginId` in the payload, so nothing else subscribed to the
@@ -523,11 +535,12 @@ either — an empty array, or `interactive: false` — resets the flag as well:
 there is then nothing left to answer, and a flag left set would only be
 inherited by whatever the owner asks next.
 
-The phone hub forwards an answered notice's canonical state with *neither* of
-those two fields for exactly this reason: the glasses read an update as a patch,
-so echoing back the row or the flag the wearer already answered would put the
-question in front of them again. Both are omitted when empty or false anyway, so
-this is their absence from the patch rather than a new spelling.
+Because the phone relays the owner's patch rather than re-serialising its state,
+this falls out rather than needing enforcement: a text-only update simply does
+not carry `actions` or `interactive`, so there is nothing there to reopen the
+question with. An earlier build re-serialised full state and had to strip both
+fields by hand to stop an ordinary text update putting an answered question back
+in front of the wearer.
 
 Actions buy the band nothing else. They do not extend the TTL, they do not
 touch the 60 s absolute lifetime, and they do not change what BACK does.

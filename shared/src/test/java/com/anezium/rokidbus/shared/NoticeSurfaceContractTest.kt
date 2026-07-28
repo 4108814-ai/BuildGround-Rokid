@@ -262,6 +262,79 @@ class NoticeSurfaceContractTest {
         assertTrue(chosen.expectsInput)
     }
 
+    /**
+     * The hub relays this rather than re-serialising its state, so it has to
+     * carry a clear as a clear. Anything it flattens to an absent key is a
+     * field the wearer never sees change.
+     */
+    @Test
+    fun `an update payload round-trips every field, including the cleared ones`() {
+        val patch = NoticeSurfacePatch(
+            title = NoticeField("Marie"),
+            footer = NoticeField(null),
+            interactive = NoticeField(false),
+            actions = NoticeField(emptyList()),
+            ttlMs = NoticeField(12_000L),
+        )
+
+        val wire = NoticeSurfaceContract.toUpdatePayload("relay:notice", patch)
+
+        assertEquals(
+            setOf("surfaceId", "title", "footer", "interactive", "actions", "ttlMs"),
+            wire.keys().asSequence().toSet(),
+        )
+        // Present and empty, which is how the patch spells a clear. Absent would
+        // mean "leave it alone".
+        assertEquals("", wire.getString("footer"))
+        assertFalse(wire.getBoolean("interactive"))
+        assertEquals(0, wire.getJSONArray("actions").length())
+
+        val reread = (NoticeSurfaceContract.validateUpdate(wire) as NoticeSurfacePatchResult.Valid).patch
+        assertEquals(patch, reread)
+    }
+
+    @Test
+    fun `an update payload carries only what the owner sent`() {
+        val wire = NoticeSurfaceContract.toUpdatePayload(
+            "relay:notice",
+            NoticeSurfacePatch(body = NoticeField("Five out")),
+        )
+
+        assertEquals(setOf("surfaceId", "body"), wire.keys().asSequence().toSet())
+        assertEquals("Five out", wire.getString("body"))
+    }
+
+    @Test
+    fun `a relayed clear empties the field it names`() {
+        val current = NoticeSurfaceContent(
+            title = "Marie",
+            body = "On my way",
+            footer = "tap to reply",
+            interactive = true,
+            actions = listOf(NoticeAction("reply", "phone", "Reply")),
+        )
+
+        val wire = NoticeSurfaceContract.toUpdatePayload(
+            "relay:notice",
+            NoticeSurfacePatch(
+                footer = NoticeField(null),
+                interactive = NoticeField(false),
+                actions = NoticeField(emptyList()),
+            ),
+        )
+        val applied = (NoticeSurfaceContract.validateUpdate(wire) as NoticeSurfacePatchResult.Valid)
+            .patch
+            .applyTo(current)
+
+        assertNull(applied.footer)
+        assertFalse(applied.interactive)
+        assertTrue(applied.actions.isEmpty())
+        assertFalse(applied.expectsInput)
+        // Untouched fields are untouched.
+        assertEquals("Marie", applied.title)
+        assertEquals("On my way", applied.body)
+    }
+
     @Test
     fun `action payload names the notice and the action`() {
         val payload = NoticeSurfaceContract.actionPayload("relay:notice", "yes")
