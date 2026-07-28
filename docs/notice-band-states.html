@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The notice band — four states</title>
+<style>
+  :root {
+    --optic: #000000;
+    --phosphor: #71FF97;
+    --muted: #7E9585;
+    --dim: #47584D;
+    --hairline: #13221A;
+    --edge: #1d3226;
+    --page: #0a0f0c;
+    --panel: #0d1410;
+    --panel-edge: #16211a;
+    --ink: #c8d6cc;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, "JetBrains Mono", monospace;
+    --sans: system-ui, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--sans);
+    margin: 0;
+    padding: 40px 20px 80px;
+    line-height: 1.55;
+  }
+  main { max-width: 780px; margin: 0 auto; }
+
+  header { margin-bottom: 44px; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin: 0 0 10px;
+  }
+  h1 {
+    font-family: var(--mono);
+    font-size: clamp(22px, 4vw, 30px);
+    font-weight: 700;
+    color: var(--phosphor);
+    margin: 0 0 10px;
+    text-wrap: balance;
+  }
+  header p { color: var(--muted); max-width: 62ch; margin: 0; }
+
+  section { margin-bottom: 52px; }
+  .state-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .state-num {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--dim);
+  }
+  h2 {
+    font-family: var(--mono);
+    font-size: 17px;
+    color: var(--ink);
+    margin: 0;
+  }
+  .state-sub { color: var(--muted); font-size: 14px; margin: 0 0 16px; max-width: 62ch; }
+  .state-sub code, td code {
+    font-family: var(--mono);
+    font-size: 0.92em;
+    color: var(--phosphor);
+    background: var(--hairline);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* ---- the simulated optic ---- */
+  .optic {
+    background: var(--optic);
+    border: 1px solid var(--panel-edge);
+    border-radius: 10px;
+    padding: 22px 0 46px;
+    display: flex;
+    justify-content: center;
+    overflow-x: auto;
+  }
+  .band {
+    width: 80%;
+    min-width: 300px;
+    background: #000;
+    border: 1px solid var(--edge);
+    border-radius: 8px;
+    padding: 12px 16px 12px;
+    font-family: var(--mono);
+  }
+  .band .t { color: var(--phosphor); font-weight: 700; font-size: 19px; margin: 0; }
+  .band .b { color: var(--muted); font-size: 15px; margin: 5px 0 0; }
+  .band .f { color: var(--muted); font-size: 13px; margin: 7px 0 0; }
+  .row { display: flex; gap: 8px; margin-top: 9px; }
+  .chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #000;
+    border: 1px solid var(--hairline);
+    border-radius: 5px;
+    padding: 5px 8px;
+    color: var(--muted);
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .chip .g { font-size: 16px; line-height: 1; }
+  .chip.sel {
+    border: 2px solid var(--phosphor);
+    padding: 4px 7px;
+    color: var(--phosphor);
+  }
+
+  /* ---- facts under each mock ---- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+    margin-top: 14px;
+  }
+  td {
+    padding: 7px 12px 7px 0;
+    border-top: 1px solid var(--panel-edge);
+    vertical-align: top;
+  }
+  td:first-child {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--dim);
+    width: 150px;
+    white-space: nowrap;
+  }
+  td:last-child { color: var(--ink); }
+  .none { color: var(--dim); }
+
+  /* ---- demo ---- */
+  .demo-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 16px;
+  }
+  .demo-controls button {
+    font-family: var(--mono);
+    font-size: 13.5px;
+    background: var(--panel);
+    color: var(--ink);
+    border: 1px solid var(--panel-edge);
+    border-radius: 6px;
+    padding: 9px 16px;
+    cursor: pointer;
+  }
+  .demo-controls button:hover { border-color: var(--dim); }
+  .demo-controls button:focus-visible { outline: 2px solid var(--phosphor); outline-offset: 2px; }
+  .plugin-log {
+    margin-top: 14px;
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    border-radius: 6px;
+    padding: 12px 16px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--muted);
+    min-height: 58px;
+  }
+  .plugin-log .hd { color: var(--dim); text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; margin-bottom: 6px; }
+  .plugin-log div.rx { color: var(--phosphor); }
+  .plugin-log div.drop { color: var(--dim); }
+  #demo-band.gone { opacity: 0.25; transition: opacity 240ms; }
+  @media (prefers-reduced-motion: reduce) { #demo-band.gone { transition: none; } }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <p class="eyebrow">Rokid Nexus · HUD · notice tier</p>
+  <h1>The notice band — four states</h1>
+  <p>Colors, sizes, and borders are the renderer's own (phosphor <span style="font-family:var(--mono)">#71FF97</span>, band at 80% of the optic's width, pure black fills for the additive optics). A notice lives 2 to 20 seconds, and BACK dismisses it in every state.</p>
+</header>
+
+<section>
+  <div class="state-head"><span class="state-num">1</span><h2>Plain band</h2></div>
+  <p class="state-sub">Neither <code>interactive</code> nor actions. It says its piece and leaves on its TTL. It listens to <em>nothing</em>: every gesture passes through to whatever is underneath.</p>
+  <div class="optic">
+    <div class="band">
+      <p class="t">Nexus notice</p>
+      <p class="b">A band that arrives, says one thing, and leaves on its own deadline.</p>
+    </div>
+  </div>
+  <table>
+    <tr><td>Keys claimed</td><td class="none">none (BACK dismisses, as everywhere)</td></tr>
+    <tr><td>The plugin hears</td><td class="none">nothing</td></tr>
+  </table>
+</section>
+
+<section>
+  <div class="state-head"><span class="state-num">2</span><h2>Interactive band</h2></div>
+  <p class="state-sub"><code>interactive = true</code>, no actions. One possible answer: the confirming tap. This works with no surface open — a dormant plugin can be shown and answered.</p>
+  <div class="optic">
+    <div class="band">
+      <p class="t">Marie</p>
+      <p class="b">On my way, ten minutes out.</p>
+      <p class="f">tap to answer &middot; back to dismiss</p>
+    </div>
+  </div>
+  <table>
+    <tr><td>Keys claimed</td><td>confirm only (touchpad tap, temple tap, ring tap) — scroll passes through</td></tr>
+    <tr><td>The plugin hears</td><td><code>/notice/input</code> — <strong>once</strong>; the band then goes inert</td></tr>
+  </table>
+</section>
+
+<section>
+  <div class="state-head"><span class="state-num">3</span><h2>Band with actions</h2></div>
+  <p class="state-sub">Up to three answers. Scroll moves the selection — and is only claimed while a row is up; a band without actions lets it through — and the confirming tap fires the selected one.</p>
+  <div class="optic">
+    <div class="band">
+      <p class="t">Nexus notice</p>
+      <p class="b">A band that arrives, asks one thing, and leaves on its own deadline.</p>
+      <p class="f">Scroll to choose &middot; Back to dismiss</p>
+      <div class="row">
+        <span class="chip sel"><span class="g">&#9990;</span>Reply</span>
+        <span class="chip"><span class="g">&#9711;</span>Later</span>
+        <span class="chip"><span class="g">&#9632;</span>Ignore</span>
+      </div>
+    </div>
+  </div>
+  <table>
+    <tr><td>Keys claimed</td><td>confirm + forward/backward (the selection wraps at both ends)</td></tr>
+    <tr><td>The plugin hears</td><td><code>/notice/action</code> with the selected id — <strong>once</strong></td></tr>
+  </table>
+</section>
+
+<section>
+  <div class="state-head"><span class="state-num">4</span><h2>Answered</h2></div>
+  <p class="state-sub">A notice takes exactly one answer, of either kind. The moment it is given, the row leaves the band, nothing is claimed, and nothing fires again. The TTL runs on unchanged — answering buys no time.</p>
+  <div class="optic">
+    <div class="band">
+      <p class="t">Nexus notice</p>
+      <p class="b">A band that arrives, asks one thing, and leaves on its own deadline.</p>
+      <p class="f">Reply &middot; Back to dismiss</p>
+    </div>
+  </div>
+  <table>
+    <tr><td>Keys claimed</td><td class="none">none — the band is a display again</td></tr>
+    <tr><td>The plugin hears</td><td class="none">nothing more, even on another tap (the phone refuses it: <code>already_answered</code>)</td></tr>
+  </table>
+</section>
+
+<section>
+  <div class="state-head"><span class="state-num">&#9655;</span><h2>Try the rule</h2></div>
+  <p class="state-sub">The same state machine the glasses run: scroll, confirm, confirm again — and watch what the plugin would receive.</p>
+  <div class="optic">
+    <div class="band" id="demo-band">
+      <p class="t">Nexus notice</p>
+      <p class="b" id="demo-body">A band that arrives, asks one thing, and leaves on its own deadline.</p>
+      <p class="f" id="demo-footer">Scroll to choose &middot; Back to dismiss</p>
+      <div class="row" id="demo-row"></div>
+    </div>
+  </div>
+  <div class="demo-controls">
+    <button id="d-back2">&#9664; scroll</button>
+    <button id="d-fwd">scroll &#9654;</button>
+    <button id="d-tap">&#9679; tap</button>
+    <button id="d-dismiss">back</button>
+    <button id="d-reset">re-show</button>
+  </div>
+  <div class="plugin-log">
+    <div class="hd">What the plugin receives</div>
+    <div id="d-log"><span class="none">— nothing yet</span></div>
+  </div>
+</section>
+</main>
+
+<script>
+(function () {
+  var actions = [
+    { id: "reply", glyph: "✆", label: "Reply" },
+    { id: "later", glyph: "◯", label: "Later" },
+    { id: "ignore", glyph: "■", label: "Ignore" }
+  ];
+  var sel = 0, answered = false, dismissed = false;
+  var row = document.getElementById("demo-row");
+  var band = document.getElementById("demo-band");
+  var footer = document.getElementById("demo-footer");
+  var log = document.getElementById("d-log");
+
+  function render() {
+    band.classList.toggle("gone", dismissed);
+    row.innerHTML = "";
+    if (!answered && !dismissed) {
+      actions.forEach(function (a, i) {
+        var c = document.createElement("span");
+        c.className = "chip" + (i === sel ? " sel" : "");
+        c.innerHTML = '<span class="g">' + a.glyph + "</span>" + a.label;
+        row.appendChild(c);
+      });
+    }
+  }
+  function say(text, cls) {
+    var d = document.createElement("div");
+    d.className = cls;
+    d.textContent = text;
+    if (log.firstChild && log.firstChild.nodeType === 1 && log.firstChild.tagName === "SPAN") log.innerHTML = "";
+    log.appendChild(d);
+    while (log.childNodes.length > 5) log.removeChild(log.firstChild);
+  }
+  function move(delta) {
+    if (answered || dismissed) { say("scroll passes through the band (no row left) — nothing", "drop"); return; }
+    sel = ((sel + delta) % actions.length + actions.length) % actions.length;
+    render();
+  }
+  document.getElementById("d-fwd").addEventListener("click", function () { move(1); });
+  document.getElementById("d-back2").addEventListener("click", function () { move(-1); });
+  document.getElementById("d-tap").addEventListener("click", function () {
+    if (dismissed) { say("the band is closed — nothing", "drop"); return; }
+    if (answered) { say("tap ignored — already_answered, nothing goes out", "drop"); return; }
+    answered = true;
+    footer.innerHTML = actions[sel].label + " &middot; Back to dismiss";
+    say('onNexusNoticeAction("' + actions[sel].id + '")  ×1', "rx");
+    render();
+  });
+  document.getElementById("d-dismiss").addEventListener("click", function () {
+    if (dismissed) return;
+    dismissed = true;
+    say("closed(user) — the plugin only learns it is over", "drop");
+    render();
+  });
+  document.getElementById("d-reset").addEventListener("click", function () {
+    sel = 0; answered = false; dismissed = false;
+    footer.innerHTML = "Scroll to choose &middot; Back to dismiss";
+    log.innerHTML = '<span class="none">— nothing yet</span>';
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>

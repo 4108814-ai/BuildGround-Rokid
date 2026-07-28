@@ -329,6 +329,10 @@ Anything the wearer follows over minutes is an activity; anything they browse or
 drive is a surface. Actions do not change that: they let the band ask something
 with more than one answer, not stay longer or hold more.
 
+[notice-band-states.html](notice-band-states.html) shows the band's four
+states as the wearer sees them — plain, interactive, with actions, answered —
+with an interactive demo of the one-answer rule. Open it in a browser.
+
 ```kotlin
 data class NexusNoticeAction(
     val id: String,

@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.0.48
+
+### Activities
+
+- A new tier between a pin and a surface: an ongoing process — a ride
+  approaching, a timer running, a transfer in flight — holds a stable corner
+  of the HUD. It draws as a compact chip, and the primary activity can open
+  into a panel with progress, details, and up to three platform-drawn
+  actions the wearer steps through with scroll and fires with a tap.
+- A significant update lets the panel flare to catch the eye — throttled by
+  the platform, and never by holding the screen on: an activity still cannot
+  wake or keep the display, exactly like every other tier.
+- An idle panel folds back to its chip after about ten seconds. A new
+  Settings switch keeps the primary activity expanded instead; it is the
+  wearer's preference, and no plugin can read, set, or override it.
+
+### Notices learn to ask a real question
+
+- A notice can now carry up to three answers, drawn as glyph chips under
+  the band — the same row an activity panel uses, drawn by the same view,
+  so the wearer learns it once. Scroll steps along it, the selection wraps
+  and follows its answer across updates, and a tap fires the one that is
+  chosen.
+- A notice takes exactly one answer, of either kind. The moment it is
+  given, the row leaves the band, nothing fires again, and the phone
+  refuses a duplicate — measured on hardware, two temple taps 188 ms apart
+  used to mean two replies sent. This deliberately changes 1.0.46
+  behaviour, where an interactive band replied on every tap.
+- Clearing a field of a shown notice now actually reaches the glasses: the
+  phone relays the patch a plugin sent instead of re-serialising its own
+  state, so an emptied footer, a withdrawn question, or a cleared row
+  arrives as exactly that.
+
+### Plugin SDK 0.6.0
+
+- The activity tier and notice actions land in the SDK: `NexusActivity`,
+  `NexusNoticeAction`, `actions` on notices and their updates, the
+  `onNexusActivityAction` and `onNexusNoticeAction` callbacks, and a
+  nullable `interactive` on `NexusNoticeUpdate` so a band can be asked
+  again.
+- The guide gains a visual reference of the notice band's four states,
+  with the one-answer rule as an interactive demo
+  (`docs/notice-band-states.html`).
+
 ## 1.0.47
 
 ### Phone battery
