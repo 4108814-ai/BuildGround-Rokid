@@ -18,3 +18,6 @@ local.properties
 
 .gradle-user/
 .gradle-sandbox-home/
+
+/scratchpad/
+/.claude/
