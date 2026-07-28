@@ -28,6 +28,16 @@ interface NexusPluginCallbacks {
      * cannot take it.
      */
     fun onNoticeInput(event: NexusInputEvent) = Unit
+
+    /** The wearer fired one of this plugin's current activity actions. */
+    fun onActivityAction(id: String) = Unit
+
+    /**
+     * This plugin's activity ended. Reasons are strings so a newer hub can add
+     * one without an older SDK silently dropping the callback.
+     */
+    fun onActivityClosed(reason: String) = Unit
+
     fun onRegistrationState(result: Int)
     fun onMessage(path: String, id: String, payload: JSONObject) = Unit
     fun onBinary(path: String, id: String, payload: JSONObject, data: ByteArray) = Unit

@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.graphics.PixelFormat
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
 import android.view.Gravity
@@ -144,7 +145,8 @@ object NoticeOverlayRenderer {
         fade.snapTo(0f)
     }
 
-    private class NoticeBandView(context: Context) : LinearLayout(context) {
+    /** Shared top-band geometry used unchanged by notices and activity flares. */
+    internal class NoticeBandView(context: Context) : LinearLayout(context) {
         private val title = row(bold = true, sizeSp = TITLE_SP, color = BusTheme.phosphor)
         private val body = row(bold = false, sizeSp = BODY_SP, color = BusTheme.muted).apply {
             isSingleLine = false
@@ -192,12 +194,34 @@ object NoticeOverlayRenderer {
         }
 
         fun render(content: com.anezium.rokidbus.shared.NoticeSurfaceContent) {
-            title.text = content.title.orEmpty()
-            title.visibility = visibleIf(!content.title.isNullOrEmpty())
-            body.text = content.body.orEmpty()
-            body.visibility = visibleIf(!content.body.isNullOrEmpty())
-            footer.text = content.footer.orEmpty()
-            footer.visibility = visibleIf(!content.footer.isNullOrEmpty())
+            render(
+                titleText = content.title,
+                bodyText = content.body,
+                footerText = content.footer,
+                leadingGlyph = null,
+            )
+        }
+
+        fun render(
+            titleText: String?,
+            bodyText: String?,
+            footerText: String?,
+            leadingGlyph: Drawable?,
+        ) {
+            title.text = titleText.orEmpty()
+            title.visibility = visibleIf(!titleText.isNullOrEmpty())
+            leadingGlyph?.setBounds(
+                0,
+                0,
+                BusTheme.dp(context, GLYPH_SIZE_DP),
+                BusTheme.dp(context, GLYPH_SIZE_DP),
+            )
+            title.compoundDrawablePadding = if (leadingGlyph == null) 0 else BusTheme.dp(context, 7)
+            title.setCompoundDrawables(leadingGlyph, null, null, null)
+            body.text = bodyText.orEmpty()
+            body.visibility = visibleIf(!bodyText.isNullOrEmpty())
+            footer.text = footerText.orEmpty()
+            footer.visibility = visibleIf(!footerText.isNullOrEmpty())
         }
 
         private fun row(bold: Boolean, sizeSp: Float, color: Int) =
@@ -225,4 +249,5 @@ object NoticeOverlayRenderer {
     private const val TITLE_SP = 15f
     private const val BODY_SP = 12f
     private const val FOOTER_SP = 11f
+    private const val GLYPH_SIZE_DP = 36
 }

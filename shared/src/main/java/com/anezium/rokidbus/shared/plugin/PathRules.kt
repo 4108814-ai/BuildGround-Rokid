@@ -59,12 +59,16 @@ object PathRules {
      * third-party plugin to discover it needed one.
      */
     fun isDirectReply(path: String): Boolean = when (normalizeAbsolute(path)) {
-        BusPaths.NOTICE_CLOSED, BusPaths.NOTICE_INPUT -> true
+        BusPaths.NOTICE_CLOSED, BusPaths.NOTICE_INPUT,
+        BusPaths.ACTIVITY_ACTION, BusPaths.ACTIVITY_CLOSED,
+        -> true
         else -> false
     }
 
     fun isOwnerScoped(path: String): Boolean = when (normalizeAbsolute(path)) {
-        BusPaths.NOTICE_CLOSED, BusPaths.NOTICE_INPUT -> true
+        BusPaths.NOTICE_CLOSED, BusPaths.NOTICE_INPUT,
+        BusPaths.ACTIVITY_ACTION, BusPaths.ACTIVITY_CLOSED,
+        -> true
         else -> matchesPrefix(path, "/system/plugin")
     }
 
@@ -72,6 +76,7 @@ object PathRules {
         "/surface/show", "/surface/update", "/surface/hide",
         BusPaths.PIN_SHOW, BusPaths.PIN_HIDE,
         BusPaths.NOTICE_SHOW, BusPaths.NOTICE_UPDATE, BusPaths.NOTICE_HIDE,
+        BusPaths.ACTIVITY_START, BusPaths.ACTIVITY_UPDATE, BusPaths.ACTIVITY_END,
         -> PluginCapability.SURFACES
         "/audio/lease/acquire", "/audio/lease/release" -> PluginCapability.MICROPHONE
         "/stt/session/start", "/stt/session/stop" -> PluginCapability.STT

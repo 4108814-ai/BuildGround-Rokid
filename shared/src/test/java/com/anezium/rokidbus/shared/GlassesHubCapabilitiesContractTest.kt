@@ -11,9 +11,12 @@ class GlassesHubCapabilitiesContractTest {
     @Test
     fun `capabilities carry the optional glasses version name`() {
         val capabilities = GlassesHubCapabilitiesContract.create(
-            features = BusCapabilityBits.IMAGE_SURFACE or BusCapabilityBits.PIN_SURFACE,
+            features = BusCapabilityBits.IMAGE_SURFACE or
+                BusCapabilityBits.PIN_SURFACE or
+                BusCapabilityBits.ACTIVITY_SURFACE,
             imageSurfaceVersion = ImageSurfaceContract.VERSION,
             pinSurfaceVersion = PinSurfaceContract.VERSION,
+            activitySurfaceVersion = ActivitySurfaceContract.VERSION,
             maxImageBytes = ImageSurfaceContract.MAX_IMAGE_BYTES,
             versionName = " 1.0.1 ",
             setupComplete = true,
@@ -27,10 +30,14 @@ class GlassesHubCapabilitiesContractTest {
         assertEquals("1.0.1", parsed.versionName)
         assertTrue(parsed.setupComplete)
         assertEquals(
-            BusCapabilityBits.IMAGE_SURFACE or BusCapabilityBits.PIN_SURFACE,
+            BusCapabilityBits.IMAGE_SURFACE or
+                BusCapabilityBits.PIN_SURFACE or
+                BusCapabilityBits.ACTIVITY_SURFACE,
             parsed.features,
         )
         assertEquals(PinSurfaceContract.VERSION, parsed.pinSurfaceVersion)
+        assertEquals(ActivitySurfaceContract.VERSION, parsed.activitySurfaceVersion)
+        assertEquals(128, BusCapabilityBits.ACTIVITY_SURFACE)
     }
 
     @Test
@@ -53,6 +60,7 @@ class GlassesHubCapabilitiesContractTest {
         assertNull(parsed.versionName)
         assertFalse(parsed.setupComplete)
         assertEquals(0, parsed.pinSurfaceVersion)
+        assertEquals(0, parsed.activitySurfaceVersion)
         assertFalse(versionlessPayload.has("versionName"))
         assertFalse(versionlessPayload.getBoolean("setupComplete"))
     }

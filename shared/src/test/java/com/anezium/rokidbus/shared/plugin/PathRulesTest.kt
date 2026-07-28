@@ -88,4 +88,26 @@ class PathRulesTest {
         assertEquals(PluginCapability.SURFACES, PathRules.requiredCapability("/pin/show"))
         assertEquals(PluginCapability.SURFACES, PathRules.requiredCapability("/pin/hide"))
     }
+
+    @Test
+    fun `activity routes reuse surfaces and replies stay owner scoped`() {
+        assertEquals(
+            PluginCapability.SURFACES,
+            PathRules.requiredCapability("/activity/start"),
+        )
+        assertEquals(
+            PluginCapability.SURFACES,
+            PathRules.requiredCapability("/activity/update"),
+        )
+        assertEquals(
+            PluginCapability.SURFACES,
+            PathRules.requiredCapability("/activity/end"),
+        )
+        assertNull(PathRules.requiredCapability("/activity/action"))
+        assertNull(PathRules.requiredCapability("/activity/closed"))
+        assertTrue(PathRules.isDirectReply("/activity/action"))
+        assertTrue(PathRules.isDirectReply("/activity/closed"))
+        assertTrue(PathRules.isOwnerScoped("/activity/action"))
+        assertTrue(PathRules.isOwnerScoped("/activity/closed"))
+    }
 }

@@ -50,6 +50,11 @@ object BusPaths {
     const val NOTICE_HIDE = "/notice/hide"
     const val NOTICE_INPUT = "/notice/input"
     const val NOTICE_CLOSED = "/notice/closed"
+    const val ACTIVITY_START = "/activity/start"
+    const val ACTIVITY_UPDATE = "/activity/update"
+    const val ACTIVITY_END = "/activity/end"
+    const val ACTIVITY_ACTION = "/activity/action"
+    const val ACTIVITY_CLOSED = "/activity/closed"
     const val LAUNCHER_LIST = "/launcher/list"
     const val LAUNCHER_GLYPHS = "/launcher/glyphs"
     const val LAUNCHER_OPEN = "/launcher/open"
@@ -137,6 +142,7 @@ object BusCapabilityBits {
     const val CAMERA_LOHS_REVERSE_REQUIRED = 1 shl 4
     const val PIN_SURFACE = 1 shl 5
     const val NOTICE_SURFACE = 1 shl 6
+    const val ACTIVITY_SURFACE = 1 shl 7
 }
 
 object LinkStateBits {

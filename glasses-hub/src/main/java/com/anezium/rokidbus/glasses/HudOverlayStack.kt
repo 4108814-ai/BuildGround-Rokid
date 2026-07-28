@@ -27,6 +27,7 @@ internal object HudOverlayStack {
      */
     fun reassert() {
         PinOverlayRenderer.ensureOnTop()
+        ActivityOverlayRenderer.ensureOnTop()
         NoticeOverlayRenderer.ensureOnTop()
     }
 }

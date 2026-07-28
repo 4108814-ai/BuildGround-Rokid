@@ -14,7 +14,9 @@ import android.provider.Settings
 import com.anezium.rokidbus.client.IBusCallback
 import com.anezium.rokidbus.client.IBusService
 import com.anezium.rokidbus.client.PluginRegistrationResult
+import com.anezium.rokidbus.client.ui.NexusGlyphs
 import com.anezium.rokidbus.client.ui.NexusPluginIcons
+import com.anezium.rokidbus.shared.ActivitySurfaceContract
 import com.anezium.rokidbus.shared.BusCapabilityBits
 import com.anezium.rokidbus.shared.BusConstants
 import com.anezium.rokidbus.shared.BusEnvelope
@@ -66,6 +68,9 @@ object GlassesHub {
     // reference would drag MediaSyncEngine's class init (and its executor thread) in with it.
     private val cameraSessionTracker = CameraSessionTracker { active ->
         MediaSyncEngine.onCameraSessionChanged(active)
+        // CameraActivity runs in :camera. This callback is the main-process
+        // visibility edge consumed by the accessibility overlay renderer.
+        ActivityController.setCameraOverlayActive(active)
     }
     private val autoEnrollAttempted = AtomicBoolean(false)
     private val wifiEnableA11yInFlight = AtomicBoolean(false)
@@ -183,6 +188,7 @@ object GlassesHub {
         appContext?.let { context ->
             if (PinController.handlePinEnvelope(envelope)) return
             if (NoticeController.handleNoticeEnvelope(envelope)) return
+            if (ActivityController.handleActivityEnvelope(envelope)) return
             if (SurfaceController.handleSurfaceEnvelope(context, envelope)) return
         }
         if (envelope.path == BusPaths.LAUNCHER_LIST) {
@@ -274,6 +280,22 @@ object GlassesHub {
         )
     }
 
+    /**
+     * Activity verbs use the platform vocabulary first, then the owner's
+     * registered glyphs, then the required `dot` fallback.
+     */
+    internal fun activityGlyphDrawable(
+        context: Context,
+        ownerPluginId: String,
+        glyph: String,
+    ): Drawable {
+        if (NexusGlyphs.isBuiltIn(glyph)) {
+            return requireNotNull(context.getDrawable(NexusGlyphs.drawableFor(glyph)))
+        }
+        pluginGlyphCache.drawableFor(ownerPluginId, glyph)?.let { return it }
+        return requireNotNull(context.getDrawable(NexusGlyphs.drawableFor(null)))
+    }
+
     fun sendSurfaceInput(payload: JSONObject): String? =
         sendRemote(BusEnvelope(path = BusPaths.SURFACE_INPUT, payload = payload))
 
@@ -288,10 +310,12 @@ object GlassesHub {
         val capabilities = GlassesHubCapabilitiesContract.create(
             features = BusCapabilityBits.IMAGE_SURFACE or
                 BusCapabilityBits.PIN_SURFACE or
-                BusCapabilityBits.NOTICE_SURFACE,
+                BusCapabilityBits.NOTICE_SURFACE or
+                BusCapabilityBits.ACTIVITY_SURFACE,
             imageSurfaceVersion = ImageSurfaceContract.VERSION,
             pinSurfaceVersion = PinSurfaceContract.VERSION,
             noticeSurfaceVersion = NoticeSurfaceContract.VERSION,
+            activitySurfaceVersion = ActivitySurfaceContract.VERSION,
             maxImageBytes = ImageSurfaceContract.MAX_IMAGE_BYTES,
             versionName = BuildConfig.VERSION_NAME,
             setupComplete = SelfArmOnboardingStateMachine.evaluate(
@@ -309,7 +333,8 @@ object GlassesHub {
         if (error == null) {
             log(
                 "renderer capabilities announced imageVersion=${ImageSurfaceContract.VERSION} " +
-                    "pinVersion=${PinSurfaceContract.VERSION}",
+                    "pinVersion=${PinSurfaceContract.VERSION} " +
+                    "activityVersion=${ActivitySurfaceContract.VERSION}",
             )
         } else {
             log("renderer capability announcement failed code=$error")

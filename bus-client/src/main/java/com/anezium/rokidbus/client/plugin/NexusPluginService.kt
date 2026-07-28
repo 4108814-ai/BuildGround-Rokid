@@ -96,6 +96,8 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
     final override fun onGlassesAiButton(active: Boolean) = onNexusGlassesAiButton(active)
     final override fun onNoticeInput(event: NexusInputEvent) = onNexusNoticeInput(event)
     final override fun onNoticeClosed(reason: NexusNoticeCloseReason) = onNexusNoticeClosed(reason)
+    final override fun onActivityAction(id: String) = onNexusActivityAction(id)
+    final override fun onActivityClosed(reason: String) = onNexusActivityClosed(reason)
     final override fun onRegistrationState(result: Int) {
         if (result == PluginRegistrationResult.APPROVED) {
             onNexusRegistrationState(result)
@@ -125,6 +127,13 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
 
     /** This plugin's notice is gone, once, whatever ended it. */
     protected open fun onNexusNoticeClosed(reason: NexusNoticeCloseReason) = Unit
+
+    /** The wearer fired one of this plugin's current activity actions. */
+    protected open fun onNexusActivityAction(id: String) = Unit
+
+    /** This plugin's activity ended, once, whatever ended it. */
+    protected open fun onNexusActivityClosed(reason: String) = Unit
+
     protected open fun onNexusGlassesAiButton(active: Boolean) = Unit
     protected open fun onNexusRegistrationState(result: Int) = Unit
     protected open fun onNexusMessage(path: String, id: String, payload: JSONObject) = Unit

@@ -8,6 +8,7 @@ data class GlassesHubCapabilities(
     val imageSurfaceVersion: Int,
     val pinSurfaceVersion: Int,
     val noticeSurfaceVersion: Int = 0,
+    val activitySurfaceVersion: Int = 0,
     val maxImageBytes: Int,
     val versionName: String?,
     val setupComplete: Boolean = false,
@@ -27,6 +28,7 @@ object GlassesHubCapabilitiesContract {
         imageSurfaceVersion: Int,
         pinSurfaceVersion: Int = 0,
         noticeSurfaceVersion: Int = 0,
+        activitySurfaceVersion: Int = 0,
         maxImageBytes: Int,
         versionName: String?,
         setupComplete: Boolean = false,
@@ -38,6 +40,7 @@ object GlassesHubCapabilitiesContract {
         imageSurfaceVersion = imageSurfaceVersion,
         pinSurfaceVersion = pinSurfaceVersion,
         noticeSurfaceVersion = noticeSurfaceVersion,
+        activitySurfaceVersion = activitySurfaceVersion,
         maxImageBytes = maxImageBytes,
         versionName = normalizeVersionName(versionName),
         setupComplete = setupComplete,
@@ -51,6 +54,7 @@ object GlassesHubCapabilitiesContract {
         .put("imageSurfaceVersion", capabilities.imageSurfaceVersion)
         .put("pinSurfaceVersion", capabilities.pinSurfaceVersion)
         .put("noticeSurfaceVersion", capabilities.noticeSurfaceVersion)
+        .put("activitySurfaceVersion", capabilities.activitySurfaceVersion)
         .put("maxImageBytes", capabilities.maxImageBytes)
         .put("setupComplete", capabilities.setupComplete)
         .put("setupFailureState", capabilities.setupFailureState)
@@ -65,6 +69,7 @@ object GlassesHubCapabilitiesContract {
         imageSurfaceVersion = payload.optInt("imageSurfaceVersion", 0),
         pinSurfaceVersion = payload.optInt("pinSurfaceVersion", 0),
         noticeSurfaceVersion = payload.optInt("noticeSurfaceVersion", 0),
+        activitySurfaceVersion = payload.optInt("activitySurfaceVersion", 0),
         maxImageBytes = payload.optInt("maxImageBytes", 0),
         versionName = normalizeVersionName(payload.optString("versionName", "")),
         setupComplete = payload.optBoolean("setupComplete", false),

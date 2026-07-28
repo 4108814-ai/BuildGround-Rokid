@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.graphics.PixelFormat
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
 import android.view.Gravity
@@ -102,7 +103,11 @@ object PinOverlayRenderer {
         params.y = BusTheme.dp(context, EDGE_MARGIN_DP)
     }
 
-    private class PinPanelView(context: Context) : LinearLayout(context) {
+    /**
+     * The shared medium chip geometry. Activities instantiate this same view;
+     * the pin renderer continues to use it with no leading glyph.
+     */
+    internal class PinPanelView(context: Context) : LinearLayout(context) {
         private val title = row(bold = true)
         private val lines = List(MAX_LINE_SLOTS) { row() }
 
@@ -132,7 +137,20 @@ object PinOverlayRenderer {
 
         fun render(pin: NexusPinSurface?) {
             val content = pin?.content
-            val size = content?.size ?: PinSurfaceSize.SMALL
+            render(
+                titleText = content?.title,
+                lineContent = content?.lines.orEmpty(),
+                size = content?.size ?: PinSurfaceSize.SMALL,
+                leadingGlyph = null,
+            )
+        }
+
+        fun render(
+            titleText: String?,
+            lineContent: List<com.anezium.rokidbus.shared.PinSurfaceLine>,
+            size: PinSurfaceSize,
+            leadingGlyph: Drawable?,
+        ) {
             val medium = size == PinSurfaceSize.MEDIUM
             val maxWidthPx = (
                 resources.displayMetrics.widthPixels *
@@ -141,11 +159,19 @@ object PinOverlayRenderer {
 
             title.textSize = if (medium) MEDIUM_TITLE_SP else SMALL_TITLE_SP
             title.maxWidth = maxWidthPx
-            title.text = content?.title.orEmpty()
-            title.visibility = visibleIf(!content?.title.isNullOrEmpty())
+            title.text = titleText.orEmpty()
+            title.visibility = visibleIf(!titleText.isNullOrEmpty())
+            leadingGlyph?.setBounds(
+                0,
+                0,
+                BusTheme.dp(context, GLYPH_SIZE_DP),
+                BusTheme.dp(context, GLYPH_SIZE_DP),
+            )
+            title.compoundDrawablePadding = if (leadingGlyph == null) 0 else BusTheme.dp(context, 6)
+            title.setCompoundDrawables(leadingGlyph, null, null, null)
 
             lines.forEachIndexed { index, view ->
-                val line = content?.lines?.getOrNull(index)?.takeIf { index < size.maxLines }
+                val line = lineContent.getOrNull(index)?.takeIf { index < size.maxLines }
                 view.textSize = if (medium) MEDIUM_LINE_SP else SMALL_LINE_SP
                 view.maxWidth = maxWidthPx
                 view.setTextColor(
@@ -181,4 +207,5 @@ object PinOverlayRenderer {
     private const val MEDIUM_TITLE_SP = 15f
     private const val MEDIUM_LINE_SP = 12f
     private const val MEDIUM_SCREEN_WIDTH_FRACTION = 0.60f
+    private const val GLYPH_SIZE_DP = 32
 }

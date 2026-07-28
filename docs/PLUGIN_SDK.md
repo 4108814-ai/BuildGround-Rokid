@@ -114,13 +114,203 @@ declared receive prefixes: `onNexusMessage` (JSON envelopes) and
 `onNexusBinaryMessage` (binary frames with their metadata). Hub state rides the
 additive capabilities contracts in `shared`: the phone announces `features`
 plus the camera consumer display name (`PhoneHubCapabilitiesContract`), the
-glasses announce renderer features, image/pin surface versions and image limits, their app version,
-and onboarding completion (`GlassesHubCapabilitiesContract`); unknown fields
-stay ignorable in both directions.
+glasses announce renderer features, image/pin/notice/activity surface versions,
+image limits, their app version, and onboarding completion
+(`GlassesHubCapabilitiesContract`); unknown fields stay ignorable in both
+directions.
 
 Surface IDs are local to the plugin. The SDK validates fields and payload size;
 the hub injects verified ownership and global sequencing. High-level code cannot
 set a trusted owner, global sequence, or arbitrary system path.
+
+### Choosing a HUD kind
+
+Choose the object by what the wearer is doing, not by how large you want it to
+look:
+
+- **Ongoing process** the wearer follows → **activity**.
+- **Discrete event** needing attention or a response → **notice**.
+- **Engaged interaction** the wearer is driving → **surface**.
+- **Trivial static fact** that just needs to stay put → **pin**.
+
+An activity is not a frequently updated pin. If there is a state machine behind
+the value — a route, delivery, ride, workout, or timer — use an activity. Your
+plugin describes that state and the platform decides whether it is currently a
+chip, panel, flare, pulse, or hidden. Plugins cannot select a presentation or
+supply activity layouts, images, animations, colors, or timings.
+
+### Live activities
+
+Activities reuse the existing `surfaces` grant and plugin API version 3. They
+live on `NexusPluginClient`, not `NexusSurfaceSession`, because the real-world
+process continues when its engaged surface closes:
+
+```kotlin
+sealed interface NexusActivityProgress {
+    data class Percent(val value: Int) : NexusActivityProgress
+    data object Indeterminate : NexusActivityProgress
+}
+
+data class NexusActivityAction(
+    val id: String,
+    val glyph: String,
+    val label: String,
+)
+
+data class NexusActivity(
+    val glyph: String,
+    val primary: String,
+    val secondary: String? = null,
+    val progress: NexusActivityProgress? = null,
+    val eta: String? = null,
+    val detail: List<String> = emptyList(),
+    val actions: List<NexusActivityAction> = emptyList(),
+    val maxDurationMs: Long? = null,
+)
+
+val supportsActivitySurface: Boolean
+fun startActivity(activity: NexusActivity): NexusSdkResult
+fun updateActivity(
+    activity: NexusActivity,
+    significant: Boolean = false,
+): NexusSdkResult
+fun endActivity(): NexusSdkResult
+
+interface NexusPluginCallbacks {
+    fun onActivityAction(id: String) = Unit
+    fun onActivityClosed(reason: String) = Unit
+}
+```
+
+`NexusPluginService` forwards those callbacks to the overridable
+`onNexusActivityAction(id)` and `onNexusActivityClosed(reason)` hooks used in
+the example below.
+
+Check the live `supportsActivitySurface` value immediately before starting or
+updating. For a registered plugin with the `surfaces` grant, all three methods
+return `CAPABILITY_NOT_AVAILABLE` without sending when the glasses did not
+announce activity v1, so the same plugin APK remains safe with an old hub.
+
+The typed models enforce the wire caps in `init`: `primary` is required and at
+most 12 trimmed characters; `secondary` is optional and at most 28; `eta` is
+optional and at most 8; `detail` has at most two 32-character entries;
+percentage progress is `0..100`; and there are at most three actions.
+`maxDurationMs`, when present on start, is clamped by the hub to one minute
+through 12 hours. Without it the activity lasts until explicitly ended,
+replaced, or its owner disconnects. There is no TTL and no keep-alive loop.
+
+Activity and action glyphs are strings, not enums, because the glyph vocabulary
+is additive. Use a platform glyph for each action; the main activity glyph may
+also be one your plugin registered through the custom-glyph API. The wire
+validates glyph-name shape, and an unknown well-formed name renders as `dot`
+instead of failing on an older hub. Each action's `id`, `glyph`, and `label`
+must be nonblank. Activity v1 intentionally sets no separate numeric length cap
+on action IDs or labels beyond that requirement and the three-action limit.
+
+`updateActivity` sends the complete mutable state: nullable optional fields are
+explicitly cleared when null and both lists are sent even when empty.
+`maxDurationMs` is start-only and is omitted from updates, so an update cannot
+restart or change the safety deadline. `significant` is a transient hint and is
+sent only when true.
+
+A Maps-shaped route can publish the next maneuver as one object:
+
+```kotlin
+class MapsLikePluginService : NexusPluginService() {
+    private var routeActivityStarted = false
+    private var muted = false
+
+    override fun onNexusOpen() = Unit
+    override fun onNexusClose() = Unit // The route activity continues.
+    override fun onNexusInput(event: NexusInputEvent) = Unit
+
+    fun startRoute() {
+        val result = nexusClient?.startActivity(
+            routeActivity(
+                glyph = "turn-left",
+                distance = "300 m",
+                street = "Rue de la Paix",
+                percent = 42,
+                maxDurationMs = 4 * 60 * 60 * 1000L,
+            ),
+        )
+        routeActivityStarted = result == NexusSdkResult.SENT
+    }
+
+    fun updateRoute(
+        glyph: String,
+        distance: String,
+        street: String,
+        percent: Int,
+        maneuverChanged: Boolean,
+    ) {
+        if (!routeActivityStarted) return
+        nexusClient?.updateActivity(
+            routeActivity(glyph, distance, street, percent),
+            significant = maneuverChanged,
+        )
+    }
+
+    private fun routeActivity(
+        glyph: String,
+        distance: String,
+        street: String,
+        percent: Int,
+        maxDurationMs: Long? = null,
+    ) = NexusActivity(
+        glyph = glyph,
+        primary = distance,
+        secondary = street,
+        progress = NexusActivityProgress.Percent(percent),
+        eta = "12:41",
+        detail = listOf("then right on Av. de l'Opera"),
+        actions = listOf(
+            NexusActivityAction(id = "mute", glyph = "pause", label = "Mute"),
+        ),
+        maxDurationMs = maxDurationMs,
+    )
+
+    override fun onNexusActivityAction(id: String) {
+        if (id == "mute") muted = !muted
+    }
+
+    override fun onNexusActivityClosed(reason: String) {
+        routeActivityStarted = false
+    }
+
+    fun finishRoute() {
+        nexusClient?.endActivity()
+        routeActivityStarted = false
+    }
+}
+```
+
+Ordinary updates pulse. Set `significant = true` only for a real transition
+such as a maneuver change or arrival. The hub decides whether that becomes a
+flare and permits at most one flare per activity every 10 seconds; a throttled
+flare becomes a pulse and is never queued. Do not use `significant` for distance
+countdown ticks.
+
+The platform can keep two activities and one pin in stable corners. Exactly one
+activity is primary: the most recently significant one, or the oldest started
+one when none is significant. A third start replaces the
+least-recently-updated non-primary activity, with the oldest start as the
+deterministic fallback when no non-primary candidate exists. Only the primary
+activity can show the expanded panel
+or claim its action row.
+
+With no actions, a center tap on the idle layer opens the plugin through its
+normal `onNexusOpen` path. With one to three actions, forward/backward selects
+one and center tap invokes `onNexusActivityAction(id)`. Activity input is inert
+while a surface, notice, launcher, or camera overlay owns the context; BACK is
+never claimed. `onNexusActivityClosed(reason)` reports `owner`, `replaced`,
+`disconnect`, or `max-duration`.
+
+The phone hub owns canonical activity state and resends it after a glasses
+reconnect, after first clearing possible ghosts. You should still call
+`endActivity()` when the underlying process ends. Do not end it merely because
+an engaged surface received `onNexusClose`. Activity v1 neither wakes nor keeps
+the display on, and it does not include plan 014's glance layer.
 
 ### Real image surfaces
 

@@ -1,6 +1,11 @@
 package com.anezium.rokidbus.client.plugin
 
+import com.anezium.rokidbus.shared.ActivityAction
+import com.anezium.rokidbus.shared.ActivityProgress
+import com.anezium.rokidbus.shared.ActivitySurfaceContent
+import com.anezium.rokidbus.shared.ActivitySurfaceContract
 import com.anezium.rokidbus.shared.BusPaths
+import com.anezium.rokidbus.shared.GlyphContract
 import com.anezium.rokidbus.shared.ImageSurfaceContract
 import com.anezium.rokidbus.shared.ImageSurfaceValidationResult
 import com.anezium.rokidbus.shared.MediaArtworkContract
@@ -611,4 +616,122 @@ data class NexusNoticeUpdate(
             footer?.let { put("footer", it.trim()) }
             ttlMs?.let { put("ttlMs", it) }
         }
+}
+
+/**
+ * Progress for an ongoing [NexusActivity].
+ *
+ * A percentage is an integer from 0 through 100. [Indeterminate] asks the
+ * platform to show ongoing work without inventing a completion estimate.
+ */
+sealed interface NexusActivityProgress {
+    data class Percent(val value: Int) : NexusActivityProgress {
+        init {
+            require(value in 0..100)
+        }
+    }
+
+    data object Indeterminate : NexusActivityProgress
+}
+
+/**
+ * One one-shot command in an activity's platform-rendered action row.
+ *
+ * @property id Stable value returned through
+ * [NexusPluginCallbacks.onActivityAction].
+ * @property glyph Well-formed open-set glyph name. Unknown names degrade to
+ * the platform's `dot` fallback.
+ * @property label Human-readable command label. The platform owns whether and
+ * where it is shown.
+ */
+data class NexusActivityAction(
+    val id: String,
+    val glyph: String,
+    val label: String,
+) {
+    init {
+        require(id.trim().isNotEmpty())
+        require(GlyphContract.isWellFormedName(glyph))
+        require(label.trim().isNotEmpty())
+    }
+
+    internal fun toContract(): ActivityAction = ActivityAction(
+        id = id.trim(),
+        glyph = glyph.trim(),
+        label = label.trim(),
+    )
+}
+
+/**
+ * One ongoing real-world process that the wearer follows over time.
+ *
+ * Use an activity for an ongoing process, a notice for a discrete event, a
+ * surface for interaction the wearer is actively driving, and a pin for a
+ * trivial static fact. The plugin declares state only; the platform always
+ * chooses chip, panel, flare, pulse, or hidden presentation.
+ *
+ * @property glyph Required open-set state glyph name. It is shape-validated,
+ * not checked against this SDK's built-in set.
+ * @property primary Required glance value, capped at 12 trimmed characters.
+ * @property secondary Optional label for [primary], capped at 28 trimmed
+ * characters.
+ * @property progress Optional percentage or indeterminate progress state.
+ * @property eta Optional trailing value, capped at 8 trimmed characters.
+ * @property detail Up to two panel-only detail lines, each capped at 32
+ * trimmed characters.
+ * @property actions Up to three one-shot, platform-rendered actions.
+ * @property maxDurationMs Optional safety deadline, clamped on start to one
+ * minute through twelve hours. Null means the activity lasts until ended,
+ * evicted, or disconnected.
+ */
+data class NexusActivity(
+    val glyph: String,
+    val primary: String,
+    val secondary: String? = null,
+    val progress: NexusActivityProgress? = null,
+    val eta: String? = null,
+    val detail: List<String> = emptyList(),
+    val actions: List<NexusActivityAction> = emptyList(),
+    val maxDurationMs: Long? = null,
+) {
+    init {
+        require(GlyphContract.isWellFormedName(glyph))
+        require(primary.trim().isNotEmpty())
+        require(primary.trim().length <= ActivitySurfaceContract.MAX_PRIMARY_CHARS)
+        require(
+            secondary == null ||
+                secondary.trim().length <= ActivitySurfaceContract.MAX_SECONDARY_CHARS,
+        )
+        require(eta == null || eta.trim().length <= ActivitySurfaceContract.MAX_ETA_CHARS)
+        require(detail.size <= ActivitySurfaceContract.MAX_DETAIL_LINES)
+        require(detail.all { it.trim().length <= ActivitySurfaceContract.MAX_DETAIL_CHARS })
+        require(actions.size <= ActivitySurfaceContract.MAX_ACTIONS)
+    }
+
+    internal fun toStartPayload(): JSONObject = ActivitySurfaceContract.toPayload(
+        surfaceId = ActivitySurfaceContract.LOCAL_SURFACE_ID,
+        content = toContent(),
+    )
+
+    internal fun toUpdatePayload(significant: Boolean): JSONObject =
+        ActivitySurfaceContract.toUpdatePayload(
+            surfaceId = ActivitySurfaceContract.LOCAL_SURFACE_ID,
+            content = toContent(),
+            significant = significant,
+        )
+
+    private fun toContent(): ActivitySurfaceContent = ActivitySurfaceContent(
+        glyph = glyph.trim(),
+        primary = primary.trim(),
+        secondary = secondary?.trim()?.takeIf { it.isNotEmpty() },
+        progress = when (progress) {
+            is NexusActivityProgress.Percent -> ActivityProgress.Percent(progress.value)
+            NexusActivityProgress.Indeterminate -> ActivityProgress.Indeterminate
+            null -> null
+        },
+        eta = eta?.trim()?.takeIf { it.isNotEmpty() },
+        detail = detail.map(String::trim),
+        actions = actions.map(NexusActivityAction::toContract),
+        maxDurationMs = maxDurationMs,
+    )
 }

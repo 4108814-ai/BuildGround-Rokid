@@ -3,6 +3,9 @@ package com.anezium.rokidbus.client.plugin
 import android.content.Context
 import com.anezium.rokidbus.client.HubTarget
 import com.anezium.rokidbus.client.PluginRegistrationResult
+import com.anezium.rokidbus.shared.ActivitySurfaceContract
+import com.anezium.rokidbus.shared.ActivitySurfacePatchResult
+import com.anezium.rokidbus.shared.ActivitySurfaceValidationResult
 import com.anezium.rokidbus.shared.BusCapabilityBits
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.LinkStateBits
@@ -122,6 +125,68 @@ class NexusPluginClient internal constructor(
                 BusPaths.NOTICE_HIDE,
                 UUID.randomUUID().toString(),
                 JSONObject().put("surfaceId", NoticeSurfaceContract.LOCAL_SURFACE_ID),
+            )
+        ) {
+            NexusSdkResult.SENT
+        } else {
+            NexusSdkResult.NOT_REGISTERED
+        }
+    }
+
+    /**
+     * Whether these glasses support the platform-owned activity tier.
+     *
+     * This intentionally ignores the current link. Like a pin, an activity is
+     * canonical phone-side state and is resent when capable glasses reconnect.
+     */
+    val supportsActivitySurface: Boolean
+        get() = hubCapabilities and BusCapabilityBits.ACTIVITY_SURFACE != 0
+
+    fun startActivity(activity: NexusActivity): NexusSdkResult {
+        activityPreflight()?.let { return it }
+        val payload = activity.toStartPayload()
+        if (
+            ActivitySurfaceContract.validateStart(payload) !is
+            ActivitySurfaceValidationResult.Valid
+        ) {
+            return NexusSdkResult.INVALID_PAYLOAD
+        }
+        return if (send(BusPaths.ACTIVITY_START, UUID.randomUUID().toString(), payload)) {
+            NexusSdkResult.SENT
+        } else {
+            NexusSdkResult.NOT_REGISTERED
+        }
+    }
+
+    fun updateActivity(
+        activity: NexusActivity,
+        significant: Boolean = false,
+    ): NexusSdkResult {
+        activityPreflight()?.let { return it }
+        val payload = activity.toUpdatePayload(significant)
+        if (
+            ActivitySurfaceContract.validateUpdate(payload) !is
+            ActivitySurfacePatchResult.Valid
+        ) {
+            return NexusSdkResult.INVALID_PAYLOAD
+        }
+        return if (send(BusPaths.ACTIVITY_UPDATE, UUID.randomUUID().toString(), payload)) {
+            NexusSdkResult.SENT
+        } else {
+            NexusSdkResult.NOT_REGISTERED
+        }
+    }
+
+    fun endActivity(): NexusSdkResult {
+        activityPreflight()?.let { return it }
+        return if (
+            send(
+                BusPaths.ACTIVITY_END,
+                UUID.randomUUID().toString(),
+                JSONObject().put(
+                    "surfaceId",
+                    ActivitySurfaceContract.LOCAL_SURFACE_ID,
+                ),
             )
         ) {
             NexusSdkResult.SENT
@@ -306,6 +371,30 @@ class NexusPluginClient internal constructor(
                 ?.let(callbacks::onNoticeClosed)
             return
         }
+        if (path == BusPaths.ACTIVITY_ACTION) {
+            val activityId = payload.optString("activityId")
+            val actionId = payload.optString("id")
+            if (
+                isApproved &&
+                activityId == "$pluginId:${ActivitySurfaceContract.LOCAL_SURFACE_ID}" &&
+                actionId.isNotBlank()
+            ) {
+                callbacks.onActivityAction(actionId)
+            }
+            return
+        }
+        if (path == BusPaths.ACTIVITY_CLOSED) {
+            val activityId = payload.optString("activityId")
+            val reason = payload.optString("reason")
+            if (
+                isApproved &&
+                activityId == "$pluginId:${ActivitySurfaceContract.LOCAL_SURFACE_ID}" &&
+                reason.isNotBlank()
+            ) {
+                callbacks.onActivityClosed(reason)
+            }
+            return
+        }
         when (path) {
             // A duplicate PLUGIN_OPEN (fresh event id) is the hub asking an already-open
             // plugin to re-present itself — e.g. the glasses fell back to the launcher
@@ -473,6 +562,13 @@ class NexusPluginClient internal constructor(
         !isApproved -> NexusSdkResult.NOT_REGISTERED
         !hasCapability(PluginCapability.SURFACES) -> NexusSdkResult.CAPABILITY_NOT_GRANTED
         !supportsPinSurface -> NexusSdkResult.CAPABILITY_NOT_AVAILABLE
+        else -> null
+    }
+
+    private fun activityPreflight(): NexusSdkResult? = when {
+        !isApproved -> NexusSdkResult.NOT_REGISTERED
+        !hasCapability(PluginCapability.SURFACES) -> NexusSdkResult.CAPABILITY_NOT_GRANTED
+        !supportsActivitySurface -> NexusSdkResult.CAPABILITY_NOT_AVAILABLE
         else -> null
     }
 

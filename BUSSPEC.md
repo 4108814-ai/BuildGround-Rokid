@@ -415,15 +415,16 @@ as `/surface/input` so the active plugin can close its own state.
 ## Notice protocol v1
 
 A notice is a transient band across the top of the wearer's view: one
-real-world event, briefly, and then gone. It is the third HUD kind alongside
-pins and surfaces, and the boundaries between them are the point.
+real-world event, briefly, and then gone. It is one of four HUD kinds, and the
+boundaries between them are the point.
 
-- **pin** — ambient and persistent, no input. A fact that stays put.
-- **notice** — transient, top band, arrives and resolves on its own.
-- **surface** — engaged. The wearer is looking at it and driving it.
+- **activity** — an ongoing process the wearer follows.
+- **notice** — a discrete event needing attention or a response.
+- **surface** — an engaged interaction the wearer is driving.
+- **pin** — a trivial static fact that just needs to stay put.
 
-Anything the wearer follows over minutes is neither: that is an activity
-(plan 012).
+If there is a state machine behind a persistent value, use an activity rather
+than repeatedly replacing a pin.
 
 Notices reuse the `surfaces` grant; there is no notice capability and the
 plugin API version remains 3. Glasses announce support with feature bit 64
@@ -535,6 +536,223 @@ While a notice with `interactive: true` is visible, and only then:
   surface underneath stays scrollable while a notice is up, and the DOWN/UP
   bookkeeping that consumes an orphaned UP applies here too, because a notice
   routinely expires between the two halves of a press.
+
+## Activity protocol v1
+
+An activity is a structured, live description of an ongoing real-world process:
+a route, delivery, ride, workout, or timer. The plugin declares what is
+happening; the glasses hub chooses how prominently to present it. Plugins cannot
+supply a layout, image, animation, color, timing, form factor, or presentation.
+
+Use the four HUD kinds this way:
+
+- **activity** — an ongoing process the wearer follows.
+- **notice** — a discrete event needing attention or a response.
+- **surface** — an engaged interaction the wearer is driving.
+- **pin** — a trivial static fact that just needs to stay put.
+
+Activities reuse the `surfaces` grant and plugin API version 3. There is no
+activity descriptor capability or grant UI. Glasses announce support with
+feature bit 128 (`ACTIVITY_SURFACE`, `1 shl 7`) and
+`activitySurfaceVersion: 1`. A plugin connected to a hub that did not announce
+activity v1 receives `CAPABILITY_NOT_AVAILABLE`; the hub does not send traffic
+that the old glasses cannot understand.
+
+### Paths and ownership
+
+Phone to glasses:
+
+- `/activity/start` — starts the owner's activity, or replaces its current
+  state. It carries full state.
+- `/activity/update` — patches an existing activity. It is owner-only.
+- `/activity/end` — ends an existing activity. It is owner-only.
+
+Glasses to phone to the owning plugin:
+
+- `/activity/action` — `{activityId, id}`, where `id` is the selected action's
+  plugin-supplied identifier.
+- `/activity/closed` — `{activityId, reason}`, where `reason` is one of
+  `owner | replaced | disconnect | max-duration`.
+
+Returned activity traffic is owner-scoped, like notice input: the phone hub
+delivers it only to the activity owner. The plugin uses the local surface ID
+`activity`; after principal and grant checks, the phone hub injects
+`ownerPluginId`, rewrites the wire ID to `<pluginId>:activity`, and assigns a
+monotonic `seq`. A plugin cannot supply a trusted owner, global ID, or sequence.
+
+### Payload
+
+A normalized start payload on the phone-to-glasses wire is:
+
+```json
+{
+  "surfaceId": "maps:activity",
+  "ownerPluginId": "maps",
+  "seq": 31,
+  "kind": "activity",
+  "glyph": "turn-left",
+  "primary": "300 m",
+  "secondary": "Rue de la Paix",
+  "progress": 42,
+  "eta": "12:41",
+  "detail": ["then right on Av. de l'Opera"],
+  "actions": [
+    {"id": "mute", "glyph": "pause", "label": "Mute"}
+  ]
+}
+```
+
+Payload caps are checked after trimming. Violations are rejected, not
+truncated:
+
+- `glyph` is required and must be a well-formed glyph name. It may name a
+  platform glyph or one registered by the plugin. The set is open and additive:
+  an unknown but well-formed name renders as `dot` rather than being rejected.
+  A plugin supplies geometry only through the existing custom-glyph contract,
+  never an activity image.
+- `primary` is required and is at most 12 characters.
+- `secondary` is optional and is at most 28 characters.
+- `progress` is optional. It is an integer from 0 through 100, or the string
+  `"indeterminate"`. Absence means no progress affordance.
+- `eta` is optional and is at most 8 characters.
+- `detail` is optional and contains at most two strings, each at most 32
+  characters.
+- `actions` is optional and contains at most three actions. Every action has
+  nonblank `id`, `glyph`, and `label` fields. Plugins must choose action glyphs
+  from the shared platform vocabulary; the wire validates name shape so a
+  well-formed glyph added by a newer platform can still degrade to `dot` on an
+  older one. Activity v1 deliberately adds no numeric length cap to an action
+  ID or label beyond the nonblank requirement and the three-action limit.
+- `maxDurationMs` is optional on `/activity/start` and is clamped to
+  `[60_000, 43_200_000]`. Absence means the activity has no deadline.
+
+`/activity/update` has patch semantics: a present field replaces its value, an
+absent field keeps the current value, and JSON `null` clears an optional scalar.
+JSON `null` or an empty `detail` or `actions` array clears that list. `glyph`
+and `primary` remain required in the resulting state. The typed SDK sends the complete
+mutable activity state on update, including empty lists and explicit nulls for
+cleared optional values. It does not change `maxDurationMs`; that safety
+deadline belongs to the start.
+
+`significant` is an update-only transient boolean and defaults to false. It
+requests attention from the platform policy, not a particular presentation. It
+is not stored as activity state and is not replayed after a camera overlay or a
+reconnect.
+
+The glasses hub drops a stale or duplicate `seq`. The phone hub accepts at most
+four `/activity/update` messages per second per plugin; start and end do not let
+a plugin bypass validation or ownership checks.
+
+### Platform presentations
+
+The same activity state can appear in five ways:
+
+- **chip** — the ambient corner form, delegated to the medium pin panel view:
+  glyph plus `primary` on the title row and `secondary` below.
+- **panel** — the expanded form: large glyph, `primary` at 24sp,
+  `secondary` at 13sp, trailing `eta`, progress when present, detail at 11sp,
+  and the action row. It uses a pure-black background and the shared hairline
+  border.
+- **flare** — a significant update morphs the chip from its corner into the
+  shared notice-band geometry over about 280 ms, holds for about 3.5 s, and
+  reverse-collapses over about 240 ms.
+- **pulse** — a minor or throttled update scales the chip
+  `1.0 -> 1.12 -> 1.0` over about 180 ms.
+- **hidden** — while the camera overlay is visible.
+
+Presentation selection is a pure hub policy. In priority order:
+
+| Context | `significant` | Flare budget | Collapse state | Result |
+|---|---:|---:|---|---|
+| Camera overlay visible | either | either | either | hidden |
+| Any non-camera context | true | available | either | flare |
+| Any non-camera context | true | exhausted | either | pulse |
+| Another surface active | false | either | either | pulse |
+| Nexus launcher visible | false | either | either | pulse |
+| Idle/native home | false | either | running or always expanded | panel |
+| Idle/native home | false | either | elapsed | chip |
+
+The panel collapses to its chip after about 10 seconds without activity, unless
+the wearer enabled the always-expanded setting. There is at most one flare per
+10 seconds per activity. A significant update inside the budget window becomes
+a pulse immediately; it is not queued. A camera-hidden update is retained as
+state but its flare or pulse is not replayed when the camera disappears.
+
+The renderer owns one fixed full-screen transparent,
+`FLAG_NOT_TOUCHABLE | FLAG_NOT_FOCUSABLE` window. Child views move, resize,
+scale, fade, clip, and crossfade inside it. It never animates window layout
+parameters, requests focus, claims touch, keeps the screen on, or wakes the
+display. Activity v1 has no `wakeDisplay` field and no plan-014 glance layer.
+
+### Capacity, corners, and primary selection
+
+Activity v1 holds at most two activities alongside the existing one pin. The
+pin keeps its chosen corner and new activities take free corners. Even with all
+three residents, one of the four corners remains unused.
+
+At activity capacity, a third start replaces the least-recently-updated
+non-primary activity. If there is no non-primary candidate, the oldest started
+activity is the deterministic fallback. The replaced owner receives
+`/activity/closed` with reason `replaced`. Restarting or updating an existing
+owner retains its corner rather than making the HUD jump.
+
+Exactly one activity is primary because only one expanded panel and action row
+can be active. The activity with the latest significant update is primary; if
+none has a significant update, the oldest started activity is primary.
+Significant updates affect primary selection even when their flare is throttled
+to a pulse or hidden by the camera. Non-primary activities remain chips.
+
+### Actions and input arbitration
+
+With no actions, center tap opens the owner through the standard
+`/system/plugin/open` route, just like a launcher tile. With one to three
+actions, forward/backward selects among the platform-rendered glyphs and center
+tap emits `/activity/action`. Actions are one-shot commands only: there is no
+text entry, scrolling, plugin layout, or fourth action. Anything more involved
+opens a surface.
+
+An activity may claim those keys only on the idle layer: there must be no active
+surface, no visible notice, no visible launcher, and no camera overlay. Under
+any of those higher-priority contexts the activity remains passive. Only the
+primary activity can claim input. BACK is never claimed or forwarded by an
+activity, and activity windows never take focus.
+
+### Lifecycle, reconnect, and errors
+
+Activities have no TTL or keep-alive requirement. An activity ends when its
+owner ends it, the owner disconnects, it is replaced, or its optional maximum
+duration expires. The phone hub owns canonical state and is the single place
+that emits `/activity/closed`.
+
+On a glasses capability re-announce, the phone first sends a fresh,
+hub-generated clear-all sentinel on `/activity/end` for wire ID
+`nexus-hub:activity`, before resending canonical activities:
+
+```json
+{
+  "surfaceId": "nexus-hub:activity",
+  "localSurfaceId": "activity",
+  "ownerPluginId": "nexus-hub",
+  "seq": 104
+}
+```
+
+The glasses treats that reserved end as an empty-slot assertion: it clears all
+rendered activities and advances the sequence floor before accepting the
+resends. Each resend carries the remaining `maxDurationMs`, not the original
+duration; a sub-minute remainder uses the start contract's 60-second wire floor
+while the phone retains and enforces the exact original deadline. This prevents
+a ghost activity from surviving a phone-hub restart or continuing to claim
+idle-layer input.
+
+Activity errors mirror pins and notices:
+
+- `INVALID_ACTIVITY` — shape, ID, cap, type, or resulting-state validation
+  failed.
+- `ACTIVITY_RATE_LIMITED` — more than four accepted updates per second for the
+  plugin.
+- `CAPABILITY_NOT_AVAILABLE` — activity v1 was not announced or the glasses
+  cannot accept the activity.
 
 ## Camera contract
 
@@ -768,8 +986,8 @@ Both hubs announce an additive JSON payload on `/system/hub/capabilities`;
 unknown fields are ignorable in both directions, so fields only ever get added.
 
 - Glasses → phone (`GlassesHubCapabilitiesContract`): `version`, renderer
-  `features` bits, `imageSurfaceVersion`, `pinSurfaceVersion`, `maxImageBytes`,
-  the glasses app
+  `features` bits, `imageSurfaceVersion`, `pinSurfaceVersion`,
+  `noticeSurfaceVersion`, `activitySurfaceVersion`, `maxImageBytes`, the glasses app
   `versionName` (drives the phone-side glasses update checker), and
   `setupComplete` (self-arm onboarding state; the phone preserves the last
   known value across link loss — only a live announcement can lower it).
@@ -820,28 +1038,32 @@ bits are `1 = CXR_CONTROL_UP`, `2 = SPP_DATA_UP`, and
 Hub feature bits share one value space regardless of direction. Bit `2` is
 `IMAGE_SURFACE`, bit `4` is `CAMERA_CONSUMER_READY`, bit `8` is
 `CAMERA_FROZEN_SPP`, bit `16` is `CAMERA_LOHS_REVERSE_REQUIRED` (sent only in
-phone-to-glasses camera announcements), and bit `32` is `PIN_SURFACE`. The
-phone does not include renderer bits in camera announcements. The glasses hub
-announces its renderer after either remote link connects by sending
+phone-to-glasses camera announcements), bit `32` is `PIN_SURFACE`, bit `64` is
+`NOTICE_SURFACE`, and bit `128` is `ACTIVITY_SURFACE`. The phone does not
+include renderer bits in camera announcements. The glasses hub announces its
+renderer after either remote link connects by sending
 `/system/hub/capabilities` with
-`{"version":1,"features":34,"imageSurfaceVersion":1,"pinSurfaceVersion":1,"maxImageBytes":65536,"versionName":"1.0.0","setupComplete":true}`.
+`{"version":1,"features":226,"imageSurfaceVersion":1,"pinSurfaceVersion":1,"noticeSurfaceVersion":1,"activitySurfaceVersion":1,"maxImageBytes":65536,"versionName":"1.0.0","setupComplete":true}`.
 `versionName` is the optional glasses app `BuildConfig.VERSION_NAME`; older glasses
 omit it and newer phones treat the missing field as an unknown installed version.
 `setupComplete` reports whether the on-device self-arm onboarding state is `COMPLETE`;
 older payloads omit it and newer phones default the missing field to `false`. A glasses
 hub linked during the transition re-announces capabilities so the phone sees it live.
-The phone hub exposes `IMAGE_SURFACE` and `PIN_SURFACE` to local plugins only
-after receiving their valid versioned announcements. `IMAGE_SURFACE` additionally
-requires `SPP_DATA_UP` and is cleared when all glasses links drop. `PIN_SURFACE`
-is not: it survives link drops, because a pin has canonical phone-side state and
-an announce-time resend, so one pushed while the glasses are asleep is held and
-delivered on reconnect rather than refused. A later announce overwrites the
-remembered value. Capability changes are surfaced by
+The phone hub exposes renderer features to local plugins only after receiving
+their valid versioned announcements. `IMAGE_SURFACE` additionally requires
+`SPP_DATA_UP` and is cleared when all glasses links drop. `PIN_SURFACE` is not:
+it survives link drops, because a pin has canonical phone-side state and an
+announce-time resend, so one pushed while the glasses are asleep is held and
+delivered on reconnect rather than refused. Activities likewise have canonical
+phone-side state and reconnect resends, but owner disconnect still ends them;
+notices remain live moments and are never held for a down link. A later
+announcement overwrites the remembered feature value. Capability changes are surfaced by
 another link-state callback so clients refresh `capabilities()`; callers must not
 cache a one-time Binder result. Old glasses hubs do not announce the bit, so the
-plugin API version remains 3 and image/pin calls fail locally with
-`CAPABILITY_NOT_AVAILABLE`. Image and pin rendering remain covered by the existing
-`surfaces` user grant; it is not a plugin descriptor capability.
+plugin API version remains 3 and typed image, pin, notice, and activity calls
+fail locally with `CAPABILITY_NOT_AVAILABLE`. Image surfaces, pins, notices,
+and activities remain covered by the existing `surfaces` user grant; it is not
+a plugin descriptor capability.
 
 Request/response is NOT in AIDL: the `BusClient` wrapper implements it — a request is
 `send(path, id, payload)` + a pending map keyed by `id`; any reply is delivered by the
@@ -860,14 +1082,28 @@ class BusClient(context, clientId, pathPrefixes: List<String>, listener: (BusEve
     fun close()
 ```
 
-The typed plugin wrapper adds pin methods directly to `NexusPluginClient`,
-because a pin is independent from and may outlive any `NexusSurfaceSession`:
+The typed plugin wrapper adds pin and activity methods directly to
+`NexusPluginClient`, because both are independent from any
+`NexusSurfaceSession`:
 
 ```kotlin
 fun showPin(pin: NexusPin): NexusSdkResult
 fun hidePin(): NexusSdkResult
 val supportsPinSurface: Boolean
+
+fun startActivity(activity: NexusActivity): NexusSdkResult
+fun updateActivity(
+    activity: NexusActivity,
+    significant: Boolean = false,
+): NexusSdkResult
+fun endActivity(): NexusSdkResult
+val supportsActivitySurface: Boolean
 ```
+
+`NexusPluginCallbacks` receives `onActivityAction(id: String)` and
+`onActivityClosed(reason: String)`. `NexusPluginService` exposes them as
+`onNexusActivityAction(id: String)` and
+`onNexusActivityClosed(reason: String)`.
 
 The hub service is discovered by **intent action** `com.anezium.rokidbus.action.HUB`
 (each hub app exports a `BusHubService` with that action; the lib resolves it via

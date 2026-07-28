@@ -29,6 +29,10 @@ import android.util.Log
 import com.anezium.rokidbus.client.IBusCallback
 import com.anezium.rokidbus.client.IBusService
 import com.anezium.rokidbus.client.PluginRegistrationResult
+import com.anezium.rokidbus.shared.ActivityCloseReason
+import com.anezium.rokidbus.shared.ActivitySurfaceContract
+import com.anezium.rokidbus.shared.ActivitySurfacePatchResult
+import com.anezium.rokidbus.shared.ActivitySurfaceValidationResult
 import com.anezium.rokidbus.shared.BusCapabilityBits
 import com.anezium.rokidbus.shared.BusConstants
 import com.anezium.rokidbus.shared.BusEnvelope
@@ -182,6 +186,11 @@ class BusHubService : Service() {
     private val noticeHandler = Handler(Looper.getMainLooper())
     private val noticeExpiryTick = Runnable(::expireCanonicalNotice)
     private val phoneNoticeState = PhoneNoticeState(nowMs = { SystemClock.elapsedRealtime() })
+    private val activityHandler = Handler(Looper.getMainLooper())
+    private val activityExpiryTick = Runnable(::expireCanonicalActivities)
+    private val phoneActivityState = PhoneActivityState(nowMs = { SystemClock.elapsedRealtime() })
+    /** Serializes canonical mutation with its wire send, including reconnect batches. */
+    private val activityWireLock = Any()
     private val updateCheckHandler = Handler(Looper.getMainLooper())
     @Volatile private var updateCheckLoopStopped = true
     private val updateCheckTick = object : Runnable {
@@ -244,6 +253,7 @@ class BusHubService : Service() {
     @Volatile private var remoteImageSurfaceVersion = 0
     @Volatile private var remotePinSurfaceVersion = 0
     @Volatile private var remoteNoticeSurfaceVersion = 0
+    @Volatile private var remoteActivitySurfaceVersion = 0
     @Volatile private var remoteMaxImageBytes = 0
     @Volatile private var remoteGlassesVersionName: String? = null
     @Volatile private var remoteGlassesSetupComplete = false
@@ -714,6 +724,7 @@ class BusHubService : Service() {
         hubEnabled = false
         if (::speechSessionManager.isInitialized) speechSessionManager.cancel()
         stopAudioLease(InternalAudioStopReason.HUB_STOPPED)
+        clearAllActivitiesForHubStop()
         runCatching { cxrLink?.disconnect() }
         cxrLink = null
         cxrConnected = false
@@ -735,6 +746,8 @@ class BusHubService : Service() {
         stopPeriodicUpdateChecks()
         pinHandler.removeCallbacks(pinExpiryTick)
         noticeHandler.removeCallbacks(noticeExpiryTick)
+        activityHandler.removeCallbacks(activityExpiryTick)
+        clearAllActivitiesForHubStop()
         sppLoopStop = true
         if (::speechSessionManager.isInitialized) speechSessionManager.close()
         stopAudioLease(InternalAudioStopReason.HUB_STOPPED)
@@ -836,6 +849,34 @@ class BusHubService : Service() {
                 return
             }
         }
+        if (isActivityPath(envelope.path)) {
+            val invalidActivity = envelope.binary != null ||
+                envelope.payload.optString("surfaceId") != ActivitySurfaceContract.LOCAL_SURFACE_ID ||
+                when (envelope.path) {
+                    BusPaths.ACTIVITY_START ->
+                        ActivitySurfaceContract.validateStart(envelope.payload) !is
+                            ActivitySurfaceValidationResult.Valid
+                    BusPaths.ACTIVITY_UPDATE ->
+                        ActivitySurfaceContract.validateUpdate(envelope.payload) !is
+                            ActivitySurfacePatchResult.Valid
+                    else -> false
+                }
+            if (invalidActivity) {
+                recordLocalRoute(
+                    envelope,
+                    senderUid,
+                    sender,
+                    PluginBusJournal.Verdict.REJECTED,
+                    ActivitySurfaceContract.ERROR_INVALID_ACTIVITY,
+                )
+                deliverError(
+                    sender.replyBinder,
+                    envelope.id,
+                    ActivitySurfaceContract.ERROR_INVALID_ACTIVITY,
+                )
+                return
+            }
+        }
         val ownedEnvelope = if (
             sender.principal != null &&
             PathRules.requiredCapability(envelope.path) == PluginCapability.SURFACES
@@ -848,6 +889,8 @@ class BusHubService : Service() {
                     PinSurfaceContract.ERROR_INVALID_PIN
                 } else if (isNoticePath(envelope.path)) {
                     NoticeSurfaceContract.ERROR_INVALID_NOTICE
+                } else if (isActivityPath(envelope.path)) {
+                    ActivitySurfaceContract.ERROR_INVALID_ACTIVITY
                 } else {
                     "INVALID_SURFACE_ID"
                 }
@@ -873,6 +916,10 @@ class BusHubService : Service() {
         }
         if (isNoticePath(ownedEnvelope.path)) {
             handleLocalNotice(ownedEnvelope, senderUid, sender)
+            return
+        }
+        if (isActivityPath(ownedEnvelope.path)) {
+            handleLocalActivity(ownedEnvelope, senderUid, sender)
             return
         }
         if (
@@ -1000,6 +1047,16 @@ class BusHubService : Service() {
         if (envelope.path == BusPaths.NOTICE_CLOSED) {
             recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
             handleGlassesNoticeClosed(envelope)
+            return
+        }
+        if (envelope.path == BusPaths.ACTIVITY_ACTION) {
+            recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
+            handleGlassesActivityAction(envelope)
+            return
+        }
+        if (envelope.path == BusPaths.ACTIVITY_CLOSED) {
+            recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
+            handleGlassesActivityClosed(envelope)
             return
         }
         if (deliverLocal(envelope)) {
@@ -1170,6 +1227,7 @@ class BusHubService : Service() {
             .ifBlank { envelope.payload.optString("pluginId") }
         if (explicit.isNotBlank()) return explicit
         val surfaceId = envelope.payload.optString("surfaceId")
+            .ifBlank { envelope.payload.optString("activityId") }
         return surfaceId.substringBefore(':').takeIf { ':' in surfaceId && it.isNotBlank() }
     }
 
@@ -1177,9 +1235,11 @@ class BusHubService : Service() {
         BusPaths.SURFACE_SHOW, BusPaths.SURFACE_UPDATE, BusPaths.SURFACE_HIDE,
         BusPaths.PIN_SHOW, BusPaths.PIN_HIDE,
         BusPaths.NOTICE_SHOW, BusPaths.NOTICE_UPDATE, BusPaths.NOTICE_HIDE,
+        BusPaths.ACTIVITY_START, BusPaths.ACTIVITY_UPDATE, BusPaths.ACTIVITY_END,
         -> PluginBusJournal.Category.SURFACE
         BusPaths.SURFACE_INPUT, BusPaths.PLUGIN_INPUT,
         BusPaths.NOTICE_INPUT, BusPaths.NOTICE_CLOSED,
+        BusPaths.ACTIVITY_ACTION, BusPaths.ACTIVITY_CLOSED,
         -> PluginBusJournal.Category.INPUT
         BusPaths.PLUGIN_OPEN, BusPaths.PLUGIN_CLOSE -> PluginBusJournal.Category.LIFECYCLE
         BusPaths.PLUGIN_REGISTRATION -> PluginBusJournal.Category.REGISTRATION
@@ -1372,6 +1432,246 @@ class BusHubService : Service() {
         if (pinLinkUp()) {
             sendRemote(BusEnvelope(path = BusPaths.NOTICE_HIDE, payload = result.payload))
         }
+    }
+
+    private fun isActivityPath(path: String): Boolean =
+        path == BusPaths.ACTIVITY_START ||
+            path == BusPaths.ACTIVITY_UPDATE ||
+            path == BusPaths.ACTIVITY_END
+
+    private fun handleLocalActivity(
+        envelope: BusEnvelope,
+        senderUid: Int,
+        sender: AuthorizedSender,
+    ): Unit = synchronized(activityWireLock) {
+        val principal = sender.principal
+        if (principal == null || envelope.binary != null) {
+            rejectActivity(
+                envelope,
+                senderUid,
+                sender,
+                ActivitySurfaceContract.ERROR_INVALID_ACTIVITY,
+            )
+            return
+        }
+        if (capabilities() and BusCapabilityBits.ACTIVITY_SURFACE == 0) {
+            rejectActivity(
+                envelope,
+                senderUid,
+                sender,
+                ActivitySurfaceContract.ERROR_CAPABILITY_NOT_AVAILABLE,
+            )
+            return
+        }
+
+        val pluginId = principal.descriptor.id
+        when (envelope.path) {
+            BusPaths.ACTIVITY_START ->
+                when (val result = phoneActivityState.start(pluginId, envelope.payload)) {
+                    is PhoneActivityStartResult.Rejected ->
+                        rejectActivity(envelope, senderUid, sender, result.code)
+                    is PhoneActivityStartResult.Accepted -> {
+                        result.replaced?.let { replaced ->
+                            log("activity replaced owner=${replaced.ownerPluginId} by=$pluginId")
+                            sendActivityEndIfReachable(replaced, "replaced")
+                            deliverActivityClosed(replaced.ownerPluginId, replaced.reason)
+                        }
+                        scheduleActivityExpiry()
+                        forwardActivity(envelope, result.payload, senderUid, sender)
+                    }
+                }
+            BusPaths.ACTIVITY_UPDATE ->
+                when (val result = phoneActivityState.update(pluginId, envelope.payload)) {
+                    PhoneActivityUpdateResult.Ignored -> recordLocalRoute(
+                        envelope,
+                        senderUid,
+                        sender,
+                        PluginBusJournal.Verdict.OK,
+                        "ACTIVITY_UPDATE_IGNORED_NO_SESSION",
+                    )
+                    is PhoneActivityUpdateResult.Rejected ->
+                        rejectActivity(envelope, senderUid, sender, result.code)
+                    is PhoneActivityUpdateResult.Accepted -> {
+                        scheduleActivityExpiry()
+                        forwardActivity(envelope, result.payload, senderUid, sender)
+                    }
+                }
+            BusPaths.ACTIVITY_END ->
+                when (val result = phoneActivityState.end(pluginId)) {
+                    PhoneActivityClearResult.Ignored -> recordLocalRoute(
+                        envelope,
+                        senderUid,
+                        sender,
+                        PluginBusJournal.Verdict.OK,
+                        "ACTIVITY_END_IGNORED_NO_SESSION",
+                    )
+                    is PhoneActivityClearResult.Cleared -> {
+                        scheduleActivityExpiry()
+                        val forwarded = envelope.copy(payload = result.payload)
+                        recordLocalRoute(
+                            forwarded,
+                            senderUid,
+                            sender,
+                            PluginBusJournal.Verdict.OK,
+                        )
+                        if (pinLinkUp()) {
+                            sendRemote(forwarded)?.let {
+                                deliverError(sender.replyBinder, envelope.id, it)
+                            }
+                        } else {
+                            log("activity end held owner=$pluginId reason=link_down")
+                        }
+                        deliverActivityClosed(result.ownerPluginId, result.reason)
+                    }
+                }
+        }
+    }
+
+    private fun forwardActivity(
+        envelope: BusEnvelope,
+        payload: JSONObject,
+        senderUid: Int,
+        sender: AuthorizedSender,
+    ) {
+        val forwarded = envelope.copy(payload = payload)
+        recordLocalRoute(forwarded, senderUid, sender, PluginBusJournal.Verdict.OK)
+        if (pinLinkUp()) {
+            sendRemote(forwarded)?.let { deliverError(sender.replyBinder, envelope.id, it) }
+        } else {
+            log(
+                "activity held owner=${payload.optString("ownerPluginId")} " +
+                    "path=${envelope.path} reason=link_down",
+            )
+        }
+    }
+
+    private fun rejectActivity(
+        envelope: BusEnvelope,
+        senderUid: Int,
+        sender: AuthorizedSender,
+        code: String,
+    ) {
+        recordLocalRoute(envelope, senderUid, sender, PluginBusJournal.Verdict.REJECTED, code)
+        deliverError(sender.replyBinder, envelope.id, code)
+    }
+
+    private fun deliverActivityClosed(pluginId: String, reason: ActivityCloseReason) {
+        val payload = ActivitySurfaceContract
+            .closedPayload("$pluginId:${ActivitySurfaceContract.LOCAL_SURFACE_ID}", reason)
+            .put("pluginId", pluginId)
+        if (!deliverLocal(BusEnvelope(path = BusPaths.ACTIVITY_CLOSED, payload = payload))) {
+            log("activity close undelivered owner=$pluginId reason=${reason.wireValue}")
+        }
+    }
+
+    private fun handleGlassesActivityAction(
+        envelope: BusEnvelope,
+    ): Unit = synchronized(activityWireLock) {
+        val activityId = envelope.payload.optString("activityId")
+        val actionId = envelope.payload.optString("id")
+        val owner = phoneActivityState.ownerForAction(activityId, actionId)
+        if (owner == null) {
+            log(
+                "activity action ignored id=${activityId.take(80)} " +
+                    "actionPresent=${actionId.isNotBlank()} reason=not_current",
+            )
+            return
+        }
+        val payload = JSONObject(envelope.payload.toString()).put("pluginId", owner)
+        if (!deliverLocal(envelope.copy(payload = payload))) {
+            log("activity action undelivered owner=$owner; no live registration")
+        }
+    }
+
+    private fun handleGlassesActivityClosed(
+        envelope: BusEnvelope,
+    ): Unit = synchronized(activityWireLock) {
+        val activityId = envelope.payload.optString("activityId")
+        val reason = ActivityCloseReason.fromWireValue(envelope.payload.optString("reason"))
+        if (reason == null) {
+            log("activity close ignored id=${activityId.take(80)} reason=invalid")
+            return
+        }
+        when (val result = phoneActivityState.closedByGlasses(activityId, reason)) {
+            PhoneActivityClearResult.Ignored ->
+                log(
+                    "activity close ignored id=${activityId.take(80)} " +
+                        "reason=${reason.wireValue}",
+                )
+            is PhoneActivityClearResult.Cleared -> {
+                scheduleActivityExpiry()
+                log("activity closed owner=${result.ownerPluginId} reason=${reason.wireValue}")
+                deliverActivityClosed(result.ownerPluginId, result.reason)
+            }
+        }
+    }
+
+    private fun scheduleActivityExpiry(): Unit = synchronized(activityWireLock) {
+        activityHandler.removeCallbacks(activityExpiryTick)
+        val deadline = phoneActivityState.nextExpiryDeadlineMs() ?: return
+        activityHandler.postDelayed(
+            activityExpiryTick,
+            (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0L),
+        )
+    }
+
+    private fun expireCanonicalActivities(): Unit = synchronized(activityWireLock) {
+        phoneActivityState.expireIfDue().forEach { expired ->
+            log("activity expired owner=${expired.ownerPluginId}")
+            sendActivityEndIfReachable(expired, "max_duration")
+            deliverActivityClosed(expired.ownerPluginId, expired.reason)
+        }
+        scheduleActivityExpiry()
+    }
+
+    private fun sendActivityEndIfReachable(
+        result: PhoneActivityClearResult.Cleared,
+        cause: String,
+    ) {
+        if (!pinLinkUp()) {
+            log("activity end held owner=${result.ownerPluginId} cause=$cause reason=link_down")
+            return
+        }
+        val error = sendRemote(BusEnvelope(path = BusPaths.ACTIVITY_END, payload = result.payload))
+        if (error != null) {
+            log("activity end failed owner=${result.ownerPluginId} cause=$cause code=$error")
+        }
+    }
+
+    private fun clearActivityForDisconnectedOwner(
+        pluginId: String,
+        reason: String,
+    ): Unit = synchronized(activityWireLock) {
+        val result = phoneActivityState.ownerDisconnected(pluginId)
+        if (result !is PhoneActivityClearResult.Cleared) return
+        scheduleActivityExpiry()
+        log("activity cleared owner=$pluginId reason=$reason")
+        sendActivityEndIfReachable(result, "disconnect")
+    }
+
+    private fun clearActivityForRevokedOwner(
+        pluginId: String,
+        reason: String,
+    ): Unit = synchronized(activityWireLock) {
+        val result = phoneActivityState.ownerLostAccess(pluginId)
+        if (result !is PhoneActivityClearResult.Cleared) return
+        scheduleActivityExpiry()
+        log("activity cleared owner=$pluginId reason=$reason")
+        sendActivityEndIfReachable(result, "access_lost")
+    }
+
+    private fun clearAllActivitiesForHubStop(): Unit = synchronized(activityWireLock) {
+        val cleared = phoneActivityState.disconnectAll()
+        if (cleared.isEmpty()) return@synchronized
+        activityHandler.removeCallbacks(activityExpiryTick)
+        cleared.forEach { result ->
+            deliverActivityClosed(result.ownerPluginId, result.reason)
+        }
+        if (pinLinkUp()) {
+            val sentinel = phoneActivityState.emptySlotAssertPayload()
+            sendRemote(BusEnvelope(path = BusPaths.ACTIVITY_END, payload = sentinel))
+        }
+        log("activity tier cleared reason=hub_stopped count=${cleared.size}")
     }
 
     private fun handleLocalPin(
@@ -1789,10 +2089,22 @@ class BusHubService : Service() {
         runCatching { registration.callbackBinder.unlinkToDeath(registration.deathRecipient, 0) }
         releaseAudioLeaseForLocalBinder(registration.callbackBinder, reason)
         releaseSpeechSessionForLocalBinder(registration, reason)
+        registration.principal?.descriptor?.id?.let { pluginId ->
+            val ownerStillConnected = registrations.any {
+                it.principal?.descriptor?.id == pluginId
+            }
+            if (!ownerStillConnected &&
+                reason != "replace" &&
+                reason != "authorizationChanged"
+            ) {
+                clearActivityForDisconnectedOwner(pluginId, reason)
+            }
+        }
         // A registration going away is normal: the hub unbinds dormant plugins, and a
         // background plugin is expected to push its pin and disconnect. The pin outlives
         // the connection — only losing the grant, a TTL, a replacement, or an explicit
-        // hide clears it. See clearPinForRevokedOwner.
+        // hide clears it. See clearPinForRevokedOwner. Activities intentionally differ:
+        // the final live registration disappearing cleared that owner's activity above.
         if (reason in setOf("binderDied", "dead callback", "unregister")) {
             registration.principal?.let { principal ->
                 if (::externalPluginController.isInitialized) {
@@ -1810,6 +2122,7 @@ class BusHubService : Service() {
         if (::externalPluginController.isInitialized) externalPluginController.onRevoked(key)
         clearPinForRevokedOwner(key.pluginId, "authorizationChanged")
         clearNoticeForRevokedOwner(key.pluginId, "authorizationChanged")
+        clearActivityForRevokedOwner(key.pluginId, "authorizationChanged")
         registrations.filter { it.principal?.grantKey() == key }.forEach { registration ->
             removeRegistration(registration, "authorizationChanged")
         }
@@ -1864,6 +2177,15 @@ class BusHubService : Service() {
             }
             if (!stillGranted) clearPinForRevokedOwner(owner, "ownerUnavailable")
             if (!stillGranted) clearNoticeForRevokedOwner(owner, "ownerUnavailable")
+        }
+        phoneActivityState.ownerPluginIds().forEach { owner ->
+            val stillGranted = validPrincipals.any { principal ->
+                principal.descriptor.id == owner &&
+                    (pluginGrantStore.stateFor(principal) as? PluginGrantState.Approved)
+                        ?.capabilities
+                        ?.contains(PluginCapability.SURFACES) == true
+            }
+            if (!stillGranted) clearActivityForRevokedOwner(owner, "ownerUnavailable")
         }
         val available = validPrincipals.any { principal ->
             principal.packageName == packageName &&
@@ -2381,6 +2703,36 @@ class BusHubService : Service() {
         }
     }
 
+    private fun resendCanonicalActivitiesIfAvailable(): Unit = synchronized(activityWireLock) {
+        if (capabilities() and BusCapabilityBits.ACTIVITY_SURFACE == 0) return
+        expireCanonicalActivities()
+
+        // A phone-hub restart may leave several owner IDs rendered on the glasses.
+        // Clear the whole tier first, then mint newer sequences for every canonical resend.
+        val emptyAssert = phoneActivityState.emptySlotAssertPayload()
+        val clearError = sendRemote(
+            BusEnvelope(path = BusPaths.ACTIVITY_END, payload = emptyAssert),
+        )
+        if (clearError != null) {
+            log("activity empty assert failed code=$clearError")
+            return
+        }
+
+        phoneActivityState.payloadsForResend().forEach { payload ->
+            val error = sendRemote(BusEnvelope(path = BusPaths.ACTIVITY_START, payload = payload))
+            if (error == null) {
+                log(
+                    "activity resent owner=${payload.optString("ownerPluginId")} " +
+                        "seq=${payload.optLong("seq")}",
+                )
+            } else {
+                log(
+                    "activity resend failed owner=${payload.optString("ownerPluginId")} code=$error",
+                )
+            }
+        }
+    }
+
     private fun acquireAudioLease(
         envelope: BusEnvelope,
         replyRemote: Boolean,
@@ -2835,8 +3187,10 @@ class BusHubService : Service() {
         principal: PhonePluginPrincipal? = null,
         grantedCapabilities: Set<PluginCapability> = emptySet(),
     ): Boolean {
-        removeRegistrationsByBinder(cb.asBinder(), "replace")
         val callbackBinder = cb.asBinder()
+        val replacedRegistrations = registrations.filter {
+            it.callbackBinder == callbackBinder
+        }
         val deathRecipient = IBinder.DeathRecipient {
             removeRegistrationsByBinder(callbackBinder, "binderDied")
         }
@@ -2863,6 +3217,10 @@ class BusHubService : Service() {
             grantedCapabilities = grantedCapabilities,
         )
         registrations += registration
+        // Keep the old registration live until the replacement callback has a
+        // death link and is registered. A failed re-registration is not a
+        // connection drop and must not strand or spuriously clear activity.
+        replacedRegistrations.forEach { removeRegistration(it, "replace") }
         pluginBusJournal.record(
             pluginId = principal?.descriptor?.id,
             category = PluginBusJournal.Category.REGISTRATION,
@@ -3732,12 +4090,12 @@ class BusHubService : Service() {
             if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.onLinkLost()
             remoteImageSurfaceVersion = 0
             remoteMaxImageBytes = 0
-            // remotePinSurfaceVersion deliberately survives, for the same reason as the
-            // setup state below: pin support is a property of the glasses, not of the link,
-            // and a plugin waking while they are off must still be able to leave a pin
-            // waiting for them. The next announce overwrites it, so swapping in older
-            // glasses corrects itself. Image support is not kept — an image has no
-            // canonical state to resend, so it must refuse while the link is down.
+            // remotePinSurfaceVersion and remoteActivitySurfaceVersion deliberately survive,
+            // for the same reason as the setup state below: support is a property of the
+            // glasses, not of the link, and both tiers have canonical state plus reconnect
+            // resends. The next announce overwrites them, so swapping in older glasses
+            // corrects itself. Image support is not kept — an image has no canonical state
+            // to resend, so it must refuse while the link is down.
             // Keep the last-known setup state across link drops: powered-off glasses must
             // not re-open the setup step. Only a live announcement may report false.
             updateRemoteGlassesAppState(null, setupComplete = remoteGlassesSetupComplete)
@@ -3815,6 +4173,12 @@ class BusHubService : Service() {
         ) {
             capabilities = capabilities or BusCapabilityBits.NOTICE_SURFACE
         }
+        // Like pins, activities have canonical phone-side state and an announce-time
+        // resend. Their owner must stay connected, but a transient glasses-link loss does
+        // not make an otherwise valid start or update disappear.
+        if (remoteActivitySurfaceVersion == ActivitySurfaceContract.VERSION) {
+            capabilities = capabilities or BusCapabilityBits.ACTIVITY_SURFACE
+        }
         return capabilities
     }
 
@@ -3852,8 +4216,12 @@ class BusHubService : Service() {
         val noticeSupported = advertised.protocolVersion == GlassesHubCapabilitiesContract.VERSION &&
             advertised.features and BusCapabilityBits.NOTICE_SURFACE != 0 &&
             advertised.noticeSurfaceVersion == NoticeSurfaceContract.VERSION
+        val activitySupported = advertised.protocolVersion == GlassesHubCapabilitiesContract.VERSION &&
+            advertised.features and BusCapabilityBits.ACTIVITY_SURFACE != 0 &&
+            advertised.activitySurfaceVersion == ActivitySurfaceContract.VERSION
         remotePinSurfaceVersion = if (pinSupported) PinSurfaceContract.VERSION else 0
         remoteNoticeSurfaceVersion = if (noticeSupported) NoticeSurfaceContract.VERSION else 0
+        remoteActivitySurfaceVersion = if (activitySupported) ActivitySurfaceContract.VERSION else 0
         remoteMaxImageBytes = if (imageSupported) advertised.maxImageBytes else 0
         updateRemoteGlassesAppState(
             advertised.versionName,
@@ -3871,11 +4239,13 @@ class BusHubService : Service() {
         log(
             "renderer capabilities image=$imageSupported pin=$pinSupported " +
                 "notice=${advertised.features and BusCapabilityBits.NOTICE_SURFACE != 0} " +
+                "activity=$activitySupported " +
                 "maxImageBytes=$remoteMaxImageBytes",
         )
         // Link bits may be unchanged; repeat the callback so clients refresh capabilities().
         notifyLinkState()
         if (pinSupported) resendCanonicalPinIfAvailable()
+        if (activitySupported) resendCanonicalActivitiesIfAvailable()
     }
 
     private fun validateImageEnvelope(envelope: BusEnvelope): String? {

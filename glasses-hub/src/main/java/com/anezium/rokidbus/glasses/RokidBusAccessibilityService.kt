@@ -48,6 +48,8 @@ class RokidBusAccessibilityService : AccessibilityService() {
         )
         SurfaceOverlayRenderer.onServiceConnected(this)
         PinOverlayRenderer.onServiceConnected(this)
+        ActivityController.onServiceConnected(applicationContext)
+        ActivityOverlayRenderer.onServiceConnected(this)
         NoticeOverlayRenderer.onServiceConnected(this)
         LauncherOverlayRenderer.onServiceConnected(this)
         StatusBadgeOverlayRenderer.onServiceConnected(this)
@@ -135,6 +137,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
                     noticeConsumesConfirm(event) -> true
                     LauncherOverlayRenderer.handleKeyEvent(event) -> true
                     SurfaceController.handleKeyEvent(event) -> true
+                    ActivityController.handleKeyEvent(event) -> true
                     else -> false
                 }
             }
@@ -189,7 +192,8 @@ class RokidBusAccessibilityService : AccessibilityService() {
         val launcherShown = LauncherOverlayRenderer.isShown()
         val surfaceActive = SurfaceController.activeSurface() != null
         val noticeClaims = NoticeController.claimsInput()
-        if (!launcherShown && !surfaceActive && !noticeClaims) return false
+        val activityClaims = ActivityController.claimsRingKey(event.keyCode)
+        if (!launcherShown && !surfaceActive && !noticeClaims && !activityClaims) return false
 
         if (event.action != KeyEvent.ACTION_DOWN) return true
         if (event.repeatCount == 0) {
@@ -203,6 +207,8 @@ class RokidBusAccessibilityService : AccessibilityService() {
                     NoticeController.handleRingKey(event.keyCode, event.eventTime)
                 surfaceActive ->
                     SurfaceController.handleRingKey(event.keyCode, event.eventTime)
+                activityClaims ->
+                    ActivityController.handleRingKey(event.keyCode, event.eventTime)
                 else -> Unit
             }
         }
@@ -233,10 +239,13 @@ class RokidBusAccessibilityService : AccessibilityService() {
         LauncherOverlayRenderer.onServiceDestroyed(this)
         StatusBadgeOverlayRenderer.onServiceDestroyed(this)
         PinOverlayRenderer.onServiceDestroyed(this)
+        ActivityOverlayRenderer.onServiceDestroyed(this)
+        ActivityController.onServiceDestroyed()
         SurfaceOverlayRenderer.onServiceDestroyed(this)
         NoticeOverlayRenderer.onServiceDestroyed(this)
         SurfaceController.cancelRingInput()
         NoticeController.cancelRingInput()
+        ActivityController.cancelRingInput()
         RingFocusBroadcastCoordinator.onServiceDestroyed(this)
         consumedDownKeys.clear()
         super.onDestroy()
@@ -253,12 +262,17 @@ class RokidBusAccessibilityService : AccessibilityService() {
             }
             return
         }
-        if (SurfaceController.activeSurface() == null) return
+        if (SurfaceController.activeSurface() != null) {
+            repeat(tapCount) {
+                SurfaceController.forwardSurfaceInput(
+                    TripleTapDetector.KEYCODE_NOTIFICATION,
+                    KeyEvent.ACTION_DOWN,
+                )
+            }
+            return
+        }
         repeat(tapCount) {
-            SurfaceController.forwardSurfaceInput(
-                TripleTapDetector.KEYCODE_NOTIFICATION,
-                KeyEvent.ACTION_DOWN,
-            )
+            ActivityController.handlePendingTempleTap()
         }
     }
 
