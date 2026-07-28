@@ -1,6 +1,7 @@
 package com.anezium.rokidbus.plugin.agents
 
 import android.content.Context
+import android.os.SystemClock
 import org.json.JSONObject
 
 data class AgentdConfig(
@@ -47,24 +48,51 @@ object AgentdPairingParser {
     fun parse(raw: String): AgentdPairingParseResult {
         val json = runCatching { JSONObject(raw.trim()) }.getOrNull()
             ?: return AgentdPairingParseResult.Invalid("Pairing data is not valid JSON.")
-        if (json.optInt("v", -1) != 1) {
+        if (json.intOrNull("v") != 1) {
             return AgentdPairingParseResult.Invalid("Unsupported pairing version.")
         }
-        if (json.optString("kind") != "nexus-agentd") {
+        if (json.nullableString("kind", MAX_WIRE_TYPE_CHARS) != "nexus-agentd") {
             return AgentdPairingParseResult.Invalid("Pairing kind must be nexus-agentd.")
         }
-        val host = json.optString("host").trim()
-        val port = json.optInt("port", -1)
-        val token = json.optString("token").trim()
-        val name = json.optString("name").trim().ifBlank { host }
-        if (host.isBlank()) return AgentdPairingParseResult.Invalid("Host is missing.")
+        val host = json.identifierOrNull("host", MAX_HOST_CHARS)
+            ?: return AgentdPairingParseResult.Invalid("Host is missing.")
+        val port = json.intOrNull("port") ?: -1
+        val token = json.identifierOrNull("token", MAX_AUTH_TOKEN_CHARS)
+            ?: return AgentdPairingParseResult.Invalid("Token is missing.")
+        val name = json.nullableString("name", MAX_HUD_LABEL_CHARS) ?: host
         if (port !in 1..65535) return AgentdPairingParseResult.Invalid("Port is invalid.")
-        if (token.isBlank()) return AgentdPairingParseResult.Invalid("Token is missing.")
         return AgentdPairingParseResult.Valid(AgentdConfig(host, port, token, name))
     }
 }
 
-class AgentsConfigStore(context: Context) {
+internal enum class MachineTrustResult {
+    TRUSTED,
+    NEWLY_TRUSTED,
+    REJECTED,
+}
+
+internal fun decideMachineTrust(
+    knownToken: String?,
+    hasAnyTrustedMachine: Boolean,
+    linkWindowOpen: Boolean,
+    presentedToken: String,
+): MachineTrustResult = when {
+    knownToken != null && knownToken == presentedToken -> MachineTrustResult.TRUSTED
+    knownToken != null -> MachineTrustResult.REJECTED
+    !hasAnyTrustedMachine || linkWindowOpen -> MachineTrustResult.NEWLY_TRUSTED
+    else -> MachineTrustResult.REJECTED
+}
+
+internal fun linkWindowDeadline(now: Long): Long =
+    now.coerceAtMost(Long.MAX_VALUE - LINK_WINDOW_DURATION_MS) + LINK_WINDOW_DURATION_MS
+
+internal fun isLinkWindowDeadlineOpen(deadline: Long, now: Long): Boolean =
+    deadline - now in 1L..LINK_WINDOW_DURATION_MS
+
+class AgentsConfigStore(
+    context: Context,
+    private val elapsedRealtime: () -> Long = SystemClock::elapsedRealtime,
+) {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun load(): AgentsConfig {
@@ -159,11 +187,60 @@ class AgentsConfigStore(context: Context) {
         return known == token
     }
 
+    /**
+     * Atomically applies the LAN trust-on-first-use/link-window policy.
+     * Existing machine tokens are never changed by this operation.
+     */
+    @Synchronized
+    internal fun authorizeMachine(
+        machineId: String,
+        token: String,
+        machineName: String,
+    ): MachineTrustResult {
+        val key = machineKey(machineId)
+        val knownToken = prefs.getString(key, null)
+        val hasAnyTrustedMachine = prefs.all.keys.any { it.startsWith(KEY_MACHINE_PREFIX) }
+        val result = decideMachineTrust(
+            knownToken = knownToken,
+            hasAnyTrustedMachine = hasAnyTrustedMachine,
+            linkWindowOpen = isLinkWindowOpen(),
+            presentedToken = token,
+        )
+        if (result == MachineTrustResult.NEWLY_TRUSTED) {
+            prefs.edit()
+                .putString(key, token)
+                .putString("$KEY_MACHINE_NAME_PREFIX$machineId", machineName)
+                .remove(KEY_LINK_WINDOW_DEADLINE)
+                .apply()
+        }
+        return result
+    }
+
     fun trustMachine(machineId: String, token: String, machineName: String) {
         prefs.edit()
             .putString(machineKey(machineId), token)
             .putString("$KEY_MACHINE_NAME_PREFIX$machineId", machineName)
             .apply()
+    }
+
+    fun armLinkWindow() {
+        prefs.edit()
+            .putLong(KEY_LINK_WINDOW_DEADLINE, linkWindowDeadline(elapsedRealtime()))
+            .apply()
+    }
+
+    @Synchronized
+    fun isLinkWindowOpen(): Boolean = linkWindowRemainingMs() > 0L
+
+    @Synchronized
+    fun linkWindowRemainingMs(): Long {
+        val deadline = prefs.getLong(KEY_LINK_WINDOW_DEADLINE, 0L)
+        val now = elapsedRealtime()
+        val remaining = if (isLinkWindowDeadlineOpen(deadline, now)) deadline - now else 0L
+        if (remaining == 0L && deadline != 0L) {
+            prefs.edit().remove(KEY_LINK_WINDOW_DEADLINE).apply()
+        }
+        return remaining
     }
 
     fun trustedMachineNames(): List<String> = prefs.all.keys
@@ -188,6 +265,17 @@ class AgentsConfigStore(context: Context) {
         prefs.edit().putString("$KEY_NOTIFICATION_PREFIX$sessionKey", fingerprint).apply()
     }
 
+    /**
+     * An alert fingerprint outlives the session it describes, so without this
+     * the preferences file grows by one entry per session the wearer ever saw.
+     */
+    fun forgetNotificationFingerprints(sessionKeys: Set<String>) {
+        if (sessionKeys.isEmpty()) return
+        prefs.edit().apply {
+            sessionKeys.forEach { remove("$KEY_NOTIFICATION_PREFIX$it") }
+        }.apply()
+    }
+
     private companion object {
         const val PREFS = "nexus_plugin_agents"
         const val KEY_AGENTD_ENABLED = "agentd.enabled"
@@ -204,5 +292,8 @@ class AgentsConfigStore(context: Context) {
         const val KEY_NOTIFICATION_PREFIX = "notification."
         const val KEY_MACHINE_PREFIX = "machine.token."
         const val KEY_MACHINE_NAME_PREFIX = "machine.name."
+        const val KEY_LINK_WINDOW_DEADLINE = "machine.link_window_deadline"
     }
 }
+
+internal const val LINK_WINDOW_DURATION_MS = 2L * 60L * 1000L

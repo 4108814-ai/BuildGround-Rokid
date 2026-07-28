@@ -2,6 +2,7 @@ package com.anezium.rokidbus.plugin.agents
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -76,6 +77,71 @@ class OpenClawProtocolTest {
                     """{"type":"event","event":"exec.approval.resolved","payload":{"id":"approval-1","decision":"allow-once","resolvedAtMs":2000}}""",
                 ),
             ),
+        )
+    }
+
+    @Test
+    fun missingOrWrongSessionsFieldIsMalformedRatherThanEmpty() {
+        assertNull(OpenClawProtocol.mapSessionsOrNull(JSONObject("""{"count":0}""")))
+        assertNull(
+            OpenClawProtocol.mapSessionsOrNull(
+                JSONObject("""{"sessions":{"key":"not-an-array"}}"""),
+            ),
+        )
+        assertEquals(
+            emptyList<AgentSession>(),
+            OpenClawProtocol.mapSessionsOrNull(JSONObject("""{"sessions":[]}""")),
+        )
+    }
+
+    @Test
+    fun listIsCappedAndScalarTypesAreStrict() {
+        val rows = (0 until MAX_SESSIONS_PER_PROVIDER + 20).joinToString(",") {
+            """{"key":"agent:$it","displayName":"Session $it","updatedAt":$it}"""
+        }
+        val mapped = OpenClawProtocol.mapSessions(JSONObject("""{"sessions":[$rows]}"""))
+        assertEquals(MAX_SESSIONS_PER_PROVIDER, mapped.size)
+
+        val strict = OpenClawProtocol.mapSessions(
+            JSONObject(
+                """{"sessions":[
+                    {"key":7,"displayName":"coerced"},
+                    {"key":"valid","displayName":8,"hasActiveRun":"true"}
+                ]}""".trimIndent(),
+            ),
+        )
+        assertEquals(1, strict.size)
+        assertEquals("valid", strict.single().title)
+        assertEquals(AgentStatus.IDLE, strict.single().status)
+    }
+
+    @Test
+    fun retainedOpenClawStringsAreBounded() {
+        val longTitle = "x".repeat(MAX_HUD_LABEL_CHARS + 50)
+        val mapped = OpenClawProtocol.mapSessions(
+            JSONObject(
+                """{"sessions":[{"key":"valid","displayName":"$longTitle","lastRunError":"${"e".repeat(MAX_STATUS_DETAIL_CHARS + 50)}"}]}""",
+            ),
+        ).single()
+        assertEquals(MAX_HUD_LABEL_CHARS, mapped.title?.length)
+        assertEquals(MAX_STATUS_DETAIL_CHARS, mapped.statusDetail?.length)
+    }
+
+    @Test
+    fun approvalEventRejectsWrongScalarTypes() {
+        assertTrue(
+            OpenClawProtocol.parseEvent(
+                JSONObject(
+                    """{"type":"event","event":"exec.approval.requested","payload":{"id":5,"request":{"sessionKey":"s","command":"run"}}}""",
+                ),
+            ) is OpenClawEvent.Unknown,
+        )
+        assertTrue(
+            OpenClawProtocol.parseEvent(
+                JSONObject(
+                    """{"type":"event","event":"connect.challenge","payload":{"nonce":{"nested":true}}}""",
+                ),
+            ) is OpenClawEvent.Unknown,
         )
     }
 }

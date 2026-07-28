@@ -2,8 +2,10 @@ package com.anezium.rokidbus.plugin.agents
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -12,6 +14,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import java.util.concurrent.atomic.AtomicBoolean
 
 class AgentdClient(
     private val httpClient: OkHttpClient,
@@ -20,94 +23,125 @@ class AgentdClient(
     private val versionName: String,
 ) {
     private var loopJob: Job? = null
-    @Volatile private var socket: WebSocket? = null
+    private val sockets = GenerationSlot<WebSocket>()
 
     /** Survives reconnects: the daemon forgets, the wearer should not. */
     @Volatile private var openSessionId: String? = null
 
     fun openDetail(sessionId: String) {
         openSessionId = sessionId
-        socket?.send(AgentdProtocolCodec.detailOpen(sessionId))
+        sockets.current()?.send(AgentdProtocolCodec.detailOpen(sessionId))
     }
 
     fun closeDetail() {
         openSessionId = null
-        socket?.send(AgentdProtocolCodec.DETAIL_CLOSE)
+        sockets.current()?.send(AgentdProtocolCodec.DETAIL_CLOSE)
     }
 
+    @Synchronized
     fun start(config: AgentdConfig) {
-        stop(clearSessions = false)
-        loopJob = scope.launch {
-            var attempt = 0
-            while (isActive) {
-                store.setConnection(AgentProvider.CLAUDE, ConnectionState.CONNECTING)
-                val result = try {
-                    connectOnce(config)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Throwable) {
-                    ConnectionOutcome.Retry
-                } finally {
-                    socket?.cancel()
-                    socket = null
-                }
-                when (result) {
-                    is ConnectionOutcome.AuthFailed -> {
-                        store.setConnection(
-                            AgentProvider.CLAUDE,
-                            ConnectionState.AUTH_FAILED,
-                            result.detail,
-                        )
-                        return@launch
-                    }
-                    is ConnectionOutcome.RetryWithDetail -> {
-                        store.setConnection(
-                            AgentProvider.CLAUDE,
-                            ConnectionState.DISCONNECTED,
-                            result.detail,
-                        )
-                    }
-                    ConnectionOutcome.Retry -> {
-                        store.setConnection(
-                            AgentProvider.CLAUDE,
-                            ConnectionState.DISCONNECTED,
-                            "Connection lost",
-                        )
-                    }
-                }
-                delay(reconnectDelayMs(attempt++))
-            }
+        loopJob?.cancel()
+        val advance = sockets.advance()
+        advance.previous?.cancel()
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            runConnectionLoop(config, advance.generation)
         }
+        loopJob = job
+        job.start()
     }
 
+    @Synchronized
     fun stop(clearSessions: Boolean) {
         loopJob?.cancel()
         loopJob = null
-        socket?.cancel()
-        socket = null
+        sockets.advance().previous?.cancel()
         store.setConnection(AgentProvider.CLAUDE, ConnectionState.DISCONNECTED)
         if (clearSessions) store.replaceProvider(AgentProvider.CLAUDE, emptyList())
     }
 
-    private suspend fun connectOnce(config: AgentdConfig): ConnectionOutcome {
-        val codec = AgentdProtocolCodec()
-        codec.reset()
+    private suspend fun runConnectionLoop(config: AgentdConfig, generation: Long) {
+        val backoff = ReconnectBackoff()
+        while (scope.isActive && sockets.isCurrent(generation)) {
+            store.setConnection(AgentProvider.CLAUDE, ConnectionState.CONNECTING)
+            val result = try {
+                connectOnce(config, generation, backoff)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                ConnectionOutcome.Retry
+            } finally {
+                sockets.clear(generation)?.cancel()
+            }
+            if (!sockets.isCurrent(generation)) return
+            when (result) {
+                is ConnectionOutcome.AuthFailed -> {
+                    store.setConnection(
+                        AgentProvider.CLAUDE,
+                        ConnectionState.AUTH_FAILED,
+                        result.detail,
+                    )
+                    return
+                }
+                is ConnectionOutcome.RetryWithDetail -> {
+                    store.setConnection(
+                        AgentProvider.CLAUDE,
+                        ConnectionState.DISCONNECTED,
+                        result.detail,
+                    )
+                }
+                ConnectionOutcome.Retry -> {
+                    store.setConnection(
+                        AgentProvider.CLAUDE,
+                        ConnectionState.DISCONNECTED,
+                        "Connection lost",
+                    )
+                }
+            }
+            delay(backoff.nextDelayMs())
+        }
+    }
+
+    private suspend fun connectOnce(
+        config: AgentdConfig,
+        generation: Long,
+        backoff: ReconnectBackoff,
+    ): ConnectionOutcome = coroutineScope {
+        val codec = AgentdProtocolCodec().also(AgentdProtocolCodec::reset)
         val ended = CompletableDeferred<ConnectionOutcome>()
-        var connected = false
+        val connected = AtomicBoolean(false)
+        lateinit var deadlines: ConnectionDeadlines
+
+        fun isLive(): Boolean = sockets.isCurrent(generation) && !ended.isCompleted
+
+        deadlines = ConnectionDeadlines(this) { detail ->
+            if (sockets.isCurrent(generation)) {
+                ended.complete(ConnectionOutcome.RetryWithDetail(detail))
+            }
+        }
         val request = Request.Builder()
             .url(webSocketUrl(config.host, config.port))
             .build()
         val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                if (!isLive()) {
+                    webSocket.cancel()
+                    return
+                }
                 if (!webSocket.send(codec.hello(config.token, versionName))) {
                     ended.complete(ConnectionOutcome.Retry)
+                    return
                 }
+                deadlines.arm(DEADLINE_HELLO, "Daemon hello timed out")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (!isLive()) return
                 when (val action = codec.parse(text)) {
                     is AgentdAction.HelloAcknowledged -> {
-                        connected = true
+                        if (!connected.compareAndSet(false, true)) return
+                        deadlines.clear(DEADLINE_HELLO)
+                        deadlines.arm(DEADLINE_SNAPSHOT, "Daemon snapshot timed out")
+                        backoff.reset()
                         store.setConnection(
                             AgentProvider.CLAUDE,
                             ConnectionState.CONNECTED,
@@ -115,31 +149,54 @@ class AgentdClient(
                         )
                     }
                     is AgentdAction.Snapshot -> {
+                        if (!connected.get()) return
+                        deadlines.clear(DEADLINE_SNAPSHOT)
                         store.replaceProvider(AgentProvider.CLAUDE, action.sessions)
                         // A fresh connection knows nothing of the open conversation.
                         openSessionId?.let { webSocket.send(AgentdProtocolCodec.detailOpen(it)) }
                     }
-                    is AgentdAction.Upsert -> store.upsert(action.session)
-                    is AgentdAction.Removed -> {
-                        store.remove(AgentProvider.CLAUDE, action.sessionId)
+                    is AgentdAction.Upsert -> {
+                        if (connected.get()) store.upsert(action.session)
                     }
-                    is AgentdAction.Detail -> store.setConversation(
-                        AgentProvider.CLAUDE,
-                        action.sessionId,
-                        action.messages,
-                    )
-                    is AgentdAction.DetailAppend -> store.appendConversation(
-                        AgentProvider.CLAUDE,
-                        action.sessionId,
-                        action.message,
-                    )
-                    is AgentdAction.Send -> webSocket.send(action.text)
+                    is AgentdAction.Removed -> {
+                        if (connected.get()) {
+                            store.remove(AgentProvider.CLAUDE, action.sessionId)
+                        }
+                    }
+                    is AgentdAction.Detail -> {
+                        if (connected.get()) {
+                            store.setConversation(
+                                AgentProvider.CLAUDE,
+                                action.sessionId,
+                                action.messages,
+                            )
+                        }
+                    }
+                    is AgentdAction.DetailAppend -> {
+                        if (connected.get()) {
+                            store.appendConversation(
+                                AgentProvider.CLAUDE,
+                                action.sessionId,
+                                action.message,
+                            )
+                        }
+                    }
+                    is AgentdAction.Send -> {
+                        if (action.text == AgentdProtocolCodec.REFRESH) {
+                            if (!connected.get()) return
+                            deadlines.arm(DEADLINE_SNAPSHOT, "Daemon refresh timed out")
+                        }
+                        if (!webSocket.send(action.text)) {
+                            ended.complete(ConnectionOutcome.Retry)
+                        }
+                    }
                     // Only the LAN link sees a daemon hello: here we are the client.
                     is AgentdAction.Hello, AgentdAction.Ignore -> Unit
                 }
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                if (!sockets.isCurrent(generation)) return
                 if (code == BAD_TOKEN_CLOSE_CODE) {
                     ended.complete(ConnectionOutcome.AuthFailed("Pairing invalid"))
                 } else {
@@ -149,25 +206,38 @@ class AgentdClient(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                if (!sockets.isCurrent(generation)) return
                 if (code == BAD_TOKEN_CLOSE_CODE) {
                     ended.complete(ConnectionOutcome.AuthFailed("Pairing invalid"))
                 } else {
                     ended.complete(
-                        if (connected) ConnectionOutcome.Retry
+                        if (connected.get()) ConnectionOutcome.Retry
                         else ConnectionOutcome.RetryWithDetail("Connection closed"),
                     )
                 }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                ended.complete(ConnectionOutcome.Retry)
+                if (sockets.isCurrent(generation)) {
+                    ended.complete(ConnectionOutcome.Retry)
+                }
             }
         }
-        socket = httpClient.newWebSocket(request, listener)
-        return ended.await()
+        val candidate = httpClient.newWebSocket(request, listener)
+        if (!sockets.install(generation, candidate)) {
+            candidate.cancel()
+            ended.complete(ConnectionOutcome.Retry)
+        }
+        try {
+            ended.await()
+        } finally {
+            deadlines.clearAll()
+        }
     }
 
     private companion object {
         const val BAD_TOKEN_CLOSE_CODE = 4401
+        const val DEADLINE_HELLO = "hello"
+        const val DEADLINE_SNAPSHOT = "snapshot"
     }
 }
