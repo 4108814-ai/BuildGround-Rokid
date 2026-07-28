@@ -238,6 +238,8 @@ class BusHubService : Service() {
     private var glassesAppOperationSequence = 0L
     private var activeGlassesAppOperationId: Long? = null
     @Volatile private var lastAnnouncedPhoneCapabilities: PhoneHubCapabilities? = null
+    private var phoneBatteryReporter: PhoneBatteryReporter? = null
+    private var phoneBatteryBadgeSubscription: PhoneBatteryBadgeStore.Subscription? = null
     @Volatile private var lastNotifiedStatus: String? = null
     @Volatile private var remoteImageSurfaceVersion = 0
     @Volatile private var remotePinSurfaceVersion = 0
@@ -605,6 +607,15 @@ class BusHubService : Service() {
         refreshMediaSyncConsent()
         registerPluginPackageReceiver()
         registerWifiStateReceiver()
+        phoneBatteryReporter = PhoneBatteryReporter(
+            context = this,
+            send = ::sendRemote,
+            log = ::log,
+            initiallyEnabled = PhoneBatteryBadgeStore(this).isEnabled(),
+        ).also { it.start() }
+        phoneBatteryBadgeSubscription = PhoneBatteryBadgeStore(this).addChangeListener { enabled ->
+            phoneBatteryReporter?.setEnabled(enabled)
+        }
         hubEnabled = prefs().getBoolean(PREF_ENABLED, true)
         if (hubEnabled) {
             if (!canRunHub(this)) {
@@ -738,6 +749,10 @@ class BusHubService : Service() {
             runCatching { unregisterReceiver(wifiStateReceiver) }
             wifiStateReceiverRegistered = false
         }
+        phoneBatteryReporter?.stop()
+        phoneBatteryReporter = null
+        phoneBatteryBadgeSubscription?.close()
+        phoneBatteryBadgeSubscription = null
         developerModeJournalSubscription?.close()
         developerModeJournalSubscription = null
         if (::pluginRegistry.isInitialized) pluginRegistry.close()
@@ -3744,6 +3759,7 @@ class BusHubService : Service() {
         ) {
             pluginRegistry.syncLauncherList()
             announcePhoneCapabilities()
+            phoneBatteryReporter?.resend("link_up")
         } else {
             lastAnnouncedPhoneCapabilities = null
         }
@@ -3848,6 +3864,10 @@ class BusHubService : Service() {
         if (::manualPairingEngine.isInitialized) {
             manualPairingEngine.onGlassesSetupReported(advertised.setupComplete)
         }
+        // The glasses announce on every hub start, which is the one restart the
+        // phone cannot see as a link change. Without this the badge stays blank
+        // until the phone next crosses a percent.
+        phoneBatteryReporter?.resend("glasses_announced")
         log(
             "renderer capabilities image=$imageSupported pin=$pinSupported " +
                 "notice=${advertised.features and BusCapabilityBits.NOTICE_SURFACE != 0} " +

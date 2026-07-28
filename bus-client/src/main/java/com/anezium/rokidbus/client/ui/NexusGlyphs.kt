@@ -71,6 +71,7 @@ object NexusGlyphs {
         "package" to R.drawable.ic_glyph_package,
         "walk" to R.drawable.ic_glyph_walk,
         "timer" to R.drawable.ic_glyph_timer,
+        "phone" to R.drawable.ic_glyph_phone,
         FALLBACK to R.drawable.ic_glyph_dot,
     )
 }

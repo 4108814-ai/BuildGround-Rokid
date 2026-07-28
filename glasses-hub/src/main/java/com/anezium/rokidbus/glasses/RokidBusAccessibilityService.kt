@@ -50,6 +50,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
         PinOverlayRenderer.onServiceConnected(this)
         NoticeOverlayRenderer.onServiceConnected(this)
         LauncherOverlayRenderer.onServiceConnected(this)
+        StatusBadgeOverlayRenderer.onServiceConnected(this)
         GlassesHub.start(applicationContext)
         AccessibilityRearmWatcher.start(applicationContext, "accessibility_service_connected")
         // If a manual pairing was awaiting the phone's arm when the ROM tore the service down,
@@ -87,6 +88,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         wirelessDebuggingAutomator?.onAccessibilityEvent(event)
         developerOptionsEnabler?.onAccessibilityEvent(event)
+        StatusBadgeOverlayRenderer.onAccessibilityEvent(event)
         if (pendingManualCompletion != null && !manualWifiEnableActive) {
             main.removeCallbacks(manualOpenVerifier)
             main.postDelayed(manualOpenVerifier, MANUAL_OPEN_EVENT_SETTLE_MS)
@@ -229,6 +231,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
         developerOptionsEnabler = null
         if (liveInstance === this) liveInstance = null
         LauncherOverlayRenderer.onServiceDestroyed(this)
+        StatusBadgeOverlayRenderer.onServiceDestroyed(this)
         PinOverlayRenderer.onServiceDestroyed(this)
         SurfaceOverlayRenderer.onServiceDestroyed(this)
         NoticeOverlayRenderer.onServiceDestroyed(this)

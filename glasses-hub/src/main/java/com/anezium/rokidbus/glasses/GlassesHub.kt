@@ -179,6 +179,7 @@ object GlassesHub {
             MediaSyncEngine.onTransferEnvelope(envelope.path, envelope.payload)
             return
         }
+        if (PhoneBatteryController.handleEnvelope(envelope)) return
         appContext?.let { context ->
             if (PinController.handlePinEnvelope(envelope)) return
             if (NoticeController.handleNoticeEnvelope(envelope)) return

@@ -146,6 +146,8 @@ class SettingsActivity : Activity() {
             )
             addView(BusTheme.gap(this@SettingsActivity, 10))
             addView(speechRow(), NexusUi.block())
+            addView(BusTheme.gap(this@SettingsActivity, 10))
+            addView(phoneBatteryBadgeRow(), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 28))
             addView(NexusUi.sectionRow(this@SettingsActivity, "Advanced"), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 12))
@@ -453,6 +455,48 @@ class SettingsActivity : Activity() {
                         developerModeStore.setEnabled(enabled)
                         buildUi()
                     }
+                },
+            )
+        }
+
+    private fun phoneBatteryBadgeRow(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = NexusUi.bordered(this@SettingsActivity, NexusUi.PANEL, NexusUi.LINE, 15)
+            setPadding(
+                NexusUi.dp(this@SettingsActivity, 15),
+                NexusUi.dp(this@SettingsActivity, 10),
+                NexusUi.dp(this@SettingsActivity, 15),
+                NexusUi.dp(this@SettingsActivity, 10),
+            )
+            val store = PhoneBatteryBadgeStore(this@SettingsActivity)
+            addView(
+                LinearLayout(this@SettingsActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(NexusUi.rowTitle(this@SettingsActivity, "Phone battery on glasses"))
+                    addView(BusTheme.gap(this@SettingsActivity, 3))
+                    addView(
+                        NexusUi.rowSub(
+                            this@SettingsActivity,
+                            "Charge chip beside the clock in the status row",
+                        ),
+                    )
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            addView(
+                Switch(this@SettingsActivity).apply {
+                    isChecked = store.isEnabled()
+                    thumbTintList = ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(NexusUi.GREEN, NexusUi.INK3),
+                    )
+                    trackTintList = ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(NexusUi.GREEN_DIM, NexusUi.LINE),
+                    )
+                    setOnCheckedChangeListener { _, enabled -> store.setEnabled(enabled) }
                 },
             )
         }

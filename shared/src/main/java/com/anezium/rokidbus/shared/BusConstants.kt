@@ -91,6 +91,9 @@ object BusPaths {
     const val GLASSES_BRIGHTNESS_REQUEST = "/glasses/brightness/request"
     const val GLASSES_VOLUME_REQUEST = "/glasses/volume/request"
     const val GLASSES_DEVICE_INFO = "/glasses/device-info"
+
+    /** Phone hub to glasses hub only; see [PhoneBatteryContract] for why it is not a plugin path. */
+    const val PHONE_BATTERY = "/phone/battery"
     const val PLUGIN_OPEN = "/system/plugin/open"
     const val PLUGIN_CLOSE = "/system/plugin/close"
     const val PLUGIN_INPUT = "/system/plugin/input"
