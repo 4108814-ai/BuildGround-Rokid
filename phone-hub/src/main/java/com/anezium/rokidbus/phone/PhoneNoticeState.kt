@@ -16,8 +16,21 @@ internal data class CanonicalPhoneNotice(
     val ttlDeadlineMs: Long,
     /** Fixed at the first show. No update can push a notice past it. */
     val hardDeadlineMs: Long,
+    /** The wearer has already picked. A notice takes exactly one answer. */
+    val answered: Boolean = false,
 ) {
     val deadlineMs: Long get() = minOf(ttlDeadlineMs, hardDeadlineMs)
+}
+
+/** What the phone owes a `/notice/action` arriving from the glasses. */
+internal sealed interface PhoneNoticeActionResult {
+    data class Owner(val ownerPluginId: String) : PhoneNoticeActionResult
+
+    /** The one answer was already taken. Distinct from [NotCurrent] on purpose. */
+    data object AlreadyAnswered : PhoneNoticeActionResult
+
+    /** No such notice, or no such action on the one that is up. */
+    data object NotCurrent : PhoneNoticeActionResult
 }
 
 internal sealed interface PhoneNoticeShowResult {
@@ -117,10 +130,15 @@ internal class PhoneNoticeState(
         }
 
         val surfaceId = "$ownerPluginId:${NoticeSurfaceContract.LOCAL_SURFACE_ID}"
+        // An update that carries the actions field is a new question and is owed
+        // a new answer; one that leaves it out is the owner driving an answered
+        // band as a display and must not reopen it.
+        val answered = if (patch.patch.actions != null) false else current.answered
         val notice = current.copy(
             content = patched,
-            payload = normalized(surfaceId, ownerPluginId, patched),
+            payload = normalized(surfaceId, ownerPluginId, patched, answered),
             ttlDeadlineMs = now + patched.ttlMs,
+            answered = answered,
         )
         active = notice
         return PhoneNoticeUpdateResult.Accepted(notice)
@@ -154,6 +172,29 @@ internal class PhoneNoticeState(
     @Synchronized
     fun ownerPluginId(): String? = active?.ownerPluginId
 
+    /**
+     * Takes the canonical notice's one answer and names the plugin owed it.
+     *
+     * Checked against the canonical content rather than trusted from the wire,
+     * so a pick that raced a replacement is dropped instead of being handed to
+     * whoever holds the slot now. The answered flag lives here as well as on the
+     * glasses because the duplicate that prompted this rule is a race, and a
+     * race is exactly what survives one side losing its state.
+     */
+    @Synchronized
+    fun takeAnswer(surfaceId: String, actionId: String): PhoneNoticeActionResult {
+        if (actionId.isBlank()) return PhoneNoticeActionResult.NotCurrent
+        val current = active ?: return PhoneNoticeActionResult.NotCurrent
+        val expected = "${current.ownerPluginId}:${NoticeSurfaceContract.LOCAL_SURFACE_ID}"
+        if (surfaceId != expected) return PhoneNoticeActionResult.NotCurrent
+        if (current.content.actions.none { it.id == actionId }) {
+            return PhoneNoticeActionResult.NotCurrent
+        }
+        if (current.answered) return PhoneNoticeActionResult.AlreadyAnswered
+        active = current.copy(answered = true)
+        return PhoneNoticeActionResult.Owner(current.ownerPluginId)
+    }
+
     @Synchronized
     fun expireIfDue(): PhoneNoticeClearResult {
         val deadline = active?.deadlineMs ?: return PhoneNoticeClearResult.Ignored
@@ -163,11 +204,24 @@ internal class PhoneNoticeState(
     @Synchronized
     fun expiryDeadlineMs(): Long? = active?.deadlineMs
 
+    /**
+     * The canonical payload the glasses receive.
+     *
+     * An answered notice is sent without its actions. The glasses apply an
+     * update as a patch, and a patch that carries the actions field is a new
+     * question there -- so forwarding the row the wearer already answered, on
+     * an ordinary text update, would resurrect it under them.
+     */
     private fun normalized(
         surfaceId: String,
         ownerPluginId: String,
         content: NoticeSurfaceContent,
-    ): JSONObject = NoticeSurfaceContract.toPayload(surfaceId, content)
+        answered: Boolean = false,
+    ): JSONObject = NoticeSurfaceContract
+        .toPayload(
+            surfaceId,
+            if (answered) content.copy(actions = emptyList()) else content,
+        )
         .put("localSurfaceId", NoticeSurfaceContract.LOCAL_SURFACE_ID)
         .put("ownerPluginId", ownerPluginId)
         .put("seq", sequence.incrementAndGet())

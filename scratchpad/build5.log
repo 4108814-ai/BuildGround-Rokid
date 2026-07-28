@@ -1,0 +1,59 @@
+> Task :shared:preBuild UP-TO-DATE
+> Task :CxrGlobal:lib:preBuild UP-TO-DATE
+> Task :CxrGlobal:lib:preDebugBuild UP-TO-DATE
+> Task :shared:preDebugBuild UP-TO-DATE
+> Task :shared:generateDebugResources UP-TO-DATE
+> Task :CxrGlobal:lib:processDebugNavigationResources UP-TO-DATE
+> Task :CxrGlobal:lib:generateDebugResources UP-TO-DATE
+> Task :shared:packageDebugResources UP-TO-DATE
+> Task :CxrGlobal:lib:packageDebugResources UP-TO-DATE
+> Task :shared:processDebugNavigationResources UP-TO-DATE
+> Task :CxrGlobal:lib:parseDebugLocalResources UP-TO-DATE
+> Task :shared:parseDebugLocalResources UP-TO-DATE
+> Task :shared:generateDebugRFile UP-TO-DATE
+> Task :CxrGlobal:lib:generateDebugRFile UP-TO-DATE
+> Task :shared:compileDebugKotlin UP-TO-DATE
+> Task :CxrGlobal:lib:compileDebugKotlin UP-TO-DATE
+> Task :bus-client:preBuild UP-TO-DATE
+> Task :CxrGlobal:lib:javaPreCompileDebug UP-TO-DATE
+> Task :bus-client:preDebugBuild UP-TO-DATE
+> Task :CxrGlobal:lib:compileDebugJavaWithJavac NO-SOURCE
+> Task :CxrGlobal:lib:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :bus-client:compileDebugAidl UP-TO-DATE
+> Task :bus-client:generateDebugResources UP-TO-DATE
+> Task :bus-client:packageDebugResources UP-TO-DATE
+> Task :bus-client:processDebugNavigationResources UP-TO-DATE
+> Task :bus-client:parseDebugLocalResources UP-TO-DATE
+> Task :bus-client:generateDebugRFile UP-TO-DATE
+> Task :shared:javaPreCompileDebug UP-TO-DATE
+> Task :shared:compileDebugJavaWithJavac NO-SOURCE
+> Task :shared:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :bus-client:compileDebugKotlin UP-TO-DATE
+> Task :bus-client:javaPreCompileDebug UP-TO-DATE
+> Task :bus-client:compileDebugJavaWithJavac UP-TO-DATE
+> Task :bus-client:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :phone-hub:preBuild UP-TO-DATE
+> Task :phone-hub:preDebugBuild UP-TO-DATE
+> Task :phone-hub:generateDebugResources UP-TO-DATE
+> Task :phone-hub:packageDebugResources UP-TO-DATE
+> Task :phone-hub:processDebugNavigationResources UP-TO-DATE
+> Task :phone-hub:parseDebugLocalResources UP-TO-DATE
+> Task :phone-hub:generateDebugRFile UP-TO-DATE
+> Task :glasses-hub:preBuild UP-TO-DATE
+> Task :glasses-hub:preDebugBuild UP-TO-DATE
+> Task :glasses-hub:generateDebugBuildConfig UP-TO-DATE
+> Task :glasses-hub:generateDebugResources UP-TO-DATE
+> Task :glasses-hub:packageDebugResources UP-TO-DATE
+> Task :glasses-hub:processDebugNavigationResources UP-TO-DATE
+> Task :glasses-hub:parseDebugLocalResources UP-TO-DATE
+> Task :glasses-hub:generateDebugRFile UP-TO-DATE
+
+> Task :phone-hub:compileDebugKotlin
+w: file:///E:/Tools/Rokid/RokidNexus/phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt:3342:39 'static fun getDefaultAdapter(): BluetoothAdapter!' is deprecated. Deprecated in Java.
+w: file:///E:/Tools/Rokid/RokidNexus/phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt:4088:30 'static fun getDefaultAdapter(): BluetoothAdapter!' is deprecated. Deprecated in Java.
+
+> Task :glasses-hub:compileDebugKotlin
+
+BUILD SUCCESSFUL in 8s
+39 actionable tasks: 2 executed, 37 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.5.1/userguide/configuration_cache_enabling.html

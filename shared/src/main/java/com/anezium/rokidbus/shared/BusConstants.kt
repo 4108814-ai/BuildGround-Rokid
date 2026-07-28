@@ -49,6 +49,7 @@ object BusPaths {
     const val NOTICE_UPDATE = "/notice/update"
     const val NOTICE_HIDE = "/notice/hide"
     const val NOTICE_INPUT = "/notice/input"
+    const val NOTICE_ACTION = "/notice/action"
     const val NOTICE_CLOSED = "/notice/closed"
     const val ACTIVITY_START = "/activity/start"
     const val ACTIVITY_UPDATE = "/activity/update"

@@ -366,6 +366,18 @@ class NexusPluginClient internal constructor(
             }
             return
         }
+        if (path == BusPaths.NOTICE_ACTION) {
+            val noticeId = payload.optString("noticeId")
+            val actionId = payload.optString("id")
+            if (
+                isApproved &&
+                noticeId == "$pluginId:${NoticeSurfaceContract.LOCAL_SURFACE_ID}" &&
+                actionId.isNotBlank()
+            ) {
+                callbacks.onNoticeAction(actionId)
+            }
+            return
+        }
         if (path == BusPaths.NOTICE_CLOSED) {
             NexusNoticeCloseReason.fromWire(payload.optString("reason"))
                 ?.let(callbacks::onNoticeClosed)

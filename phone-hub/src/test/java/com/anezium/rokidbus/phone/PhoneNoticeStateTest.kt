@@ -2,8 +2,10 @@ package com.anezium.rokidbus.phone
 
 import com.anezium.rokidbus.shared.NoticeCloseReason
 import com.anezium.rokidbus.shared.NoticeSurfaceContract
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -118,6 +120,105 @@ class PhoneNoticeStateTest {
         assertTrue(state.hide("maps") is PhoneNoticeClearResult.Ignored)
         assertEquals("relay", state.ownerPluginId())
     }
+
+    @Test
+    fun `an action only reaches the plugin whose visible notice offers it`() {
+        state.show("relay", showPayload("relay").put("actions", actions()))
+
+        assertEquals(
+            PhoneNoticeActionResult.Owner("relay"),
+            state.takeAnswer(noticeId, "reply"),
+        )
+    }
+
+    @Test
+    fun `a pick for another notice or another action is not current`() {
+        state.show("relay", showPayload("relay").put("actions", actions()))
+
+        // A pick that raced a replacement, an id this band never offered, and a
+        // blank one all go nowhere rather than to whoever holds the slot now.
+        assertEquals(PhoneNoticeActionResult.NotCurrent, state.takeAnswer("maps:notice", "reply"))
+        assertEquals(PhoneNoticeActionResult.NotCurrent, state.takeAnswer(noticeId, "later"))
+        assertEquals(PhoneNoticeActionResult.NotCurrent, state.takeAnswer(noticeId, ""))
+    }
+
+    @Test
+    fun `a notice takes exactly one answer`() {
+        state.show("relay", showPayload("relay").put("actions", actions()))
+
+        assertEquals(PhoneNoticeActionResult.Owner("relay"), state.takeAnswer(noticeId, "reply"))
+        // The duplicate temple tap. Told apart from not_current so logcat can
+        // say which of the two refusals happened.
+        assertEquals(PhoneNoticeActionResult.AlreadyAnswered, state.takeAnswer(noticeId, "reply"))
+    }
+
+    @Test
+    fun `a notice with no actions answers no pick at all`() {
+        state.show("relay", showPayload("relay"))
+
+        assertEquals(PhoneNoticeActionResult.NotCurrent, state.takeAnswer(noticeId, "reply"))
+    }
+
+    @Test
+    fun `a new show reopens the question`() {
+        state.show("relay", showPayload("relay").put("actions", actions()))
+        state.takeAnswer(noticeId, "reply")
+
+        state.show("relay", showPayload("relay").put("actions", actions()))
+
+        assertEquals(PhoneNoticeActionResult.Owner("relay"), state.takeAnswer(noticeId, "reply"))
+    }
+
+    @Test
+    fun `an update carrying actions reopens the question and one without does not`() {
+        state.show("relay", showPayload("relay").put("actions", actions()))
+        state.takeAnswer(noticeId, "reply")
+
+        state.update("relay", JSONObject().put("body", "Sending"))
+        assertEquals(
+            PhoneNoticeActionResult.AlreadyAnswered,
+            state.takeAnswer(noticeId, "reply"),
+        )
+
+        state.update("relay", JSONObject().put("actions", actions()))
+        assertEquals(PhoneNoticeActionResult.Owner("relay"), state.takeAnswer(noticeId, "reply"))
+    }
+
+    /**
+     * The glasses read an update as a patch, and a patch that carries actions is
+     * a new question there. Forwarding the answered row on an ordinary text
+     * update would put it back in front of the wearer.
+     */
+    @Test
+    fun `an answered notice is forwarded without its row`() {
+        state.show("relay", showPayload("relay").put("actions", actions()))
+        val shown = state.update("relay", JSONObject().put("body", "Still asking"))
+        assertTrue(
+            (shown as PhoneNoticeUpdateResult.Accepted).notice.payload.has("actions"),
+        )
+
+        state.takeAnswer(noticeId, "reply")
+        val answered = state.update("relay", JSONObject().put("body", "Sending"))
+
+        val payload = (answered as PhoneNoticeUpdateResult.Accepted).notice.payload
+        assertFalse(payload.has("actions"))
+        assertEquals("Sending", payload.getString("body"))
+        // The canonical content keeps the row, so a duplicate pick is still
+        // recognised as a real action rather than an unknown one.
+        assertEquals(
+            PhoneNoticeActionResult.AlreadyAnswered,
+            state.takeAnswer(noticeId, "reply"),
+        )
+    }
+
+    private val noticeId = "relay:${NoticeSurfaceContract.LOCAL_SURFACE_ID}"
+
+    private fun actions() = JSONArray().put(
+        JSONObject()
+            .put("id", "reply")
+            .put("glyph", "phone")
+            .put("label", "Reply"),
+    )
 
     private fun showPayload(ownerPluginId: String) = JSONObject()
         .put("surfaceId", "$ownerPluginId:${NoticeSurfaceContract.LOCAL_SURFACE_ID}")

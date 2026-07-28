@@ -78,7 +78,7 @@ object NoticeOverlayRenderer {
         val activeService = service ?: return
         val view = ensureWindow(activeService) ?: return
         val arriving = fade.current == 0f
-        view.render(notice.content)
+        view.render(notice)
         if (arriving) {
             // Measure once the content is in place: the band's height is what the
             // arrival slides through, and it depends on how much body there is.
@@ -153,6 +153,7 @@ object NoticeOverlayRenderer {
             maxLines = MAX_BODY_LINES
         }
         private val footer = row(bold = false, sizeSp = FOOTER_SP, color = BusTheme.muted)
+        private val actions = HudActionRowView(context)
 
         init {
             orientation = VERTICAL
@@ -181,6 +182,14 @@ object NoticeOverlayRenderer {
                     topMargin = BusTheme.dp(context, 5)
                 },
             )
+            // Under the footer, so the reading order is what the band says, then
+            // how to answer it, then the answers themselves.
+            addView(
+                actions,
+                LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                    topMargin = BusTheme.dp(context, 6)
+                },
+            )
         }
 
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -193,20 +202,34 @@ object NoticeOverlayRenderer {
             )
         }
 
-        fun render(content: com.anezium.rokidbus.shared.NoticeSurfaceContent) {
+        /**
+         * The band draws the notice's *live* actions, so an answered one loses
+         * its row and becomes an inert display without the content it was shown
+         * with being rewritten.
+         */
+        fun render(notice: NexusNoticeSurface) {
             render(
-                titleText = content.title,
-                bodyText = content.body,
-                footerText = content.footer,
+                titleText = notice.content.title,
+                bodyText = notice.content.body,
+                footerText = notice.content.footer,
                 leadingGlyph = null,
+                actionChips = notice.liveActions.map { HudActionChip(it.glyph, it.label) },
+                selectedActionIndex = notice.selectedActionIndex,
             )
         }
 
+        /**
+         * The text-only form the activity flare borrows. It carries no actions:
+         * a flare is a moment of emphasis on something the wearer is already
+         * following, not a question, and its own row lives on the panel.
+         */
         fun render(
             titleText: String?,
             bodyText: String?,
             footerText: String?,
             leadingGlyph: Drawable?,
+            actionChips: List<HudActionChip> = emptyList(),
+            selectedActionIndex: Int = 0,
         ) {
             title.text = titleText.orEmpty()
             title.visibility = visibleIf(!titleText.isNullOrEmpty())
@@ -222,6 +245,7 @@ object NoticeOverlayRenderer {
             body.visibility = visibleIf(!bodyText.isNullOrEmpty())
             footer.text = footerText.orEmpty()
             footer.visibility = visibleIf(!footerText.isNullOrEmpty())
+            actions.render(actionChips, selectedActionIndex)
         }
 
         private fun row(bold: Boolean, sizeSp: Float, color: Int) =

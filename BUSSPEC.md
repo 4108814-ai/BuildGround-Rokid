@@ -444,6 +444,16 @@ Phone to glasses:
 
 Glasses to phone to plugin:
 
+- `/notice/input` — `{noticeId, keyCode, action}`. The single confirming
+  gesture, sent only by a band that carries no actions.
+- `/notice/action` — `{noticeId, id}`, where `id` is the selected action's
+  plugin-supplied identifier. Sent instead of `/notice/input` whenever the band
+  carries actions, and **at most once per question**. The phone hub checks the
+  id against the notice it currently holds, so a pick that raced a replacement
+  is dropped rather than handed to whoever owns the slot now, and it refuses a
+  second pick for a notice already answered. The two refusals log distinct
+  reasons — `not_current` and `already_answered` — because they mean different
+  things.
 - `/notice/closed` — `{noticeId, reason}` with `reason` in
   `user | timeout | owner | replaced | disconnect`. Delivered exactly once per
   notice, including when the owner hid it itself. Not delivered when the owner
@@ -467,8 +477,12 @@ for pins.
   "kind": "notice",
   "title": "Marie",
   "body": "On my way, ten minutes out.",
-  "footer": "tap to reply · back to dismiss",
+  "footer": "scroll to choose · back to dismiss",
   "interactive": true,
+  "actions": [
+    {"id": "reply", "glyph": "phone", "label": "Reply"},
+    {"id": "later", "glyph": "timer", "label": "Later"}
+  ],
   "ttlMs": 8000
 }
 ```
@@ -478,8 +492,36 @@ for pins.
 - Newlines in the body collapse to spaces. The renderer wraps; a plugin does
   not lay the band out by hand.
 - `interactive` optional, default false.
+- `actions` optional and **omitted entirely when empty**. At most three, and a
+  fourth is rejected rather than dropped. Every action has nonblank `id`,
+  `glyph`, and `label`, with the same rules as an activity's: the glyph name is
+  shape-validated, not membership-checked, so a name from a newer platform
+  degrades to `dot` on an older one, and there is no numeric cap on an id or
+  label beyond nonblank and the three-action limit.
 - `ttlMs` optional, default 8000, clamped to `[2000, 20000]`. Every accepted
   show or update restarts it.
+
+A notice that offers no actions sends no `actions` key. That is the
+compatibility rule, not an optimisation: every band written before actions
+existed serialises exactly as it did, and a hub or SDK that predates them sees
+nothing new. It is also the one place the notice deliberately departs from the
+activity payload, which always sends its array.
+
+`/notice/update` may replace the whole row by sending `actions`; leaving the key
+out keeps the current row, and an empty array clears it. The wearer's selection
+follows its action id across a replacement, so a plugin reordering its answers
+does not move the wearer's finger onto a different one. When the selected id is
+gone the selection falls back to the first action.
+
+**An update that carries the `actions` key is a new question** and reopens the
+band for another answer; one that leaves the key out is the owner driving an
+already-answered band as a display and does not. The phone hub forwards an
+answered notice's canonical state *without* its actions for exactly this
+reason: the glasses read an update as a patch, so echoing the answered row on
+an ordinary text update would put it back in front of the wearer.
+
+Actions buy the band nothing else. They do not extend the TTL, they do not
+touch the 60 s absolute lifetime, and they do not change what BACK does.
 
 ### Two limits that are not the TTL
 
@@ -494,7 +536,9 @@ refresh a body a few times a second without any plugin driving the renderer.
 
 ### Errors
 
-- `INVALID_NOTICE` — shape, id, cap, or enum validation failed.
+- `INVALID_NOTICE` — shape, id, cap, or enum validation failed. A fourth
+  action, a blank action id or label, a malformed action glyph name, and an
+  `actions` value that is not an array all land here.
 - `NOTICE_RATE_LIMITED` — over the per-second budget.
 - `CAPABILITY_NOT_AVAILABLE` — notice v1 was not announced, or the glasses
   cannot be reached.
@@ -512,6 +556,15 @@ emit nothing for black, so the fill reads as transparent and only the border
 and text light up. The band grows with its body to 40% of screen height and
 then ellipsizes.
 
+Actions render as a row of glyph-and-label chips under the footer, the selected
+one outlined in phosphor. It is the same row the activity panel draws, from the
+same view: one affordance, drawn once, so the wearer learns it once.
+
+**The row leaves the band the moment it is answered.** The question has been
+answered, so the choices have no reason to stay in the wearer's eye, and what
+remains is whatever text the band is carrying — an inert display the owner can
+keep updating until it expires.
+
 The band arrives and leaves through the shared motion layer (plan 013) rather
 than blinking into place.
 
@@ -521,21 +574,61 @@ missed; that is correct for v1 and matches the pin rule.
 
 ### Input claim
 
-While a notice with `interactive: true` is visible, and only then:
+While a notice that expects input is visible, and only then. A notice expects
+input when `interactive` is true **or** it carries actions: offering answers is
+already asking for one, so a plugin shipping a choice does not also have to set
+the flag.
 
 - **Confirm** — center tap, ENTER, or the temple key — is claimed and forwarded
-  to the owner as `/notice/input`, owner-scoped like `/notice/closed`. This
-  works with no surface open, which is the capability the tier adds: until now
-  every input route in the glasses hub was gated on an active surface, so a
-  dormant plugin could be shown but never answered.
+  to the owner: as `/notice/action` carrying the selected action's id when the
+  band has a row, and as `/notice/input` when it does not. Both are
+  owner-scoped like `/notice/closed`. This works with no surface open, which is
+  the capability the tier adds: until now every input route in the glasses hub
+  was gated on an active surface, so a dormant plugin could be shown but never
+  answered.
+- **Forward and backward** — touchpad swipe or ring scroll — move the selection
+  along the row, wrapping at both ends, and are claimed **only while the band
+  actually has actions**. A notice without them claims no direction at all, so
+  every swipe keeps reaching the surface, activity, or launcher underneath
+  exactly as it did before actions existed. The swipe-pair dedupe is the one
+  the rest of the hub uses, because the hardware emits each direction twice and
+  one step must not travel two.
 - **BACK always dismisses**, platform-side, and is never forwarded. There is no
   `handlesBack` for notices and there never will be: a plugin must not be able
-  to hold the wearer inside a banner. A double tap on the ring means the same.
-- **Everything else passes through unchanged** — ring scroll, the launcher
-  gesture, every other key. A band claims two gestures, not the glasses. A
-  surface underneath stays scrollable while a notice is up, and the DOWN/UP
-  bookkeeping that consumes an orphaned UP applies here too, because a notice
-  routinely expires between the two halves of a press.
+  to hold the wearer inside a banner, and giving a band answers does not change
+  that. It runs ahead of the surface for the same reason. A double tap on the
+  ring means the same.
+- **Everything else passes through unchanged** — the launcher gesture, every
+  other key. A band claims the gestures it can act on, not the glasses. The
+  DOWN/UP bookkeeping that consumes an orphaned UP applies here too, because a
+  notice routinely expires between the two halves of a press.
+
+### One question, one answer
+
+**A notice takes exactly one answer.** Measured on device, two temple taps
+188 ms apart fired the same action twice; for a messaging plugin that is two
+replies sent. So the first confirm on a band with a row fires its action and
+answers the band, and from then on:
+
+- the row leaves the band and the band becomes an inert display;
+- forward and backward stop being claimed;
+- confirm stops being claimed and **fires nothing at all** — not another
+  action, and not `/notice/input` either, even when `interactive` is true. One
+  band, one reply, of either kind. Taps and swipes fall through beneath it
+  exactly as they do beneath a plain banner.
+
+The glasses hold the flag and the phone hub holds it too. That is deliberate
+rather than redundant: the thing being defended against is a race, and a race
+is precisely what survives one side losing its state.
+
+Asking again means sending a new question — an `/notice/update` carrying
+`actions`, or a fresh `/notice/show`. Answering changes nothing about the
+band's life: the TTL and the 60 s absolute lifetime run exactly as they would
+have.
+
+A notice with actions still dies on its TTL. There is no hold-open rule, no
+scrolling inside the band, and no text entry: a notice is a question with a
+short life, not a menu. Anything the wearer needs to browse is a surface.
 
 ## Activity protocol v1
 

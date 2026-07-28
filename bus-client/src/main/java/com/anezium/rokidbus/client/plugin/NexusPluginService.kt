@@ -95,6 +95,7 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
     final override fun onLinkState(state: Int) = onNexusLinkState(state)
     final override fun onGlassesAiButton(active: Boolean) = onNexusGlassesAiButton(active)
     final override fun onNoticeInput(event: NexusInputEvent) = onNexusNoticeInput(event)
+    final override fun onNoticeAction(id: String) = onNexusNoticeAction(id)
     final override fun onNoticeClosed(reason: NexusNoticeCloseReason) = onNexusNoticeClosed(reason)
     final override fun onActivityAction(id: String) = onNexusActivityAction(id)
     final override fun onActivityClosed(reason: String) = onNexusActivityClosed(reason)
@@ -122,8 +123,17 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
     protected abstract fun onNexusInput(event: NexusInputEvent)
     protected open fun onNexusLinkState(state: Int) = Unit
 
-    /** The wearer answered this plugin's interactive notice. */
+    /**
+     * The wearer answered this plugin's interactive notice with the one
+     * gesture a band without actions offers.
+     */
     protected open fun onNexusNoticeInput(event: NexusInputEvent) = Unit
+
+    /**
+     * The wearer picked one of this plugin's notice actions, by its id. Fires
+     * in place of [onNexusNoticeInput] whenever the band carries actions.
+     */
+    protected open fun onNexusNoticeAction(id: String) = Unit
 
     /** This plugin's notice is gone, once, whatever ended it. */
     protected open fun onNexusNoticeClosed(reason: NexusNoticeCloseReason) = Unit

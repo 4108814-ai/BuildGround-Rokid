@@ -1,5 +1,6 @@
 package com.anezium.rokidbus.shared
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -28,13 +29,36 @@ enum class NoticeCloseReason(val wireValue: String) {
     }
 }
 
+/**
+ * One answer the wearer can pick from a notice's platform-rendered action row.
+ *
+ * Deliberately the same three fields as [ActivityAction], because it is the
+ * same affordance in a different tier: the wearer moves along a row of glyphs
+ * and confirms one. Two spellings of one idea would be the expensive mistake
+ * here, not the duplicated data class.
+ */
+data class NoticeAction(
+    val id: String,
+    val glyph: String,
+    val label: String,
+)
+
 data class NoticeSurfaceContent(
     val title: String?,
     val body: String?,
     val footer: String?,
     val interactive: Boolean = false,
+    val actions: List<NoticeAction> = emptyList(),
     val ttlMs: Long = NoticeSurfaceContract.DEFAULT_TTL_MS,
-)
+) {
+    /**
+     * Whether the band expects a gesture at all. Actions are an interaction by
+     * construction, so offering them is enough: a plugin that ships a choice
+     * does not also have to remember to set [interactive], and the glasses have
+     * one question to ask before they claim a key.
+     */
+    val expectsInput: Boolean get() = interactive || actions.isNotEmpty()
+}
 
 /**
  * One field of an update. Absent from the payload is not the same as sent empty:
@@ -50,6 +74,7 @@ data class NoticeSurfacePatch(
     val body: NoticeField<String?>? = null,
     val footer: NoticeField<String?>? = null,
     val interactive: NoticeField<Boolean>? = null,
+    val actions: NoticeField<List<NoticeAction>>? = null,
     val ttlMs: NoticeField<Long>? = null,
 ) {
     // Presence is the test, never the value: `?:` here would treat a field sent
@@ -59,6 +84,7 @@ data class NoticeSurfacePatch(
         body = if (body != null) body.value else content.body,
         footer = if (footer != null) footer.value else content.footer,
         interactive = if (interactive != null) interactive.value else content.interactive,
+        actions = if (actions != null) actions.value else content.actions,
         ttlMs = if (ttlMs != null) ttlMs.value else content.ttlMs,
     )
 }
@@ -82,6 +108,13 @@ object NoticeSurfaceContract {
     const val MAX_TITLE_CHARS = 32
     const val MAX_BODY_CHARS = 240
     const val MAX_FOOTER_CHARS = 40
+
+    /**
+     * The same ceiling an activity's action row has, for the same reason: three
+     * glyphs is what the wearer can read and step through without the band
+     * turning into a menu. Past it the notice is rejected, never truncated.
+     */
+    const val MAX_ACTIONS = 3
 
     const val DEFAULT_TTL_MS = 8_000L
     const val MIN_TTL_MS = 2_000L
@@ -134,6 +167,12 @@ object NoticeSurfaceContract {
             else -> return invalid("interactive must be a boolean")
         }
 
+        val actions = when (val result = readActions(payload, "actions")) {
+            is ActionsResult.Invalid -> return invalid(result.reason)
+            is ActionsResult.Absent -> emptyList()
+            is ActionsResult.Present -> result.value.orEmpty()
+        }
+
         val ttlMs = when (val value = payload.opt("ttlMs")) {
             null -> DEFAULT_TTL_MS
             is Number -> integerLong(value)?.coerceIn(MIN_TTL_MS, MAX_TTL_MS)
@@ -147,6 +186,7 @@ object NoticeSurfaceContract {
                 body = body?.takeIf { it.isNotEmpty() },
                 footer = footer?.takeIf { it.isNotEmpty() },
                 interactive = interactive,
+                actions = actions,
                 ttlMs = ttlMs,
             ),
         )
@@ -185,6 +225,12 @@ object NoticeSurfaceContract {
             else -> return patchInvalid("interactive must be a boolean")
         }
 
+        val actions = when (val result = readActions(payload, "actions")) {
+            is ActionsResult.Invalid -> return patchInvalid(result.reason)
+            is ActionsResult.Absent -> null
+            is ActionsResult.Present -> NoticeField(result.value.orEmpty())
+        }
+
         val ttlMs = when (val value = payload.opt("ttlMs")) {
             null -> null
             is Number -> NoticeField(
@@ -200,6 +246,7 @@ object NoticeSurfaceContract {
                 body = body,
                 footer = footer,
                 interactive = interactive,
+                actions = actions,
                 ttlMs = ttlMs,
             ),
         )
@@ -215,7 +262,22 @@ object NoticeSurfaceContract {
             content.footer?.let { put("footer", it) }
             // Omitted when false so a non-interactive payload stays minimal.
             if (content.interactive) put("interactive", true)
+            // Omitted when empty for the same reason, and for one more: a notice
+            // that offers no choice must put nothing new on the wire, so every
+            // banner written before this feature existed still serialises byte
+            // for byte the way it did. An activity always sends its array; a
+            // notice cannot, because its payload is the compatibility surface.
+            if (content.actions.isNotEmpty()) put("actions", actionsJson(content.actions))
         }
+
+    /**
+     * The wearer picked one of the band's actions. Keyed like every other
+     * notice reply, so the owner reads `noticeId` here exactly as it does on
+     * `/notice/input` and `/notice/closed`.
+     */
+    fun actionPayload(surfaceId: String, actionId: String): JSONObject = JSONObject()
+        .put("noticeId", surfaceId)
+        .put("id", actionId)
 
     fun closedPayload(surfaceId: String, reason: NoticeCloseReason): JSONObject = JSONObject()
         .put("noticeId", surfaceId)
@@ -225,6 +287,58 @@ object NoticeSurfaceContract {
         data object Absent : TextResult
         data class Present(val value: String?) : TextResult
         data class Invalid(val reason: String) : TextResult
+    }
+
+    private sealed interface ActionsResult {
+        data object Absent : ActionsResult
+        data class Present(val value: List<NoticeAction>?) : ActionsResult
+        data class Invalid(val reason: String) : ActionsResult
+    }
+
+    /**
+     * Field-for-field the activity reader, including its refusals: past the cap
+     * the whole notice is rejected rather than quietly losing its third choice,
+     * and a glyph outside this build's set is accepted as long as the name is
+     * well formed, because the renderer degrades it to a dot.
+     */
+    private fun readActions(payload: JSONObject, key: String): ActionsResult {
+        if (!payload.has(key)) return ActionsResult.Absent
+        val raw = payload.opt(key)
+        if (raw == JSONObject.NULL) return ActionsResult.Present(null)
+        val array = raw as? JSONArray ?: return ActionsResult.Invalid("$key must be an array")
+        if (array.length() > MAX_ACTIONS) {
+            return ActionsResult.Invalid("$key exceeds $MAX_ACTIONS entries")
+        }
+        val actions = buildList {
+            for (index in 0 until array.length()) {
+                val entry = array.opt(index) as? JSONObject
+                    ?: return ActionsResult.Invalid("$key must contain objects")
+                val id = (entry.opt("id") as? String)?.trim()
+                    ?: return ActionsResult.Invalid("action id must be a string")
+                if (id.isEmpty()) return ActionsResult.Invalid("action id must contain text")
+                val glyph = (entry.opt("glyph") as? String)?.trim()
+                    ?: return ActionsResult.Invalid("action glyph must be a string")
+                if (!GlyphContract.isWellFormedName(glyph)) {
+                    return ActionsResult.Invalid("action glyph is invalid")
+                }
+                val label = (entry.opt("label") as? String)?.trim()
+                    ?: return ActionsResult.Invalid("action label must be a string")
+                if (label.isEmpty()) return ActionsResult.Invalid("action label must contain text")
+                add(NoticeAction(id = id, glyph = glyph, label = label))
+            }
+        }
+        return ActionsResult.Present(actions)
+    }
+
+    private fun actionsJson(actions: List<NoticeAction>): JSONArray = JSONArray().apply {
+        actions.forEach { action ->
+            put(
+                JSONObject()
+                    .put("id", action.id)
+                    .put("glyph", action.glyph)
+                    .put("label", action.label),
+            )
+        }
     }
 
     private fun readText(payload: JSONObject, key: String, maxChars: Int): TextResult {

@@ -59,14 +59,14 @@ object PathRules {
      * third-party plugin to discover it needed one.
      */
     fun isDirectReply(path: String): Boolean = when (normalizeAbsolute(path)) {
-        BusPaths.NOTICE_CLOSED, BusPaths.NOTICE_INPUT,
+        BusPaths.NOTICE_CLOSED, BusPaths.NOTICE_INPUT, BusPaths.NOTICE_ACTION,
         BusPaths.ACTIVITY_ACTION, BusPaths.ACTIVITY_CLOSED,
         -> true
         else -> false
     }
 
     fun isOwnerScoped(path: String): Boolean = when (normalizeAbsolute(path)) {
-        BusPaths.NOTICE_CLOSED, BusPaths.NOTICE_INPUT,
+        BusPaths.NOTICE_CLOSED, BusPaths.NOTICE_INPUT, BusPaths.NOTICE_ACTION,
         BusPaths.ACTIVITY_ACTION, BusPaths.ACTIVITY_CLOSED,
         -> true
         else -> matchesPrefix(path, "/system/plugin")

@@ -20,7 +20,6 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
-import com.anezium.rokidbus.client.ui.NexusGlyphs
 import com.anezium.rokidbus.shared.ActivityProgress
 import com.anezium.rokidbus.shared.ActivitySurfaceContent
 import com.anezium.rokidbus.shared.PinSurfaceLine
@@ -517,10 +516,7 @@ internal object ActivityOverlayRenderer {
             max = 100
         }
         private val details = List(2) { text(DETAIL_SP, BusTheme.muted) }
-        private val actions = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.START
-        }
+        private val actions = HudActionRowView(context)
 
         init {
             orientation = HORIZONTAL
@@ -611,54 +607,9 @@ internal object ActivityOverlayRenderer {
                 view.text = line.orEmpty()
                 view.visibility = visibleIf(line != null)
             }
-            actions.removeAllViews()
-            content.actions.forEachIndexed { index, action ->
-                actions.addView(
-                    actionView(
-                        context = context,
-                        glyph = requireNotNull(
-                            context.getDrawable(NexusGlyphs.drawableFor(action.glyph)),
-                        ),
-                        label = action.label,
-                        selected = index == selectedActionIndex,
-                    ),
-                    LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
-                        if (index > 0) marginStart = dp(context, 6)
-                    },
-                )
-            }
-            actions.visibility = visibleIf(content.actions.isNotEmpty())
-        }
-
-        private fun actionView(
-            context: Context,
-            glyph: Drawable,
-            label: String,
-            selected: Boolean,
-        ) = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            val horizontal = dp(context, 6)
-            val vertical = dp(context, 4)
-            setPadding(horizontal, vertical, horizontal, vertical)
-            background = GradientDrawable().apply {
-                setColor(0xFF000000.toInt())
-                setStroke(
-                    dp(context, if (selected) 2 else 1),
-                    if (selected) BusTheme.phosphor else BusTheme.hairline,
-                )
-                cornerRadius = dp(context, 5).toFloat()
-            }
-            addView(
-                ImageView(context).apply { setImageDrawable(glyph) },
-                LayoutParams(dp(context, ACTION_GLYPH_DP), dp(context, ACTION_GLYPH_DP)),
-            )
-            addView(
-                text(ACTION_LABEL_SP, if (selected) BusTheme.phosphor else BusTheme.muted)
-                    .apply { text = label },
-                LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
-                    marginStart = dp(context, 4)
-                },
+            actions.render(
+                actions = content.actions.map { HudActionChip(it.glyph, it.label) },
+                selectedIndex = selectedActionIndex,
             )
         }
 
@@ -693,11 +644,9 @@ internal object ActivityOverlayRenderer {
     private const val BAND_WIDTH_FRACTION = 0.80f
     private const val PANEL_WIDTH_FRACTION = 0.78f
     private const val GLYPH_DP = 48
-    private const val ACTION_GLYPH_DP = 18
     private const val PROGRESS_HEIGHT_DP = 4
     private const val PRIMARY_SP = 24f
     private const val SECONDARY_SP = 13f
     private const val ETA_SP = 13f
     private const val DETAIL_SP = 11f
-    private const val ACTION_LABEL_SP = 10f
 }

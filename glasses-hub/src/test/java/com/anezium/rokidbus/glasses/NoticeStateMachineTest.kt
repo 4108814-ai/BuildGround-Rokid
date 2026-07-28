@@ -1,10 +1,12 @@
 package com.anezium.rokidbus.glasses
 
+import com.anezium.rokidbus.shared.NoticeAction
 import com.anezium.rokidbus.shared.NoticeCloseReason
 import com.anezium.rokidbus.shared.NoticeField
 import com.anezium.rokidbus.shared.NoticeSurfaceContent
 import com.anezium.rokidbus.shared.NoticeSurfacePatch
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -148,11 +150,255 @@ class NoticeStateMachineTest {
         assertNull(state.activeNotice())
     }
 
-    private fun content(ttlMs: Long = 8_000L) = NoticeSurfaceContent(
+    @Test
+    fun `the selection starts on the first action`() {
+        val state = NoticeStateMachine()
+
+        val decision = state.show(
+            "relay:notice",
+            seq = 1,
+            content = content(actions = threeActions()),
+            nowMs = 0L,
+        )
+
+        assertEquals(0, (decision as NoticeStateDecision.Shown).notice.selectedActionIndex)
+    }
+
+    @Test
+    fun `forward and backward wrap around the row`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(actions = threeActions()), nowMs = 0L)
+
+        assertEquals(1, moved(state, 1))
+        assertEquals(2, moved(state, 1))
+        assertEquals(0, moved(state, 1))
+        assertEquals(2, moved(state, -1))
+    }
+
+    @Test
+    fun `a notice with no actions has nothing to select`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(), nowMs = 0L)
+
+        assertTrue(state.moveSelection(1) is NoticeStateDecision.Ignored)
+        assertNull(state.selectedAction())
+    }
+
+    @Test
+    fun `choosing does not buy the band more time`() {
+        val state = NoticeStateMachine()
+        state.show(
+            "relay:notice",
+            seq = 1,
+            content = content(ttlMs = 8_000L, actions = threeActions()),
+            nowMs = 1_000L,
+        )
+
+        val moved = state.moveSelection(1) as NoticeStateDecision.Updated
+
+        assertEquals(9_000L, moved.notice.expiresAtMs)
+        assertEquals(NoticeCloseReason.TIMEOUT, closedBy(state, nowMs = 9_000L).reason)
+    }
+
+    @Test
+    fun `an update keeps the wearer on the action they were looking at`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(actions = threeActions()), nowMs = 0L)
+        state.moveSelection(1)
+
+        val reordered = listOf(threeActions()[2], threeActions()[1], threeActions()[0])
+        val decision = state.update(
+            "relay:notice",
+            seq = 2,
+            patch = NoticeSurfacePatch(actions = NoticeField(reordered)),
+            nowMs = 0L,
+        )
+
+        val notice = (decision as NoticeStateDecision.Updated).notice
+        assertEquals(1, notice.selectedActionIndex)
+        assertEquals("later", state.selectedAction()?.id)
+    }
+
+    @Test
+    fun `an update that drops the selected action falls back to the first`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(actions = threeActions()), nowMs = 0L)
+        state.moveSelection(1)
+
+        val decision = state.update(
+            "relay:notice",
+            seq = 2,
+            patch = NoticeSurfacePatch(
+                actions = NoticeField(listOf(NoticeAction("reply", "phone", "Reply"))),
+            ),
+            nowMs = 0L,
+        )
+
+        assertEquals(0, (decision as NoticeStateDecision.Updated).notice.selectedActionIndex)
+        assertEquals("reply", state.selectedAction()?.id)
+    }
+
+    @Test
+    fun `a band answers once, and the row leaves it`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(actions = threeActions()), nowMs = 0L)
+        state.moveSelection(1)
+
+        val answered = state.answer()
+
+        assertEquals("later", (answered as NoticeStateDecision.Answered).action.id)
+        assertTrue(answered.notice.answered)
+        // The question is answered, so the choices stop being on offer: nothing
+        // to draw, nothing to step through, nothing left to fire.
+        assertTrue(answered.notice.liveActions.isEmpty())
+        assertFalse(answered.notice.expectsInput)
+        assertTrue(state.moveSelection(1) is NoticeStateDecision.Ignored)
+        assertNull(state.selectedAction())
+        assertTrue(state.answer() is NoticeStateDecision.Ignored)
+    }
+
+    @Test
+    fun `an answered band does not fall back to firing input`() {
+        val state = NoticeStateMachine()
+        state.show(
+            "relay:notice",
+            seq = 1,
+            content = content(interactive = true, actions = threeActions()),
+            nowMs = 0L,
+        )
+        state.answer()
+
+        // The row is gone, but the band is not an interactive banner again: one
+        // band, one reply, of either kind.
+        assertFalse(state.activeNotice()!!.expectsInput)
+    }
+
+    @Test
+    fun `answering neither shortens nor extends the band`() {
+        val state = NoticeStateMachine()
+        state.show(
+            "relay:notice",
+            seq = 1,
+            content = content(ttlMs = 8_000L, actions = threeActions()),
+            nowMs = 1_000L,
+        )
+
+        val answered = state.answer() as NoticeStateDecision.Answered
+
+        assertEquals(9_000L, answered.notice.expiresAtMs)
+        assertTrue(state.expire(nowMs = 8_999L, expectedSeq = 1) is NoticeStateDecision.Ignored)
+        assertEquals(NoticeCloseReason.TIMEOUT, closedBy(state, nowMs = 9_000L).reason)
+    }
+
+    @Test
+    fun `an update carrying actions is a new question`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(actions = threeActions()), nowMs = 0L)
+        state.answer()
+
+        val decision = state.update(
+            "relay:notice",
+            seq = 2,
+            patch = NoticeSurfacePatch(
+                actions = NoticeField(listOf(NoticeAction("send", "phone", "Send"))),
+            ),
+            nowMs = 0L,
+        )
+
+        val notice = (decision as NoticeStateDecision.Updated).notice
+        assertFalse(notice.answered)
+        assertEquals(listOf(NoticeAction("send", "phone", "Send")), notice.liveActions)
+        assertEquals("send", (state.answer() as NoticeStateDecision.Answered).action.id)
+    }
+
+    @Test
+    fun `an update carrying an empty row resets the flag with nothing to answer`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(actions = threeActions()), nowMs = 0L)
+        state.answer()
+
+        val decision = state.update(
+            "relay:notice",
+            seq = 2,
+            patch = NoticeSurfacePatch(actions = NoticeField(emptyList())),
+            nowMs = 0L,
+        )
+
+        val notice = (decision as NoticeStateDecision.Updated).notice
+        assertFalse(notice.answered)
+        assertTrue(notice.liveActions.isEmpty())
+        assertTrue(state.answer() is NoticeStateDecision.Ignored)
+    }
+
+    @Test
+    fun `an update without actions drives an answered band as a display`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(actions = threeActions()), nowMs = 0L)
+        state.answer()
+
+        val decision = state.update(
+            "relay:notice",
+            seq = 2,
+            patch = NoticeSurfacePatch(body = NoticeField("Sending your reply")),
+            nowMs = 0L,
+        )
+
+        val notice = (decision as NoticeStateDecision.Updated).notice
+        assertTrue(notice.answered)
+        assertTrue(notice.liveActions.isEmpty())
+        assertEquals("Sending your reply", notice.content.body)
+        assertTrue(state.answer() is NoticeStateDecision.Ignored)
+    }
+
+    @Test
+    fun `a band with no actions has no answer to give`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(interactive = true), nowMs = 0L)
+
+        assertTrue(state.answer() is NoticeStateDecision.Ignored)
+        // Unchanged from before actions existed: a plain interactive banner
+        // keeps replying on `/notice/input` for as long as it is up.
+        assertTrue(state.activeNotice()!!.expectsInput)
+    }
+
+    @Test
+    fun `the index helpers wrap and refuse to invent a selection`() {
+        assertEquals(0, nextNoticeActionIndex(current = 2, delta = 1, count = 3))
+        assertEquals(2, nextNoticeActionIndex(current = 0, delta = -1, count = 3))
+        assertEquals(0, nextNoticeActionIndex(current = 0, delta = 1, count = 0))
+
+        assertEquals(
+            0,
+            preservedNoticeActionIndex(threeActions(), previousIndex = 1, next = emptyList()),
+        )
+        assertEquals(
+            0,
+            preservedNoticeActionIndex(emptyList(), previousIndex = 0, next = threeActions()),
+        )
+    }
+
+    private fun moved(state: NoticeStateMachine, delta: Int): Int =
+        (state.moveSelection(delta) as NoticeStateDecision.Updated).notice.selectedActionIndex
+
+    private fun closedBy(state: NoticeStateMachine, nowMs: Long): NoticeStateDecision.Closed =
+        state.expire(nowMs = nowMs, expectedSeq = 1) as NoticeStateDecision.Closed
+
+    private fun threeActions() = listOf(
+        NoticeAction("reply", "phone", "Reply"),
+        NoticeAction("later", "timer", "Later"),
+        NoticeAction("ignore", "stop", "Ignore"),
+    )
+
+    private fun content(
+        ttlMs: Long = 8_000L,
+        interactive: Boolean = false,
+        actions: List<NoticeAction> = emptyList(),
+    ) = NoticeSurfaceContent(
         title = "Marie",
         body = "On my way",
         footer = null,
-        interactive = false,
+        interactive = interactive,
+        actions = actions,
         ttlMs = ttlMs,
     )
 }

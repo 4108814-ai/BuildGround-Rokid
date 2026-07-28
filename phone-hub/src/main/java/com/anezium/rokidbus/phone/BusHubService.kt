@@ -1044,6 +1044,11 @@ class BusHubService : Service() {
             handleGlassesNoticeInput(envelope)
             return
         }
+        if (envelope.path == BusPaths.NOTICE_ACTION) {
+            recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
+            handleGlassesNoticeAction(envelope)
+            return
+        }
         if (envelope.path == BusPaths.NOTICE_CLOSED) {
             recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
             handleGlassesNoticeClosed(envelope)
@@ -1238,7 +1243,7 @@ class BusHubService : Service() {
         BusPaths.ACTIVITY_START, BusPaths.ACTIVITY_UPDATE, BusPaths.ACTIVITY_END,
         -> PluginBusJournal.Category.SURFACE
         BusPaths.SURFACE_INPUT, BusPaths.PLUGIN_INPUT,
-        BusPaths.NOTICE_INPUT, BusPaths.NOTICE_CLOSED,
+        BusPaths.NOTICE_INPUT, BusPaths.NOTICE_ACTION, BusPaths.NOTICE_CLOSED,
         BusPaths.ACTIVITY_ACTION, BusPaths.ACTIVITY_CLOSED,
         -> PluginBusJournal.Category.INPUT
         BusPaths.PLUGIN_OPEN, BusPaths.PLUGIN_CLOSE -> PluginBusJournal.Category.LIFECYCLE
@@ -1378,6 +1383,42 @@ class BusHubService : Service() {
         val payload = JSONObject(envelope.payload.toString()).put("pluginId", owner)
         if (!deliverLocal(envelope.copy(payload = payload))) {
             log("notice input undelivered owner=$owner; no live registration")
+        }
+    }
+
+    /**
+     * The wearer picked one of the band's actions. Routed exactly like a notice
+     * input -- to the plugin that owns the canonical slot, and to nobody else --
+     * with one extra check the input path cannot make: the action must be one
+     * this notice actually offers, so a stale pick from a band that has since
+     * been replaced does not reach the new owner.
+     */
+    private fun handleGlassesNoticeAction(envelope: BusEnvelope) {
+        val noticeId = envelope.payload.optString("noticeId")
+        val actionId = envelope.payload.optString("id")
+        val owner = when (val result = phoneNoticeState.takeAnswer(noticeId, actionId)) {
+            PhoneNoticeActionResult.NotCurrent -> {
+                log(
+                    "notice action ignored id=${noticeId.take(80)} " +
+                        "actionPresent=${actionId.isNotBlank()} reason=not_current",
+                )
+                return
+            }
+            // Distinct from not_current on purpose: this one means the wearer
+            // did pick a real action on the real notice, and it is the second
+            // time. Two temple taps 188 ms apart is what that looks like.
+            PhoneNoticeActionResult.AlreadyAnswered -> {
+                log(
+                    "notice action ignored id=${noticeId.take(80)} " +
+                        "actionPresent=${actionId.isNotBlank()} reason=already_answered",
+                )
+                return
+            }
+            is PhoneNoticeActionResult.Owner -> result.ownerPluginId
+        }
+        val payload = JSONObject(envelope.payload.toString()).put("pluginId", owner)
+        if (!deliverLocal(envelope.copy(payload = payload))) {
+            log("notice action undelivered owner=$owner; no live registration")
         }
     }
 

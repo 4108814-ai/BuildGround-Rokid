@@ -12,6 +12,7 @@ import com.anezium.rokidbus.shared.MediaArtworkContract
 import com.anezium.rokidbus.shared.PinSurfaceContent
 import com.anezium.rokidbus.shared.PinSurfaceContract
 import com.anezium.rokidbus.shared.PinSurfaceEmphasis
+import com.anezium.rokidbus.shared.NoticeAction
 import com.anezium.rokidbus.shared.NoticeCloseReason
 import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import com.anezium.rokidbus.shared.PinSurfaceLine
@@ -558,6 +559,38 @@ enum class NexusNoticeCloseReason(internal val contract: NoticeCloseReason) {
 }
 
 /**
+ * One answer the wearer can pick from a notice's platform-rendered action row.
+ *
+ * The same three fields as [NexusActivityAction], because it is the same
+ * affordance one tier up: the platform draws a row of glyphs, the wearer steps
+ * along it and confirms one.
+ *
+ * @property id Stable value returned through
+ * [NexusPluginCallbacks.onNoticeAction].
+ * @property glyph Well-formed open-set glyph name. Unknown names degrade to
+ * the platform's `dot` fallback.
+ * @property label Human-readable answer label. The platform owns whether and
+ * where it is shown.
+ */
+data class NexusNoticeAction(
+    val id: String,
+    val glyph: String,
+    val label: String,
+) {
+    init {
+        require(id.trim().isNotEmpty())
+        require(GlyphContract.isWellFormedName(glyph))
+        require(label.trim().isNotEmpty())
+    }
+
+    internal fun toContract(): NoticeAction = NoticeAction(
+        id = id.trim(),
+        glyph = glyph.trim(),
+        label = label.trim(),
+    )
+}
+
+/**
  * A transient band across the top of the wearer's view.
  *
  * Use it for a single real-world event that has just happened and may deserve
@@ -569,12 +602,21 @@ enum class NexusNoticeCloseReason(internal val contract: NoticeCloseReason) {
  * collapse to spaces; the renderer wraps it. [ttlMs] is clamped to 2-20 seconds
  * and restarts on every accepted update, but no notice outlives sixty seconds
  * from the first show.
+ *
+ * @property interactive Ask for a single confirming gesture, answered on
+ * [NexusPluginCallbacks.onNoticeInput]. Redundant when [actions] is set:
+ * offering answers is already asking for one.
+ * @property actions Up to three answers the wearer can choose between,
+ * answered on [NexusPluginCallbacks.onNoticeAction]. A fourth is refused, not
+ * dropped. They do not extend the band's life: a notice with a choice on it
+ * still leaves on its own deadline, and Back still dismisses it.
  */
 data class NexusNotice(
     val title: String? = null,
     val body: String? = null,
     val footer: String? = null,
     val interactive: Boolean = false,
+    val actions: List<NexusNoticeAction> = emptyList(),
     val ttlMs: Long? = null,
 ) {
     init {
@@ -582,6 +624,7 @@ data class NexusNotice(
         require(body == null || body.trim().length <= NoticeSurfaceContract.MAX_BODY_CHARS)
         require(footer == null || footer.trim().length <= NoticeSurfaceContract.MAX_FOOTER_CHARS)
         require(!title?.trim().isNullOrEmpty() || !body?.trim().isNullOrEmpty())
+        require(actions.size <= NoticeSurfaceContract.MAX_ACTIONS)
     }
 
     internal fun toPayload(): JSONObject = JSONObject()
@@ -592,6 +635,9 @@ data class NexusNotice(
             body?.trim()?.takeIf { it.isNotEmpty() }?.let { put("body", it) }
             footer?.trim()?.takeIf { it.isNotEmpty() }?.let { put("footer", it) }
             if (interactive) put("interactive", true)
+            // A notice with no answers sends no actions key at all, so every
+            // banner written before this existed still goes out unchanged.
+            if (actions.isNotEmpty()) putActions(actions)
             ttlMs?.let { put("ttlMs", it) }
         }
 }
@@ -601,21 +647,49 @@ data class NexusNotice(
  * those are replaced: leaving one out keeps whatever is on screen, while
  * passing an empty string clears it. An update cannot leave the band with no
  * text at all.
+ *
+ * @property actions Replaces the whole action row. An empty list leaves the
+ * current row alone rather than clearing it, so this cannot take a question's
+ * answers away from a wearer halfway through reading them; hide the notice
+ * instead. The wearer's selection follows its action id across the swap, so
+ * reordering answers does not move their finger onto a different one.
  */
 data class NexusNoticeUpdate(
     val title: String? = null,
     val body: String? = null,
     val footer: String? = null,
+    val actions: List<NexusNoticeAction> = emptyList(),
     val ttlMs: Long? = null,
 ) {
+    init {
+        require(actions.size <= NoticeSurfaceContract.MAX_ACTIONS)
+    }
+
     internal fun toPayload(): JSONObject = JSONObject()
         .put("surfaceId", NoticeSurfaceContract.LOCAL_SURFACE_ID)
         .apply {
             title?.let { put("title", it.trim()) }
             body?.let { put("body", it.trim()) }
             footer?.let { put("footer", it.trim()) }
+            if (actions.isNotEmpty()) putActions(actions)
             ttlMs?.let { put("ttlMs", it) }
         }
+}
+
+private fun JSONObject.putActions(actions: List<NexusNoticeAction>) {
+    put(
+        "actions",
+        JSONArray().apply {
+            actions.map(NexusNoticeAction::toContract).forEach { action ->
+                put(
+                    JSONObject()
+                        .put("id", action.id)
+                        .put("glyph", action.glyph)
+                        .put("label", action.label),
+                )
+            }
+        },
+    )
 }
 
 /**

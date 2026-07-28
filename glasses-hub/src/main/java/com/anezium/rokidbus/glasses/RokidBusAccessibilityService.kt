@@ -136,6 +136,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
                 }
                 when {
                     noticeConsumesBack(event) -> true
+                    noticeConsumesDirection(event) -> true
                     noticeConsumesConfirm(event) -> true
                     LauncherOverlayRenderer.handleKeyEvent(event) -> true
                     SurfaceController.handleKeyEvent(event) -> true
@@ -171,13 +172,58 @@ class RokidBusAccessibilityService : AccessibilityService() {
      * in this hub was gated on there being an active surface, so a dormant
      * plugin could be shown but never answered.
      *
-     * Nothing else is claimed. Scroll, the launcher gesture and every other key
-     * fall through to exactly the chain they used before.
+     * A band offering actions answers with the selected one; a plain
+     * interactive band still sends the single gesture it always did.
      */
     private fun noticeConsumesConfirm(event: KeyEvent): Boolean =
         event.action == KeyEvent.ACTION_DOWN &&
             event.keyCode in NOTICE_CONFIRM_KEYS &&
             NoticeController.handleConfirm(event.keyCode)
+
+    /**
+     * Scroll moves the selection, and only while the band actually has a row to
+     * move along. A notice without actions claims nothing here, so every swipe
+     * keeps reaching the launcher, the surface, or the activity underneath
+     * exactly as it did before this existed.
+     *
+     * The swipe pair dedupe is shared with the rest of the hub: the hardware
+     * emits each direction twice, and a wearer stepping one glyph must not
+     * travel two.
+     */
+    private fun noticeConsumesDirection(event: KeyEvent): Boolean {
+        if (!NoticeController.claimsDirection()) return false
+        if (event.keyCode !in NOTICE_DIRECTION_KEYS) return false
+        // Only the DOWN acts; the matching UP is consumed by the same
+        // `consumedDownKeys` bookkeeping every other claim here relies on.
+        if (event.action != KeyEvent.ACTION_DOWN) return false
+        when (
+            noticeInputDedupe.onKey(
+                event.keyCode,
+                event.action,
+                event.repeatCount,
+                event.eventTime,
+            )
+        ) {
+            DpadPairDedupe.Direction.FORWARD -> NoticeController.handleDirection(1)
+            DpadPairDedupe.Direction.BACKWARD -> NoticeController.handleDirection(-1)
+            // The second half of the hardware's swipe pair, or a long-press
+            // repeat. Nothing moves, but it is still claimed below.
+            null -> Unit
+        }
+        // Claimed whether or not it moved the selection: letting the duplicate
+        // half through would scroll the surface behind the band by exactly the
+        // amount the dedupe just refused to move the row.
+        return true
+    }
+
+    private val noticeInputDedupe = DpadPairDedupe()
+
+    private val NOTICE_DIRECTION_KEYS = setOf(
+        DpadPairDedupe.KEYCODE_DPAD_UP,
+        DpadPairDedupe.KEYCODE_DPAD_DOWN,
+        DpadPairDedupe.KEYCODE_DPAD_LEFT,
+        DpadPairDedupe.KEYCODE_DPAD_RIGHT,
+    )
 
     private val NOTICE_CONFIRM_KEYS = setOf(
         KeyEvent.KEYCODE_ENTER,
@@ -194,18 +240,19 @@ class RokidBusAccessibilityService : AccessibilityService() {
         val launcherShown = LauncherOverlayRenderer.isShown()
         val surfaceActive = SurfaceController.activeSurface() != null
         val noticeClaims = NoticeController.claimsInput()
+        val noticeRingClaims = NoticeController.claimsRingKey(event.keyCode)
         val activityClaims = ActivityController.claimsRingKey(event.keyCode)
         if (!launcherShown && !surfaceActive && !noticeClaims && !activityClaims) return false
 
         if (event.action != KeyEvent.ACTION_DOWN) return true
         if (event.repeatCount == 0) {
-            val ringTap = event.keyCode == RingSurfaceInputPolicy.RING_KEYCODE_TAP
             when {
                 launcherShown ->
                     LauncherOverlayRenderer.handleRingKey(event.keyCode, event.eventTime)
-                // The band takes the tap and nothing else. Scroll keeps reaching
-                // the surface underneath, so a notice never freezes the ring.
-                noticeClaims && ringTap ->
+                // The band takes the tap, and scroll only while it is offering a
+                // choice. Anything else keeps reaching the surface underneath,
+                // so a notice never freezes the ring.
+                noticeRingClaims ->
                     NoticeController.handleRingKey(event.keyCode, event.eventTime)
                 surfaceActive ->
                     SurfaceController.handleRingKey(event.keyCode, event.eventTime)

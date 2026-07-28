@@ -4,6 +4,7 @@ import android.view.KeyEvent
 import com.anezium.rokidbus.client.plugin.NexusCard
 import com.anezium.rokidbus.client.plugin.NexusImage
 import com.anezium.rokidbus.client.plugin.NexusNotice
+import com.anezium.rokidbus.client.plugin.NexusNoticeAction
 import com.anezium.rokidbus.client.plugin.NexusNoticeUpdate
 import com.anezium.rokidbus.client.plugin.NexusPin
 import com.anezium.rokidbus.client.plugin.NexusPinEmphasis
@@ -18,6 +19,7 @@ import com.anezium.rokidbus.client.plugin.NexusSpeechState
 import com.anezium.rokidbus.client.plugin.NexusSpeechStopReason
 import com.anezium.rokidbus.client.plugin.NexusSurfaceSession
 import com.anezium.rokidbus.shared.ImageSurfaceContract
+import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
 
 class HelloPluginService : NexusPluginService() {
@@ -187,12 +189,22 @@ class HelloPluginService : NexusPluginService() {
     }
 
     /**
-     * The answer to a tap on the band, with no surface involved. This is what
-     * the notice tier is for: until now a plugin could only be reached while it
-     * held a screen open.
+     * The answer to a tap on a band that offers no choice. The demo notice
+     * below carries actions, so this is here as the reference for the simpler
+     * shape: one gesture, no row.
      */
     override fun onNexusNoticeInput(event: NexusInputEvent) {
         nexusClient?.updateNotice(NexusNoticeUpdate(footer = "Answered. Back to dismiss"))
+    }
+
+    /**
+     * The wearer picked one of the band's answers, with no surface involved.
+     * This is what the notice tier is for: until now a plugin could only be
+     * reached while it held a screen open, and only ever with one answer.
+     */
+    override fun onNexusNoticeAction(id: String) {
+        val label = DEMO_NOTICE_BAND.actions.firstOrNull { it.id == id }?.label ?: id
+        nexusClient?.updateNotice(NexusNoticeUpdate(footer = "$label · Back to dismiss"))
     }
 
     /**
@@ -226,13 +238,25 @@ class HelloPluginService : NexusPluginService() {
         const val PIN_MEDIUM = 2
         const val DEMO_NOTICE = 3
 
-        /** Interactive: the tap is answered below, with no surface open. */
+        /**
+         * A band that asks something. Scroll steps along the answers, tap fires
+         * the selected one, and Back still dismisses the whole thing without
+         * the plugin ever hearing about it.
+         *
+         * No `interactive` flag: carrying actions is already asking for an
+         * answer. The full TTL, because a band worth choosing from is a band
+         * worth being able to read first.
+         */
         val DEMO_NOTICE_BAND = NexusNotice(
             title = "Nexus notice",
-            body = "A band that arrives, says one thing, and leaves on its own deadline.",
-            footer = "Tap to answer · Back to dismiss",
-            interactive = true,
-            ttlMs = 8_000L,
+            body = "A band that arrives, asks one thing, and leaves on its own deadline.",
+            footer = "Scroll to choose · Back to dismiss",
+            actions = listOf(
+                NexusNoticeAction(id = "reply", glyph = "phone", label = "Reply"),
+                NexusNoticeAction(id = "later", glyph = "timer", label = "Later"),
+                NexusNoticeAction(id = "ignore", glyph = "stop", label = "Ignore"),
+            ),
+            ttlMs = NoticeSurfaceContract.MAX_TTL_MS,
         )
 
         /** No `ttlMs` of its own, so it takes the hub's 30-minute default. */

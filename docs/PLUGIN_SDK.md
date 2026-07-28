@@ -316,6 +316,142 @@ reconnect, after first clearing possible ghosts. You should still call
 an engaged surface received `onNexusClose`. Activity v1 neither wakes nor keeps
 the display on, and it does not include plan 014's glance layer.
 
+### Notice bands
+
+Notices reuse the existing `surfaces` grant and API version 3, and live on
+`NexusPluginClient` for the same reason pins do: a plugin can wake, say one
+thing, and go dormant again without ever opening a surface.
+
+**A notice is a question with a short life, not a menu.** It arrives, says its
+piece, and leaves on its own deadline — 8 seconds by default, at most 20, and
+never more than 60 seconds from the first show however often you update it.
+Anything the wearer follows over minutes is an activity; anything they browse or
+drive is a surface. Actions do not change that: they let the band ask something
+with more than one answer, not stay longer or hold more.
+
+```kotlin
+data class NexusNoticeAction(
+    val id: String,
+    val glyph: String,
+    val label: String,
+)
+
+data class NexusNotice(
+    val title: String? = null,
+    val body: String? = null,
+    val footer: String? = null,
+    val interactive: Boolean = false,
+    val actions: List<NexusNoticeAction> = emptyList(),
+    val ttlMs: Long? = null,
+)
+
+data class NexusNoticeUpdate(
+    val title: String? = null,
+    val body: String? = null,
+    val footer: String? = null,
+    val actions: List<NexusNoticeAction> = emptyList(),
+    val ttlMs: Long? = null,
+)
+
+val supportsNoticeSurface: Boolean
+fun showNotice(notice: NexusNotice): NexusSdkResult
+fun updateNotice(update: NexusNoticeUpdate): NexusSdkResult
+fun hideNotice(): NexusSdkResult
+
+interface NexusPluginCallbacks {
+    fun onNoticeInput(event: NexusInputEvent) = Unit
+    fun onNoticeAction(id: String) = Unit
+    fun onNoticeClosed(reason: NexusNoticeCloseReason) = Unit
+}
+```
+
+`NexusPluginService` forwards those to the overridable `onNexusNoticeInput`,
+`onNexusNoticeAction(id)`, and `onNexusNoticeClosed(reason)` hooks.
+
+Give a band up to three actions and the platform draws a row of glyph chips
+under the footer: forward and backward step along it, confirm fires the selected
+one, and you hear the id through `onNexusNoticeAction`. A fourth action is
+refused, not dropped. With no actions the band keeps its single confirming
+gesture and `onNexusNoticeInput` instead — the two never both fire. Setting
+`interactive` alongside actions is redundant: offering answers is already asking
+for one.
+
+**You will hear `onNexusNoticeAction` at most once per question.** A notice
+takes exactly one answer: the first confirm fires, the row leaves the band, and
+after that the band claims nothing and sends nothing — no second action, and no
+`onNexusNoticeInput` fallback either. Write the handler as if it runs once,
+because it does. Two fast temple taps used to reach a plugin as two calls, which
+for a messaging plugin meant two replies sent.
+
+That is also why the SDK gives you no way to clear the row: answering removes
+it for you. To ask again, send a new question — an `updateNotice` carrying
+`actions`, or a fresh `showNotice`.
+
+```kotlin
+nexusClient?.showNotice(
+    NexusNotice(
+        title = "Marie",                       // optional, max 32 trimmed chars
+        body = "On my way, ten minutes out.",  // optional, max 240
+        footer = "scroll to choose",           // optional, max 40
+        actions = listOf(
+            NexusNoticeAction(id = "reply", glyph = "phone", label = "Reply"),
+            NexusNoticeAction(id = "later", glyph = "timer", label = "Later"),
+        ),
+    ),
+)
+
+override fun onNexusNoticeAction(id: String) {
+    when (id) {
+        "reply" -> openReply()
+        "later" -> snooze()
+    }
+}
+```
+
+Action glyphs are strings for the same reason activity glyphs are: the
+vocabulary is additive, the wire validates name shape rather than membership,
+and an unknown well-formed name renders as `dot` on an older hub. Each action's
+`id`, `glyph`, and `label` must be nonblank; there is no numeric cap on an id or
+label beyond that and the three-action limit.
+
+Answering turns the band into a display you still own, which is the shape most
+of these want. A voice-reply plugin asks, hears the pick once, and then narrates
+what it is doing on the same band:
+
+```kotlin
+override fun onNexusNoticeAction(id: String) {
+    if (id != "reply") return
+    // The row is already gone from the band; from here it is a display.
+    nexusClient?.updateNotice(NexusNoticeUpdate(body = "Listening…"))
+    startDictation(
+        onPartial = { text -> nexusClient?.updateNotice(NexusNoticeUpdate(body = text)) },
+        onSent = {
+            nexusClient?.updateNotice(NexusNoticeUpdate(body = "Reply sent"))
+            nexusClient?.hideNotice()
+        },
+    )
+}
+```
+
+`updateNotice` has patch semantics — a field you set replaces its value, one you
+leave out keeps it, an empty string clears it. Actions are the exception:
+passing a non-empty list replaces the whole row *and reopens the band for
+another answer*, while an empty list leaves the current row alone rather than
+clearing it. An update that carries no actions — like every call above — drives
+an answered band without reopening it. The wearer's selection follows its action
+id across a replacement, so reordering your answers does not move their finger
+onto a different one.
+
+**BACK always dismisses the band**, platform-side, and you never hear about it.
+That is deliberate and it does not change when a notice carries actions: a
+plugin must not be able to hold the wearer inside a banner. Ring scroll and
+every other key keep reaching whatever is underneath, except forward and
+backward while an unanswered row is actually up.
+
+Check the live `supportsNoticeSurface` value immediately before use. Unlike
+pins it accounts for the link: a notice is a moment, so the hub never holds one
+for glasses it cannot reach and tells you instead.
+
 ### Real image surfaces
 
 Image surfaces use the existing `surfaces` grant; do not add a descriptor

@@ -29,6 +29,16 @@ interface NexusPluginCallbacks {
      */
     fun onNoticeInput(event: NexusInputEvent) = Unit
 
+    /**
+     * The wearer picked one of this plugin's notice actions, by its id.
+     *
+     * Fires instead of [onNoticeInput], never alongside it: a band that offers
+     * answers is answered by which one was chosen, and a band that offers none
+     * keeps the single confirming gesture. Back is still never delivered to
+     * either -- it dismisses the band, and no plugin can take it.
+     */
+    fun onNoticeAction(id: String) = Unit
+
     /** The wearer fired one of this plugin's current activity actions. */
     fun onActivityAction(id: String) = Unit
 
