@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.0.47
+
+### Phone battery
+
+- Your phone's charge now sits in the glasses' status row, beside the clock
+  and the weather: a small phone glyph and the percentage, with a plus while
+  it charges. The glasses always knew their own battery; now they admit the
+  phone they depend on has one too.
+- The chip behaves like the ROM's own indicators. It shows on the launcher
+  and its screens, follows the status row when an app like the teleprompter
+  moves it, tucks in beside the clock when the weather steps out, and never
+  sits on top of anything.
+- Not interested? Settings has a switch. Off means off — the chip leaves
+  immediately and stays gone.
+
+### Plugin marks
+
+- A plugin's own icon now reaches the glasses. Until now a custom mark showed
+  on the phone and fell back to a generic tile in the glasses launcher, which
+  never had the plugin's APK to load it from; the mark itself now travels, as
+  bare geometry the glasses draw in the HUD's one green.
+- The design system holds: a plugin ships a shape, never a colour, a size, or
+  a look. Tests now catch a mark that drifts from the rules instead of prose
+  hoping it will not.
+
 ## 1.0.46
 
 ### Notices
