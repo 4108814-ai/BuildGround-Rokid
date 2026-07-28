@@ -12,6 +12,7 @@ import path from "node:path";
 export const HOOK_EVENTS = [
   "SessionStart",
   "UserPromptSubmit",
+  "PreToolUse",
   "Stop",
   "SubagentStop",
   "Notification",

@@ -166,6 +166,16 @@ async function main() {
     assert.equal(snapshot.sessions.some((session) => session.id === "smoke-session"), true);
     assert.equal(upsert.session.status, "working");
     assert.equal(upsert.seq, snapshot.seq + 1);
+    // There is deliberately no linked phone in this smoke test. A blocking
+    // permission hook must therefore return immediately with no decision so
+    // Claude Code can show its own local prompt.
+    postWithCurl({
+      ...base,
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_use_id: "smoke-tool-use",
+      tool_input: { command: "npm test", description: "Run tests" },
+    });
     for (const frame of [helloAck, snapshot, upsert]) {
       process.stdout.write(`${JSON.stringify(frame)}\n`);
     }

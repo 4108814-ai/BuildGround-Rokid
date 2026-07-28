@@ -192,6 +192,7 @@ export class SessionStore {
       case "SubagentStop":
         break;
       case "PreCompact":
+      case "PreToolUse":
       case "PostToolUse":
         break;
       case "Notification":

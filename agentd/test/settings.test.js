@@ -35,6 +35,7 @@ test("install creates a fresh settings file with one forwarder per event", async
     assert.equal(result.backupPath, undefined);
     const settings = JSON.parse(await fsp.readFile(settingsPath, "utf8"));
     assert.deepEqual(Object.keys(settings.hooks).sort(), [...HOOK_EVENTS].sort());
+    assert.ok(HOOK_EVENTS.includes("PreToolUse"));
     assert.equal(forwarderCommands(settings).length, HOOK_EVENTS.length);
   } finally {
     await fsp.rm(tempDir, { recursive: true, force: true });

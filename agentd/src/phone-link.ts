@@ -1,6 +1,11 @@
 import { createSocket, type Socket as UdpSocket } from "node:dgram";
 import { networkInterfaces } from "node:os";
 import { connect, type Socket as TcpSocket } from "node:net";
+import type {
+  ApprovalDecision,
+  ApprovalOutcome,
+  ApprovalRequest,
+} from "./approval-manager";
 import type { SessionStore } from "./session-store";
 import type { AgentConfig, Logger, Session, SessionMessage } from "./types";
 
@@ -16,6 +21,8 @@ import type { AgentConfig, Logger, Session, SessionMessage } from "./types";
 export const DISCOVERY_PORT = 8793;
 const DISCOVERY_INTERVAL_MS = 2000;
 const RECONNECT_DELAY_MS = 3000;
+export const PHONE_HELLO_TIMEOUT_MS = 15_000;
+export const REFUSAL_RECONNECT_DELAY_MS = 60_000;
 const DETAIL_MESSAGE_LIMIT = 40;
 const MAX_LINE_BYTES = 512 * 1024;
 
@@ -25,13 +32,25 @@ export interface PhoneLinkOptions {
   logger: Logger;
   detailProvider: (sessionId: string, limit: number) => Promise<SessionMessage[]>;
   onDetailOpen?: (sessionId: string) => void;
+  onApprovalDecision?: (requestId: string, decision: ApprovalDecision) => void;
+  onConnected?: () => void;
+  onDisconnected?: () => void;
+  operatorMessage?: (message: string) => void;
   discoveryPort?: number;
+  helloTimeoutMs?: number;
+  reconnectDelayMs?: number;
+  now?: () => number;
 }
 
 interface PhoneAnnouncement {
   host: string;
   port: number;
   name: string;
+}
+
+interface RejectedPhone {
+  retryAt: number;
+  reportedReason: string;
 }
 
 function parseAnnouncement(raw: Buffer, host: string): PhoneAnnouncement | undefined {
@@ -82,14 +101,22 @@ export class PhoneLink {
   private socket?: TcpSocket;
   private discoveryTimer?: NodeJS.Timeout;
   private reconnectTimer?: NodeJS.Timeout;
+  private helloTimer?: NodeJS.Timeout;
   private buffer = "";
   private sequence = 0;
   private openSessionId?: string;
   private connectedTo?: string;
+  private phoneName?: string;
+  private authenticated = false;
   private stopped = false;
   private unsubscribe?: () => void;
+  private readonly rejectedPhones = new Map<string, RejectedPhone>();
+  private readonly retryAt = new Map<string, number>();
+  private readonly now: () => number;
 
-  constructor(private readonly options: PhoneLinkOptions) {}
+  constructor(private readonly options: PhoneLinkOptions) {
+    this.now = options.now ?? Date.now;
+  }
 
   start(): void {
     this.stopped = false;
@@ -125,16 +152,26 @@ export class PhoneLink {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
     }
+    this.clearHelloTimer();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     this.socket?.destroy();
     this.socket = undefined;
+    this.authenticated = false;
     this.discovery?.close();
     this.discovery = undefined;
   }
 
   get connected(): boolean {
-    return this.socket !== undefined;
+    return this.authenticated && this.socket !== undefined && !this.socket.destroyed;
+  }
+
+  sendApprovalRequest(request: ApprovalRequest): boolean {
+    return this.send({ ...request });
+  }
+
+  sendApprovalResolved(requestId: string, outcome: ApprovalOutcome): boolean {
+    return this.send({ type: "approval_resolved", v: 1, requestId, outcome });
   }
 
   /** Streams an appended conversation message if the phone is reading that session. */
@@ -170,25 +207,34 @@ export class PhoneLink {
     if (this.socket || this.stopped) {
       return;
     }
+    const target = `${announcement.host}:${announcement.port}`;
+    const now = this.now();
+    if ((this.rejectedPhones.get(target)?.retryAt ?? 0) > now) {
+      return;
+    }
+    if ((this.retryAt.get(target) ?? 0) > now) {
+      return;
+    }
     const socket = connect({ host: announcement.host, port: announcement.port });
     this.socket = socket;
+    this.connectedTo = target;
+    this.phoneName = announcement.name;
+    this.authenticated = false;
     socket.setNoDelay(true);
     socket.setKeepAlive(true, 30_000);
     socket.on("connect", () => {
-      this.connectedTo = `${announcement.host}:${announcement.port}`;
-      this.options.logger.info("phone_link_connected", {
-        phone: announcement.name,
-        target: this.connectedTo,
-      });
-      this.send({
+      this.helloTimer = setTimeout(
+        () => this.onHelloTimeout(socket),
+        this.options.helloTimeoutMs ?? PHONE_HELLO_TIMEOUT_MS,
+      );
+      this.helloTimer.unref();
+      this.write({
         type: "hello",
         v: 1,
         machineId: this.options.config.machineId,
         machineName: this.options.config.machineName,
         token: this.options.config.token,
       });
-      this.sendSnapshot();
-      this.unsubscribe = this.subscribe();
     });
     socket.on("data", (chunk) => this.onData(chunk));
     socket.on("error", (error) => {
@@ -207,18 +253,33 @@ export class PhoneLink {
   }
 
   private onClose(): void {
+    const wasAuthenticated = this.authenticated;
+    const target = this.connectedTo;
+    this.clearHelloTimer();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     this.socket = undefined;
+    this.authenticated = false;
     this.buffer = "";
     this.openSessionId = undefined;
-    if (this.connectedTo) {
-      this.options.logger.info("phone_link_closed", { target: this.connectedTo });
-      this.connectedTo = undefined;
+    this.connectedTo = undefined;
+    this.phoneName = undefined;
+    if (target && !this.rejectedPhones.has(target)) {
+      this.retryAt.set(target, this.now() + (this.options.reconnectDelayMs ?? RECONNECT_DELAY_MS));
+    }
+    if (wasAuthenticated && target) {
+      this.options.logger.info("phone_link_closed", { target });
+      this.options.onDisconnected?.();
     }
     if (!this.stopped) {
       // Discovery keeps running; give the phone a moment before dialling again.
-      this.reconnectTimer = setTimeout(() => this.announce(), RECONNECT_DELAY_MS);
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+      }
+      this.reconnectTimer = setTimeout(
+        () => this.announce(),
+        this.options.reconnectDelayMs ?? RECONNECT_DELAY_MS,
+      );
       this.reconnectTimer.unref();
     }
   }
@@ -254,7 +315,22 @@ export class PhoneLink {
     }
     switch (message.type) {
       case "hello_ack":
+        this.onHelloAck();
         break;
+      case "hello_reject":
+        this.onHelloReject(message.reason);
+        break;
+      default:
+        if (!this.authenticated) {
+          return;
+        }
+        this.handleAuthenticatedMessage(message);
+        break;
+    }
+  }
+
+  private handleAuthenticatedMessage(message: Record<string, unknown>): void {
+    switch (message.type) {
       case "refresh":
         this.sendSnapshot();
         break;
@@ -275,8 +351,113 @@ export class PhoneLink {
       case "ping":
         this.send({ type: "pong", t: message.t });
         break;
+      case "approval_decision": {
+        const requestId =
+          typeof message.requestId === "string" && message.requestId.length > 0
+            ? message.requestId
+            : undefined;
+        const decision =
+          message.decision === "allow" || message.decision === "deny"
+            ? message.decision
+            : undefined;
+        if (requestId && decision) {
+          this.options.onApprovalDecision?.(requestId, decision);
+        }
+        break;
+      }
       default:
         break;
+    }
+  }
+
+  private onHelloAck(): void {
+    if (this.authenticated || !this.socket || this.socket.destroyed) {
+      return;
+    }
+    this.authenticated = true;
+    this.clearHelloTimer();
+    if (this.connectedTo) {
+      this.rejectedPhones.delete(this.connectedTo);
+      this.retryAt.delete(this.connectedTo);
+    }
+    this.options.logger.info("phone_link_connected", {
+      phone: this.phoneName ?? "phone",
+      target: this.connectedTo ?? "unknown",
+    });
+    this.sendSnapshot();
+    this.unsubscribe = this.subscribe();
+    this.options.onConnected?.();
+  }
+
+  private onHelloReject(rawReason: unknown): void {
+    if (this.authenticated || !this.connectedTo) {
+      return;
+    }
+    const reason = rawReason === "bad_token" ? "bad_token" : "unknown_machine";
+    const reportedReason = this.reasonKey(rawReason);
+    const previous = this.rejectedPhones.get(this.connectedTo);
+    this.rejectedPhones.set(this.connectedTo, {
+      retryAt: this.now() + REFUSAL_RECONNECT_DELAY_MS,
+      reportedReason,
+    });
+
+    if (!previous || previous.reportedReason !== reportedReason) {
+      if (rawReason !== "unknown_machine" && rawReason !== "bad_token") {
+        this.options.logger.warn("phone_link_reject_unknown_reason", {
+          reason: rawReason,
+          target: this.connectedTo,
+        });
+      }
+      const message =
+        reason === "bad_token"
+          ? "The phone refused this computer because its saved token no longer matches, usually because the daemon identity was regenerated. On the phone, use Forget computers to clear it, then open Agents \u2192 Link a computer and start the daemon again."
+          : "The phone refused this computer because it is not linked and the linking window is closed. On the phone, open Agents \u2192 Link a computer, then start the daemon again.";
+      this.options.logger.warn("phone_link_rejected", {
+        reason,
+        rawReason,
+        target: this.connectedTo,
+        message,
+      });
+      this.tellOperator(message);
+    }
+    this.socket?.destroy();
+  }
+
+  private onHelloTimeout(socket: TcpSocket): void {
+    if (this.socket !== socket || this.authenticated) {
+      return;
+    }
+    this.options.logger.warn("phone_link_hello_timeout", {
+      target: this.connectedTo ?? "unknown",
+      timeoutMs: this.options.helloTimeoutMs ?? PHONE_HELLO_TIMEOUT_MS,
+    });
+    socket.destroy();
+  }
+
+  private clearHelloTimer(): void {
+    if (this.helloTimer) {
+      clearTimeout(this.helloTimer);
+      this.helloTimer = undefined;
+    }
+  }
+
+  private tellOperator(message: string): void {
+    if (this.options.operatorMessage) {
+      this.options.operatorMessage(message);
+      return;
+    }
+    try {
+      process.stderr.write(`nexus-agentd: ${message}\n`);
+    } catch {
+      // The durable log still contains the full operator guidance.
+    }
+  }
+
+  private reasonKey(reason: unknown): string {
+    try {
+      return JSON.stringify(reason);
+    } catch {
+      return String(reason);
     }
   }
 
@@ -315,11 +496,23 @@ export class PhoneLink {
     this.send({ type: "session_removed", seq: this.sequence, sessionId });
   }
 
-  private send(message: Record<string, unknown>): void {
+  private send(message: Record<string, unknown>): boolean {
+    if (!this.authenticated) {
+      return false;
+    }
+    return this.write(message);
+  }
+
+  private write(message: Record<string, unknown>): boolean {
     const socket = this.socket;
     if (!socket || socket.destroyed) {
-      return;
+      return false;
     }
-    socket.write(`${JSON.stringify(message)}\n`);
+    try {
+      socket.write(`${JSON.stringify(message)}\n`);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

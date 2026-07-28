@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
+import { ApprovalManager, approvalTimeoutFromEnv, type HookResponse } from "./approval-manager";
 import { defaultStateDir, ensureConfig } from "./config";
 import { discoverRecentSessions } from "./discovery";
 import { HookHttpServer } from "./http-server";
@@ -30,6 +31,7 @@ export async function startDaemon(): Promise<RunningDaemon> {
 
   let wsHub: WsHub | undefined;
   let phoneLink: PhoneLink | undefined;
+  let approvals: ApprovalManager | undefined;
   const tailManager = new TranscriptTailManager(
     (sessionId, update) => sessions.applyTranscriptUpdate(sessionId, update),
     logger,
@@ -51,7 +53,7 @@ export async function startDaemon(): Promise<RunningDaemon> {
       tailManager.start(sessionId, transcriptPath);
     }
   };
-  const processHook = (payload: HookPayload) => {
+  const processHook = (payload: HookPayload): HookResponse | Promise<HookResponse> => {
     sessions.handleHook(payload);
     const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined;
     const eventName = typeof payload.hook_event_name === "string" ? payload.hook_event_name : undefined;
@@ -63,21 +65,40 @@ export async function startDaemon(): Promise<RunningDaemon> {
           : undefined;
     if (sessionId && eventName === "SessionEnd") {
       tailManager.stop(sessionId);
+      approvals?.resolveSession(sessionId);
     } else if (sessionId && transcriptPath && sessions.get(sessionId)?.stale === false) {
       tailManager.start(sessionId, transcriptPath);
     }
+    if (eventName === "PreToolUse") {
+      return approvals?.request(payload) ?? {};
+    }
+    return {};
   };
 
+  const hub = new WsHub(config, sessions, logger, { detailProvider, onDetailOpen });
+  wsHub = hub;
+  const link = new PhoneLink({
+    config,
+    store: sessions,
+    logger,
+    detailProvider,
+    onDetailOpen,
+    onApprovalDecision: (requestId, decision) => approvals?.handleDecision(requestId, decision),
+    onConnected: () => approvals?.onLinkConnected(),
+    onDisconnected: () => approvals?.onLinkDisconnected(),
+  });
+  phoneLink = link;
+  approvals = new ApprovalManager({
+    transport: link,
+    logger,
+    timeoutMs: approvalTimeoutFromEnv(),
+  });
   const httpServer = new HookHttpServer({
     port: config.httpPort,
     sessionCount: () => sessions.size,
     onHook: processHook,
     logger,
   });
-  const hub = new WsHub(config, sessions, logger, { detailProvider, onDetailOpen });
-  wsHub = hub;
-  const link = new PhoneLink({ config, store: sessions, logger, detailProvider, onDetailOpen });
-  phoneLink = link;
   const heartbeatTimer = setInterval(() => sessions.sweepStalled(), 60_000);
   heartbeatTimer.unref();
 
@@ -113,6 +134,7 @@ export async function startDaemon(): Promise<RunningDaemon> {
       }
       stopped = true;
       clearInterval(heartbeatTimer);
+      approvals?.dispose();
       link.stop();
       tailManager.stopAll();
       await Promise.all([httpServer.stop(), hub.stop()]);

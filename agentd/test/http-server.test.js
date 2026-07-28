@@ -28,21 +28,31 @@ function call(port, method, requestPath, body = "") {
   });
 }
 
-test("loopback HTTP server reports health and acknowledges hooks before processing", async () => {
+test("loopback HTTP server reports health and returns the completed hook decision", async () => {
   let received;
+  let markReceived;
+  const receivedHook = new Promise((resolve) => { markReceived = resolve; });
   const warnings = [];
   const logger = {
     info() {},
     warn(event) { warnings.push(event); },
     error() {},
   };
-  const never = new Promise(() => {});
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
   const server = new HookHttpServer({
     port: 0,
     sessionCount: () => 3,
-    onHook(payload) {
+    async onHook(payload) {
       received = payload;
-      return never;
+      markReceived();
+      await held;
+      return {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+        },
+      };
     },
     logger,
   });
@@ -57,10 +67,24 @@ test("loopback HTTP server reports health and acknowledges hooks before processi
     });
 
     const payload = { session_id: "http-session", hook_event_name: "SessionStart" };
-    const accepted = await call(server.port(), "POST", "/hook", JSON.stringify(payload));
-    assert.deepEqual(accepted, { status: 200, body: "{}" });
-    await new Promise((resolve) => setImmediate(resolve));
+    let completed = false;
+    const acceptedPromise = call(server.port(), "POST", "/hook", JSON.stringify(payload))
+      .then((value) => {
+        completed = true;
+        return value;
+      });
+    await receivedHook;
     assert.deepEqual(received, payload);
+    assert.equal(completed, false);
+    release();
+    const accepted = await acceptedPromise;
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(JSON.parse(accepted.body), {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+      },
+    });
 
     const malformed = await call(server.port(), "POST", "/hook", "{");
     assert.deepEqual(malformed, { status: 200, body: "{}" });

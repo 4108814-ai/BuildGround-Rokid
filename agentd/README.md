@@ -5,8 +5,9 @@ Claude Code lifecycle hooks on loopback, tails active Claude transcript JSONL fi
 publishes authenticated session snapshots and ordered deltas to the Nexus Agents Android
 plugin.
 
-Phase 1 is monitoring only. The daemon does not approve or deny requests, block Claude
-hooks, accept voice commands, provide TLS, or install itself as a Windows service.
+The daemon can hold Claude Code `PreToolUse` hooks while the linked phone asks the wearer
+to allow or deny a tool call. It does not auto-approve requests, accept voice commands,
+provide TLS, or install itself as a Windows service.
 
 ## Requirements and setup
 
@@ -64,8 +65,11 @@ hooks. Before changing an existing settings file, they create a timestamped
 `settings.json.agentd-backup-*` copy. Reinstalling is idempotent. Malformed JSON aborts
 without writing.
 
-The generated hook forwarder always exits successfully and silently. If the daemon is
-down or unreachable, it gives up within two seconds so Claude Code can continue.
+The generated hook forwarder always exits successfully. Ordinary lifecycle hooks return
+immediately. A `PreToolUse` hook waits for the linked phone for up to 120 seconds; set
+`NEXUS_AGENTD_APPROVAL_TIMEOUT_MS` to a positive millisecond value to change that timeout.
+If the daemon or phone is unavailable, the hook returns no decision so Claude Code uses
+its own local permission prompt.
 
 ## Operations and verification
 

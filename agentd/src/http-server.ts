@@ -1,11 +1,12 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { HookResponse } from "./approval-manager";
 import type { HookPayload, Logger } from "./types";
 
 export interface HookHttpServerOptions {
   port: number;
   sessionCount: () => number;
-  onHook: (payload: HookPayload) => void | Promise<void>;
+  onHook: (payload: HookPayload) => HookResponse | void | Promise<HookResponse | void>;
   logger: Logger;
 }
 
@@ -41,37 +42,33 @@ export class HookHttpServer {
           body += chunk;
         });
         request.on("end", () => {
-          response.writeHead(200, {
-            "content-type": "application/json",
-            "content-length": "2",
-          });
-          response.end("{}");
-          setImmediate(() => {
-            let payload: HookPayload;
-            try {
-              const parsed: unknown = JSON.parse(body);
-              if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-                throw new Error("payload is not a JSON object");
-              }
-              payload = parsed as HookPayload;
-            } catch (error) {
-              this.options.logger.warn("hook_parse_failed", {
-                bodyBytes: Buffer.byteLength(body),
-                reason: error instanceof Error ? error.name : "unknown",
-              });
-              return;
+          let payload: HookPayload;
+          try {
+            const parsed: unknown = JSON.parse(body);
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+              throw new Error("payload is not a JSON object");
             }
-            Promise.resolve(this.options.onHook(payload)).catch((error) => {
+            payload = parsed as HookPayload;
+          } catch (error) {
+            this.options.logger.warn("hook_parse_failed", {
+              bodyBytes: Buffer.byteLength(body),
+              reason: error instanceof Error ? error.name : "unknown",
+            });
+            this.respond(response, {});
+            return;
+          }
+          Promise.resolve(this.options.onHook(payload))
+            .then((result) => this.respond(response, result ?? {}))
+            .catch((error) => {
               this.options.logger.error("hook_processing_failed", {
                 reason: error instanceof Error ? error.name : "unknown",
               });
+              this.respond(response, {});
             });
-          });
         });
         request.on("error", () => {
           if (!response.headersSent) {
-            response.writeHead(200, { "content-type": "application/json" });
-            response.end("{}");
+            this.respond(response, {});
           }
         });
         return;
@@ -111,5 +108,17 @@ export class HookHttpServer {
     return new Promise((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
     });
+  }
+
+  private respond(response: import("node:http").ServerResponse, value: HookResponse): void {
+    if (response.headersSent || response.destroyed) {
+      return;
+    }
+    const body = JSON.stringify(value);
+    response.writeHead(200, {
+      "content-type": "application/json",
+      "content-length": Buffer.byteLength(body),
+    });
+    response.end(body);
   }
 }

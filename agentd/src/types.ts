@@ -43,6 +43,9 @@ export interface HookPayload {
   transcript_path?: unknown;
   cwd?: unknown;
   hook_event_name?: unknown;
+  tool_name?: unknown;
+  tool_input?: unknown;
+  tool_use_id?: unknown;
   source?: unknown;
   prompt?: unknown;
   message?: unknown;
