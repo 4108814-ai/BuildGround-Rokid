@@ -137,6 +137,24 @@ class NexusNoticeActionTest {
         assertEquals("reply", updated.getJSONObject(0).getString("id"))
     }
 
+    /**
+     * A notice takes one answer, so asking again has to be sayable. Only a
+     * plugin that actually sets the flag sends it: a text update that carried
+     * it by accident would read on the glasses as the owner re-asking.
+     */
+    @Test
+    fun `an update carries the interactive flag only when it is set`() {
+        val fixture = approvedFixture()
+
+        fixture.client.updateNotice(NexusNoticeUpdate(body = "Listening…"))
+        fixture.client.updateNotice(NexusNoticeUpdate(interactive = true))
+        fixture.client.updateNotice(NexusNoticeUpdate(body = "Done", interactive = false))
+
+        assertFalse(fixture.transport.sends[0].second.has("interactive"))
+        assertTrue(fixture.transport.sends[1].second.getBoolean("interactive"))
+        assertFalse(fixture.transport.sends[2].second.getBoolean("interactive"))
+    }
+
     @Test
     fun `the model refuses a fourth action and a malformed one`() {
         val three = List(NoticeSurfaceContract.MAX_ACTIONS) { index ->

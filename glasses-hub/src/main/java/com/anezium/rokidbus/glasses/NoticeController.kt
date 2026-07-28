@@ -69,18 +69,31 @@ internal fun preservedNoticeActionIndex(
     return next.indexOfFirst { it.id == selectedId }.takeIf { it >= 0 } ?: 0
 }
 
+/**
+ * What a band's one answer turned out to be.
+ *
+ * Both kinds are the same event -- the wearer answered -- and differ only in
+ * what goes on the wire, so they are one type. A band that offers a row is
+ * answered by which choice was picked; a band that offers none is answered by
+ * the fact that it was confirmed at all.
+ */
+internal sealed interface NoticeAnswer {
+    data class Action(val action: NoticeAction) : NoticeAnswer
+    data class Input(val keyCode: Int) : NoticeAnswer
+}
+
 internal sealed interface NoticeStateDecision {
     data class Shown(val notice: NexusNoticeSurface) : NoticeStateDecision
     data class Updated(val notice: NexusNoticeSurface) : NoticeStateDecision
 
     /**
-     * The one answer this band had to give, taken. Carries the action so the
-     * send and the flag that forbids a second one are a single transition and
-     * cannot be separated by a second tap.
+     * The one answer this band had to give, taken. Carries everything the send
+     * needs so that the send and the flag forbidding a second one are a single
+     * transition, which two taps 188 ms apart cannot get between.
      */
     data class Answered(
         val notice: NexusNoticeSurface,
-        val action: NoticeAction,
+        val answer: NoticeAnswer,
     ) : NoticeStateDecision
 
     data class Closed(val surfaceId: String, val reason: NoticeCloseReason) : NoticeStateDecision
@@ -145,34 +158,45 @@ internal class NoticeStateMachine {
                 previousIndex = current.selectedActionIndex,
                 next = patched.actions,
             ),
-            // An update that carries the actions field is a new question, so it
-            // is owed a new answer. One that leaves the field out is the owner
-            // driving an already-answered band as a display, and must not
-            // quietly reopen it. An empty array resets too: there is nothing
-            // left to answer, and leaving the flag set would only mean a later
-            // row inherited a stale one.
-            answered = if (patch.actions != null) false else current.answered,
+            // An update that carries either field granting the band its
+            // interactivity -- the row, or the plain interactive flag -- is the
+            // owner asking again, so it is owed a new answer. An update that
+            // carries neither is the owner driving an already-answered band as
+            // a display, and must not quietly reopen it. Emptying the row or
+            // clearing the flag resets too: there is then nothing left to
+            // answer, and a flag left set would only be inherited by whatever
+            // the owner asks next.
+            answered = if (patch.actions != null || patch.interactive != null) {
+                false
+            } else {
+                current.answered
+            },
         )
         active = notice
         return NoticeStateDecision.Updated(notice)
     }
 
     /**
-     * Takes the band's one answer, if it still has one to give.
+     * Takes the band's one answer, whichever kind it has to give.
      *
      * Marking and reading happen in the same call on purpose: the duplicate tap
      * that started this arrived 188 ms after the first, and any gap between
-     * "which action is selected" and "this band is now answered" is a gap two
-     * taps can both fit through.
+     * "what is this band's answer" and "this band is now answered" is a gap two
+     * taps can both fit through. That is why the plain input case comes through
+     * here too rather than being checked and then forwarded.
      */
-    fun answer(): NoticeStateDecision {
+    fun answer(confirmKeyCode: Int): NoticeStateDecision {
         val current = active ?: return NoticeStateDecision.Ignored
-        if (current.answered) return NoticeStateDecision.Ignored
-        val action = current.content.actions.getOrNull(current.selectedActionIndex)
-            ?: return NoticeStateDecision.Ignored
+        if (!current.expectsInput) return NoticeStateDecision.Ignored
+        val answer = when (
+            val action = current.content.actions.getOrNull(current.selectedActionIndex)
+        ) {
+            null -> NoticeAnswer.Input(confirmKeyCode)
+            else -> NoticeAnswer.Action(action)
+        }
         val notice = current.copy(answered = true)
         active = notice
-        return NoticeStateDecision.Answered(notice, action)
+        return NoticeStateDecision.Answered(notice, answer)
     }
 
     /**
@@ -289,23 +313,20 @@ internal object NoticeController {
         visibleNotice()?.liveActions?.isNotEmpty() == true
 
     /**
-     * The wearer confirmed. The owner hears about it; nobody else does.
+     * The wearer confirmed. The owner hears about it once; nobody else does.
      *
-     * A band with actions answers with the one that is selected, on
-     * `/notice/action`, and does so exactly once. A band without them keeps the
-     * single-gesture reply on `/notice/input` it has always had, unchanged.
+     * A band with actions answers with the selected one on `/notice/action`; a
+     * band without them answers on `/notice/input`. Either way that is the
+     * band's one answer, and the state machine decides which it is and marks it
+     * spent in the same step -- there is no reading here for a second tap to
+     * race.
      *
-     * An answered band claims nothing: the second of two fast taps falls
-     * through to whatever is underneath, and in particular does not fall back
-     * to firing input just because the row is gone.
+     * An answered band of either kind claims nothing: the second of two fast
+     * taps falls through to whatever is underneath.
      */
     fun handleConfirm(keyCode: Int): Boolean {
-        val notice = visibleNotice()?.takeIf { it.expectsInput } ?: return false
-        if (notice.content.actions.isEmpty()) {
-            forwardInput(notice.surfaceId, keyCode)
-            return true
-        }
-        runOnMain { applyDecision(state.answer()) }
+        if (visibleNotice()?.expectsInput != true) return false
+        runOnMain { applyDecision(state.answer(keyCode)) }
         return true
     }
 
@@ -442,7 +463,12 @@ internal object NoticeController {
                 // No expiry rescheduling: answering neither shortens nor extends
                 // the band's life, and the deadline it was already given still
                 // stands. The re-render is what makes the row leave the band.
-                forwardAction(decision.notice.surfaceId, decision.action.id)
+                when (val answer = decision.answer) {
+                    is NoticeAnswer.Action ->
+                        forwardAction(decision.notice.surfaceId, answer.action.id)
+                    is NoticeAnswer.Input ->
+                        forwardInput(decision.notice.surfaceId, answer.keyCode)
+                }
                 notifyChanged()
             }
             is NoticeStateDecision.Closed -> {

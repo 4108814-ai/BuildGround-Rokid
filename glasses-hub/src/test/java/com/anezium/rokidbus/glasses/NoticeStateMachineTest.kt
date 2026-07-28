@@ -244,9 +244,10 @@ class NoticeStateMachineTest {
         state.show("relay:notice", seq = 1, content = content(actions = threeActions()), nowMs = 0L)
         state.moveSelection(1)
 
-        val answered = state.answer()
+        val answered = state.answer(CONFIRM_KEY)
 
-        assertEquals("later", (answered as NoticeStateDecision.Answered).action.id)
+        val answer = (answered as NoticeStateDecision.Answered).answer
+        assertEquals("later", (answer as NoticeAnswer.Action).action.id)
         assertTrue(answered.notice.answered)
         // The question is answered, so the choices stop being on offer: nothing
         // to draw, nothing to step through, nothing left to fire.
@@ -254,7 +255,31 @@ class NoticeStateMachineTest {
         assertFalse(answered.notice.expectsInput)
         assertTrue(state.moveSelection(1) is NoticeStateDecision.Ignored)
         assertNull(state.selectedAction())
-        assertTrue(state.answer() is NoticeStateDecision.Ignored)
+        assertTrue(state.answer(CONFIRM_KEY) is NoticeStateDecision.Ignored)
+    }
+
+    @Test
+    fun `a band with no row answers once too, with the plain input`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(interactive = true), nowMs = 0L)
+
+        val answered = state.answer(CONFIRM_KEY)
+
+        val answer = (answered as NoticeStateDecision.Answered).answer
+        assertEquals(CONFIRM_KEY, (answer as NoticeAnswer.Input).keyCode)
+        assertTrue(answered.notice.answered)
+        assertFalse(answered.notice.expectsInput)
+        // The second of two fast taps. Nothing to send, nothing to claim.
+        assertTrue(state.answer(CONFIRM_KEY) is NoticeStateDecision.Ignored)
+    }
+
+    @Test
+    fun `a band that asked for nothing answers nothing`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(), nowMs = 0L)
+
+        assertTrue(state.answer(CONFIRM_KEY) is NoticeStateDecision.Ignored)
+        assertFalse(state.activeNotice()!!.answered)
     }
 
     @Test
@@ -266,11 +291,12 @@ class NoticeStateMachineTest {
             content = content(interactive = true, actions = threeActions()),
             nowMs = 0L,
         )
-        state.answer()
+        state.answer(CONFIRM_KEY)
 
         // The row is gone, but the band is not an interactive banner again: one
         // band, one reply, of either kind.
         assertFalse(state.activeNotice()!!.expectsInput)
+        assertTrue(state.answer(CONFIRM_KEY) is NoticeStateDecision.Ignored)
     }
 
     @Test
@@ -283,7 +309,7 @@ class NoticeStateMachineTest {
             nowMs = 1_000L,
         )
 
-        val answered = state.answer() as NoticeStateDecision.Answered
+        val answered = state.answer(CONFIRM_KEY) as NoticeStateDecision.Answered
 
         assertEquals(9_000L, answered.notice.expiresAtMs)
         assertTrue(state.expire(nowMs = 8_999L, expectedSeq = 1) is NoticeStateDecision.Ignored)
@@ -294,7 +320,7 @@ class NoticeStateMachineTest {
     fun `an update carrying actions is a new question`() {
         val state = NoticeStateMachine()
         state.show("relay:notice", seq = 1, content = content(actions = threeActions()), nowMs = 0L)
-        state.answer()
+        state.answer(CONFIRM_KEY)
 
         val decision = state.update(
             "relay:notice",
@@ -308,14 +334,53 @@ class NoticeStateMachineTest {
         val notice = (decision as NoticeStateDecision.Updated).notice
         assertFalse(notice.answered)
         assertEquals(listOf(NoticeAction("send", "phone", "Send")), notice.liveActions)
-        assertEquals("send", (state.answer() as NoticeStateDecision.Answered).action.id)
+        val answer = (state.answer(CONFIRM_KEY) as NoticeStateDecision.Answered).answer
+        assertEquals("send", (answer as NoticeAnswer.Action).action.id)
+    }
+
+    @Test
+    fun `an update carrying the interactive flag is a new question too`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(interactive = true), nowMs = 0L)
+        state.answer(CONFIRM_KEY)
+
+        val decision = state.update(
+            "relay:notice",
+            seq = 2,
+            patch = NoticeSurfacePatch(interactive = NoticeField(true)),
+            nowMs = 0L,
+        )
+
+        val notice = (decision as NoticeStateDecision.Updated).notice
+        assertFalse(notice.answered)
+        assertTrue(notice.expectsInput)
+        assertTrue(state.answer(CONFIRM_KEY) is NoticeStateDecision.Answered)
+    }
+
+    @Test
+    fun `clearing the interactive flag resets the answer with nothing left to ask`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(interactive = true), nowMs = 0L)
+        state.answer(CONFIRM_KEY)
+
+        val decision = state.update(
+            "relay:notice",
+            seq = 2,
+            patch = NoticeSurfacePatch(interactive = NoticeField(false)),
+            nowMs = 0L,
+        )
+
+        val notice = (decision as NoticeStateDecision.Updated).notice
+        assertFalse(notice.answered)
+        assertFalse(notice.expectsInput)
+        assertTrue(state.answer(CONFIRM_KEY) is NoticeStateDecision.Ignored)
     }
 
     @Test
     fun `an update carrying an empty row resets the flag with nothing to answer`() {
         val state = NoticeStateMachine()
         state.show("relay:notice", seq = 1, content = content(actions = threeActions()), nowMs = 0L)
-        state.answer()
+        state.answer(CONFIRM_KEY)
 
         val decision = state.update(
             "relay:notice",
@@ -327,14 +392,19 @@ class NoticeStateMachineTest {
         val notice = (decision as NoticeStateDecision.Updated).notice
         assertFalse(notice.answered)
         assertTrue(notice.liveActions.isEmpty())
-        assertTrue(state.answer() is NoticeStateDecision.Ignored)
+        assertTrue(state.answer(CONFIRM_KEY) is NoticeStateDecision.Ignored)
     }
 
     @Test
-    fun `an update without actions drives an answered band as a display`() {
+    fun `an update carrying neither field drives an answered band as a display`() {
         val state = NoticeStateMachine()
-        state.show("relay:notice", seq = 1, content = content(actions = threeActions()), nowMs = 0L)
-        state.answer()
+        state.show(
+            "relay:notice",
+            seq = 1,
+            content = content(interactive = true, actions = threeActions()),
+            nowMs = 0L,
+        )
+        state.answer(CONFIRM_KEY)
 
         val decision = state.update(
             "relay:notice",
@@ -347,18 +417,7 @@ class NoticeStateMachineTest {
         assertTrue(notice.answered)
         assertTrue(notice.liveActions.isEmpty())
         assertEquals("Sending your reply", notice.content.body)
-        assertTrue(state.answer() is NoticeStateDecision.Ignored)
-    }
-
-    @Test
-    fun `a band with no actions has no answer to give`() {
-        val state = NoticeStateMachine()
-        state.show("relay:notice", seq = 1, content = content(interactive = true), nowMs = 0L)
-
-        assertTrue(state.answer() is NoticeStateDecision.Ignored)
-        // Unchanged from before actions existed: a plain interactive banner
-        // keeps replying on `/notice/input` for as long as it is up.
-        assertTrue(state.activeNotice()!!.expectsInput)
+        assertTrue(state.answer(CONFIRM_KEY) is NoticeStateDecision.Ignored)
     }
 
     @Test
@@ -376,6 +435,9 @@ class NoticeStateMachineTest {
             preservedNoticeActionIndex(emptyList(), previousIndex = 0, next = threeActions()),
         )
     }
+
+    /** `KeyEvent.KEYCODE_ENTER`, spelled out so the test needs no framework. */
+    private val CONFIRM_KEY = 66
 
     private fun moved(state: NoticeStateMachine, delta: Int): Int =
         (state.moveSelection(delta) as NoticeStateDecision.Updated).notice.selectedActionIndex

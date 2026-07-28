@@ -445,15 +445,18 @@ Phone to glasses:
 Glasses to phone to plugin:
 
 - `/notice/input` — `{noticeId, keyCode, action}`. The single confirming
-  gesture, sent only by a band that carries no actions.
+  gesture, sent only by a band that carries no actions, and **at most once per
+  question**.
 - `/notice/action` — `{noticeId, id}`, where `id` is the selected action's
   plugin-supplied identifier. Sent instead of `/notice/input` whenever the band
-  carries actions, and **at most once per question**. The phone hub checks the
-  id against the notice it currently holds, so a pick that raced a replacement
-  is dropped rather than handed to whoever owns the slot now, and it refuses a
-  second pick for a notice already answered. The two refusals log distinct
-  reasons — `not_current` and `already_answered` — because they mean different
-  things.
+  carries actions, and **at most once per question**.
+
+Both replies go through the same gate on the phone hub: the notice must be the
+one it currently holds, it must actually have asked for a gesture, and it only
+answers once — an action id it never offered, a pick that raced a replacement,
+and a second reply of either kind are all refused. The refusals log distinct
+reasons, `not_current` and `already_answered`, because they mean different
+things.
 - `/notice/closed` — `{noticeId, reason}` with `reason` in
   `user | timeout | owner | replaced | disconnect`. Delivered exactly once per
   notice, including when the owner hid it itself. Not delivered when the owner
@@ -513,12 +516,18 @@ follows its action id across a replacement, so a plugin reordering its answers
 does not move the wearer's finger onto a different one. When the selected id is
 gone the selection falls back to the first action.
 
-**An update that carries the `actions` key is a new question** and reopens the
-band for another answer; one that leaves the key out is the owner driving an
-already-answered band as a display and does not. The phone hub forwards an
-answered notice's canonical state *without* its actions for exactly this
-reason: the glasses read an update as a patch, so echoing the answered row on
-an ordinary text update would put it back in front of the wearer.
+**An update that carries the `actions` key or the `interactive` key is a new
+question** and reopens the band for another answer; one that carries neither is
+the owner driving an already-answered band as a display and does not. Clearing
+either — an empty array, or `interactive: false` — resets the flag as well:
+there is then nothing left to answer, and a flag left set would only be
+inherited by whatever the owner asks next.
+
+The phone hub forwards an answered notice's canonical state with *neither* of
+those two fields for exactly this reason: the glasses read an update as a patch,
+so echoing back the row or the flag the wearer already answered would put the
+question in front of them again. Both are omitted when empty or false anyway, so
+this is their absence from the patch rather than a new spelling.
 
 Actions buy the band nothing else. They do not extend the TTL, they do not
 touch the 60 s absolute lifetime, and they do not change what BACK does.
@@ -580,12 +589,12 @@ already asking for one, so a plugin shipping a choice does not also have to set
 the flag.
 
 - **Confirm** — center tap, ENTER, or the temple key — is claimed and forwarded
-  to the owner: as `/notice/action` carrying the selected action's id when the
-  band has a row, and as `/notice/input` when it does not. Both are
-  owner-scoped like `/notice/closed`. This works with no surface open, which is
-  the capability the tier adds: until now every input route in the glasses hub
-  was gated on an active surface, so a dormant plugin could be shown but never
-  answered.
+  to the owner once: as `/notice/action` carrying the selected action's id when
+  the band has a row, and as `/notice/input` when it does not. Both are
+  owner-scoped like `/notice/closed`, and both spend the band's one answer; see
+  below. This works with no surface open, which is the capability the tier
+  adds: until now every input route in the glasses hub was gated on an active
+  surface, so a dormant plugin could be shown but never answered.
 - **Forward and backward** — touchpad swipe or ring scroll — move the selection
   along the row, wrapping at both ends, and are claimed **only while the band
   actually has actions**. A notice without them claims no direction at all, so
@@ -605,26 +614,34 @@ the flag.
 
 ### One question, one answer
 
-**A notice takes exactly one answer.** Measured on device, two temple taps
-188 ms apart fired the same action twice; for a messaging plugin that is two
-replies sent. So the first confirm on a band with a row fires its action and
-answers the band, and from then on:
+**A notice takes exactly one answer, of either kind.** Measured on device, two
+temple taps 188 ms apart fired the same reply twice; for a messaging plugin
+that is two messages sent. So the first confirm answers the band — firing
+`/notice/action` when it has a row, `/notice/input` when it does not — and from
+then on:
 
-- the row leaves the band and the band becomes an inert display;
+- the row, if there was one, leaves the band and the band becomes an inert
+  display;
 - forward and backward stop being claimed;
 - confirm stops being claimed and **fires nothing at all** — not another
-  action, and not `/notice/input` either, even when `interactive` is true. One
-  band, one reply, of either kind. Taps and swipes fall through beneath it
-  exactly as they do beneath a plain banner.
+  action, and not `/notice/input` either, even when `interactive` is still
+  true. Taps and swipes fall through beneath it exactly as they do beneath a
+  plain banner.
+
+**This changed behaviour that shipped in 1.0.46.** A band with
+`interactive: true` used to fire `/notice/input` on every confirm for as long
+as it was visible; it now fires on the first one only. The rule is the same one
+the action row needed, and a question that could be answered twice was the same
+bug whichever way it was asked.
 
 The glasses hold the flag and the phone hub holds it too. That is deliberate
 rather than redundant: the thing being defended against is a race, and a race
 is precisely what survives one side losing its state.
 
-Asking again means sending a new question — an `/notice/update` carrying
-`actions`, or a fresh `/notice/show`. Answering changes nothing about the
-band's life: the TTL and the 60 s absolute lifetime run exactly as they would
-have.
+Asking again means sending a new question — a `/notice/update` carrying
+`actions` or `interactive`, or a fresh `/notice/show`. Answering changes nothing
+about the band's life: the TTL and the 60 s absolute lifetime run exactly as
+they would have.
 
 A notice with actions still dies on its TTL. There is no hold-open rule, no
 scrolling inside the band, and no text entry: a notice is a question with a

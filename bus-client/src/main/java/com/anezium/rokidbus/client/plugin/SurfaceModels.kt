@@ -648,16 +648,22 @@ data class NexusNotice(
  * passing an empty string clears it. An update cannot leave the band with no
  * text at all.
  *
- * @property actions Replaces the whole action row. An empty list leaves the
- * current row alone rather than clearing it, so this cannot take a question's
- * answers away from a wearer halfway through reading them; hide the notice
- * instead. The wearer's selection follows its action id across the swap, so
- * reordering answers does not move their finger onto a different one.
+ * @property interactive Ask again on a band that has already been answered, or
+ * stop asking. Null leaves the current state alone, which is what an ordinary
+ * text update does. Setting it either way reopens the band for a new answer:
+ * see [NexusPluginCallbacks.onNoticeInput] for why a band only answers once.
+ * @property actions Replaces the whole action row, and reopens the band for a
+ * new answer. An empty list leaves the current row alone rather than clearing
+ * it, so this cannot take a question's answers away from a wearer halfway
+ * through reading them; hide the notice instead. The wearer's selection follows
+ * its action id across the swap, so reordering answers does not move their
+ * finger onto a different one.
  */
 data class NexusNoticeUpdate(
     val title: String? = null,
     val body: String? = null,
     val footer: String? = null,
+    val interactive: Boolean? = null,
     val actions: List<NexusNoticeAction> = emptyList(),
     val ttlMs: Long? = null,
 ) {
@@ -671,6 +677,10 @@ data class NexusNoticeUpdate(
             title?.let { put("title", it.trim()) }
             body?.let { put("body", it.trim()) }
             footer?.let { put("footer", it.trim()) }
+            // Sent only when the plugin actually set it. An update that leaves
+            // it null must not carry the field, or every text update would read
+            // as the owner asking the question again.
+            interactive?.let { put("interactive", it) }
             if (actions.isNotEmpty()) putActions(actions)
             ttlMs?.let { put("ttlMs", it) }
         }

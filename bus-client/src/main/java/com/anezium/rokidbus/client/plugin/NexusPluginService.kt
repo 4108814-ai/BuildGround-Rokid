@@ -124,14 +124,16 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
     protected open fun onNexusLinkState(state: Int) = Unit
 
     /**
-     * The wearer answered this plugin's interactive notice with the one
-     * gesture a band without actions offers.
+     * The wearer answered this plugin's interactive notice with the one gesture
+     * a band without actions offers. Fires once per question; a notice takes
+     * exactly one answer.
      */
     protected open fun onNexusNoticeInput(event: NexusInputEvent) = Unit
 
     /**
      * The wearer picked one of this plugin's notice actions, by its id. Fires
-     * in place of [onNexusNoticeInput] whenever the band carries actions.
+     * in place of [onNexusNoticeInput] whenever the band carries actions, and
+     * likewise once per question.
      */
     protected open fun onNexusNoticeAction(id: String) = Unit
 

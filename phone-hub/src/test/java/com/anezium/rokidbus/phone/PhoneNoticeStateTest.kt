@@ -184,31 +184,80 @@ class PhoneNoticeStateTest {
         assertEquals(PhoneNoticeActionResult.Owner("relay"), state.takeAnswer(noticeId, "reply"))
     }
 
+    @Test
+    fun `a plain interactive notice takes exactly one answer too`() {
+        state.show("relay", showPayload("relay").put("interactive", true))
+
+        assertEquals(PhoneNoticeActionResult.Owner("relay"), state.takeInputAnswer(noticeId))
+        assertEquals(PhoneNoticeActionResult.AlreadyAnswered, state.takeInputAnswer(noticeId))
+    }
+
+    @Test
+    fun `input for another notice or one that asked nothing is not current`() {
+        state.show("relay", showPayload("relay"))
+        assertEquals(PhoneNoticeActionResult.NotCurrent, state.takeInputAnswer(noticeId))
+
+        state.show("relay", showPayload("relay").put("interactive", true))
+        assertEquals(PhoneNoticeActionResult.NotCurrent, state.takeInputAnswer("maps:notice"))
+    }
+
+    @Test
+    fun `an action and an input are the same one answer`() {
+        state.show("relay", showPayload("relay").put("actions", actions()))
+
+        assertEquals(PhoneNoticeActionResult.Owner("relay"), state.takeAnswer(noticeId, "reply"))
+        // Whichever kind arrives first spends the band's one answer.
+        assertEquals(PhoneNoticeActionResult.AlreadyAnswered, state.takeInputAnswer(noticeId))
+    }
+
+    @Test
+    fun `show and update reopen a plain interactive question`() {
+        state.show("relay", showPayload("relay").put("interactive", true))
+        state.takeInputAnswer(noticeId)
+
+        state.update("relay", JSONObject().put("body", "Still here"))
+        assertEquals(PhoneNoticeActionResult.AlreadyAnswered, state.takeInputAnswer(noticeId))
+
+        state.update("relay", JSONObject().put("interactive", true))
+        assertEquals(PhoneNoticeActionResult.Owner("relay"), state.takeInputAnswer(noticeId))
+
+        state.takeInputAnswer(noticeId)
+        state.show("relay", showPayload("relay").put("interactive", true))
+        assertEquals(PhoneNoticeActionResult.Owner("relay"), state.takeInputAnswer(noticeId))
+    }
+
     /**
-     * The glasses read an update as a patch, and a patch that carries actions is
-     * a new question there. Forwarding the answered row on an ordinary text
-     * update would put it back in front of the wearer.
+     * The glasses read an update as a patch, and a patch carrying either the row
+     * or the interactive flag is a new question there. Forwarding what the
+     * wearer already answered, on an ordinary text update, would put the
+     * question back in front of them.
      */
     @Test
-    fun `an answered notice is forwarded without its row`() {
-        state.show("relay", showPayload("relay").put("actions", actions()))
+    fun `an answered notice is forwarded without its row or its flag`() {
+        state.show(
+            "relay",
+            showPayload("relay").put("interactive", true).put("actions", actions()),
+        )
         val shown = state.update("relay", JSONObject().put("body", "Still asking"))
         assertTrue(
             (shown as PhoneNoticeUpdateResult.Accepted).notice.payload.has("actions"),
         )
+        assertTrue(shown.notice.payload.has("interactive"))
 
         state.takeAnswer(noticeId, "reply")
         val answered = state.update("relay", JSONObject().put("body", "Sending"))
 
         val payload = (answered as PhoneNoticeUpdateResult.Accepted).notice.payload
         assertFalse(payload.has("actions"))
+        assertFalse(payload.has("interactive"))
         assertEquals("Sending", payload.getString("body"))
-        // The canonical content keeps the row, so a duplicate pick is still
-        // recognised as a real action rather than an unknown one.
+        // The canonical content keeps both, so a duplicate reply of either kind
+        // is still recognised as a real one rather than an unknown one.
         assertEquals(
             PhoneNoticeActionResult.AlreadyAnswered,
             state.takeAnswer(noticeId, "reply"),
         )
+        assertEquals(PhoneNoticeActionResult.AlreadyAnswered, state.takeInputAnswer(noticeId))
     }
 
     private val noticeId = "relay:${NoticeSurfaceContract.LOCAL_SURFACE_ID}"

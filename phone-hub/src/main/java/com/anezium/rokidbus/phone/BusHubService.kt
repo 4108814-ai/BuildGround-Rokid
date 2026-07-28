@@ -1363,22 +1363,26 @@ class BusHubService : Service() {
     }
 
     /**
-     * The wearer answered a banner. Only the plugin that raised it hears about
-     * it, and only while it still owns the slot: an input arriving for a notice
-     * that has already been replaced belongs to nobody.
+     * The wearer answered a banner that offered no row. Only the plugin that
+     * raised it hears about it, only while it still owns the slot, and only
+     * once: input goes through the same one-answer gate an action does, because
+     * the duplicate tap that made that rule does not care which kind of reply
+     * the band was offering.
      */
     private fun handleGlassesNoticeInput(envelope: BusEnvelope) {
-        val owner = phoneNoticeState.ownerPluginId()
-        if (owner == null) {
+        val noticeId = envelope.payload.optString("noticeId")
+        val owner = when (val result = phoneNoticeState.takeInputAnswer(noticeId)) {
             // Silent drops here cost an evening once: the glasses claimed the key
             // and sent it, and nothing downstream said why it went nowhere.
-            log("notice input dropped: no canonical notice on the phone")
-            return
-        }
-        val expected = "$owner:${NoticeSurfaceContract.LOCAL_SURFACE_ID}"
-        if (envelope.payload.optString("noticeId") != expected) {
-            log("notice input ignored id=${envelope.payload.optString("noticeId")}")
-            return
+            PhoneNoticeActionResult.NotCurrent -> {
+                log("notice input ignored id=${noticeId.take(80)} reason=not_current")
+                return
+            }
+            PhoneNoticeActionResult.AlreadyAnswered -> {
+                log("notice input ignored id=${noticeId.take(80)} reason=already_answered")
+                return
+            }
+            is PhoneNoticeActionResult.Owner -> result.ownerPluginId
         }
         val payload = JSONObject(envelope.payload.toString()).put("pluginId", owner)
         if (!deliverLocal(envelope.copy(payload = payload))) {

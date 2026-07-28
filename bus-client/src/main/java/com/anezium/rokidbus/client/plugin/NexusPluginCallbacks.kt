@@ -24,6 +24,13 @@ interface NexusPluginCallbacks {
      * not the plugin has a surface open, which is what the notice tier exists
      * for: a plugin can be dormant, say one thing, and be answered.
      *
+     * Fires **at most once per question**, like [onNoticeAction]: a notice
+     * takes exactly one answer, after which the band is an inert display and
+     * confirm reaches whatever is underneath it. Ask again by sending an update
+     * that carries `interactive` or a new action row, or by showing a new
+     * notice. This is a deliberate change from 1.0.46, where an interactive
+     * band replied on every confirm.
+     *
      * Back is never delivered here. It dismisses the band, always, and a plugin
      * cannot take it.
      */
@@ -34,8 +41,10 @@ interface NexusPluginCallbacks {
      *
      * Fires instead of [onNoticeInput], never alongside it: a band that offers
      * answers is answered by which one was chosen, and a band that offers none
-     * keeps the single confirming gesture. Back is still never delivered to
-     * either -- it dismisses the band, and no plugin can take it.
+     * keeps the single confirming gesture. Fires at most once per question, for
+     * the same reason and with the same way of asking again. Back is still
+     * never delivered to either -- it dismisses the band, and no plugin can
+     * take it.
      */
     fun onNoticeAction(id: String) = Unit
 

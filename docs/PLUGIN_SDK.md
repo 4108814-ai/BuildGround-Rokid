@@ -349,6 +349,7 @@ data class NexusNoticeUpdate(
     val title: String? = null,
     val body: String? = null,
     val footer: String? = null,
+    val interactive: Boolean? = null,
     val actions: List<NexusNoticeAction> = emptyList(),
     val ttlMs: Long? = null,
 )
@@ -376,16 +377,22 @@ gesture and `onNexusNoticeInput` instead — the two never both fire. Setting
 `interactive` alongside actions is redundant: offering answers is already asking
 for one.
 
-**You will hear `onNexusNoticeAction` at most once per question.** A notice
-takes exactly one answer: the first confirm fires, the row leaves the band, and
-after that the band claims nothing and sends nothing — no second action, and no
-`onNexusNoticeInput` fallback either. Write the handler as if it runs once,
-because it does. Two fast temple taps used to reach a plugin as two calls, which
-for a messaging plugin meant two replies sent.
+**Both callbacks fire at most once per question.** A notice takes exactly one
+answer: the first confirm fires, the row leaves the band, and after that the
+band claims nothing and sends nothing — no second action, no second input, and
+no falling back from one to the other. Write both handlers as if they run once,
+because they do. Two fast temple taps used to reach a plugin as two calls, which
+for a messaging plugin meant two messages sent.
 
-That is also why the SDK gives you no way to clear the row: answering removes
-it for you. To ask again, send a new question — an `updateNotice` carrying
-`actions`, or a fresh `showNotice`.
+> **Behaviour change from 1.0.46.** A notice with `interactive = true` used to
+> call `onNexusNoticeInput` on every confirm for as long as the band was up. It
+> now calls it on the first confirm only. If your plugin relied on repeated
+> taps, ask again explicitly with an `updateNotice` that carries `interactive`
+> or a new row.
+
+That is also why the SDK gives you no way to clear the row: answering removes it
+for you. To ask again, send a new question — an `updateNotice` carrying
+`actions` or `interactive`, or a fresh `showNotice`.
 
 ```kotlin
 nexusClient?.showNotice(
@@ -435,12 +442,16 @@ override fun onNexusNoticeAction(id: String) {
 
 `updateNotice` has patch semantics — a field you set replaces its value, one you
 leave out keeps it, an empty string clears it. Actions are the exception:
-passing a non-empty list replaces the whole row *and reopens the band for
-another answer*, while an empty list leaves the current row alone rather than
-clearing it. An update that carries no actions — like every call above — drives
-an answered band without reopening it. The wearer's selection follows its action
-id across a replacement, so reordering your answers does not move their finger
-onto a different one.
+passing a non-empty list replaces the whole row, while an empty list leaves the
+current row alone rather than clearing it. The wearer's selection follows its
+action id across a replacement, so reordering your answers does not move their
+finger onto a different one.
+
+Two of these fields also *reopen* an answered band: `actions` and `interactive`.
+Setting either is how you ask again — a new row, or `interactive = true` on a
+band that has no row. An update that carries neither, like every call in the
+example above, drives an answered band as a display without reopening it, which
+is almost always what you want after the wearer has replied.
 
 **BACK always dismisses the band**, platform-side, and you never hear about it.
 That is deliberate and it does not change when a notice carries actions: a

@@ -130,10 +130,16 @@ internal class PhoneNoticeState(
         }
 
         val surfaceId = "$ownerPluginId:${NoticeSurfaceContract.LOCAL_SURFACE_ID}"
-        // An update that carries the actions field is a new question and is owed
-        // a new answer; one that leaves it out is the owner driving an answered
-        // band as a display and must not reopen it.
-        val answered = if (patch.patch.actions != null) false else current.answered
+        // An update carrying either field that grants the band its
+        // interactivity -- the row, or the plain interactive flag -- is the
+        // owner asking again and is owed a new answer. One that carries neither
+        // is the owner driving an answered band as a display and must not
+        // reopen it.
+        val answered = if (patch.patch.actions != null || patch.patch.interactive != null) {
+            false
+        } else {
+            current.answered
+        }
         val notice = current.copy(
             content = patched,
             payload = normalized(surfaceId, ownerPluginId, patched, answered),
@@ -195,6 +201,25 @@ internal class PhoneNoticeState(
         return PhoneNoticeActionResult.Owner(current.ownerPluginId)
     }
 
+    /**
+     * The same gate for the plain confirming gesture of a band with no row.
+     *
+     * A notice takes exactly one answer whichever kind it is, so input is not
+     * the unguarded path it used to be: it must be the current notice, that
+     * notice must actually have asked for a gesture, and it only gets to answer
+     * once.
+     */
+    @Synchronized
+    fun takeInputAnswer(surfaceId: String): PhoneNoticeActionResult {
+        val current = active ?: return PhoneNoticeActionResult.NotCurrent
+        val expected = "${current.ownerPluginId}:${NoticeSurfaceContract.LOCAL_SURFACE_ID}"
+        if (surfaceId != expected) return PhoneNoticeActionResult.NotCurrent
+        if (!current.content.expectsInput) return PhoneNoticeActionResult.NotCurrent
+        if (current.answered) return PhoneNoticeActionResult.AlreadyAnswered
+        active = current.copy(answered = true)
+        return PhoneNoticeActionResult.Owner(current.ownerPluginId)
+    }
+
     @Synchronized
     fun expireIfDue(): PhoneNoticeClearResult {
         val deadline = active?.deadlineMs ?: return PhoneNoticeClearResult.Ignored
@@ -207,10 +232,12 @@ internal class PhoneNoticeState(
     /**
      * The canonical payload the glasses receive.
      *
-     * An answered notice is sent without its actions. The glasses apply an
-     * update as a patch, and a patch that carries the actions field is a new
-     * question there -- so forwarding the row the wearer already answered, on
-     * an ordinary text update, would resurrect it under them.
+     * An answered notice is sent with neither its actions nor its interactive
+     * flag. The glasses apply an update as a patch, and a patch carrying either
+     * of those fields is the owner asking again -- so echoing them back on an
+     * ordinary text update would reopen, under the wearer, a question they have
+     * already answered. Both are omitted when empty or false by [toPayload], so
+     * stripping them here is simply their absence from the patch.
      */
     private fun normalized(
         surfaceId: String,
@@ -220,7 +247,11 @@ internal class PhoneNoticeState(
     ): JSONObject = NoticeSurfaceContract
         .toPayload(
             surfaceId,
-            if (answered) content.copy(actions = emptyList()) else content,
+            if (answered) {
+                content.copy(interactive = false, actions = emptyList())
+            } else {
+                content
+            },
         )
         .put("localSurfaceId", NoticeSurfaceContract.LOCAL_SURFACE_ID)
         .put("ownerPluginId", ownerPluginId)
