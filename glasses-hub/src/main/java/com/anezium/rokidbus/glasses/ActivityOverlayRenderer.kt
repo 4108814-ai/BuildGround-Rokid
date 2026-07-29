@@ -641,7 +641,7 @@ internal object ActivityOverlayRenderer {
     private fun dp(context: Context, value: Int): Int = BusTheme.dp(context, value)
 
     private const val EDGE_MARGIN_DP = 12
-    private const val BAND_WIDTH_FRACTION = 0.80f
+    private const val BAND_WIDTH_FRACTION = 0.92f
     private const val PANEL_WIDTH_FRACTION = 0.78f
     private const val GLYPH_DP = 48
     private const val PROGRESS_HEIGHT_DP = 4
