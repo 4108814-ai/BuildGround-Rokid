@@ -434,12 +434,15 @@ plugin API version remains 3. Glasses announce support with feature bit 64
 
 Phone to glasses:
 
-- `/notice/show` — shows or replaces the band. Full state every time.
+- `/notice/show` — shows or replaces the band. Full state every time. It is
+  the only notice path that may carry a binary frame, and only when the payload
+  describes a valid JPEG or PNG.
 - `/notice/update` — refreshes the visible band. Fields present replace their
   value; fields absent keep it; a field sent empty clears it. Honored only for
   the plugin that owns the slot and only while a band is actually visible,
   otherwise ignored with a log rather than an error — an update racing a
-  deadline that fired a frame earlier is ordinary.
+  deadline that fired a frame earlier is ordinary. Updates are always
+  text-only; a binary frame is `INVALID_NOTICE`.
 
   **The phone relays the owner's validated patch**, stamped with the hub's own
   fields — the wire `surfaceId` `<pluginId>:notice`, `localSurfaceId`,
@@ -502,7 +505,29 @@ for pins.
 }
 ```
 
-- `title` optional, 32 chars after trim. `body` optional, 240. `footer`
+The same band carrying a picture instead of a question. Note what is absent:
+an image notice asks nothing, so it offers no actions and its body is free to
+run long enough to page.
+
+```json
+{
+  "surfaceId": "relay:notice",
+  "ownerPluginId": "relay",
+  "seq": 13,
+  "kind": "notice",
+  "title": "Marie",
+  "body": "Look at the view from the hotel window this morning.",
+  "footer": "back to dismiss",
+  "imageVersion": 1,
+  "contentKey": "message-photo-12",
+  "mimeType": "image/jpeg",
+  "pixelWidth": 480,
+  "pixelHeight": 160,
+  "sha256": "64 lowercase hex characters"
+}
+```
+
+- `title` optional, 32 chars after trim. `body` optional, 1024. `footer`
   optional, 40. At least one of title or body must survive trimming.
 - Newlines in the body collapse to spaces. The renderer wraps; a plugin does
   not lay the band out by hand.
@@ -513,8 +538,16 @@ for pins.
   shape-validated, not membership-checked, so a name from a newer platform
   degrades to `dot` on an older one, and there is no numeric cap on an id or
   label beyond nonblank and the three-action limit.
-- `ttlMs` optional, default 8000, clamped to `[2000, 20000]`. Every accepted
-  show or update restarts it.
+- `ttlMs` optional. When absent, the hub computes `2000 ms + 45 ms` per
+  normalized title/body/footer character and clamps the result to
+  `[4000, 45000]`. An explicit value is clamped to `[2000, 45000]`. Every
+  accepted show or update restarts the ordinary countdown.
+- Image metadata is optional and uses the image-surface fields shown above.
+  The binary frame is required when they are present. JPEG and PNG are
+  accepted up to 64 KiB, each decoded edge is at most 512 px, and the total
+  decoded area is at most 512 x 512. Signature, dimensions, and SHA-256 must
+  agree with the frame. A sender should aim near 480 x 160. An update preserves
+  the current image; replacing or removing it requires a fresh show.
 
 A notice that offers no actions sends no `actions` key. That is the
 compatibility rule, not an optimisation: every band written before actions
@@ -543,14 +576,24 @@ fields by hand to stop an ordinary text update putting an answered question back
 in front of the wearer.
 
 Actions buy the band nothing else. They do not extend the TTL, they do not
-touch the 60 s absolute lifetime, and they do not change what BACK does.
+touch the 90 s absolute lifetime, and they do not change what BACK does. An
+answerable notice is one unpaged question, whether it offers actions or asks
+for the plain confirming gesture; paging is reserved for a notice that asks
+nothing so forward and backward never have two meanings.
 
 ### Two limits that are not the TTL
 
-**An absolute lifetime of 60 s** from the first accepted show, enforced by the
-phone hub. Because every update restarts the TTL — which is what keeps a band
-alive while someone dictates into it — a plugin could otherwise hold a banner
-in the wearer's eye forever by updating it.
+**An absolute lifetime of 90 s** from the first accepted show. Because every
+update restarts the TTL — which is what keeps a band alive while someone
+dictates into it — a plugin could otherwise hold a banner in the wearer's eye
+forever by updating it.
+
+The first real page turn ends both that lifetime and the TTL. The glasses enter
+an engaged reading state with one 30 s inactivity timeout, restarted by every
+page gesture including a gesture held at the first or last page. BACK, thirty
+seconds without a gesture, or another notice taking the tier ends engagement.
+The phone does not run a competing notice timer: page count and engagement
+exist only on the glasses, where the text was measured.
 
 **Five accepted messages per second per plugin**, shared between show and
 update so the budget cannot be dodged by alternating. Sized so a transcript can
@@ -558,9 +601,10 @@ refresh a body a few times a second without any plugin driving the renderer.
 
 ### Errors
 
-- `INVALID_NOTICE` — shape, id, cap, or enum validation failed. A fourth
+- `INVALID_NOTICE` — shape, id, cap, image, or enum validation failed. A fourth
   action, a blank action id or label, a malformed action glyph name, and an
-  `actions` value that is not an array all land here.
+  `actions` value that is not an array all land here, as do an invalid image
+  frame and any binary frame on update or hide.
 - `NOTICE_RATE_LIMITED` — over the per-second budget.
 - `CAPABILITY_NOT_AVAILABLE` — notice v1 was not announced, or the glasses
   cannot be reached.
@@ -572,18 +616,23 @@ about the present. The plugin is told and decides for itself.
 
 ### Rendering
 
-Geometry is platform-owned; a plugin sends text and nothing else. Top band,
+Geometry is platform-owned; a plugin sends content, never layout. Top band,
 92% of screen width, pure black with the hairline border — the additive optics
 emit nothing for black, so the fill reads as transparent and only the border
-and text light up. The band grows with its body to 65% of screen height and
-then ellipsizes.
+and content light up. The band is capped at 65% of screen height.
 
-Those two numbers are sized against the wire, not chosen for looks: the band
-draws the longest body the contract accepts — 240 characters — whole. At this
-width the optics carry roughly 34 monospace columns, so a full body lands
-inside eight lines, and eight lines under a title and over a footer and an
-action row measure about 62% of the screen. Ellipsizing is the safety net for
-a body that somehow arrives longer, not the ordinary outcome for a valid one.
+The renderer measures the complete normalized body once with the real
+`StaticLayout`, width, typeface, and text size. Eight measured lines form a
+page; the controller owns the current page and the renderer draws that exact
+line window. There is no scroll offset and no upstream page calculation. A
+multi-page footer draws the plugin footer at the start and muted platform text
+such as `2/4` at the end. One page adds no indicator and no extra row.
+
+An image is full content width below the title, aspect-preserved and capped at
+150 physical pixels high. It appears on page one only, where the body window is
+three lines; later pages recover all eight lines. Decode uses the same RGB-565
+worker path as image surfaces and never runs on the main thread. Text and image
+are published together only after decode succeeds.
 
 Actions render as a row of glyph-and-label chips under the footer, the selected
 one outlined in phosphor. It is the same row the activity panel draws, from the
@@ -616,12 +665,14 @@ the flag.
   adds: until now every input route in the glasses hub was gated on an active
   surface, so a dormant plugin could be shown but never answered.
 - **Forward and backward** — touchpad swipe or ring scroll — move the selection
-  along the row, wrapping at both ends, and are claimed **only while the band
-  actually has actions**. A notice without them claims no direction at all, so
-  every swipe keeps reaching the surface, activity, or launcher underneath
-  exactly as it did before actions existed. The swipe-pair dedupe is the one
-  the rest of the hub uses, because the hardware emits each direction twice and
-  one step must not travel two.
+  along an action row, wrapping at both ends, or replace the body with the
+  previous/next measured page. They are claimed only while the band has live
+  actions or multiple pages. A plain one-page notice claims no direction, so
+  every swipe keeps reaching the surface, activity, or launcher underneath.
+  Page indices clamp at the ends; once engaged, a held-end gesture still
+  restarts inactivity. The swipe-pair dedupe is the one the rest of the hub
+  uses, because the hardware emits each direction twice and one step must not
+  travel two.
 - **BACK always dismisses**, platform-side, and is never forwarded. There is no
   `handlesBack` for notices and there never will be: a plugin must not be able
   to hold the wearer inside a banner, and giving a band answers does not change
@@ -660,7 +711,7 @@ is precisely what survives one side losing its state.
 
 Asking again means sending a new question — a `/notice/update` carrying
 `actions` or `interactive`, or a fresh `/notice/show`. Answering changes nothing
-about the band's life: the TTL and the 60 s absolute lifetime run exactly as
+about the band's life: the TTL and the 90 s absolute lifetime run exactly as
 they would have.
 
 A notice with actions still dies on its TTL. There is no hold-open rule, no

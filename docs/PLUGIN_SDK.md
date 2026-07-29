@@ -19,7 +19,7 @@ resolved transitively.
 repositories { maven("https://jitpack.io") }
 
 dependencies {
-    implementation("com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.6.0")
+    implementation("com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.7.0")
 }
 ```
 
@@ -322,12 +322,18 @@ Notices reuse the existing `surfaces` grant and API version 3, and live on
 `NexusPluginClient` for the same reason pins do: a plugin can wake, say one
 thing, and go dormant again without ever opening a surface.
 
-**A notice is a question with a short life, not a menu.** It arrives, says its
-piece, and leaves on its own deadline — 8 seconds by default, at most 20, and
-never more than 60 seconds from the first show however often you update it.
-Anything the wearer follows over minutes is an activity; anything they browse or
-drive is a surface. Actions do not change that: they let the band ask something
-with more than one answer, not stay longer or hold more.
+**A notice is a message or a question, not a menu.** It arrives, says its piece,
+and leaves on its own deadline. With no explicit `ttlMs`, Nexus computes
+`2000 ms + 45 ms` per normalized text character and clamps that to 4–45
+seconds; an explicit value is clamped to 2–45 seconds. The absolute lifetime is
+90 seconds. Anything the wearer follows over minutes is an activity; anything
+they browse or drive is a surface.
+
+A body may contain 1024 characters. Nexus measures it on the glasses and
+replaces one eight-line page with the next; your plugin never calculates page
+breaks. Forward and backward change pages, the footer gains a platform `2/4`
+indicator, and nothing scrolls. The first page turn replaces both countdowns
+with a 30-second inactivity timeout restarted on every page gesture.
 
 [notice-band-states.html](notice-band-states.html) shows the band's four
 states as the wearer sees them — plain, interactive, with actions, answered —
@@ -340,6 +346,13 @@ data class NexusNoticeAction(
     val label: String,
 )
 
+data class NexusNoticeImage(
+    val contentKey: String,
+    val mimeType: String,
+    val pixelWidth: Int,
+    val pixelHeight: Int,
+)
+
 data class NexusNotice(
     val title: String? = null,
     val body: String? = null,
@@ -347,6 +360,7 @@ data class NexusNotice(
     val interactive: Boolean = false,
     val actions: List<NexusNoticeAction> = emptyList(),
     val ttlMs: Long? = null,
+    val image: NexusNoticeImage? = null,
 )
 
 data class NexusNoticeUpdate(
@@ -360,6 +374,7 @@ data class NexusNoticeUpdate(
 
 val supportsNoticeSurface: Boolean
 fun showNotice(notice: NexusNotice): NexusSdkResult
+fun showNotice(notice: NexusNotice, imageBytes: ByteArray): NexusSdkResult
 fun updateNotice(update: NexusNoticeUpdate): NexusSdkResult
 fun hideNotice(): NexusSdkResult
 
@@ -376,10 +391,11 @@ interface NexusPluginCallbacks {
 Give a band up to three actions and the platform draws a row of glyph chips
 under the footer: forward and backward step along it, confirm fires the selected
 one, and you hear the id through `onNexusNoticeAction`. A fourth action is
-refused, not dropped. With no actions the band keeps its single confirming
-gesture and `onNexusNoticeInput` instead — the two never both fire. Setting
-`interactive` alongside actions is redundant: offering answers is already asking
-for one.
+refused, not dropped. An answerable notice is deliberately one unpaged
+question, so the directions never mean both “choose” and “turn page.” With no
+actions, `interactive = true` claims one confirming gesture and calls
+`onNexusNoticeInput`; the two callbacks never both fire. Setting `interactive`
+alongside actions is redundant: offering answers is already asking for one.
 
 **Both callbacks fire at most once per question.** A notice takes exactly one
 answer: the first confirm fires, the row leaves the band, and after that the
@@ -402,7 +418,7 @@ for you. To ask again, send a new question — an `updateNotice` carrying
 nexusClient?.showNotice(
     NexusNotice(
         title = "Marie",                       // optional, max 32 trimmed chars
-        body = "On my way, ten minutes out.",  // optional, max 240
+        body = "On my way, ten minutes out.",  // optional, max 1024
         footer = "scroll to choose",           // optional, max 40
         actions = listOf(
             NexusNoticeAction(id = "reply", glyph = "phone", label = "Reply"),
@@ -418,6 +434,37 @@ override fun onNexusNoticeAction(id: String) {
     }
 }
 ```
+
+To attach a JPEG or PNG, pass its declared metadata in the notice and its
+encoded bytes to the binary overload. The frame is limited to 64 KiB, each edge
+to 512 px, and total decoded area to 512 x 512; aim near 480 x 160. Nexus checks
+the signature, dimensions, and SHA-256 before forwarding it. The image is full
+band width under the title, capped at 150 physical pixels, and appears on page
+one only. Its first body window is three lines; later pages use eight.
+
+```kotlin
+val photo = notificationPictureBytes()
+nexusClient?.showNotice(
+    NexusNotice(
+        title = "Marie",
+        body = notificationBody,
+        image = NexusNoticeImage(
+            contentKey = "message-${notificationId}",
+            mimeType = "image/jpeg",
+            pixelWidth = 480,
+            pixelHeight = 160,
+        ),
+    ),
+    photo,
+)
+```
+
+Text and image appear in the same frame after background decode; there is no
+text-only waiting state. `showNotice(notice)` refuses a notice whose `image` is
+set, and the binary overload refuses one without image metadata. Updates remain
+text-only and preserve the current image. Use a fresh `showNotice` to replace
+or remove it. The binary overload also requires the live
+`supportsImageSurface` capability; keep the text-only form as the fallback.
 
 Action glyphs are strings for the same reason activity glyphs are: the
 vocabulary is additive, the wire validates name shape rather than membership,
@@ -465,7 +512,8 @@ is almost always what you want after the wearer has replied.
 That is deliberate and it does not change when a notice carries actions: a
 plugin must not be able to hold the wearer inside a banner. Ring scroll and
 every other key keep reaching whatever is underneath, except forward and
-backward while an unanswered row is actually up.
+backward while an unanswered row or multiple text pages are actually up. A
+plain one-page notice claims no direction at all.
 
 Check the live `supportsNoticeSurface` value immediately before use. Unlike
 pins it accounts for the link: a notice is a moment, so the hub never holds one
