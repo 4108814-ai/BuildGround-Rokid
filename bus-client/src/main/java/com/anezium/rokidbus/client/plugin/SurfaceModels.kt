@@ -590,6 +590,22 @@ data class NexusNoticeAction(
     )
 }
 
+/** Metadata for the JPEG or PNG frame sent with a [NexusNotice]. */
+data class NexusNoticeImage(
+    val contentKey: String,
+    val mimeType: String,
+    val pixelWidth: Int,
+    val pixelHeight: Int,
+) {
+    init {
+        require(contentKey.isNotBlank() && contentKey.length <= ImageSurfaceContract.MAX_CONTENT_KEY_CHARS)
+        require(mimeType == ImageSurfaceContract.MIME_JPEG || mimeType == ImageSurfaceContract.MIME_PNG)
+        require(pixelWidth in 1..ImageSurfaceContract.MAX_EDGE_PIXELS)
+        require(pixelHeight in 1..ImageSurfaceContract.MAX_EDGE_PIXELS)
+        require(pixelWidth.toLong() * pixelHeight.toLong() <= ImageSurfaceContract.MAX_TOTAL_PIXELS)
+    }
+}
+
 /**
  * A transient band across the top of the wearer's view.
  *
@@ -597,11 +613,11 @@ data class NexusNoticeAction(
  * one gesture of reply. Anything the wearer follows over minutes is not a
  * notice, and anything static that should simply stay put is a pin.
  *
- * [title] is capped at 32 trimmed characters, [body] at 240, [footer] at 40, and
+ * [title] is capped at 32 trimmed characters, [body] at 1024, [footer] at 40, and
  * at least one of title or body must survive trimming. Newlines in the body
- * collapse to spaces; the renderer wraps it. [ttlMs] is clamped to 2-20 seconds
- * and restarts on every accepted update, but no notice outlives sixty seconds
- * from the first show.
+ * collapse to spaces; the renderer wraps it into pages. When [ttlMs] is absent
+ * the hub derives one from the text length; an explicit value is clamped to
+ * 2-45 seconds.
  *
  * @property interactive Ask for a single confirming gesture, answered on
  * [NexusPluginCallbacks.onNoticeInput]. Redundant when [actions] is set:
@@ -618,6 +634,7 @@ data class NexusNotice(
     val interactive: Boolean = false,
     val actions: List<NexusNoticeAction> = emptyList(),
     val ttlMs: Long? = null,
+    val image: NexusNoticeImage? = null,
 ) {
     init {
         require(title == null || title.trim().length <= NoticeSurfaceContract.MAX_TITLE_CHARS)
@@ -627,7 +644,7 @@ data class NexusNotice(
         require(actions.size <= NoticeSurfaceContract.MAX_ACTIONS)
     }
 
-    internal fun toPayload(): JSONObject = JSONObject()
+    internal fun toPayload(imageBytes: ByteArray? = null): JSONObject = JSONObject()
         .put("surfaceId", NoticeSurfaceContract.LOCAL_SURFACE_ID)
         .put("kind", NoticeSurfaceContract.KIND)
         .apply {
@@ -639,6 +656,9 @@ data class NexusNotice(
             // banner written before this existed still goes out unchanged.
             if (actions.isNotEmpty()) putActions(actions)
             ttlMs?.let { put("ttlMs", it) }
+            image?.let { metadata ->
+                if (imageBytes != null) putNoticeImage(metadata, imageBytes)
+            }
         }
 }
 
@@ -700,6 +720,15 @@ private fun JSONObject.putActions(actions: List<NexusNoticeAction>) {
             }
         },
     )
+}
+
+private fun JSONObject.putNoticeImage(image: NexusNoticeImage, bytes: ByteArray) {
+    put("imageVersion", ImageSurfaceContract.VERSION)
+    put("contentKey", image.contentKey)
+    put("mimeType", image.mimeType)
+    put("pixelWidth", image.pixelWidth)
+    put("pixelHeight", image.pixelHeight)
+    put("sha256", ImageSurfaceContract.sha256(bytes))
 }
 
 /**

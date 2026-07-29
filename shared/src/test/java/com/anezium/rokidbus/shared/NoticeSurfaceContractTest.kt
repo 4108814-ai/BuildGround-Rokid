@@ -10,7 +10,7 @@ import org.junit.Test
 
 class NoticeSurfaceContractTest {
     @Test
-    fun `trims text collapses newlines and defaults ttl`() {
+    fun `trims text collapses newlines and derives ttl`() {
         val result = NoticeSurfaceContract.validateShow(
             JSONObject()
                 .put("kind", "notice")
@@ -24,7 +24,12 @@ class NoticeSurfaceContractTest {
         assertEquals("On my way, ten minutes out.", content.body)
         assertEquals("tap to reply", content.footer)
         assertFalse(content.interactive)
-        assertEquals(NoticeSurfaceContract.DEFAULT_TTL_MS, content.ttlMs)
+        assertEquals(
+            NoticeSurfaceContract.derivedTtlMs(
+                "Marie".length + "On my way, ten minutes out.".length + "tap to reply".length,
+            ),
+            content.ttlMs,
+        )
     }
 
     @Test
@@ -58,6 +63,48 @@ class NoticeSurfaceContractTest {
         )
 
         assertTrue(result is NoticeSurfaceValidationResult.Invalid)
+    }
+
+    @Test
+    fun `accepts 1024 body characters and rejects 1025`() {
+        val accepted = NoticeSurfaceContract.validateShow(
+            showPayload().put("body", "x".repeat(1024)),
+        )
+        val rejected = NoticeSurfaceContract.validateShow(
+            showPayload().put("body", "x".repeat(1025)),
+        )
+
+        assertTrue(accepted is NoticeSurfaceValidationResult.Valid)
+        assertTrue(rejected is NoticeSurfaceValidationResult.Invalid)
+    }
+
+    @Test
+    fun `length derived ttl follows the reading rate and clamps`() {
+        assertEquals(4_000L, NoticeSurfaceContract.derivedTtlMs(0))
+        assertEquals(12_800L, NoticeSurfaceContract.derivedTtlMs(240))
+        assertEquals(45_000L, NoticeSurfaceContract.derivedTtlMs(1024))
+    }
+
+    @Test
+    fun `show validates an image frame with the shipped image contract`() {
+        val bytes = jpeg(width = 480, height = 160)
+        val payload = showPayload()
+            .put("imageVersion", ImageSurfaceContract.VERSION)
+            .put("contentKey", "message-photo")
+            .put("mimeType", ImageSurfaceContract.MIME_JPEG)
+            .put("pixelWidth", 480)
+            .put("pixelHeight", 160)
+            .put("sha256", ImageSurfaceContract.sha256(bytes))
+
+        val accepted = NoticeSurfaceContract.validateShow(payload, bytes)
+        val missingFrame = NoticeSurfaceContract.validateShow(payload)
+
+        assertTrue(accepted is NoticeSurfaceValidationResult.Valid)
+        assertEquals(
+            "message-photo",
+            (accepted as NoticeSurfaceValidationResult.Valid).content.image?.contentKey,
+        )
+        assertTrue(missingFrame is NoticeSurfaceValidationResult.Invalid)
     }
 
     @Test
@@ -361,4 +408,16 @@ class NoticeSurfaceContractTest {
         .put("id", id)
         .put("glyph", glyph)
         .put("label", label)
+
+    private fun jpeg(width: Int, height: Int): ByteArray =
+        ByteArray(128).also { bytes ->
+            byteArrayOf(
+                0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xc0.toByte(),
+                0x00, 0x11, 0x08,
+                (height ushr 8).toByte(), height.toByte(),
+                (width ushr 8).toByte(), width.toByte(),
+                0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00,
+                0xff.toByte(), 0xd9.toByte(),
+            ).copyInto(bytes)
+        }
 }

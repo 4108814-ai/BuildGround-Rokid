@@ -500,6 +500,118 @@ class NoticeStateMachineTest {
         )
     }
 
+    @Test
+    fun `page arithmetic accounts for the shorter image page`() {
+        assertEquals(1, noticePageCount(lineCount = 8, firstPageLines = 8, followingPageLines = 8))
+        assertEquals(3, noticePageCount(lineCount = 17, firstPageLines = 8, followingPageLines = 8))
+        assertEquals(4, noticePageCount(lineCount = 20, firstPageLines = 3, followingPageLines = 8))
+    }
+
+    @Test
+    fun `page windows select the measured lines without overlap or loss`() {
+        assertEquals(
+            NoticePageWindow(0, 3),
+            noticePageWindow(
+                pageIndex = 0,
+                lineCount = 20,
+                firstPageLines = 3,
+                followingPageLines = 8,
+            ),
+        )
+        assertEquals(
+            NoticePageWindow(3, 11),
+            noticePageWindow(
+                pageIndex = 1,
+                lineCount = 20,
+                firstPageLines = 3,
+                followingPageLines = 8,
+            ),
+        )
+        assertEquals(
+            NoticePageWindow(19, 20),
+            noticePageWindow(
+                pageIndex = 3,
+                lineCount = 20,
+                firstPageLines = 3,
+                followingPageLines = 8,
+            ),
+        )
+    }
+
+    @Test
+    fun `first page turn kills both countdowns and gestures restart inactivity`() {
+        val state = NoticeStateMachine()
+        state.show(
+            "relay:notice",
+            seq = 1,
+            content = content(ttlMs = 45_000L),
+            nowMs = 0L,
+        )
+        state.setPageCount("relay:notice", seq = 1, count = 4)
+
+        val firstTurn = state.movePage(delta = 1, nowMs = 10_000L)
+            as NoticeStateDecision.Updated
+        assertTrue(firstTurn.notice.engaged)
+        assertEquals(1, firstTurn.notice.pageIndex)
+        assertEquals(40_000L, firstTurn.notice.expiresAtMs)
+
+        val secondTurn = state.movePage(delta = 1, nowMs = 39_000L)
+            as NoticeStateDecision.Updated
+        assertEquals(69_000L, secondTurn.notice.expiresAtMs)
+        val thirdTurn = state.movePage(delta = 1, nowMs = 68_000L)
+            as NoticeStateDecision.Updated
+        assertEquals(98_000L, thirdTurn.notice.expiresAtMs)
+
+        // The original TTL and ninety-second lifetime are both dead after the
+        // first turn; only thirty seconds without a gesture can close it.
+        assertTrue(state.expire(nowMs = 90_000L, expectedSeq = 1) is NoticeStateDecision.Ignored)
+        assertTrue(state.expire(nowMs = 97_999L, expectedSeq = 1) is NoticeStateDecision.Ignored)
+        assertEquals(
+            NoticeCloseReason.TIMEOUT,
+            (state.expire(nowMs = 98_000L, expectedSeq = 1) as NoticeStateDecision.Closed).reason,
+        )
+    }
+
+    @Test
+    fun `an engaged boundary gesture restarts inactivity without wrapping pages`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(), nowMs = 0L)
+        state.setPageCount("relay:notice", seq = 1, count = 2)
+        state.movePage(delta = 1, nowMs = 1_000L)
+
+        val held = state.movePage(delta = 1, nowMs = 20_000L)
+            as NoticeStateDecision.Updated
+
+        assertEquals(1, held.notice.pageIndex)
+        assertEquals(50_000L, held.notice.expiresAtMs)
+    }
+
+    @Test
+    fun `an answerable notice stays unpaged after its row leaves`() {
+        val state = NoticeStateMachine()
+        state.show(
+            "relay:notice",
+            seq = 1,
+            content = content(actions = threeActions()),
+            nowMs = 0L,
+        )
+
+        assertTrue(state.setPageCount("relay:notice", seq = 1, count = 4) is NoticeStateDecision.Ignored)
+        assertEquals(1, state.activeNotice()!!.pageCount)
+        state.answer(CONFIRM_KEY)
+        assertTrue(state.setPageCount("relay:notice", seq = 1, count = 4) is NoticeStateDecision.Ignored)
+        assertFalse(state.activeNotice()!!.isPaged)
+    }
+
+    @Test
+    fun `a plain single page notice claims no input or direction`() {
+        val state = NoticeStateMachine()
+        state.show("relay:notice", seq = 1, content = content(), nowMs = 0L)
+
+        assertFalse(state.activeNotice()!!.expectsInput)
+        assertFalse(state.activeNotice()!!.claimsDirection)
+    }
+
     /** `KeyEvent.KEYCODE_ENTER`, spelled out so the test needs no framework. */
     private val CONFIRM_KEY = 66
 

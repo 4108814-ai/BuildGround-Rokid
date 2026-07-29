@@ -183,8 +183,8 @@ class BusHubService : Service() {
     private val pinHandler = Handler(Looper.getMainLooper())
     private val phonePinState = PhonePinState(nowMs = { SystemClock.elapsedRealtime() })
     private val pinExpiryTick = Runnable(::expireCanonicalPin)
-    private val noticeHandler = Handler(Looper.getMainLooper())
-    private val noticeExpiryTick = Runnable(::expireCanonicalNotice)
+    // The glasses own notice expiry because page engagement exists only where
+    // layout was measured. A phone timer cannot know the first turn stopped it.
     private val phoneNoticeState = PhoneNoticeState(nowMs = { SystemClock.elapsedRealtime() })
     private val activityHandler = Handler(Looper.getMainLooper())
     private val activityExpiryTick = Runnable(::expireCanonicalActivities)
@@ -745,7 +745,6 @@ class BusHubService : Service() {
     override fun onDestroy() {
         stopPeriodicUpdateChecks()
         pinHandler.removeCallbacks(pinExpiryTick)
-        noticeHandler.removeCallbacks(noticeExpiryTick)
         activityHandler.removeCallbacks(activityExpiryTick)
         clearAllActivitiesForHubStop()
         sppLoopStop = true
@@ -831,12 +830,7 @@ class BusHubService : Service() {
             }
         }
         if (isNoticePath(envelope.path)) {
-            val invalidNotice = envelope.binary != null ||
-                envelope.payload.optString("surfaceId") != NoticeSurfaceContract.LOCAL_SURFACE_ID ||
-                (
-                    envelope.path == BusPaths.NOTICE_SHOW &&
-                        NoticeSurfaceContract.validateShow(envelope.payload) !is NoticeSurfaceValidationResult.Valid
-                    )
+            val invalidNotice = !isValidLocalNoticeEnvelope(envelope)
             if (invalidNotice) {
                 recordLocalRoute(
                     envelope,
@@ -906,6 +900,33 @@ class BusHubService : Service() {
             val imageError = validateSurfaceImageEnvelope(ownedEnvelope)
             if (imageError != null) {
                 recordLocalRoute(ownedEnvelope, senderUid, sender, PluginBusJournal.Verdict.REJECTED, imageError)
+                deliverError(sender.replyBinder, ownedEnvelope.id, imageError)
+                return
+            }
+        }
+        if (ownedEnvelope.path == BusPaths.NOTICE_SHOW && ownedEnvelope.binary != null) {
+            val validation = NoticeSurfaceContract.validateShow(
+                ownedEnvelope.payload,
+                ownedEnvelope.binary,
+            )
+            val metadata = (validation as? NoticeSurfaceValidationResult.Valid)
+                ?.content
+                ?.image
+            val imageError = if (
+                metadata == null || validateDecodedImageEnvelope(ownedEnvelope, metadata) != null
+            ) {
+                NoticeSurfaceContract.ERROR_INVALID_NOTICE
+            } else {
+                null
+            }
+            if (imageError != null) {
+                recordLocalRoute(
+                    ownedEnvelope,
+                    senderUid,
+                    sender,
+                    PluginBusJournal.Verdict.REJECTED,
+                    imageError,
+                )
                 deliverError(sender.replyBinder, ownedEnvelope.id, imageError)
                 return
             }
@@ -1263,7 +1284,7 @@ class BusHubService : Service() {
         sender: AuthorizedSender,
     ) {
         val principal = sender.principal
-        if (principal == null || envelope.binary != null) {
+        if (principal == null) {
             rejectNotice(envelope, senderUid, sender, NoticeSurfaceContract.ERROR_INVALID_NOTICE)
             return
         }
@@ -1282,7 +1303,13 @@ class BusHubService : Service() {
         val pluginId = principal.descriptor.id
         when (envelope.path) {
             BusPaths.NOTICE_SHOW ->
-                when (val result = phoneNoticeState.show(pluginId, envelope.payload)) {
+                when (
+                    val result = phoneNoticeState.show(
+                        pluginId,
+                        envelope.payload,
+                        envelope.binary,
+                    )
+                ) {
                     is PhoneNoticeShowResult.Rejected ->
                         rejectNotice(envelope, senderUid, sender, result.code)
                     is PhoneNoticeShowResult.Accepted -> {
@@ -1290,7 +1317,6 @@ class BusHubService : Service() {
                             log("notice replaced owner=$previous by=$pluginId")
                             deliverNoticeClosed(previous, NoticeCloseReason.REPLACED)
                         }
-                        scheduleNoticeExpiry()
                         forwardNotice(envelope, result.notice.payload, senderUid, sender)
                     }
                 }
@@ -1306,7 +1332,6 @@ class BusHubService : Service() {
                     is PhoneNoticeUpdateResult.Rejected ->
                         rejectNotice(envelope, senderUid, sender, result.code)
                     is PhoneNoticeUpdateResult.Accepted -> {
-                        scheduleNoticeExpiry()
                         forwardNotice(envelope, result.notice.payload, senderUid, sender)
                     }
                 }
@@ -1320,7 +1345,6 @@ class BusHubService : Service() {
                         "NOTICE_HIDE_IGNORED_NOT_OWNER",
                     )
                     is PhoneNoticeClearResult.Cleared -> {
-                        noticeHandler.removeCallbacks(noticeExpiryTick)
                         recordLocalRoute(envelope, senderUid, sender, PluginBusJournal.Verdict.OK)
                         sendRemote(BusEnvelope(path = BusPaths.NOTICE_HIDE, payload = result.payload))
                         deliverNoticeClosed(result.ownerPluginId, result.reason)
@@ -1434,31 +1458,7 @@ class BusHubService : Service() {
             PhoneNoticeClearResult.Ignored ->
                 log("notice close ignored id=$surfaceId reason=${reason.wireValue}")
             is PhoneNoticeClearResult.Cleared -> {
-                noticeHandler.removeCallbacks(noticeExpiryTick)
                 log("notice closed owner=${result.ownerPluginId} reason=${reason.wireValue}")
-                deliverNoticeClosed(result.ownerPluginId, result.reason)
-            }
-        }
-    }
-
-    private fun scheduleNoticeExpiry() {
-        noticeHandler.removeCallbacks(noticeExpiryTick)
-        val deadline = phoneNoticeState.expiryDeadlineMs() ?: return
-        noticeHandler.postDelayed(
-            noticeExpiryTick,
-            (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0L),
-        )
-    }
-
-    private fun expireCanonicalNotice() {
-        when (val result = phoneNoticeState.expireIfDue()) {
-            PhoneNoticeClearResult.Ignored -> scheduleNoticeExpiry()
-            is PhoneNoticeClearResult.Cleared -> {
-                noticeHandler.removeCallbacks(noticeExpiryTick)
-                log("notice expired owner=${result.ownerPluginId}")
-                if (pinLinkUp()) {
-                    sendRemote(BusEnvelope(path = BusPaths.NOTICE_HIDE, payload = result.payload))
-                }
                 deliverNoticeClosed(result.ownerPluginId, result.reason)
             }
         }
@@ -1472,7 +1472,6 @@ class BusHubService : Service() {
     private fun clearNoticeForRevokedOwner(pluginId: String, reason: String) {
         val result = phoneNoticeState.ownerLostAccess(pluginId)
         if (result !is PhoneNoticeClearResult.Cleared) return
-        noticeHandler.removeCallbacks(noticeExpiryTick)
         log("notice cleared owner=$pluginId reason=$reason")
         if (pinLinkUp()) {
             sendRemote(BusEnvelope(path = BusPaths.NOTICE_HIDE, payload = result.payload))

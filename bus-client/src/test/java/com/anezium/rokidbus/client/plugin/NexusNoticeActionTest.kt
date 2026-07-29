@@ -3,6 +3,7 @@ package com.anezium.rokidbus.client.plugin
 import com.anezium.rokidbus.client.PluginRegistrationResult
 import com.anezium.rokidbus.shared.BusCapabilityBits
 import com.anezium.rokidbus.shared.BusPaths
+import com.anezium.rokidbus.shared.ImageSurfaceContract
 import com.anezium.rokidbus.shared.LinkStateBits
 import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
@@ -18,6 +19,7 @@ class NexusNoticeActionTest {
         lateinit var listener: NexusPluginTransport.Listener
         var featureBits = 0
         val sends = mutableListOf<Pair<String, JSONObject>>()
+        val binarySends = mutableListOf<Triple<String, JSONObject, ByteArray>>()
 
         override fun connect(listener: NexusPluginTransport.Listener) {
             this.listener = listener
@@ -33,7 +35,10 @@ class NexusNoticeActionTest {
             id: String,
             payload: JSONObject,
             data: ByteArray,
-        ): Boolean = true
+        ): Boolean {
+            binarySends += Triple(path, JSONObject(payload.toString()), data.copyOf())
+            return true
+        }
 
         override fun capabilities(): Int = featureBits
         override fun close() = Unit
@@ -137,6 +142,33 @@ class NexusNoticeActionTest {
         assertEquals("reply", updated.getJSONObject(0).getString("id"))
     }
 
+    @Test
+    fun `an image notice uses one binary show envelope`() {
+        val fixture = approvedFixture()
+        val bytes = jpeg(width = 480, height = 160)
+        val notice = NexusNotice(
+            title = "Marie",
+            body = "On my way",
+            image = NexusNoticeImage(
+                contentKey = "message-photo",
+                mimeType = ImageSurfaceContract.MIME_JPEG,
+                pixelWidth = 480,
+                pixelHeight = 160,
+            ),
+        )
+
+        assertEquals(NexusSdkResult.INVALID_PAYLOAD, fixture.client.showNotice(notice))
+        assertEquals(NexusSdkResult.SENT, fixture.client.showNotice(notice, bytes))
+
+        assertTrue(fixture.transport.sends.isEmpty())
+        val (path, payload, sentBytes) = fixture.transport.binarySends.single()
+        assertEquals(BusPaths.NOTICE_SHOW, path)
+        assertEquals("notice", payload.getString("kind"))
+        assertEquals("message-photo", payload.getString("contentKey"))
+        assertEquals(ImageSurfaceContract.sha256(bytes), payload.getString("sha256"))
+        assertTrue(bytes.contentEquals(sentBytes))
+    }
+
     /**
      * A notice takes one answer, so asking again has to be sayable. Only a
      * plugin that actually sets the flag sends it: a text update that carried
@@ -214,7 +246,8 @@ class NexusNoticeActionTest {
     }
 
     private fun approvedFixture(): Fixture = fixture().also { fixture ->
-        fixture.transport.featureBits = BusCapabilityBits.NOTICE_SURFACE
+        fixture.transport.featureBits =
+            BusCapabilityBits.NOTICE_SURFACE or BusCapabilityBits.IMAGE_SURFACE
         fixture.transport.listener.onMessage(
             BusPaths.PLUGIN_REGISTRATION,
             "registration-${System.identityHashCode(fixture)}",
@@ -235,4 +268,16 @@ class NexusNoticeActionTest {
     }
 
     private fun pluginPayload() = JSONObject().put("pluginId", "hello")
+
+    private fun jpeg(width: Int, height: Int): ByteArray =
+        ByteArray(128).also { bytes ->
+            byteArrayOf(
+                0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xc0.toByte(),
+                0x00, 0x11, 0x08,
+                (height ushr 8).toByte(), height.toByte(),
+                (width ushr 8).toByte(), width.toByte(),
+                0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00,
+                0xff.toByte(), 0xd9.toByte(),
+            ).copyInto(bytes)
+        }
 }

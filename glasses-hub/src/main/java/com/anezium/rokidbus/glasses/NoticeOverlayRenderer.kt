@@ -2,15 +2,22 @@ package com.anezium.rokidbus.glasses
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import android.text.TextUtils
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
@@ -103,7 +110,7 @@ object NoticeOverlayRenderer {
             ?: service.getSystemService(WindowManager::class.java)
             ?: return null
         val root = FrameLayout(service)
-        val view = NoticeBandView(service)
+        val view = NoticeBandView(service, NoticeController::setPageCount)
         val metrics = service.resources.displayMetrics
         root.addView(
             view,
@@ -146,14 +153,43 @@ object NoticeOverlayRenderer {
     }
 
     /** Shared top-band geometry used unchanged by notices and activity flares. */
-    internal class NoticeBandView(context: Context) : LinearLayout(context) {
+    internal class NoticeBandView(
+        context: Context,
+        private val pageCountChanged: ((String, Long, Int) -> Unit)? = null,
+    ) : LinearLayout(context) {
         private val title = row(bold = true, sizeSp = TITLE_SP, color = BusTheme.phosphor)
-        private val body = row(bold = false, sizeSp = BODY_SP, color = BusTheme.muted).apply {
-            isSingleLine = false
-            maxLines = MAX_BODY_LINES
+        private val image = NoticeImageView(context)
+        private val body = NoticeBodyView(context) { count ->
+            measuredPageCount = count
+            updateFooter()
+            noticeIdentity?.let { (surfaceId, seq) ->
+                pageCountChanged?.invoke(surfaceId, seq, count)
+            }
         }
         private val footer = row(bold = false, sizeSp = FOOTER_SP, color = BusTheme.muted)
+        private val pageIndicator = row(
+            bold = false,
+            sizeSp = FOOTER_SP,
+            color = BusTheme.muted,
+        ).apply {
+            gravity = Gravity.END
+        }
+        private val footerRow = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            addView(
+                footer,
+                LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f),
+            )
+            addView(
+                pageIndicator,
+                LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT),
+            )
+        }
         private val actions = HudActionRowView(context)
+        private var noticeIdentity: Pair<String, Long>? = null
+        private var pluginFooter: String? = null
+        private var renderedPageIndex = 0
+        private var measuredPageCount = 1
 
         init {
             orientation = VERTICAL
@@ -171,13 +207,19 @@ object NoticeOverlayRenderer {
             }
             addView(title, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
             addView(
+                image,
+                LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                    topMargin = BusTheme.dp(context, 3)
+                },
+            )
+            addView(
                 body,
                 LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
                     topMargin = BusTheme.dp(context, 3)
                 },
             )
             addView(
-                footer,
+                footerRow,
                 LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
                     topMargin = BusTheme.dp(context, 5)
                 },
@@ -208,13 +250,24 @@ object NoticeOverlayRenderer {
          * with being rewritten.
          */
         fun render(notice: NexusNoticeSurface) {
-            render(
-                titleText = notice.content.title,
-                bodyText = notice.content.body,
-                footerText = notice.content.footer,
-                leadingGlyph = null,
-                actionChips = notice.liveActions.map { HudActionChip(it.glyph, it.label) },
-                selectedActionIndex = notice.selectedActionIndex,
+            noticeIdentity = notice.surfaceId to notice.seq
+            pluginFooter = notice.content.footer
+            renderedPageIndex = notice.pageIndex
+            measuredPageCount = notice.pageCount
+            renderTitle(notice.content.title, null)
+            val hasImage = notice.imageBitmap?.takeUnless { it.isRecycled } != null
+            val drawsImage = hasImage && notice.pageIndex == 0
+            image.render(notice.imageBitmap?.takeIf { drawsImage })
+            body.render(
+                text = notice.content.body,
+                pageIndex = notice.pageIndex,
+                firstPageLines = if (hasImage) IMAGE_PAGE_BODY_LINES else MAX_BODY_LINES,
+                paging = !notice.content.expectsInput,
+            )
+            updateFooter()
+            actions.render(
+                notice.liveActions.map { HudActionChip(it.glyph, it.label) },
+                notice.selectedActionIndex,
             )
         }
 
@@ -231,6 +284,23 @@ object NoticeOverlayRenderer {
             actionChips: List<HudActionChip> = emptyList(),
             selectedActionIndex: Int = 0,
         ) {
+            noticeIdentity = null
+            pluginFooter = footerText
+            renderedPageIndex = 0
+            measuredPageCount = 1
+            renderTitle(titleText, leadingGlyph)
+            image.render(null)
+            body.render(
+                text = bodyText,
+                pageIndex = 0,
+                firstPageLines = MAX_BODY_LINES,
+                paging = false,
+            )
+            updateFooter()
+            actions.render(actionChips, selectedActionIndex)
+        }
+
+        private fun renderTitle(titleText: String?, leadingGlyph: Drawable?) {
             title.text = titleText.orEmpty()
             title.visibility = visibleIf(!titleText.isNullOrEmpty())
             leadingGlyph?.setBounds(
@@ -241,11 +311,20 @@ object NoticeOverlayRenderer {
             )
             title.compoundDrawablePadding = if (leadingGlyph == null) 0 else BusTheme.dp(context, 7)
             title.setCompoundDrawables(leadingGlyph, null, null, null)
-            body.text = bodyText.orEmpty()
-            body.visibility = visibleIf(!bodyText.isNullOrEmpty())
-            footer.text = footerText.orEmpty()
-            footer.visibility = visibleIf(!footerText.isNullOrEmpty())
-            actions.render(actionChips, selectedActionIndex)
+        }
+
+        private fun updateFooter() {
+            footer.text = pluginFooter.orEmpty()
+            footer.visibility = visibleIf(!pluginFooter.isNullOrEmpty())
+            pageIndicator.text = if (measuredPageCount > 1) {
+                "${renderedPageIndex.coerceIn(0, measuredPageCount - 1) + 1}/$measuredPageCount"
+            } else {
+                ""
+            }
+            pageIndicator.visibility = visibleIf(measuredPageCount > 1)
+            footerRow.visibility = visibleIf(
+                !pluginFooter.isNullOrEmpty() || measuredPageCount > 1,
+            )
         }
 
         private fun row(bold: Boolean, sizeSp: Float, color: Int) =
@@ -266,17 +345,139 @@ object NoticeOverlayRenderer {
             if (visible) View.VISIBLE else View.GONE
     }
 
+    private class NoticeImageView(context: Context) : ImageView(context) {
+        init {
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            maxHeight = MAX_IMAGE_HEIGHT_PX
+            setBackgroundColor(0xFF000000.toInt())
+        }
+
+        fun render(bitmap: android.graphics.Bitmap?) {
+            setImageBitmap(bitmap)
+            visibility = if (bitmap == null) View.GONE else View.VISIBLE
+        }
+    }
+
+    private class NoticeBodyView(
+        context: Context,
+        private val pageCountChanged: (Int) -> Unit,
+    ) : View(context) {
+        private val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = BusTheme.muted
+            textSize = TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_SP,
+                BODY_SP,
+                resources.displayMetrics,
+            )
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
+        }
+        private var text: String? = null
+        private var pageIndex = 0
+        private var firstPageLines = MAX_BODY_LINES
+        private var paging = false
+        private var layout: StaticLayout? = null
+        private var window = NoticePageWindow(0, 0)
+        private var reportedPageCount = 1
+
+        fun render(
+            text: String?,
+            pageIndex: Int,
+            firstPageLines: Int,
+            paging: Boolean,
+        ) {
+            this.text = text
+            this.pageIndex = pageIndex
+            this.firstPageLines = firstPageLines
+            this.paging = paging
+            reportedPageCount = -1
+            contentDescription = text.orEmpty()
+            visibility = if (text.isNullOrEmpty()) View.GONE else View.VISIBLE
+            requestLayout()
+            invalidate()
+        }
+
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            val width = MeasureSpec.getSize(widthMeasureSpec).coerceAtLeast(1)
+            val content = text
+            if (content.isNullOrEmpty()) {
+                layout = null
+                window = NoticePageWindow(0, 0)
+                publishPageCount(1)
+                setMeasuredDimension(width, 0)
+                return
+            }
+
+            val builder = StaticLayout.Builder.obtain(content, 0, content.length, paint, width)
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                .setIncludePad(false)
+                .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+                .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
+            if (!paging) {
+                builder
+                    .setEllipsize(TextUtils.TruncateAt.END)
+                    .setEllipsizedWidth(width)
+                    .setMaxLines(firstPageLines)
+            }
+            val measured = builder.build()
+            layout = measured
+            val count = if (paging) {
+                noticePageCount(measured.lineCount, firstPageLines, MAX_BODY_LINES)
+            } else {
+                1
+            }
+            publishPageCount(count)
+            window = if (paging) {
+                noticePageWindow(
+                    pageIndex = pageIndex,
+                    lineCount = measured.lineCount,
+                    firstPageLines = firstPageLines,
+                    followingPageLines = MAX_BODY_LINES,
+                )
+            } else {
+                NoticePageWindow(0, measured.lineCount)
+            }
+            val desiredHeight = measured.getLineTop(window.lastLineExclusive) -
+                measured.getLineTop(window.firstLine)
+            setMeasuredDimension(
+                width,
+                resolveSize(desiredHeight, heightMeasureSpec),
+            )
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val measured = layout ?: return
+            canvas.save()
+            canvas.clipRect(0, 0, width, height)
+            canvas.translate(0f, -measured.getLineTop(window.firstLine).toFloat())
+            measured.draw(canvas)
+            canvas.restore()
+        }
+
+        private fun publishPageCount(count: Int) {
+            if (reportedPageCount == count) return
+            reportedPageCount = count
+            pageCountChanged(count)
+        }
+    }
+
     private const val EDGE_MARGIN_DP = 12
     private const val BAND_WIDTH_FRACTION = 0.92f
 
-    // Sized so the longest body the wire accepts is drawn whole. At this width
-    // the optics carry ~34 monospace columns, so the contract's 240 characters
-    // land inside eight lines, and eight lines plus a title, a footer and an
-    // action row measure ~62% of the screen. Anything smaller ellipsized valid
-    // notices by construction: the band was a third shorter than what a plugin
-    // was allowed to send it.
+    // Sized against the wire rather than chosen for looks. At this width the
+    // optics carry ~34 monospace columns, so a page of eight lines holds more
+    // than the 240 characters a single-page notice can carry, and eight lines
+    // under a title and over a footer and an action row measure ~62% of the
+    // screen. Anything smaller ellipsized valid notices by construction: the
+    // band used to be a third shorter than what a plugin was allowed to send.
+    //
+    // A first-page image spends five of the eight; later pages recover the full
+    // reading window instead of paying for the picture on every one.
     private const val MAX_HEIGHT_FRACTION = 0.65f
     private const val MAX_BODY_LINES = 8
+    private const val IMAGE_PAGE_BODY_LINES = 3
+    private const val MAX_IMAGE_HEIGHT_PX = 150
     private const val TITLE_SP = 15f
     private const val BODY_SP = 12f
     private const val FOOTER_SP = 11f

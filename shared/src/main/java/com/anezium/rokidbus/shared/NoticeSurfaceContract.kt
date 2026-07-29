@@ -50,6 +50,7 @@ data class NoticeSurfaceContent(
     val interactive: Boolean = false,
     val actions: List<NoticeAction> = emptyList(),
     val ttlMs: Long = NoticeSurfaceContract.DEFAULT_TTL_MS,
+    val image: ImageSurfaceMetadata? = null,
 ) {
     /**
      * Whether the band expects a gesture at all. Actions are an interaction by
@@ -106,7 +107,7 @@ object NoticeSurfaceContract {
     const val LOCAL_SURFACE_ID = "notice"
 
     const val MAX_TITLE_CHARS = 32
-    const val MAX_BODY_CHARS = 240
+    const val MAX_BODY_CHARS = 1024
     const val MAX_FOOTER_CHARS = 40
 
     /**
@@ -118,15 +119,19 @@ object NoticeSurfaceContract {
 
     const val DEFAULT_TTL_MS = 8_000L
     const val MIN_TTL_MS = 2_000L
-    const val MAX_TTL_MS = 20_000L
+    const val MAX_TTL_MS = 45_000L
+    const val MIN_DERIVED_TTL_MS = 4_000L
+    const val DERIVED_TTL_BASE_MS = 2_000L
+    const val DERIVED_TTL_PER_CHAR_MS = 45L
 
     /**
-     * Hard ceiling from the first accepted show, enforced by the phone hub. The TTL
-     * restarts on every update, so without this a plugin could keep a banner in the
-     * wearer's eye forever by updating it — which is precisely what a notice must
-     * not be. An ongoing thing is an activity; see plan 012.
+     * Hard ceiling from the first accepted show. The TTL restarts on every update,
+     * so without this a plugin could keep a banner in the wearer's eye forever by
+     * updating it — which is precisely what a notice must not be. The glasses
+     * enforce it until the wearer deliberately enters engaged reading. An ongoing
+     * thing is an activity; see plan 012.
      */
-    const val MAX_LIFETIME_MS = 60_000L
+    const val MAX_LIFETIME_MS = 90_000L
 
     /**
      * Accepted messages per second per plugin, shared between show and update.
@@ -139,7 +144,10 @@ object NoticeSurfaceContract {
     const val ERROR_NOTICE_RATE_LIMITED = "NOTICE_RATE_LIMITED"
     const val ERROR_CAPABILITY_NOT_AVAILABLE = "CAPABILITY_NOT_AVAILABLE"
 
-    fun validateShow(payload: JSONObject): NoticeSurfaceValidationResult {
+    fun validateShow(
+        payload: JSONObject,
+        binary: ByteArray? = null,
+    ): NoticeSurfaceValidationResult {
         if (payload.opt("kind") != KIND) return invalid("kind must be notice")
 
         val title = when (val result = readText(payload, "title", MAX_TITLE_CHARS)) {
@@ -174,10 +182,22 @@ object NoticeSurfaceContract {
         }
 
         val ttlMs = when (val value = payload.opt("ttlMs")) {
-            null -> DEFAULT_TTL_MS
+            null -> derivedTtlMs(
+                title.orEmpty().length + body.orEmpty().length + footer.orEmpty().length,
+            )
             is Number -> integerLong(value)?.coerceIn(MIN_TTL_MS, MAX_TTL_MS)
                 ?: return invalid("ttlMs must be an integer")
             else -> return invalid("ttlMs must be an integer")
+        }
+
+        val image = if (binary != null || IMAGE_FIELDS.any(payload::has)) {
+            val imagePayload = JSONObject(payload.toString()).put("kind", ImageSurfaceContract.KIND)
+            when (val result = ImageSurfaceContract.validate(imagePayload, binary)) {
+                is ImageSurfaceValidationResult.Valid -> result.metadata
+                is ImageSurfaceValidationResult.Invalid -> return invalid(result.reason)
+            }
+        } else {
+            null
         }
 
         return NoticeSurfaceValidationResult.Valid(
@@ -188,9 +208,14 @@ object NoticeSurfaceContract {
                 interactive = interactive,
                 actions = actions,
                 ttlMs = ttlMs,
+                image = image,
             ),
         )
     }
+
+    fun derivedTtlMs(characterCount: Int): Long =
+        (DERIVED_TTL_BASE_MS + characterCount.coerceAtLeast(0) * DERIVED_TTL_PER_CHAR_MS)
+            .coerceIn(MIN_DERIVED_TTL_MS, MAX_TTL_MS)
 
     /**
      * An update carries only what changed. Unlike a show it is not required to
@@ -273,6 +298,14 @@ object NoticeSurfaceContract {
             // for byte the way it did. An activity always sends its array; a
             // notice cannot, because its payload is the compatibility surface.
             if (content.actions.isNotEmpty()) put("actions", actionsJson(content.actions))
+            content.image?.let { image ->
+                put("imageVersion", ImageSurfaceContract.VERSION)
+                put("contentKey", image.contentKey)
+                put("mimeType", image.mimeType)
+                put("pixelWidth", image.pixelWidth)
+                put("pixelHeight", image.pixelHeight)
+                put("sha256", image.sha256)
+            }
         }
 
     /**
@@ -393,4 +426,12 @@ object NoticeSurfaceContract {
     private fun patchInvalid(reason: String) = NoticeSurfacePatchResult.Invalid(reason)
 
     private val NEWLINES = Regex("[\\r\\n]+")
+    private val IMAGE_FIELDS = listOf(
+        "imageVersion",
+        "contentKey",
+        "mimeType",
+        "pixelWidth",
+        "pixelHeight",
+        "sha256",
+    )
 }

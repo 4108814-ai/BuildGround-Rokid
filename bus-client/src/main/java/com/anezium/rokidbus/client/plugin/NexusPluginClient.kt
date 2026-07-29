@@ -98,6 +98,7 @@ class NexusPluginClient internal constructor(
 
     fun showNotice(notice: NexusNotice): NexusSdkResult {
         noticePreflight()?.let { return it }
+        if (notice.image != null) return NexusSdkResult.INVALID_PAYLOAD
         val payload = notice.toPayload()
         if (NoticeSurfaceContract.validateShow(payload) !is NoticeSurfaceValidationResult.Valid) {
             return NexusSdkResult.INVALID_PAYLOAD
@@ -106,6 +107,26 @@ class NexusPluginClient internal constructor(
             NexusSdkResult.SENT
         } else {
             NexusSdkResult.NOT_REGISTERED
+        }
+    }
+
+    fun showNotice(notice: NexusNotice, imageBytes: ByteArray): NexusSdkResult {
+        noticePreflight()?.let { return it }
+        if (!supportsImageSurface) return NexusSdkResult.CAPABILITY_NOT_AVAILABLE
+        if (notice.image == null) return NexusSdkResult.INVALID_PAYLOAD
+        val payload = notice.toPayload(imageBytes)
+        if (
+            NoticeSurfaceContract.validateShow(payload, imageBytes) !is
+            NoticeSurfaceValidationResult.Valid
+        ) {
+            return NexusSdkResult.INVALID_PAYLOAD
+        }
+        return if (
+            sendBinary(BusPaths.NOTICE_SHOW, UUID.randomUUID().toString(), payload, imageBytes)
+        ) {
+            NexusSdkResult.SENT
+        } else {
+            NexusSdkResult.CAPABILITY_NOT_AVAILABLE
         }
     }
 

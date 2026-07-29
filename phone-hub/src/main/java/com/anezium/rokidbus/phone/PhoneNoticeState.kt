@@ -18,9 +18,9 @@ internal data class CanonicalPhoneNotice(
      * clear -- so only the patch form is honest about an update.
      */
     val payload: JSONObject,
-    /** Restarted by every accepted update. */
+    /** Canonical ordinary deadline; the glasses own the actual expiry timer. */
     val ttlDeadlineMs: Long,
-    /** Fixed at the first show. No update can push a notice past it. */
+    /** Fixed at the first show, until a page turn replaces both deadlines. */
     val hardDeadlineMs: Long,
     /** The wearer has already picked. A notice takes exactly one answer. */
     val answered: Boolean = false,
@@ -84,7 +84,11 @@ internal class PhoneNoticeState(
     private var active: CanonicalPhoneNotice? = null
 
     @Synchronized
-    fun show(ownerPluginId: String, payload: JSONObject): PhoneNoticeShowResult {
+    fun show(
+        ownerPluginId: String,
+        payload: JSONObject,
+        binary: ByteArray? = null,
+    ): PhoneNoticeShowResult {
         val expectedSurfaceId = "$ownerPluginId:${NoticeSurfaceContract.LOCAL_SURFACE_ID}"
         if (payload.optString("surfaceId") != expectedSurfaceId ||
             payload.optString("localSurfaceId") != NoticeSurfaceContract.LOCAL_SURFACE_ID ||
@@ -92,7 +96,7 @@ internal class PhoneNoticeState(
         ) {
             return PhoneNoticeShowResult.Rejected(NoticeSurfaceContract.ERROR_INVALID_NOTICE)
         }
-        val validation = NoticeSurfaceContract.validateShow(payload)
+        val validation = NoticeSurfaceContract.validateShow(payload, binary)
         if (validation !is NoticeSurfaceValidationResult.Valid) {
             return PhoneNoticeShowResult.Rejected(NoticeSurfaceContract.ERROR_INVALID_NOTICE)
         }
