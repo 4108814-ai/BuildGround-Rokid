@@ -267,9 +267,16 @@ object NoticeOverlayRenderer {
     }
 
     private const val EDGE_MARGIN_DP = 12
-    private const val BAND_WIDTH_FRACTION = 0.80f
-    private const val MAX_HEIGHT_FRACTION = 0.40f
-    private const val MAX_BODY_LINES = 4
+    private const val BAND_WIDTH_FRACTION = 0.92f
+
+    // Sized so the longest body the wire accepts is drawn whole. At this width
+    // the optics carry ~34 monospace columns, so the contract's 240 characters
+    // land inside eight lines, and eight lines plus a title, a footer and an
+    // action row measure ~62% of the screen. Anything smaller ellipsized valid
+    // notices by construction: the band was a third shorter than what a plugin
+    // was allowed to send it.
+    private const val MAX_HEIGHT_FRACTION = 0.65f
+    private const val MAX_BODY_LINES = 8
     private const val TITLE_SP = 15f
     private const val BODY_SP = 12f
     private const val FOOTER_SP = 11f

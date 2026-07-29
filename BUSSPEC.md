@@ -573,10 +573,17 @@ about the present. The plugin is told and decides for itself.
 ### Rendering
 
 Geometry is platform-owned; a plugin sends text and nothing else. Top band,
-80% of screen width, pure black with the hairline border — the additive optics
+92% of screen width, pure black with the hairline border — the additive optics
 emit nothing for black, so the fill reads as transparent and only the border
-and text light up. The band grows with its body to 40% of screen height and
+and text light up. The band grows with its body to 65% of screen height and
 then ellipsizes.
+
+Those two numbers are sized against the wire, not chosen for looks: the band
+draws the longest body the contract accepts — 240 characters — whole. At this
+width the optics carry roughly 34 monospace columns, so a full body lands
+inside eight lines, and eight lines under a title and over a footer and an
+action row measure about 62% of the screen. Ellipsizing is the safety net for
+a body that somehow arrives longer, not the ordinary outcome for a valid one.
 
 Actions render as a row of glyph-and-label chips under the footer, the selected
 one outlined in phosphor. It is the same row the activity panel draws, from the
