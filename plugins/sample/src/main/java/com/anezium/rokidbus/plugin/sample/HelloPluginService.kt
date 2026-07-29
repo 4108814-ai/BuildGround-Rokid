@@ -1,10 +1,15 @@
 package com.anezium.rokidbus.plugin.sample
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.view.KeyEvent
 import com.anezium.rokidbus.client.plugin.NexusCard
 import com.anezium.rokidbus.client.plugin.NexusImage
 import com.anezium.rokidbus.client.plugin.NexusNotice
 import com.anezium.rokidbus.client.plugin.NexusNoticeAction
+import com.anezium.rokidbus.client.plugin.NexusNoticeImage
 import com.anezium.rokidbus.client.plugin.NexusNoticeUpdate
 import com.anezium.rokidbus.client.plugin.NexusPin
 import com.anezium.rokidbus.client.plugin.NexusPinEmphasis
@@ -212,9 +217,60 @@ class HelloPluginService : NexusPluginService() {
      * The notice needs no hide step of its own -- it expires on its own deadline,
      * which is the difference between the two tiers in one gesture.
      */
+    /**
+     * A brightness ramp, a frame and a disc, drawn rather than shipped as an
+     * asset so the sample stays one file. The ramp is the useful part: on
+     * additive monochrome optics it shows immediately which levels reach the
+     * eye and which ones disappear into the background.
+     */
+    private fun demoImageBytes(): ByteArray {
+        val bitmap = Bitmap.createBitmap(
+            DEMO_IMAGE_WIDTH,
+            DEMO_IMAGE_HEIGHT,
+            Bitmap.Config.ARGB_8888,
+        )
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.BLACK)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val steps = 8
+        val stepWidth = DEMO_IMAGE_WIDTH / steps.toFloat()
+        for (step in 0 until steps) {
+            val level = 255 * (step + 1) / steps
+            paint.color = Color.rgb(level, level, level)
+            canvas.drawRect(
+                step * stepWidth,
+                0f,
+                (step + 1) * stepWidth,
+                DEMO_IMAGE_HEIGHT * 0.55f,
+                paint,
+            )
+        }
+        paint.color = Color.WHITE
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 3f
+        canvas.drawRect(
+            1.5f,
+            1.5f,
+            DEMO_IMAGE_WIDTH - 1.5f,
+            DEMO_IMAGE_HEIGHT - 1.5f,
+            paint,
+        )
+        paint.style = Paint.Style.FILL
+        canvas.drawCircle(
+            DEMO_IMAGE_WIDTH * 0.5f,
+            DEMO_IMAGE_HEIGHT * 0.78f,
+            DEMO_IMAGE_HEIGHT * 0.16f,
+            paint,
+        )
+        val encoded = java.io.ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 85, encoded)
+        bitmap.recycle()
+        return encoded.toByteArray()
+    }
+
     private fun cycleDemoHud() {
         val client = nexusClient ?: return
-        val next = (pinStep + 1) % 4
+        val next = (pinStep + 1) % 6
         val result = when (next) {
             PIN_SMALL -> client.showPin(SMALL_PIN)
             PIN_MEDIUM -> client.showPin(MEDIUM_PIN)
@@ -222,6 +278,8 @@ class HelloPluginService : NexusPluginService() {
                 client.hidePin()
                 client.showNotice(DEMO_NOTICE_BAND)
             }
+            DEMO_NOTICE_PAGED -> client.showNotice(DEMO_NOTICE_LONG)
+            DEMO_NOTICE_IMAGE -> client.showNotice(DEMO_NOTICE_PICTURE, demoImageBytes())
             else -> client.hidePin()
         }
         if (result != NexusSdkResult.SENT) log("HUD demo step $next refused: $result")
@@ -237,6 +295,50 @@ class HelloPluginService : NexusPluginService() {
         const val PIN_SMALL = 1
         const val PIN_MEDIUM = 2
         const val DEMO_NOTICE = 3
+        const val DEMO_NOTICE_PAGED = 4
+        const val DEMO_NOTICE_IMAGE = 5
+
+        /**
+         * A band with more to say than one page holds. It offers no actions on
+         * purpose: a notice is paged or it is answerable, never both, so this is
+         * also the demo of what forward and backward mean when nothing is being
+         * asked. The glasses decide how many pages this is -- they are the only
+         * side that knows how wide a line runs.
+         */
+        val DEMO_NOTICE_LONG = NexusNotice(
+            title = "Long notice",
+            body = "This band carries more text than a single page can hold, which " +
+                "is the whole point of it: a relayed message is as long as whoever " +
+                "wrote it decided, and a tier that only ever showed the first four " +
+                "lines was not relaying anything. Scroll forward to turn the page " +
+                "and backward to go back. The first turn ends the countdown, so " +
+                "the band now waits on the reader instead of on a deadline, and " +
+                "leaves on its own once the gestures stop. Nothing here scrolls: " +
+                "each page replaces the one before it, because a HUD that scrolls " +
+                "asks the wearer to aim at something while walking.",
+            footer = "Scroll to turn pages",
+        )
+
+        /**
+         * The picture rides in the same message as the text, so the band cannot
+         * appear before its image. Deliberately a test card rather than a photo:
+         * the optics are additive and monochrome, and a brightness ramp shows
+         * what actually survives that far better than a nice picture does.
+         */
+        val DEMO_NOTICE_PICTURE = NexusNotice(
+            title = "Notice with an image",
+            body = "The picture and this text arrived as one message.",
+            footer = "Back to dismiss",
+            image = NexusNoticeImage(
+                contentKey = "sample-test-card-1",
+                mimeType = ImageSurfaceContract.MIME_JPEG,
+                pixelWidth = DEMO_IMAGE_WIDTH,
+                pixelHeight = DEMO_IMAGE_HEIGHT,
+            ),
+        )
+
+        const val DEMO_IMAGE_WIDTH = 480
+        const val DEMO_IMAGE_HEIGHT = 160
 
         /**
          * A band that asks something. Scroll steps along the answers, tap fires
