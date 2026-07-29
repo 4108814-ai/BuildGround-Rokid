@@ -50,7 +50,9 @@ stale-seq drop, phone-side rejecting validation):
 
 - `title`: optional, ≤ 32 chars after trim, single line, ellipsized.
 - `body`: optional, ≤ 240 chars after trim. Free text; the renderer word-wraps
-  it. Newlines are collapsed to spaces in v1.
+  it. Newlines are collapsed to spaces in v1. **Plan 015 raised this to 1024
+  and pages the overflow**; the number here is what v1 shipped with, kept
+  because this plan is a record of that, not the live contract. BUSSPEC is.
 - `footer`: optional, ≤ 40 chars after trim, single line. Dimmer state line
   ("Listening…", "sending in 3", "sent") — this is where the interaction status
   lives.
