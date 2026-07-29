@@ -1,4 +1,4 @@
-# Plan 014 — Notice pages and images
+# Plan 015 — Notice pages and images
 
 Status: spec decided, geometry landed, the rest unbuilt.
 Depends on 011 (notice surface), 012 (activities — the band view is shared),
