@@ -100,15 +100,36 @@ sealed interface NoticeSurfacePatchResult {
     data class Invalid(val reason: String) : NoticeSurfacePatchResult
 }
 
-/** Pure notice-surface v1 validation and normalization with no Android dependencies. */
+/** Pure notice-surface v2 validation and normalization with no Android dependencies. */
 object NoticeSurfaceContract {
     const val KIND = "notice"
-    const val VERSION = 1
+
+    /**
+     * v2 is the paged band: a body four times longer than a glance, an image in
+     * the envelope, and a patch that replaces a live notice in place.
+     *
+     * The bump is what keeps a v1 pair honest. Both sides gate the capability on
+     * an exact version match, so glasses that still speak v1 now decline the
+     * capability outright and the plugin hears CAPABILITY_NOT_AVAILABLE. Left at
+     * 1 they would have accepted the handshake and then rejected every body past
+     * 240 characters in silence, which reads to the wearer as a plugin that
+     * simply stopped talking.
+     */
+    const val VERSION = 2
     const val LOCAL_SURFACE_ID = "notice"
 
     const val MAX_TITLE_CHARS = 32
     const val MAX_BODY_CHARS = 1024
     const val MAX_FOOTER_CHARS = 40
+
+    /**
+     * A label the wearer can read at a glance, and three of them side by side.
+     *
+     * The row ellipsizes what it cannot fit, so this ceiling is not about the
+     * drawing: it is about telling the plugin author their label was too long
+     * instead of quietly handing them a chip reading "Confir…".
+     */
+    const val MAX_ACTION_LABEL_CHARS = 16
 
     /**
      * The same ceiling an activity's action row has, for the same reason: three
@@ -386,6 +407,11 @@ object NoticeSurfaceContract {
                 val label = (entry.opt("label") as? String)?.trim()
                     ?: return ActionsResult.Invalid("action label must be a string")
                 if (label.isEmpty()) return ActionsResult.Invalid("action label must contain text")
+                if (label.length > MAX_ACTION_LABEL_CHARS) {
+                    return ActionsResult.Invalid(
+                        "action label exceeds $MAX_ACTION_LABEL_CHARS characters",
+                    )
+                }
                 add(NoticeAction(id = id, glyph = glyph, label = label))
             }
         }
@@ -408,8 +434,8 @@ object NoticeSurfaceContract {
         val raw = payload.opt(key)
         if (raw == JSONObject.NULL) return TextResult.Present(null)
         val text = raw as? String ?: return TextResult.Invalid("$key must be a string")
-        // Newlines collapse to spaces in v1: the renderer owns wrapping, and a
-        // plugin cannot be allowed to lay the banner out by hand.
+        // Newlines collapse to spaces: the renderer owns wrapping and paging,
+        // and a plugin cannot be allowed to lay the band out by hand.
         val normalized = text.replace(NEWLINES, " ").trim()
         if (normalized.length > maxChars) return TextResult.Invalid("$key exceeds $maxChars characters")
         return TextResult.Present(normalized)

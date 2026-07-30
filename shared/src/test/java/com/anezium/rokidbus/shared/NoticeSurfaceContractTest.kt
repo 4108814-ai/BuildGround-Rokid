@@ -246,6 +246,30 @@ class NoticeSurfaceContractTest {
     }
 
     @Test
+    fun `rejects a label too long to read rather than letting the row truncate it`() {
+        val label = "x".repeat(NoticeSurfaceContract.MAX_ACTION_LABEL_CHARS + 1)
+
+        val result = NoticeSurfaceContract.validateShow(
+            showPayload().put("actions", JSONArray().put(action("yes", "play", label))),
+        )
+
+        assertTrue(result is NoticeSurfaceValidationResult.Invalid)
+    }
+
+    @Test
+    fun `keeps a label sitting exactly on the ceiling`() {
+        val label = "x".repeat(NoticeSurfaceContract.MAX_ACTION_LABEL_CHARS)
+
+        val content = (
+            NoticeSurfaceContract.validateShow(
+                showPayload().put("actions", JSONArray().put(action("yes", "play", label))),
+            ) as NoticeSurfaceValidationResult.Valid
+            ).content
+
+        assertEquals(label, content.actions.single().label)
+    }
+
+    @Test
     fun `rejects malformed actions field by field`() {
         val malformed = listOf(
             JSONArray().put("yes"),
