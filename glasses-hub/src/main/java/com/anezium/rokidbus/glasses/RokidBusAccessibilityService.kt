@@ -247,13 +247,18 @@ class RokidBusAccessibilityService : AccessibilityService() {
         if (event.action != KeyEvent.ACTION_DOWN) return true
         if (event.repeatCount == 0) {
             when {
-                launcherShown ->
-                    LauncherOverlayRenderer.handleRingKey(event.keyCode, event.eventTime)
                 // The band takes the tap, and scroll only while it is offering a
-                // choice. Anything else keeps reaching the surface underneath,
-                // so a notice never freezes the ring.
+                // choice or holding pages. Anything else keeps reaching whatever
+                // is underneath, so a notice never freezes the ring.
+                //
+                // It is asked before the launcher because the band is drawn on
+                // top of it: a paged notice that arrives over an open launcher is
+                // what the wearer is reading, and turning its pages must not
+                // scroll a tile row they cannot see.
                 noticeRingClaims ->
                     NoticeController.handleRingKey(event.keyCode, event.eventTime)
+                launcherShown ->
+                    LauncherOverlayRenderer.handleRingKey(event.keyCode, event.eventTime)
                 surfaceActive ->
                     SurfaceController.handleRingKey(event.keyCode, event.eventTime)
                 activityClaims ->
