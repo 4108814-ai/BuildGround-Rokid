@@ -7,6 +7,8 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 
 internal object AccessibilityWindowRoots {
+    const val SETTINGS_PACKAGE = "com.android.settings"
+
     private const val ROKID_SYSCONFIG_PACKAGE = "com.rokid.sysconfig"
     private var lastApplicationPackage = ""
 
@@ -14,20 +16,48 @@ internal object AccessibilityWindowRoots {
         if (event != null) rememberPackage(event.packageName, ownPackage)
     }
 
-    fun getNavigationRoot(service: AccessibilityService): AccessibilityNodeInfo? {
-        val root = service.rootInActiveWindow
-        if (!shouldUseWindowFallback(service, root)) {
-            rememberRoot(root, service.packageName)
-            return root
+    fun getNavigationRoot(
+        service: AccessibilityService,
+        preferredPackage: String? = null,
+    ): AccessibilityNodeInfo? {
+        val activeRoot = service.rootInActiveWindow
+        val activeRootIsReadable =
+            activeRoot != null &&
+                !isTinyRoot(activeRoot)
+        val activeRootMatchesPreference =
+            preferredPackage == null ||
+                isPackage(activeRoot, preferredPackage)
+        if (
+            activeRootIsReadable &&
+            activeRootMatchesPreference &&
+            !hasTinyFocusedSystemWindow(service)
+        ) {
+            rememberRoot(activeRoot, service.packageName)
+            return activeRoot
         }
-        return firstApplicationRoot(service) ?: root
+
+        val windowRoot = bestApplicationRoot(service, preferredPackage)
+        if (windowRoot != null) {
+            activeRoot?.recycle()
+            return windowRoot
+        }
+
+        if (activeRootIsReadable && activeRootMatchesPreference) {
+            rememberRoot(activeRoot, service.packageName)
+            return activeRoot
+        }
+        if (preferredPackage != null) {
+            activeRoot?.recycle()
+            return null
+        }
+        return activeRoot
     }
 
     fun isPackageActive(service: AccessibilityService, packageName: String): Boolean {
         val root = service.rootInActiveWindow
         if (isPackage(root, packageName)) return true
         if (!shouldUseWindowFallback(service, root)) return false
-        val windowRoot = firstApplicationRootForPackage(service, packageName)
+        val windowRoot = bestApplicationRoot(service, packageName)
         if (windowRoot == null) return packageName == lastApplicationPackage
         windowRoot.recycle()
         return true
@@ -74,43 +104,53 @@ internal object AccessibilityWindowRoots {
         return false
     }
 
-    private fun firstApplicationRoot(service: AccessibilityService): AccessibilityNodeInfo? {
-        val windows = service.windows ?: return null
-        windows.forEach { window ->
-            if (window == null || window.type != AccessibilityWindowInfo.TYPE_APPLICATION) return@forEach
-            val root = window.root ?: return@forEach
-            if (isTinyRoot(root)) {
-                root.recycle()
-                return@forEach
-            }
-            rememberRoot(root, service.packageName)
-            return root
-        }
-        return null
-    }
-
-    private fun firstApplicationRootForPackage(
+    private fun bestApplicationRoot(
         service: AccessibilityService,
-        packageName: String,
+        preferredPackage: String?,
     ): AccessibilityNodeInfo? {
         val windows = service.windows ?: return null
-        windows.forEach { window ->
-            if (window == null || window.type != AccessibilityWindowInfo.TYPE_APPLICATION) return@forEach
-            val root = window.root ?: return@forEach
-            if (isTinyRoot(root)) {
-                root.recycle()
-                return@forEach
+        val candidates = buildList {
+            windows.forEachIndexed { index, window ->
+                if (
+                    window == null ||
+                    window.type != AccessibilityWindowInfo.TYPE_APPLICATION
+                ) {
+                    return@forEachIndexed
+                }
+                val root = window.root ?: return@forEachIndexed
+                val readable = !isTinyRoot(root)
+                add(
+                    OwnedWindowRootCandidate(
+                        root = root,
+                        descriptor = AccessibilityWindowRootCandidate(
+                            packageName = root.packageName?.toString(),
+                            isActive = window.isActive,
+                            isFocused = window.isFocused,
+                            isReadable = readable,
+                            originalIndex = index,
+                        ),
+                    ),
+                )
             }
-            val rootPackage = root.packageName
-            if (rootPackage != null && packageName.contentEquals(rootPackage)) {
-                rememberRoot(root, service.packageName)
-                return root
-            }
-            root.recycle()
-            return null
         }
-        return null
+        val selectedIndex = AccessibilityWindowRootSelectionPolicy.selectIndex(
+            candidates.map(OwnedWindowRootCandidate::descriptor),
+            preferredPackage,
+        )
+        candidates.forEachIndexed { index, candidate ->
+            if (index != selectedIndex) {
+                candidate.root.recycle()
+            }
+        }
+        val selected = selectedIndex?.let(candidates::get) ?: return null
+        rememberRoot(selected.root, service.packageName)
+        return selected.root
     }
+
+    private data class OwnedWindowRootCandidate(
+        val root: AccessibilityNodeInfo,
+        val descriptor: AccessibilityWindowRootCandidate,
+    )
 
     private fun isPackage(root: AccessibilityNodeInfo?, packageName: String): Boolean =
         root?.packageName != null && packageName.contentEquals(root.packageName)
@@ -142,4 +182,34 @@ internal object AccessibilityWindowRoots {
         bounds.isEmpty || (bounds.width() <= 2 && bounds.height() <= 2)
 }
 
+internal data class AccessibilityWindowRootCandidate(
+    val packageName: String?,
+    val isActive: Boolean,
+    val isFocused: Boolean,
+    val isReadable: Boolean,
+    val originalIndex: Int,
+)
 
+internal object AccessibilityWindowRootSelectionPolicy {
+    fun selectIndex(
+        candidates: List<AccessibilityWindowRootCandidate>,
+        preferredPackage: String?,
+    ): Int? =
+        candidates
+            .withIndex()
+            .filter { (_, candidate) ->
+                candidate.isReadable &&
+                    (
+                        preferredPackage == null ||
+                            candidate.packageName == preferredPackage
+                    )
+            }
+            .maxWithOrNull(
+                compareBy<IndexedValue<AccessibilityWindowRootCandidate>>(
+                    { if (it.value.isActive) 1 else 0 },
+                    { if (it.value.isFocused) 1 else 0 },
+                    { -it.value.originalIndex },
+                ),
+            )
+            ?.index
+}

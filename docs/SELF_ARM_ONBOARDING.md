@@ -33,6 +33,20 @@ on the card. The six-digit code never leaves the glasses and is not written to
 logs. The Settings automator is inactive outside an explicitly requested setup
 (its only other mode is a single Wi-Fi toggle used as the camera fallback).
 
+Settings navigation is deliberately independent of the wearer's locale and saved
+scroll position. Nexus resolves labels such as `adb_wireless_settings`,
+`adb_pair_method_code_title`, `development_settings_title`, and `build_number`
+from the installed `com.android.settings` package, then keeps a small
+vendor-fallback catalog. It first capability-probes the direct Wireless Debugging
+route and verifies the resulting page. If traversal is needed, it selects only a
+visible `com.android.settings` RecyclerView, returns to the start of the list,
+searches forward, and compares a hashed before/after tree signature after every
+scroll. An accessibility action that reports success without moving therefore
+falls back to a gesture anchored inside the RecyclerView's measured bounds; no
+fixed screen percentage or remembered list position is trusted. Accessibility
+events may wake the state machine earlier but cannot postpone an already queued
+tick.
+
 For photo-based support, the retry card also shows a compact support code:
 `PAIR-NOPORT` when the pairing port was unavailable, `PAIR-NOTLS` when the TLS
 connect port was unavailable, `PAIR-FAIL` for a local KADB pairing error,

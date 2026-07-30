@@ -1,21 +1,21 @@
 package com.anezium.rokidbus.glasses
 
-import android.accessibilityservice.GestureDescription
 import android.accessibilityservice.AccessibilityService
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.graphics.Path
+import android.graphics.Rect
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.SystemClock
 import android.provider.Settings
-import android.util.DisplayMetrics
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.anezium.rokidbus.glasses.SelfArmVerifiedSettingsScroller.Outcome as ScrollSearchOutcome
+import com.anezium.rokidbus.glasses.SelfArmVerifiedSettingsScroller.Surface as ScrollSurface
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.Locale
@@ -25,6 +25,9 @@ internal class SelfArmWirelessDebuggingAutomator(
     private val service: RokidBusAccessibilityService,
     private val handler: Handler,
 ) {
+    private val settingsStrings = SelfArmSettingsStringResolver(service.applicationContext)
+    private val settingsScroller = SelfArmVerifiedSettingsScroller(service)
+
     internal enum class OperationMode {
         FULL_BOOTSTRAP,
         WIFI_ONLY,
@@ -66,10 +69,9 @@ internal class SelfArmWirelessDebuggingAutomator(
     private var lastReportedProgressState = ""
 
     private var awaitingWirelessDebugConfirmation = false
+    private var wirelessToggleRequestedAt = 0L
     private var deviceInfoFallback = false
     private var developerEnableFlow = false
-    private var developerScrolls = 0
-    private var deviceInfoScrolls = 0
     private var buildNumberTaps = 0
     private var developerOpenAttempts = 0
     private var lastDeveloperOpenAt = 0L
@@ -77,17 +79,26 @@ internal class SelfArmWirelessDebuggingAutomator(
     private var developerScreenSeen = false
     private var lastConnectHost = ""
     private var lastConnectPort = 0
+    private var directWirelessProbePending = false
+    private var directWirelessProbeStartedAt = 0L
+    private var directWirelessFallbackUsed = false
+    private var scheduledStepAt = SelfArmTickSchedulePolicy.NONE
 
-    private val stepRunnable = Runnable { step() }
+    private val stepRunnable = Runnable {
+        scheduledStepAt = SelfArmTickSchedulePolicy.NONE
+        step()
+    }
 
     fun start(
         mode: OperationMode = OperationMode.FULL_BOOTSTRAP,
         target: SelfArmManualTarget = SelfArmManualTarget.PAIRING_DIALOG,
     ) {
         handler.removeCallbacks(stepRunnable)
+        scheduledStepAt = SelfArmTickSchedulePolicy.NONE
         active = true
         operationMode = mode
         manualTarget = target
+        settingsStrings.refresh()
         deadlineAt = SystemClock.uptimeMillis() + if (mode == OperationMode.MANUAL_NAVIGATION) {
             MANUAL_TIMEOUT_MS
         } else {
@@ -122,17 +133,18 @@ internal class SelfArmWirelessDebuggingAutomator(
         lastLocalSelfPairingStatusAt = 0L
         lastReportedProgressState = ""
         awaitingWirelessDebugConfirmation = false
+        wirelessToggleRequestedAt = 0L
         deviceInfoFallback = false
         developerEnableFlow = false
-        developerScrolls = 0
-        deviceInfoScrolls = 0
         buildNumberTaps = 0
         developerOpenAttempts = 0
         lastDeveloperOpenAt = 0L
         developerOpenStartedAt = 0L
         developerScreenSeen = false
+        resetDirectWirelessRoute()
         lastConnectHost = lastPairingHost
         lastConnectPort = SelfArmWirelessAdbController.readWirelessPort()
+        settingsScroller.resetAll()
         if (operationMode == OperationMode.FULL_BOOTSTRAP) {
             Log.d(TAG, "start: wireless debugging setup automator started")
             android.util.Log.i(TAG, "Wireless Debugging setup")
@@ -157,6 +169,9 @@ internal class SelfArmWirelessDebuggingAutomator(
         val wasManual = operationMode == OperationMode.MANUAL_NAVIGATION
         active = false
         handler.removeCallbacks(stepRunnable)
+        scheduledStepAt = SelfArmTickSchedulePolicy.NONE
+        settingsScroller.clearPending()
+        directWirelessProbePending = false
         localSelfPairingThread?.interrupt()
         localSelfPairingThread = null
         // Don't wipe the staged assets on a transient stop (the ROM churns the AccessibilityService
@@ -176,6 +191,14 @@ internal class SelfArmWirelessDebuggingAutomator(
         // Each wizard button press deserves a fresh manual window; without this the 5-minute
         // budget runs from the first step and can expire while the wearer is still typing.
         deadlineAt = SystemClock.uptimeMillis() + MANUAL_TIMEOUT_MS
+        settingsScroller.resetAll()
+        resetDirectWirelessRoute()
+        if (
+            wifiConfirmed &&
+            target != SelfArmManualTarget.ENABLE_DEVELOPER_OPTIONS
+        ) {
+            openPreferredSettingsTarget()
+        }
         schedule(0L)
     }
 
@@ -198,7 +221,10 @@ internal class SelfArmWirelessDebuggingAutomator(
     }
 
     fun isManualTargetVisible(target: SelfArmManualTarget): Boolean {
-        val root = AccessibilityWindowRoots.getNavigationRoot(service) ?: return false
+        val root = AccessibilityWindowRoots.getNavigationRoot(
+            service,
+            AccessibilityWindowRoots.SETTINGS_PACKAGE,
+        ) ?: return false
         return when (target) {
             SelfArmManualTarget.DEVELOPER_OPTIONS -> isDeveloperOptionsScreen(root)
             SelfArmManualTarget.WIRELESS_DEBUGGING,
@@ -245,7 +271,10 @@ internal class SelfArmWirelessDebuggingAutomator(
             return
         }
 
-        val root = AccessibilityWindowRoots.getNavigationRoot(service)
+        val root = AccessibilityWindowRoots.getNavigationRoot(
+            service,
+            AccessibilityWindowRoots.SETTINGS_PACKAGE,
+        )
         if (pairingReadyReported) {
             if (readPairingDialogFromAnyRoot(root)) return
             reportCachedPairingReady()
@@ -253,6 +282,7 @@ internal class SelfArmWirelessDebuggingAutomator(
             return
         }
         if (root == null) {
+            if (fallbackFromUnverifiedDirectRouteIfDue()) return
             report("waiting_for_settings")
             schedule(STEP_DELAY_MS)
             return
@@ -295,17 +325,36 @@ internal class SelfArmWirelessDebuggingAutomator(
         }
 
         if (readPairingDialogFromAnyRoot(root)) return
-        if (awaitingWirelessDebugConfirmation && clickConfirmation(root)) {
-            awaitingWirelessDebugConfirmation = false
-            report("confirming_wireless_debugging")
-            schedule(1200L)
-            return
+        if (awaitingWirelessDebugConfirmation) {
+            if (SelfArmWirelessAdbController.isEnabled(service)) {
+                awaitingWirelessDebugConfirmation = false
+                wirelessToggleRequestedAt = 0L
+            } else if (clickConfirmation(root)) {
+                awaitingWirelessDebugConfirmation = false
+                wirelessToggleRequestedAt = 0L
+                report("confirming_wireless_debugging")
+                schedule(1200L)
+                return
+            } else if (
+                wirelessToggleRequestedAt > 0L &&
+                SystemClock.uptimeMillis() - wirelessToggleRequestedAt < WIRELESS_CONFIRMATION_WAIT_MS
+            ) {
+                report("waiting_for_wireless_debugging_confirmation")
+                schedule(CONFIRMATION_POLL_MS)
+                return
+            } else {
+                awaitingWirelessDebugConfirmation = false
+                wirelessToggleRequestedAt = 0L
+            }
         }
 
         firstEndpoint(root)?.let {
             lastConnectHost = it.host
             lastConnectPort = it.port
-            android.util.Log.i(TAG, "selfarm-wireless wireless_debugging_open wifiIp=${it.host} connectPort=${it.port}")
+            android.util.Log.i(
+                TAG,
+                "selfarm-wireless wireless_debugging_open endpointDetected=true",
+            )
         }
 
         when {
@@ -339,9 +388,17 @@ internal class SelfArmWirelessDebuggingAutomator(
             wifiClickIssued = false
         }
 
-        val root = AccessibilityWindowRoots.getNavigationRoot(service)
+        val root = AccessibilityWindowRoots.getNavigationRoot(
+            service,
+            AccessibilityWindowRoots.SETTINGS_PACKAGE,
+        )
         if (root == null) {
             schedule(STEP_DELAY_MS)
+            return
+        }
+        if (!isWifiSettingsScreen(root)) {
+            openWifiSettings()
+            schedule(900L)
             return
         }
         if (clickWifiToggle(root)) {
@@ -351,12 +408,26 @@ internal class SelfArmWirelessDebuggingAutomator(
             schedule(WIFI_POLL_INTERVAL_MS)
             return
         }
-        if (wifiScrolls < MAX_WIFI_SCROLLS && scrollForward(root)) {
-            wifiScrolls++
-            schedule(STEP_DELAY_MS)
-            return
+        when (
+            settingsScroller.continueSearch(
+                root = root,
+                surface = ScrollSurface.WIFI_SETTINGS,
+                maxBack = MAX_WIFI_SCROLLS,
+                maxForward = MAX_WIFI_SCROLLS,
+            )
+        ) {
+            ScrollSearchOutcome.WAITING,
+            ScrollSearchOutcome.MOVED,
+            ScrollSearchOutcome.PHASE_CHANGED,
+            -> {
+                wifiScrolls++
+                schedule(settingsScroller.settleDelayMs)
+                return
+            }
+            ScrollSearchOutcome.EXHAUSTED -> Unit
         }
         wifiScrolls = 0
+        settingsScroller.reset(ScrollSurface.WIFI_SETTINGS)
         openWifiSettings()
         schedule(1200L)
     }
@@ -390,48 +461,51 @@ internal class SelfArmWirelessDebuggingAutomator(
             if (!SelfArmWirelessAdbController.areDeveloperOptionsUsable(service)) {
                 startDeveloperOptionsEnableFlow()
             } else {
-                report("opening_developer_options")
-                openDeveloperSettings()
+                openPreferredSettingsTarget()
                 schedule(900L)
             }
         }, 800L)
     }
 
     private fun handleDeveloperOptionsPage(root: AccessibilityNodeInfo) {
-        if (
-            clickText(
-                root,
-                "wireless debugging",
-                "debogage sans fil",
-                "debug sans fil",
-                "depuracion inalambrica",
-                "debug inalambrico",
-                "depuracao sem fio",
-                "debug wireless",
-                "wireless debuggen",
-                "отладка по wi-fi",
-                "отладка по wi fi",
-                "отладка по wifi",
-            )
-        ) {
+        markDirectWirelessRouteVerifiedOrBypassed()
+        if (clickSettingsLabel(root, SelfArmSettingsLabel.WIRELESS_DEBUGGING)) {
+            settingsScroller.clearPending()
             report("opening_wireless_debugging")
             schedule(1100L)
             return
         }
-        if (developerScrolls < MAX_DEVELOPER_SCROLLS && scrollForward(root)) {
-            developerScrolls++
-            report("searching_wireless_debugging")
-            schedule(STEP_DELAY_MS)
-            return
-        }
-        if (developerScreenSeen) {
-            finish("wireless_debugging_manual_step_needed", false)
-        } else {
-            waitForDeveloperOptions(root)
+        when (
+            settingsScroller.continueSearch(
+                root = root,
+                surface = ScrollSurface.DEVELOPER_OPTIONS,
+                maxBack = MAX_DEVELOPER_SCROLLS,
+                maxForward = MAX_DEVELOPER_SCROLLS,
+            )
+        ) {
+            ScrollSearchOutcome.WAITING,
+            ScrollSearchOutcome.MOVED,
+            ScrollSearchOutcome.PHASE_CHANGED,
+            -> {
+                report("searching_wireless_debugging")
+                schedule(settingsScroller.settleDelayMs)
+            }
+            ScrollSearchOutcome.EXHAUSTED -> {
+                if (developerScreenSeen) {
+                    finish(
+                        "wireless_debugging_manual_step_needed",
+                        false,
+                        "SCROLL_NO_PROGRESS",
+                    )
+                } else {
+                    waitForDeveloperOptions(root)
+                }
+            }
         }
     }
 
     private fun waitForDeveloperOptions(root: AccessibilityNodeInfo) {
+        if (fallbackFromUnverifiedDirectRouteIfDue()) return
         if (isDeveloperOptionsDisabledPrompt(root) || developerOpenAttemptsTimedOut()) {
             startDeveloperOptionsEnableFlow()
             return
@@ -442,7 +516,7 @@ internal class SelfArmWirelessDebuggingAutomator(
         }
         val now = SystemClock.uptimeMillis()
         if (developerOpenAttempts < MAX_DEVELOPER_OPEN_ATTEMPTS && now - lastDeveloperOpenAt > 2200L) {
-            openDeveloperSettings()
+            openPreferredSettingsTarget()
         }
         report("opening_developer_options")
         schedule(STEP_DELAY_MS)
@@ -452,14 +526,13 @@ internal class SelfArmWirelessDebuggingAutomator(
         if (SelfArmWirelessAdbController.areDeveloperOptionsUsable(service)) {
             developerEnableFlow = false
             deviceInfoFallback = false
-            report("opening_developer_options")
-            openDeveloperSettings()
+            openPreferredSettingsTarget()
             schedule(900L)
             return
         }
         developerEnableFlow = true
         deviceInfoFallback = true
-        deviceInfoScrolls = 0
+        resetDirectWirelessRoute()
         report("developer_options_disabled")
         openDeviceInfoSettings()
         schedule(1000L)
@@ -473,25 +546,17 @@ internal class SelfArmWirelessDebuggingAutomator(
         if (SelfArmWirelessAdbController.areDeveloperOptionsUsable(service)) {
             developerEnableFlow = false
             deviceInfoFallback = false
-            report("opening_developer_options")
-            openDeveloperSettings()
+            openPreferredSettingsTarget()
             schedule(900L)
             return
         }
         val buildNumber = findBuildNumberByBuildIdentifier(root) ?: findFirst(root) {
-            containsText(
-                it,
-                "build number",
-                "numero de build",
-                "numero de version",
-                "software version",
-                "numero de compilacion",
-                "numero de compilacao",
-                "build-nummer",
-                "номер сборки",
-            )
+            it.isVisibleToUser &&
+                it.isEnabled &&
+                settingsStrings.matchesExactly(rawText(it), SelfArmSettingsLabel.BUILD_NUMBER)
         }
         if (buildNumber != null && buildNumberTaps < MAX_BUILD_NUMBER_TAPS) {
+            settingsScroller.clearPending()
             if (!canClickNow()) {
                 schedule(220L)
                 return
@@ -506,40 +571,60 @@ internal class SelfArmWirelessDebuggingAutomator(
                     lastDeveloperOpenAt = 0L
                     developerEnableFlow = false
                     deviceInfoFallback = false
-                    handler.postDelayed({ openDeveloperSettings() }, 1200L)
+                    handler.postDelayed({ openPreferredSettingsTarget() }, 1200L)
                 }
                 return
             }
         }
-        if (deviceInfoScrolls < MAX_DEVICE_INFO_SCROLLS && scrollForward(root)) {
-            deviceInfoScrolls++
-            report("searching_build_number")
-            schedule(STEP_DELAY_MS)
-            return
+        when (
+            settingsScroller.continueSearch(
+                root = root,
+                surface = ScrollSurface.DEVICE_INFO,
+                maxBack = MAX_DEVICE_INFO_SCROLLS,
+                maxForward = MAX_DEVICE_INFO_SCROLLS,
+            )
+        ) {
+            ScrollSearchOutcome.WAITING,
+            ScrollSearchOutcome.MOVED,
+            ScrollSearchOutcome.PHASE_CHANGED,
+            -> {
+                report("searching_build_number")
+                schedule(settingsScroller.settleDelayMs)
+            }
+            ScrollSearchOutcome.EXHAUSTED ->
+                finish("developer_options_manual_step_needed", false, "SCROLL_NO_PROGRESS")
         }
-        finish("developer_options_manual_step_needed", false)
     }
 
     private fun handleWirelessDebuggingPage(root: AccessibilityNodeInfo) {
-        val switchNode = findFirst(root) { className(it).lowercase(Locale.US).contains("switch") }
-        val switchBar = firstByViewId(root, "com.android.settings:id/switch_bar")
-        val switchText = findFirst(root) {
-            containsText(
-                it,
-                "use wireless debugging",
-                "utiliser le debogage sans fil",
-                "utiliser le bogage sans fil",
-                "usar depuracion inalambrica",
-                "usar depuracao sem fio",
-                "использовать отладку по wi-fi",
-                "использовать отладку по wi fi",
-                "использовать отладку по wifi",
-            )
+        markDirectWirelessRouteVerifiedOrBypassed()
+        val switchBar = firstVisibleByViewId(root, SETTINGS_SWITCH_BAR_ID)
+            ?.takeIf(::isUsableToggle)
+        val switchRoot = switchBar ?: root
+        val switchNode = WIRELESS_SWITCH_IDS.firstNotNullOfOrNull { viewId ->
+            firstVisibleByViewId(switchRoot, viewId)?.takeIf(::isUsableToggle)
         }
-        val toggleTarget = switchBar ?: switchNode ?: switchText
-        if (toggleTarget != null && !SelfArmWirelessAdbController.isEnabled(service)) {
-            if (canClickNow() && clickNode(toggleTarget)) {
+        val switchText = findFirst(switchRoot) {
+            it.isVisibleToUser &&
+                it.isEnabled &&
+                settingsStrings.matches(rawText(it), SelfArmSettingsLabel.WIRELESS_DEBUGGING)
+        }
+        val genericSwitch = findFirst(switchRoot) {
+            val className = className(it).lowercase(Locale.ROOT)
+            it.isVisibleToUser &&
+                it.isEnabled &&
+                it.isCheckable &&
+                className.endsWith("switch")
+        }
+        if (!SelfArmWirelessAdbController.isEnabled(service) && canClickNow()) {
+            val clicked = listOfNotNull(switchNode, switchBar, switchText, genericSwitch)
+                .distinctBy { node ->
+                    "${node.viewIdResourceName}|${node.className}|${rawText(node)}"
+                }
+                .any(::clickNode)
+            if (clicked) {
                 awaitingWirelessDebugConfirmation = true
+                wirelessToggleRequestedAt = SystemClock.uptimeMillis()
                 report("turning_wireless_debugging_on")
                 schedule(1200L)
                 return
@@ -549,28 +634,17 @@ internal class SelfArmWirelessDebuggingAutomator(
         val livePort = SelfArmWirelessAdbController.readWirelessPort()
         if (livePort > 0) {
             lastConnectPort = livePort
-            android.util.Log.i(TAG, "selfarm-wireless wireless_debugging_on wifiIp=${wifiIpv4().ifBlank { lastConnectHost }} connectPort=$livePort")
+            android.util.Log.i(
+                TAG,
+                "selfarm-wireless wireless_debugging_on connectPortKnown=true",
+            )
         }
 
         if (
             !pairingRequested &&
-            clickText(
-                root,
-                "pair device with pairing code",
-                "associer l'appareil avec un code d'association",
-                "code d'association",
-                "pairing code",
-                "codigo de emparejamiento",
-                "codigo de vinculacion",
-                "codigo de pareamento",
-                "codice di accoppiamento",
-                "kopplungscode",
-                "подключение устройства с помощью кода подключения",
-                "подключить устройство с помощью кода подключения",
-                "кода подключения",
-                "код подключения",
-            )
+            clickSettingsLabel(root, SelfArmSettingsLabel.PAIR_WITH_CODE)
         ) {
+            settingsScroller.clearPending()
             pairingRequested = true
             pairingRequestedAt = SystemClock.uptimeMillis()
             pairingDialogDumped = false
@@ -578,13 +652,21 @@ internal class SelfArmWirelessDebuggingAutomator(
             schedule(1200L)
             return
         }
-        if (scrollForward(root)) {
-            report("searching_pairing_code")
-            schedule(STEP_DELAY_MS)
-            return
+        when (
+            settingsScroller.continueSearch(
+                root = root,
+                surface = ScrollSurface.WIRELESS_DEBUGGING,
+                maxBack = MAX_WIRELESS_SCROLLS,
+                maxForward = MAX_WIRELESS_SCROLLS,
+            )
+        ) {
+            ScrollSearchOutcome.WAITING,
+            ScrollSearchOutcome.MOVED,
+            ScrollSearchOutcome.PHASE_CHANGED,
+            -> report("searching_pairing_code")
+            ScrollSearchOutcome.EXHAUSTED -> report("waiting_for_pairing_code")
         }
-        report("waiting_for_pairing_code")
-        schedule(STEP_DELAY_MS)
+        schedule(settingsScroller.settleDelayMs)
     }
 
     private fun readPairingDialogFromAnyRoot(primary: AccessibilityNodeInfo?): Boolean {
@@ -595,7 +677,7 @@ internal class SelfArmWirelessDebuggingAutomator(
     }
 
     private fun readPairingDialog(root: AccessibilityNodeInfo): Boolean {
-        val codeNode = firstByViewId(root, "com.android.settings:id/pairing_code")
+        val codeNode = firstVisibleByViewId(root, "com.android.settings:id/pairing_code")
         var code = codeNode?.let { firstCodeInText(rawText(it)) }.orEmpty()
         val endpoint = textByViewId(root, "com.android.settings:id/ip_addr")
         val hasPairingContext = codeNode != null || endpoint.isNotBlank() || hasPairingDialogText(root)
@@ -647,33 +729,9 @@ internal class SelfArmWirelessDebuggingAutomator(
     }
 
     private fun hasPairingDialogText(root: AccessibilityNodeInfo): Boolean =
-        containsInTree(
-            root,
-            "pair with device",
-            "pair device",
-            "wi-fi pairing code",
-            "wifi pairing code",
-            "wireless pairing code",
-            "pairing code",
-            "ip address & port",
-            "ip address and port",
-            "associer un appareil",
-            "associer l'appareil",
-            "associer avec un appareil",
-            "code d'association wi-fi",
-            "code d'association wifi",
-            "adresse ip et port",
-            "adresse ip & port",
-            "подключение устройства",
-            "подключить устройство",
-            "код подключения wi-fi",
-            "код подключения wifi",
-            "кода подключения",
-            "код подключения",
-            "ip-адрес и порт",
-            "ip адрес и порт",
-            "ip-адрес & порт",
-        )
+        containsSettingsLabel(root, SelfArmSettingsLabel.PAIRING_DIALOG_TITLE) ||
+            containsSettingsLabel(root, SelfArmSettingsLabel.PAIRING_CODE_LABEL) ||
+            containsSettingsLabel(root, SelfArmSettingsLabel.IP_ADDRESS_AND_PORT)
 
     private fun reportPairingReadyAndHold(
         code: String,
@@ -748,8 +806,7 @@ internal class SelfArmWirelessDebuggingAutomator(
                     lastConnectPort = bootstrap.connectPort
                     Log.i(
                         TAG,
-                        "local self-pair bootstrap complete pairPort=${bootstrap.pairPort} " +
-                            "connectPort=${bootstrap.connectPort}",
+                        "local self-pair bootstrap complete",
                     )
                     finish("wireless_bootstrap_complete", true)
                 }.onFailure { throwable ->
@@ -759,7 +816,10 @@ internal class SelfArmWirelessDebuggingAutomator(
                     Log.w(TAG, "local self-pair bootstrap failed: $diagnostic")
                     if (!active) return@post
                     android.util.Log.i(TAG, "Phone fallback pairing")
-                    android.util.Log.i(TAG, "selfarm-wireless self_pairing_failed wifiIp=$host pairPort=$pairPort connectPort=$connectPort error=$diagnostic")
+                    android.util.Log.i(
+                        TAG,
+                        "selfarm-wireless self_pairing_failed error=$diagnostic",
+                    )
                     sendPairingReadyStatus(token, code, host, pairPort, connectPort)
                     schedule(PAIRING_DIALOG_POLL_MS)
                 }
@@ -778,7 +838,11 @@ internal class SelfArmWirelessDebuggingAutomator(
         val now = SystemClock.uptimeMillis()
         if (now - lastLocalSelfPairingStatusAt < PAIRING_READY_REPORT_INTERVAL_MS) return
         lastLocalSelfPairingStatusAt = now
-        android.util.Log.i(TAG, "selfarm-wireless self_pairing_started wifiIp=$host pairPort=$pairPort connectPort=$connectPort")
+        android.util.Log.i(
+            TAG,
+            "selfarm-wireless self_pairing_started endpointComplete=" +
+                (host.isNotBlank() && pairPort > 0 && connectPort > 0),
+        )
     }
 
     private fun sendPairingReadyStatus(
@@ -791,7 +855,11 @@ internal class SelfArmWirelessDebuggingAutomator(
         lastPairingReadyToken = token
         lastPairingReadyReportAt = SystemClock.uptimeMillis()
         if (operationMode == OperationMode.MANUAL_NAVIGATION) report("manual_pairing_waiting")
-        android.util.Log.i(TAG, "selfarm-wireless pairing_ready wifiIp=$host codeLen=${code.length} pairPort=$pairPort connectPort=$connectPort")
+        android.util.Log.i(
+            TAG,
+            "selfarm-wireless pairing_ready codeLen=${code.length} " +
+                "endpointComplete=${host.isNotBlank() && pairPort > 0 && connectPort > 0}",
+        )
     }
 
     private fun reportCachedPairingReady() {
@@ -799,7 +867,11 @@ internal class SelfArmWirelessDebuggingAutomator(
         val now = SystemClock.uptimeMillis()
         if (now - lastPairingReadyReportAt < PAIRING_READY_REPORT_INTERVAL_MS) return
         lastPairingReadyReportAt = now
-        android.util.Log.i(TAG, "selfarm-wireless pairing_ready wifiIp=$lastPairingHost codeLen=${lastPairingCode.length} pairPort=$lastPairingPort connectPort=$lastPairingConnectPort")
+        android.util.Log.i(
+            TAG,
+            "selfarm-wireless pairing_ready codeLen=${lastPairingCode.length} " +
+                "endpointComplete=${lastPairingHost.isNotBlank() && lastPairingPort > 0 && lastPairingConnectPort > 0}",
+        )
     }
 
     private fun dumpPairingDialogNodes(root: AccessibilityNodeInfo) {
@@ -813,14 +885,22 @@ internal class SelfArmWirelessDebuggingAutomator(
         val text = rawText(node)
         val viewId = node.viewIdResourceName.orEmpty()
         if (text.isNotBlank() || viewId.isNotBlank()) {
-            val displayText = PAIRING_CODE.matcher(text).replaceAll("<code:redacted>")
+            val bounds = Rect()
+            runCatching { node.getBoundsInScreen(bounds) }
             out.append("\n  depth=")
                 .append(depth)
                 .append(" viewId=")
                 .append(viewId.ifBlank { "(none)" })
-                .append(" text=[")
-                .append(displayText)
-                .append("]")
+                .append(" class=")
+                .append(className(node).ifBlank { "(none)" })
+                .append(" bounds=")
+                .append(bounds.toShortString())
+                .append(" visible=")
+                .append(node.isVisibleToUser)
+                .append(" clickable=")
+                .append(node.isClickable)
+                .append(" textLength=")
+                .append(text.length)
         }
         for (index in 0 until node.childCount) {
             collectNodeStrings(node.getChild(index), out, depth + 1)
@@ -829,134 +909,116 @@ internal class SelfArmWirelessDebuggingAutomator(
 
     private fun clickConfirmation(root: AccessibilityNodeInfo): Boolean {
         if (!isWirelessDebuggingConfirmation(root)) return false
-        val button = findFirst(root) { node ->
-            if (!node.isClickable) return@findFirst false
-            when (normalizedText(node)) {
-                "ok", "allow", "enable", "turn on",
-                "activer", "autoriser", "utiliser", "oui", "yes",
-                "activar", "habilitar", "permitir", "si", "sim",
-                "attiva", "abilita", "consenti",
-                "ja", "aktivieren", "einschalten", "erlauben", "zulassen",
-                "включить", "разрешить", "да" -> true
-                else -> false
+        val button = CONFIRM_BUTTON_IDS.firstNotNullOfOrNull { viewId ->
+            firstVisibleByViewId(root, viewId)?.takeIf { node ->
+                node.isEnabled && node.isClickable
             }
+        } ?: findFirst(root) { node ->
+            node.isClickable &&
+                className(node).endsWith("Button") &&
+                normalizedText(node) in POSITIVE_BUTTON_FALLBACKS
         }
         return button != null && canClickNow() && clickNode(button)
     }
 
     private fun isWirelessDebuggingConfirmation(root: AccessibilityNodeInfo): Boolean =
-        containsInTree(
-            root,
-            "wireless debugging",
-            "debogage sans fil",
-            "debug sans fil",
-            "depuracion inalambrica",
-            "depuracao sem fio",
-            "debug wireless",
-            "drahtloses debugging",
-            "отладка по wi-fi",
-            "отладка по wi fi",
-            "отладка по wifi",
-        )
+        isSettingsRoot(root) &&
+            CONFIRM_BUTTON_IDS.any { viewId ->
+                firstVisibleByViewId(root, viewId)?.let { it.isEnabled && it.isClickable } == true
+            } &&
+            containsSettingsLabel(root, SelfArmSettingsLabel.WIRELESS_DEBUGGING)
 
     private fun isWirelessDebuggingPage(root: AccessibilityNodeInfo): Boolean =
-        containsInTree(
-            root,
-            "wireless debugging",
-            "debogage sans fil",
-            "debug sans fil",
-            "depuracion inalambrica",
-            "depuracao sem fio",
-            "debug wireless",
-            "отладка по wi-fi",
-            "отладка по wi fi",
-            "отладка по wifi",
-        ) &&
-            containsInTree(
-                root,
-                "pair device",
-                "associer l'appareil",
-                "use wireless debugging",
-                "utiliser le debogage sans fil",
-                "pairing code",
-                "code d'association",
-                "usar depuracion inalambrica",
-                "usar depuracao sem fio",
-                "подключение устройства",
-                "код подключения",
-                "использовать отладку по wi-fi",
-                "использовать отладку по wi fi",
-                "использовать отладку по wifi",
+        isSettingsRoot(root) &&
+            firstVisibleByViewId(root, SETTINGS_SWITCH_BAR_ID) != null &&
+            (
+                settingsStrings.matches(
+                    subtreeText(firstVisibleByViewId(root, SETTINGS_APP_BAR_ID)),
+                    SelfArmSettingsLabel.WIRELESS_DEBUGGING,
+                ) ||
+                    settingsStrings.matches(
+                        textByViewId(root, SETTINGS_SWITCH_TEXT_ID),
+                        SelfArmSettingsLabel.WIRELESS_DEBUGGING,
+                    )
             )
 
     private fun isDeveloperOptionsScreen(root: AccessibilityNodeInfo): Boolean =
-        containsInTree(
-            root,
-            "developer options",
-            "options pour les developpeurs",
-            "opciones de desarrollador",
-            "opcoes do desenvolvedor",
-            "entwickleroptionen",
-            "параметры разработчика",
-            "настройки разработчика",
-            "для разработчиков",
-        ) ||
+        isSettingsRoot(root) &&
             (
-                containsInTree(
-                    root,
-                    "debogage",
-                    "debugging",
-                    "debuggen",
-                    "depuracion",
-                    "depuracao",
-                    "отладка",
-                ) &&
-                    containsInTree(
-                        root,
-                        "oem",
-                        "memoire",
-                        "memory",
-                        "memoria",
-                        "rapport de bug",
-                        "bug report",
-                        "память",
-                        "отчет об ошибке",
-                        "отчёт об ошибке",
+                settingsStrings.matches(
+                    subtreeText(firstVisibleByViewId(root, SETTINGS_APP_BAR_ID)),
+                    SelfArmSettingsLabel.DEVELOPER_OPTIONS,
+                ) ||
+                    (
+                        firstVisibleByViewId(root, SETTINGS_SWITCH_BAR_ID) != null &&
+                            containsSettingsLabel(root, SelfArmSettingsLabel.DEVELOPER_OPTIONS)
                     )
-                )
+            )
 
     private fun isDeveloperOptionsDisabledPrompt(root: AccessibilityNodeInfo): Boolean =
-        containsInTree(
-            root,
-            "activer les options pour developpeur",
-            "activer les options pour les developpeurs",
-            "enable developer options first",
-            "turn on developer options first",
-            "activar primero las opciones de desarrollador",
-            "active primero las opciones de desarrollador",
-            "ative primeiro as opcoes do desenvolvedor",
-            "attiva prima le opzioni sviluppatore",
-            "entwickleroptionen zuerst aktivieren",
-            "сначала включите параметры разработчика",
-            "сначала включите настройки разработчика",
-            "включите параметры разработчика",
-        )
+        containsSettingsLabel(root, SelfArmSettingsLabel.DEVELOPER_OPTIONS_DISABLED)
 
     private fun clickWifiToggle(root: AccessibilityNodeInfo): Boolean {
+        if (!isWifiSettingsScreen(root)) return false
         val switchNode = findFirst(root) {
             val cls = className(it).lowercase(Locale.US)
-            cls.endsWith("switch") || cls.endsWith("togglebutton")
+            it.isVisibleToUser &&
+                it.isEnabled &&
+                (it.isCheckable || it.isClickable) &&
+                (cls.endsWith("switch") || cls.endsWith("togglebutton"))
         }
-        val idNode = firstByViewId(root, "com.android.settings:id/switch_bar")
-            ?: firstByViewId(root, "com.android.settings:id/switch_widget")
-            ?: firstByViewId(root, "android:id/switch_widget")
-        val textNode = findFirst(root) { containsText(it, "wi-fi", "wifi", "wlan", "wi fi") }
+        val idNode = firstVisibleByViewId(root, "com.android.settings:id/main_switch_bar")
+            ?.takeIf(::isUsableToggle)
+            ?: firstVisibleByViewId(root, "com.android.settings:id/switch_bar")
+                ?.takeIf(::isUsableToggle)
+            ?: firstVisibleByViewId(root, "com.android.settings:id/switch_widget")
+                ?.takeIf(::isUsableToggle)
+            ?: firstVisibleByViewId(root, "android:id/switch_widget")
+                ?.takeIf(::isUsableToggle)
+        val textNode = findFirst(root) {
+            it.isVisibleToUser &&
+                settingsStrings.matches(rawText(it), SelfArmSettingsLabel.WIFI_PRIMARY_SWITCH)
+        }
         val target = idNode ?: switchNode ?: textNode
         return target != null && canClickNow() && clickNode(target)
     }
 
-    private fun clickText(root: AccessibilityNodeInfo, vararg needles: String): Boolean {
-        val target = findFirst(root) { containsText(it, *needles) }
+    private fun isWifiSettingsScreen(root: AccessibilityNodeInfo): Boolean =
+        SelfArmSettingsNodePolicy.isWifiScreen(
+            settingsPackage = isSettingsRoot(root),
+            appBarMatches = settingsStrings.matches(
+                subtreeText(firstVisibleByViewId(root, SETTINGS_APP_BAR_ID)),
+                SelfArmSettingsLabel.WIFI_PRIMARY_SWITCH,
+            ),
+            switchTextMatches = settingsStrings.matches(
+                textByViewId(root, SETTINGS_SWITCH_TEXT_ID),
+                SelfArmSettingsLabel.WIFI_PRIMARY_SWITCH,
+            ),
+        )
+
+    private fun isUsableToggle(node: AccessibilityNodeInfo): Boolean =
+        SelfArmSettingsNodePolicy.isUsableToggle(
+            visible = node.isVisibleToUser,
+            enabled = node.isEnabled,
+            checkable = node.isCheckable,
+            clickable = node.isClickable,
+        )
+
+    private fun clickSettingsLabel(
+        root: AccessibilityNodeInfo,
+        label: SelfArmSettingsLabel,
+    ): Boolean {
+        val content = firstVisibleByViewId(root, SETTINGS_RECYCLER_ID) ?: root
+        val target = findFirst(content) { node ->
+            SelfArmSettingsNodePolicy.isActionTitle(
+                visible = node.isVisibleToUser,
+                enabled = node.isEnabled,
+                viewId = node.viewIdResourceName,
+                className = className(node),
+                exactLabelMatch = settingsStrings.matchesExactly(rawText(node), label),
+                hasClickableAncestor = hasClickableAncestor(node),
+            )
+        }
         return target != null && canClickNow() && clickNode(target)
     }
 
@@ -964,7 +1026,12 @@ internal class SelfArmWirelessDebuggingAutomator(
         var current: AccessibilityNodeInfo? = node
         while (current != null) {
             val candidate = current ?: return false
-            if (candidate.isClickable && candidate.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            if (
+                candidate.isVisibleToUser &&
+                candidate.isEnabled &&
+                candidate.isClickable &&
+                candidate.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            ) {
                 lastClickAt = SystemClock.uptimeMillis()
                 return true
             }
@@ -973,45 +1040,114 @@ internal class SelfArmWirelessDebuggingAutomator(
         return false
     }
 
-    private fun scrollForward(root: AccessibilityNodeInfo): Boolean {
-        val scrollable = findFirst(root) { it.isScrollable }
-        if (scrollable != null && scrollable.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) {
-            return true
+    private fun hasClickableAncestor(node: AccessibilityNodeInfo): Boolean {
+        var current: AccessibilityNodeInfo? = node
+        var depth = 0
+        while (current != null && depth < MAX_CLICK_ANCESTOR_DEPTH) {
+            if (current.isClickable) return true
+            current = current.parent
+            depth++
         }
-        return swipeUpGesture()
+        return false
     }
 
-    private fun swipeUpGesture(): Boolean =
-        runCatching {
-            val metrics: DisplayMetrics = service.resources.displayMetrics
-            val x = metrics.widthPixels * 0.5f
-            val startY = metrics.heightPixels * 0.74f
-            val endY = metrics.heightPixels * 0.28f
-            val path = Path().apply {
-                moveTo(x, startY)
-                lineTo(x, endY)
+    private fun openPreferredSettingsTarget() {
+        val wantsWirelessPage =
+            operationMode != OperationMode.MANUAL_NAVIGATION ||
+                manualTarget == SelfArmManualTarget.WIRELESS_DEBUGGING ||
+                manualTarget == SelfArmManualTarget.PAIRING_DIALOG
+        if (!wantsWirelessPage) {
+            report("opening_developer_options")
+            openDeveloperSettings()
+            return
+        }
+        report("opening_wireless_debugging")
+        settingsScroller.reset(ScrollSurface.DEVELOPER_OPTIONS)
+        settingsScroller.reset(ScrollSurface.WIRELESS_DEBUGGING)
+        if (!directWirelessFallbackUsed && !directWirelessProbePending) {
+            noteDeveloperOpenAttempt()
+            if (
+                SelfArmManualSettingsLauncher.open(
+                    service.applicationContext,
+                    SelfArmManualTarget.WIRELESS_DEBUGGING,
+                )
+            ) {
+                directWirelessProbePending = true
+                directWirelessProbeStartedAt = SystemClock.uptimeMillis()
+                return
             }
-            val gesture = GestureDescription.Builder()
-                .addStroke(GestureDescription.StrokeDescription(path, 0, SWIPE_DURATION_MS))
-                .build()
-            service.dispatchGesture(gesture, null, null)
-        }.getOrDefault(false)
+            directWirelessFallbackUsed = true
+        }
+        directWirelessProbePending = false
+        noteDeveloperOpenAttempt()
+        startDeveloperSettingsIntent()
+    }
+
+    private fun fallbackFromUnverifiedDirectRouteIfDue(): Boolean {
+        if (
+            !SelfArmDirectSettingsRoutePolicy.shouldFallback(
+                pending = directWirelessProbePending,
+                startedAt = directWirelessProbeStartedAt,
+                now = SystemClock.uptimeMillis(),
+                verificationWindowMs = DIRECT_WIRELESS_VERIFICATION_MS,
+            )
+        ) {
+            if (directWirelessProbePending) {
+                schedule(DIRECT_WIRELESS_VERIFICATION_POLL_MS)
+                return true
+            }
+            return false
+        }
+        directWirelessProbePending = false
+        directWirelessFallbackUsed = true
+        report("opening_developer_options")
+        noteDeveloperOpenAttempt()
+        settingsScroller.reset(ScrollSurface.DEVELOPER_OPTIONS)
+        startDeveloperSettingsIntent()
+        schedule(900L)
+        return true
+    }
+
+    private fun markDirectWirelessRouteVerifiedOrBypassed() {
+        directWirelessProbePending = false
+        directWirelessProbeStartedAt = 0L
+        directWirelessFallbackUsed = true
+    }
+
+    private fun resetDirectWirelessRoute() {
+        directWirelessProbePending = false
+        directWirelessProbeStartedAt = 0L
+        directWirelessFallbackUsed = false
+    }
 
     private fun openDeveloperSettings() {
+        noteDeveloperOpenAttempt()
+        settingsScroller.reset(ScrollSurface.DEVELOPER_OPTIONS)
+        startDeveloperSettingsIntent()
+    }
+
+    private fun noteDeveloperOpenAttempt() {
         val now = SystemClock.uptimeMillis()
         developerOpenAttempts++
         lastDeveloperOpenAt = now
         if (developerOpenStartedAt == 0L) developerOpenStartedAt = now
+    }
+
+    private fun startDeveloperSettingsIntent() {
         val intent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
-            .setPackage("com.android.settings")
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .setPackage(AccessibilityWindowRoots.SETTINGS_PACKAGE)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         if (tryStart(intent)) return
-        tryStart(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        tryStart(
+            Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+        )
     }
 
     private fun openDeviceInfoSettings() {
+        settingsScroller.reset(ScrollSurface.DEVICE_INFO)
         val intent = Intent(Settings.ACTION_DEVICE_INFO_SETTINGS)
-            .setPackage("com.android.settings")
+            .setPackage(AccessibilityWindowRoots.SETTINGS_PACKAGE)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (tryStart(intent)) return
         if (
@@ -1041,6 +1177,7 @@ internal class SelfArmWirelessDebuggingAutomator(
     }
 
     private fun openWifiSettings() {
+        settingsScroller.reset(ScrollSurface.WIFI_SETTINGS)
         wifiSettingCandidates().forEach { candidate ->
             candidate.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             if (tryStart(candidate)) {
@@ -1105,9 +1242,13 @@ internal class SelfArmWirelessDebuggingAutomator(
             false
         }
 
-    private fun firstByViewId(root: AccessibilityNodeInfo, viewId: String): AccessibilityNodeInfo? =
+    private fun firstVisibleByViewId(
+        root: AccessibilityNodeInfo,
+        viewId: String,
+    ): AccessibilityNodeInfo? =
         runCatching {
-            root.findAccessibilityNodeInfosByViewId(viewId)?.firstOrNull()
+            root.findAccessibilityNodeInfosByViewId(viewId)
+                ?.firstOrNull { node -> node.isVisibleToUser }
         }.getOrNull()
 
     private fun findFirst(
@@ -1122,21 +1263,37 @@ internal class SelfArmWirelessDebuggingAutomator(
         return null
     }
 
-    private fun containsInTree(root: AccessibilityNodeInfo, vararg needles: String): Boolean =
-        findFirst(root) { containsText(it, *needles) } != null
+    private fun containsSettingsLabel(
+        root: AccessibilityNodeInfo,
+        label: SelfArmSettingsLabel,
+    ): Boolean =
+        findFirst(root) { node ->
+            node.isVisibleToUser &&
+                settingsStrings.matches(rawText(node), label)
+        } != null
 
-    private fun containsText(node: AccessibilityNodeInfo, vararg needles: String): Boolean {
-        val value = normalizedText(node)
-        if (value.isBlank()) return false
-        return needles.any {
-            val needle = normalize(it)
-            needle.isNotBlank() && value.contains(needle)
-        }
-    }
+    private fun isSettingsRoot(root: AccessibilityNodeInfo): Boolean =
+        root.packageName?.toString() == AccessibilityWindowRoots.SETTINGS_PACKAGE
 
     private fun findBuildNumberByBuildIdentifier(root: AccessibilityNodeInfo): AccessibilityNodeInfo? =
         findFirst(root) {
             it !== root &&
+                it.isVisibleToUser &&
+                it.isEnabled &&
+                it.isClickable &&
+                settingsStrings.matches(
+                    subtreeText(it),
+                    SelfArmSettingsLabel.BUILD_NUMBER,
+                ) &&
+                SelfArmSettingsTextMatcher.containsBuildIdentifier(
+                    subtreeText(it),
+                    Build.DISPLAY.orEmpty(),
+                    Build.ID.orEmpty(),
+                )
+        } ?: findFirst(root) {
+            it !== root &&
+                it.isVisibleToUser &&
+                it.isEnabled &&
                 it.isClickable &&
                 SelfArmSettingsTextMatcher.containsBuildIdentifier(
                     subtreeText(it),
@@ -1145,6 +1302,8 @@ internal class SelfArmWirelessDebuggingAutomator(
                 )
         } ?: findFirst(root) {
             it !== root &&
+                it.isVisibleToUser &&
+                it.isEnabled &&
                 SelfArmSettingsTextMatcher.containsBuildIdentifier(
                     rawText(it),
                     Build.DISPLAY.orEmpty(),
@@ -1153,7 +1312,7 @@ internal class SelfArmWirelessDebuggingAutomator(
         }
 
     private fun textByViewId(root: AccessibilityNodeInfo, viewId: String): String =
-        firstByViewId(root, viewId)?.let { rawText(it) }.orEmpty()
+        firstVisibleByViewId(root, viewId)?.let { rawText(it) }.orEmpty()
 
     private fun firstCode(root: AccessibilityNodeInfo): String {
         val node = findFirst(root) { PAIRING_CODE.matcher(rawText(it)).find() } ?: return ""
@@ -1281,14 +1440,23 @@ internal class SelfArmWirelessDebuggingAutomator(
         if (operationMode != OperationMode.WIFI_ONLY) {
             SelfArmOnboardingStore.reportProgress(service.applicationContext, setupState)
         }
-        val wifiIp = wifiIpv4().ifBlank { lastPairingHost.ifBlank { lastConnectHost } }
-        val connectPort = SelfArmWirelessAdbController.readWirelessPort().takeIf { it > 0 } ?: lastConnectPort
-        android.util.Log.i(TAG, "selfarm-wireless $setupState wifiIp=$wifiIp connectPort=$connectPort")
+        val wifiReady = wifiIpv4().isNotBlank() ||
+            lastPairingHost.isNotBlank() ||
+            lastConnectHost.isNotBlank()
+        val connectPortKnown =
+            SelfArmWirelessAdbController.readWirelessPort() > 0 || lastConnectPort > 0
+        android.util.Log.i(
+            TAG,
+            "selfarm-wireless $setupState wifiReady=$wifiReady " +
+                "connectPortKnown=$connectPortKnown",
+        )
     }
 
     private fun finish(setupState: String, success: Boolean, diagnostic: String = "") {
         active = false
         handler.removeCallbacks(stepRunnable)
+        scheduledStepAt = SelfArmTickSchedulePolicy.NONE
+        settingsScroller.clearPending()
         if (operationMode == OperationMode.WIFI_ONLY) {
             returnFromWifiSettings()
             report(setupState)
@@ -1317,8 +1485,12 @@ internal class SelfArmWirelessDebuggingAutomator(
         SystemClock.uptimeMillis() - lastClickAt >= CLICK_COOLDOWN_MS
 
     private fun schedule(delayMs: Long) {
+        val requestedAt = SystemClock.uptimeMillis() + delayMs.coerceAtLeast(0L)
+        val nextAt = SelfArmTickSchedulePolicy.nextScheduledAt(scheduledStepAt, requestedAt)
+        if (nextAt == scheduledStepAt) return
         handler.removeCallbacks(stepRunnable)
-        handler.postDelayed(stepRunnable, delayMs)
+        scheduledStepAt = nextAt
+        handler.postAtTime(stepRunnable, nextAt)
     }
 
     private fun pairingDialogHoldMs(): Long =
@@ -1328,10 +1500,14 @@ internal class SelfArmWirelessDebuggingAutomator(
 
     companion object {
         private const val TAG = "NexusWirelessSetup"
-        private const val TIMEOUT_MS = 75_000L
+        private const val TIMEOUT_MS = 110_000L
         private const val STEP_DELAY_MS = 450L
         private const val CLICK_COOLDOWN_MS = 850L
+        private const val CONFIRMATION_POLL_MS = 300L
+        private const val WIRELESS_CONFIRMATION_WAIT_MS = 6_000L
         private const val DEVELOPER_OPEN_TIMEOUT_MS = 5_500L
+        private const val DIRECT_WIRELESS_VERIFICATION_MS = 1_800L
+        private const val DIRECT_WIRELESS_VERIFICATION_POLL_MS = 250L
         private const val WIFI_POLL_INTERVAL_MS = 1_000L
         private const val WIFI_CLICK_RETRY_WAIT_MS = 13_000L
         private const val WIFI_NETWORK_WAIT_MS = 30_000L
@@ -1343,13 +1519,37 @@ internal class SelfArmWirelessDebuggingAutomator(
         private const val MANUAL_HOLD_POLL_MS = 1_000L
         private const val PAIRING_PORT_GRACE_MS = 1_800L
         private const val PAIRING_READY_REPORT_INTERVAL_MS = 2_000L
-        private const val SWIPE_DURATION_MS = 180L
         private const val MAX_WIFI_CLICK_ATTEMPTS = 2
         private const val MAX_WIFI_SCROLLS = 8
         private const val MAX_DEVELOPER_OPEN_ATTEMPTS = 3
-        private const val MAX_DEVELOPER_SCROLLS = 15
-        private const val MAX_DEVICE_INFO_SCROLLS = 12
+        private const val MAX_DEVELOPER_SCROLLS = 48
+        private const val MAX_DEVICE_INFO_SCROLLS = 32
+        private const val MAX_WIRELESS_SCROLLS = 16
         private const val MAX_BUILD_NUMBER_TAPS = 7
+        private const val MAX_CLICK_ANCESTOR_DEPTH = 8
+        private const val SETTINGS_APP_BAR_ID = "com.android.settings:id/app_bar"
+        private const val SETTINGS_RECYCLER_ID = "com.android.settings:id/recycler_view"
+        private const val SETTINGS_SWITCH_BAR_ID = "com.android.settings:id/switch_bar"
+        private const val SETTINGS_SWITCH_TEXT_ID = "com.android.settings:id/switch_text"
+        private val WIRELESS_SWITCH_IDS = listOf(
+            "com.android.settings:id/switchWidget",
+            "com.android.settings:id/switch_widget",
+            "android:id/switch_widget",
+        )
+        private val CONFIRM_BUTTON_IDS = listOf(
+            "android:id/button1",
+            "com.android.settings:id/button1",
+        )
+        private val POSITIVE_BUTTON_FALLBACKS = setOf(
+            "ok",
+            "allow",
+            "enable",
+            "turn on",
+            "activer",
+            "autoriser",
+            "oui",
+            "yes",
+        )
         private val IPV4_ENDPOINT = Pattern.compile("\\b((?:\\d{1,3}\\.){3}\\d{1,3}):(\\d{2,5})\\b")
         private val PAIRING_CODE = Pattern.compile("\\b(\\d{6})\\b")
         private val STANDALONE_PORT = Pattern.compile("\\b(\\d{4,5})\\b")

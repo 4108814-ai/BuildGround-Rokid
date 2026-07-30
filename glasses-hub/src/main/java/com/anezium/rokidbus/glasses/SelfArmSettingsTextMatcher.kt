@@ -7,12 +7,14 @@ internal object SelfArmSettingsTextMatcher {
     private val combiningMarks = Regex("\\p{Mn}+")
     private val whitespace = Regex("\\s+")
     private val hyphenLike = Regex("[\\u2010\\u2011\\u2012\\u2013\\u2014\\u2015\\u2212]")
+    private val apostropheLike = Regex("[\\u02bc\\u2018\\u2019\\uff07]")
 
     fun normalize(value: String): String {
         if (value.isBlank()) return ""
         val punctuationNormalized = value
             .replace('\u00a0', ' ')
             .replace(hyphenLike, "-")
+            .replace(apostropheLike, "'")
         return Normalizer.normalize(punctuationNormalized, Normalizer.Form.NFD)
             .replace(combiningMarks, "")
             .lowercase(Locale.ROOT)
@@ -29,6 +31,17 @@ internal object SelfArmSettingsTextMatcher {
         }
     }
 
+    fun containsAnyNormalized(
+        value: String,
+        normalizedNeedles: Iterable<String>,
+    ): Boolean {
+        val normalizedValue = normalize(value)
+        if (normalizedValue.isBlank()) return false
+        return normalizedNeedles.any { needle ->
+            needle.isNotBlank() && normalizedValue.contains(needle)
+        }
+    }
+
     fun containsBuildIdentifier(
         value: String,
         buildDisplay: String,
@@ -42,5 +55,3 @@ internal object SelfArmSettingsTextMatcher {
             .any { normalizedValue.contains(it) }
     }
 }
-
-

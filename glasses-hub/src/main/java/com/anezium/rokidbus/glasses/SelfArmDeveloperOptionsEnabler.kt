@@ -11,12 +11,17 @@ internal class SelfArmDeveloperOptionsEnabler(
     private val service: RokidBusAccessibilityService,
     private val handler: Handler,
 ) {
+    private val settingsStrings = SelfArmSettingsStringResolver(service.applicationContext)
     private var active = false
     private var completion: ((Boolean) -> Unit)? = null
     private var successfulTaps = 0
     private var activationChecks = 0
     private var deadlineAt = 0L
-    private val stepRunnable = Runnable(::step)
+    private var scheduledStepAt = SelfArmTickSchedulePolicy.NONE
+    private val stepRunnable = Runnable {
+        scheduledStepAt = SelfArmTickSchedulePolicy.NONE
+        step()
+    }
 
     fun start(onFinished: (Boolean) -> Unit) {
         stop()
@@ -28,6 +33,8 @@ internal class SelfArmDeveloperOptionsEnabler(
         active = true
         successfulTaps = 0
         activationChecks = 0
+        scheduledStepAt = SelfArmTickSchedulePolicy.NONE
+        settingsStrings.refresh()
         deadlineAt = SystemClock.uptimeMillis() + TIMEOUT_MS
         if (!SelfArmManualSettingsLauncher.open(
                 service.applicationContext,
@@ -55,7 +62,10 @@ internal class SelfArmDeveloperOptionsEnabler(
             finish(false)
             return
         }
-        val root = AccessibilityWindowRoots.getNavigationRoot(service)
+        val root = AccessibilityWindowRoots.getNavigationRoot(
+            service,
+            AccessibilityWindowRoots.SETTINGS_PACKAGE,
+        )
         if (root == null) {
             schedule(RETRY_DELAY_MS)
             return
@@ -95,7 +105,12 @@ internal class SelfArmDeveloperOptionsEnabler(
         val clickableByIdentifier = findFirst(root) { node ->
             node !== root &&
                 node.isVisibleToUser &&
+                node.isEnabled &&
                 node.isClickable &&
+                settingsStrings.matches(
+                    subtreeText(node),
+                    SelfArmSettingsLabel.BUILD_NUMBER,
+                ) &&
                 SelfArmSettingsTextMatcher.containsBuildIdentifier(
                     subtreeText(node),
                     Build.DISPLAY.orEmpty(),
@@ -103,9 +118,22 @@ internal class SelfArmDeveloperOptionsEnabler(
                 )
         }
         if (clickableByIdentifier != null) return clickableByIdentifier
+        val clickableByIdentifierOnly = findFirst(root) { node ->
+            node !== root &&
+                node.isVisibleToUser &&
+                node.isEnabled &&
+                node.isClickable &&
+                SelfArmSettingsTextMatcher.containsBuildIdentifier(
+                    subtreeText(node),
+                    Build.DISPLAY.orEmpty(),
+                    Build.ID.orEmpty(),
+                )
+        }
+        if (clickableByIdentifierOnly != null) return clickableByIdentifierOnly
         val valueByIdentifier = findFirst(root) { node ->
             node !== root &&
                 node.isVisibleToUser &&
+                node.isEnabled &&
                 SelfArmSettingsTextMatcher.containsBuildIdentifier(
                     rawText(node),
                     Build.DISPLAY.orEmpty(),
@@ -116,23 +144,22 @@ internal class SelfArmDeveloperOptionsEnabler(
         return findFirst(root) { node ->
             node !== root &&
                 node.isVisibleToUser &&
-                SelfArmSettingsTextMatcher.containsAny(
-                    rawText(node),
-                    "build number",
-                    "numero de build",
-                    "numero de version",
-                    "software version",
-                    "numero de compilacion",
-                    "numero de compilacao",
-                    "build-nummer",
-                )
+                node.isEnabled &&
+                settingsStrings.matchesExactly(rawText(node), SelfArmSettingsLabel.BUILD_NUMBER)
         }
     }
 
     private fun clickNode(node: AccessibilityNodeInfo): Boolean {
         var current: AccessibilityNodeInfo? = node
         while (current != null) {
-            if (current.isClickable && current.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+            if (
+                current.isVisibleToUser &&
+                current.isEnabled &&
+                current.isClickable &&
+                current.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            ) {
+                return true
+            }
             current = current.parent
         }
         return false
@@ -173,6 +200,7 @@ internal class SelfArmDeveloperOptionsEnabler(
         completion = null
         active = false
         handler.removeCallbacks(stepRunnable)
+        scheduledStepAt = SelfArmTickSchedulePolicy.NONE
         log(
             if (verified) {
                 "Manual developer enable completed taps=$successfulTaps"
@@ -184,8 +212,12 @@ internal class SelfArmDeveloperOptionsEnabler(
     }
 
     private fun schedule(delayMs: Long) {
+        val requestedAt = SystemClock.uptimeMillis() + delayMs.coerceAtLeast(0L)
+        val nextAt = SelfArmTickSchedulePolicy.nextScheduledAt(scheduledStepAt, requestedAt)
+        if (nextAt == scheduledStepAt) return
         handler.removeCallbacks(stepRunnable)
-        handler.postDelayed(stepRunnable, delayMs)
+        scheduledStepAt = nextAt
+        handler.postAtTime(stepRunnable, nextAt)
     }
 
     private companion object {

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Self-arm Settings navigation
+
+- Wireless Debugging setup now verifies every scroll, starts gestures inside
+  the measured Settings RecyclerView, returns to the beginning before searching,
+  and ignores stale overlays or hidden duplicate controls.
+- Settings labels are loaded from the firmware's own localized resources, so
+  Developer options, Wireless Debugging, pairing, and Build number navigation
+  follow every locale shipped by that firmware without a Nexus translation
+  update.
+- Direct Wireless Debugging launch is capability-probed first; inaccessible
+  YodaOS fragments fall back to the hardened Settings traversal.
+
 ## 1.0.48
 
 ### Activities

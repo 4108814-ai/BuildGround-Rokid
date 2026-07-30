@@ -90,13 +90,10 @@ class RokidBusAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        AccessibilityWindowRoots.noteEvent(event, packageName)
         wirelessDebuggingAutomator?.onAccessibilityEvent(event)
         developerOptionsEnabler?.onAccessibilityEvent(event)
         StatusBadgeOverlayRenderer.onAccessibilityEvent(event)
-        if (pendingManualCompletion != null && !manualWifiEnableActive) {
-            main.removeCallbacks(manualOpenVerifier)
-            main.postDelayed(manualOpenVerifier, MANUAL_OPEN_EVENT_SETTLE_MS)
-        }
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
@@ -629,7 +626,6 @@ class RokidBusAccessibilityService : AccessibilityService() {
     companion object {
         private const val KEYCODE_PROG_BLUE = 186
         private const val MANUAL_OPEN_INITIAL_DELAY_MS = 350L
-        private const val MANUAL_OPEN_EVENT_SETTLE_MS = 120L
         private const val MANUAL_OPEN_POLL_MS = 250L
         private const val MANUAL_OPEN_TIMEOUT_MS = 30_000L
         private const val MANUAL_WIFI_NETWORK_POLL_MS = 500L
