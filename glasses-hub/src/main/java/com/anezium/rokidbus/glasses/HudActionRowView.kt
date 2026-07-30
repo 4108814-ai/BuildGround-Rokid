@@ -28,6 +28,8 @@ internal data class HudActionChip(val glyph: String, val label: String)
  * unconditionally.
  */
 internal class HudActionRowView(context: Context) : LinearLayout(context) {
+    private val labels = mutableListOf<TextView>()
+
     init {
         orientation = HORIZONTAL
         gravity = Gravity.START
@@ -35,15 +37,38 @@ internal class HudActionRowView(context: Context) : LinearLayout(context) {
 
     fun render(actions: List<HudActionChip>, selectedIndex: Int) {
         removeAllViews()
+        labels.clear()
         actions.forEachIndexed { index, action ->
             addView(
                 chip(action, selected = index == selectedIndex),
                 LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
-                    if (index > 0) marginStart = BusTheme.dp(context, 6)
+                    if (index > 0) marginStart = BusTheme.dp(context, CHIP_GAP_DP)
                 },
             )
         }
         visibility = if (actions.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    /**
+     * Every chip is given an equal share of the row before it is measured.
+     *
+     * A chip wraps its label, so without a ceiling one long label simply makes
+     * the row wider than the band and pushes the chips after it off the glass —
+     * the ellipsize on the label never fires, because nothing ever told the
+     * label it was short on room. Handing each chip the same share means three
+     * long labels all truncate instead of the last one disappearing, and a short
+     * label still costs only what it needs.
+     */
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val available = MeasureSpec.getSize(widthMeasureSpec)
+        if (available > 0 && labels.isNotEmpty()) {
+            val gaps = BusTheme.dp(context, CHIP_GAP_DP) * (labels.size - 1)
+            val chrome = BusTheme.dp(context, CHIP_CHROME_DP)
+            val share = (available - gaps) / labels.size - chrome
+            val ceiling = share.coerceAtLeast(BusTheme.dp(context, MIN_LABEL_DP))
+            labels.forEach { it.maxWidth = ceiling }
+        }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
     }
 
     private fun chip(action: HudActionChip, selected: Boolean) = LinearLayout(context).apply {
@@ -76,6 +101,7 @@ internal class HudActionRowView(context: Context) : LinearLayout(context) {
         addView(
             label(if (selected) BusTheme.phosphor else BusTheme.muted).apply {
                 text = action.label
+                labels.add(this)
             },
             LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
                 marginStart = BusTheme.dp(context, 4)
@@ -96,5 +122,12 @@ internal class HudActionRowView(context: Context) : LinearLayout(context) {
     private companion object {
         const val ACTION_GLYPH_DP = 18
         const val ACTION_LABEL_SP = 10f
+        const val CHIP_GAP_DP = 6
+
+        /** A chip's own width around the label: padding, glyph, and the gap after it. */
+        const val CHIP_CHROME_DP = 6 + ACTION_GLYPH_DP + 4 + 6
+
+        /** Below this the label reads as noise, so the row overflows rather than lie. */
+        const val MIN_LABEL_DP = 24
     }
 }
