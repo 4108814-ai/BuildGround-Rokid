@@ -316,13 +316,12 @@ code {
   right: -14%;
   bottom: -3.4rem;
   width: 46%;
-  max-height: 15.5rem;
   transform: rotate(3.5deg);
   border-color: var(--line);
   border-radius: 16px;
   box-shadow: 0 30px 70px -26px rgba(0,0,0,1);
 }
-.optic--phone img { height: 15.5rem; object-fit: cover; object-position: top center; }
+.optic--phone img { width: 100%; height: auto; }
 .optic--phone:hover { transform: rotate(1.6deg) scale(1.02); }
 .optic--phone::after { background: linear-gradient(200deg, rgba(255,255,255,.05), transparent 40%); }
 
@@ -688,13 +687,56 @@ code {
   margin-bottom: .35rem;
 }
 .slide span { color: var(--muted); font-size: .94rem; display: block; }
-.slide--text {
+/* the two plugins with nothing to screenshot get a drawn card instead */
+.slide--card {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
   background:
-    radial-gradient(90% 70% at 100% 0%, rgba(60, 240, 123, .08), transparent 70%),
-    linear-gradient(180deg, rgba(13, 19, 25, .7), rgba(7, 10, 14, .7));
+    radial-gradient(120% 80% at 50% 0%, rgba(60, 240, 123, .1), transparent 62%),
+    linear-gradient(180deg, rgba(14, 22, 28, .85), rgba(6, 9, 13, .9));
+  position: relative;
 }
+.slide--card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(60, 240, 123, .055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(60, 240, 123, .055) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(120% 70% at 50% 12%, #000 20%, transparent 72%);
+  -webkit-mask-image: radial-gradient(120% 70% at 50% 12%, #000 20%, transparent 72%);
+  pointer-events: none;
+}
+.slide__mark {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 1.6rem;
+  color: var(--glow);
+  position: relative;
+}
+.slide__mark svg {
+  width: min(58%, 128px);
+  height: auto;
+  opacity: .62;
+  filter: drop-shadow(0 0 18px rgba(60, 240, 123, .35));
+  transition: opacity .5s, transform .6s cubic-bezier(.2,.8,.3,1);
+}
+.slide--card:hover .slide__mark svg { opacity: .92; transform: translateY(-3px); }
+.slide__tag {
+  display: inline-block !important;
+  font-family: var(--mono);
+  font-size: .6rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--glow) !important;
+  border: 1px solid rgba(60, 240, 123, .3);
+  border-radius: 999px;
+  padding: .22rem .6rem;
+  margin-bottom: .7rem;
+}
+.slide--card figcaption { border-top: 1px solid var(--line-soft); position: relative; }
 
 .grid__foot {
   margin: clamp(1.2rem, 3vw, 2rem) 0 0;
@@ -759,7 +801,9 @@ code {
   grid-template-columns: 15.5rem minmax(0, 1fr);
   gap: clamp(1.5rem, 4vw, 3.5rem);
   align-items: start;
+  scroll-margin-top: 5.5rem;
 }
+.road__group:target .chip { box-shadow: 0 0 0 4px rgba(60, 240, 123, .1); }
 .road__meta p { color: var(--muted); font-size: .95rem; margin: .95rem 0 0; max-width: 22em; }
 
 .chip {
@@ -951,12 +995,6 @@ code {
 .latest a { color: var(--glow); white-space: nowrap; font-family: var(--display); font-size: .9rem; font-weight: 520; }
 .latest a:hover { text-decoration: underline; }
 
-/* hero variants */
-.hero--tight { padding-bottom: clamp(2.5rem, 5vw, 4.5rem); }
-.hero__inner--single { grid-template-columns: minmax(0, 1fr); max-width: 60rem; }
-.hero__inner--single .lede { font-size: clamp(1.12rem, .6vw + 1rem, 1.4rem); max-width: 30em; }
-.hero__inner--single .hero__facts { margin-top: .6rem; }
-
 .hero__facts--lead {
   border-top: 0;
   border-bottom: 1px solid var(--line);
@@ -966,6 +1004,9 @@ code {
 .hero__facts--lead b { font-size: 2.1rem; }
 
 /* the roadmap board, layout B's hero */
+
+.boardwrap { max-width: var(--wrap); margin: 0 auto; padding: clamp(2rem, 4vw, 3.2rem) var(--pad) 0; }
+.boardwrap .board { margin-top: 0; }
 
 .board {
   display: grid;
