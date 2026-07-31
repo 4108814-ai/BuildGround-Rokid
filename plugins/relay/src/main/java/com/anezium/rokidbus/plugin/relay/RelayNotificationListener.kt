@@ -48,7 +48,7 @@ class RelayNotificationListener : NotificationListenerService() {
     }
 
     private fun rebuildFromActiveNotifications() {
-        ReplyRepository.clear()
+        ReplyRepository.markAllReadOnly()
         if (!RelaySettings(this).enabled() || NotificationForwardingPolicy.isPaused(this)) return
         val count = runCatching {
             activeNotifications.orEmpty().count { sbn -> ingest(sbn, mayShow = false) }

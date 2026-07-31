@@ -38,6 +38,11 @@ internal sealed interface ReplySendResult {
 }
 
 internal object ReplyRepository {
+    private data class ReadableReply(
+        val snapshot: RelayInboxSnapshot,
+        val content: VisibleNotificationContent,
+    )
+
     data class CaptureResult(
         val reply: PendingReply,
         val shouldShowNow: Boolean,
@@ -55,6 +60,7 @@ internal object ReplyRepository {
     )
 
     private val pending = linkedMapOf<String, PendingReply>()
+    private val recent = linkedMapOf<String, ReadableReply>()
     private val lastCaptureAtMs = AtomicLong(0L)
 
     @Synchronized
@@ -97,7 +103,13 @@ internal object ReplyRepository {
             imageId = imagePreview?.id,
         )
         val previous = pending[id]
-        val contentChanged = previous == null || !previous.content.hasSameVisibleContent(content)
+        val previousContent = previous?.content ?: recent[id]?.content
+        val contentChanged = previousContent == null || !previousContent.hasSameVisibleContent(content)
+        val capturedAtMs = if (contentChanged) {
+            nextCaptureAtMs()
+        } else {
+            previous?.capturedAtMs ?: recent.getValue(id).snapshot.capturedAtMs
+        }
         val reply = PendingReply(
             id = id,
             notificationKey = sbn.key,
@@ -105,10 +117,21 @@ internal object ReplyRepository {
             footer = footer,
             actionIntent = action.actionIntent,
             remoteInputs = remoteInputs,
-            capturedAtMs = if (contentChanged) nextCaptureAtMs() else previous.capturedAtMs,
+            capturedAtMs = capturedAtMs,
             imagePreview = imagePreview,
         )
         pending[id] = reply
+        recent[id] = ReadableReply(
+            snapshot = RelayInboxSnapshot(
+                id = id,
+                sender = content.title,
+                appLabel = content.appLabel,
+                renderedText = content.renderedText,
+                capturedAtMs = capturedAtMs,
+            ),
+            content = content,
+        )
+        trimRecent()
         return CaptureResult(
             reply = reply,
             shouldShowNow = contentChanged && isMostRecent(id),
@@ -149,8 +172,21 @@ internal object ReplyRepository {
     }
 
     @Synchronized
+    fun inboxEntries(): List<RelayInboxEntry> = RelayInboxCatalog.entries(
+        snapshots = recent.values.map(ReadableReply::snapshot),
+        liveReplyIds = pending.keys.toSet(),
+    )
+
+    /** Keeps readable text in memory while dropping every process-bound reply object. */
+    @Synchronized
+    fun markAllReadOnly() {
+        pending.clear()
+    }
+
+    @Synchronized
     fun clear() {
         pending.clear()
+        recent.clear()
     }
 
     @Synchronized
@@ -159,6 +195,20 @@ internal object ReplyRepository {
     @Synchronized
     private fun isMostRecent(notificationId: String): Boolean =
         pending.values.maxByOrNull(PendingReply::capturedAtMs)?.id == notificationId
+
+    private fun trimRecent() {
+        while (recent.size > RelayInboxCatalog.MAX_ENTRIES) {
+            val oldestId = recent.values
+                .minWithOrNull(
+                    compareBy<ReadableReply> { it.snapshot.capturedAtMs }
+                        .thenBy { it.snapshot.id },
+                )
+                ?.snapshot
+                ?.id
+                ?: return
+            recent.remove(oldestId)
+        }
+    }
 
     private fun notificationRevision(
         sbn: StatusBarNotification,

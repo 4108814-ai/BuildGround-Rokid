@@ -79,7 +79,7 @@
                 android:value=".RelaySettingsActivity" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.LAUNCHABLE"
-                android:value="false" />
+                android:value="true" />
         </service>
     </application>
 </manifest>

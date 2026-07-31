@@ -2,5 +2,5 @@
 
 ## 1.0.0
 
-- Initial notification listener, allowlist, notice, voice reply, and local fake
-  notification harness.
+- Initial notification listener, notice, menu-launched inbox, explicit voice
+  reply, and local fake notification harness.
