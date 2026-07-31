@@ -3,4 +3,69 @@
     <string name="accessibility_service_label">Rokid Nexus Glasses</string>
     <string name="accessibility_service_description">Runs Nexus controls and guides secure Wireless Debugging pairing during first-run setup.</string>
     <string name="accessibility_service_summary">Nexus controls and secure first-run setup</string>
+
+    <!-- First-run onboarding, shown on the lens. Keep lines short: the optic fits ~29 columns. -->
+    <string name="onb_footer">Tap: continue · Back: exit</string>
+    <string name="onb_support_code">Support code: %1$s</string>
+
+    <string name="onb_accessibility_eyebrow">SETUP</string>
+    <string name="onb_accessibility_title">Turn on Rokid Nexus Glasses</string>
+    <string name="onb_accessibility_body">Find “Rokid Nexus Glasses” in the Settings list and switch it on.\n\nNexus comes straight back here and finishes the rest on its own.</string>
+    <string name="onb_accessibility_action">OPEN SETTINGS</string>
+
+    <string name="onb_running_eyebrow">SETTING UP</string>
+    <string name="onb_running_title">Nexus is finishing up</string>
+    <string name="onb_running_body">%1$s\n\nKeep the glasses on. This usually takes 1–2 minutes.</string>
+    <string name="onb_running_status">Working…</string>
+    <string name="onb_running_recovery_action">FINISH SETUP</string>
+
+    <string name="onb_wifi_eyebrow">SETUP PAUSED</string>
+    <string name="onb_wifi_title">Wi-Fi needed</string>
+    <string name="onb_wifi_body">Connect the glasses to Wi-Fi from the Hi Rokid app on your phone.\n\nNexus picks up where it left off the moment they are online.</string>
+    <string name="onb_wifi_action">CHECK AGAIN</string>
+
+    <string name="onb_manual_eyebrow">FINISH ON YOUR PHONE</string>
+    <string name="onb_manual_title">Nexus needs a hand</string>
+    <string name="onb_manual_body">Automatic setup could not finish here. Open Rokid Nexus on your phone and follow the guided setup.</string>
+    <string name="onb_manual_action">RETRY HERE</string>
+
+    <string name="onb_failed_eyebrow">SETUP STOPPED</string>
+    <string name="onb_failed_title">Let’s try again</string>
+    <string name="onb_failed_body">%1$s\n\nTap retry — Nexus reopens the secure setup and finishes arming.</string>
+    <string name="onb_failed_action">RETRY</string>
+
+    <string name="onb_unsupported_eyebrow">SETUP UNAVAILABLE</string>
+    <string name="onb_unsupported_title">Android 11 required</string>
+    <string name="onb_unsupported_body">This firmware has no Wireless Debugging pairing API. Use the documented ADB pm grant fallback.</string>
+    <string name="onb_unsupported_action">NO WIRELESS SETUP</string>
+
+    <string name="onb_done_eyebrow">SETUP COMPLETE</string>
+    <string name="onb_done_title">You’re all set</string>
+    <string name="onb_done_body">Rokid Nexus is armed and ready.</string>
+
+    <!-- Phase lines. One short sentence: it sits inside onb_running_body. -->
+    <string name="onb_phase_unknown">Getting ready…</string>
+    <string name="onb_phase_waiting_for_accessibility">Waiting for Rokid Nexus Glasses to be switched on.</string>
+    <string name="onb_phase_waiting_for_wifi">Waiting for a Wi-Fi network.</string>
+    <string name="onb_phase_enabling_developer_options">Unlocking developer options…</string>
+    <string name="onb_phase_opening_wireless_debugging">Opening Wireless Debugging…</string>
+    <string name="onb_phase_reading_pairing_dialog">Reading the pairing details…</string>
+    <string name="onb_phase_pairing_locally">Pairing securely…</string>
+    <string name="onb_phase_pairing_via_phone">Your phone is finishing the pairing…</string>
+    <string name="onb_phase_arming">Arming Nexus…</string>
+    <string name="onb_phase_complete">Secure setup complete.</string>
+    <string name="onb_phase_manual_required">Automatic setup could not finish.</string>
+    <string name="onb_phase_failed">Setup stopped before it finished.</string>
+
+    <!-- Failure reasons, shown in place of the phase line when setup stops. -->
+    <string name="onb_reason_lease_expired">Setup stalled and was stopped.</string>
+    <string name="onb_reason_wifi_required">No Wi-Fi network. Connect the glasses to Wi-Fi, then retry.</string>
+    <string name="onb_reason_pairing_expired">The pairing step timed out.</string>
+    <string name="onb_reason_wireless_timeout">Wireless Debugging setup timed out.</string>
+    <string name="onb_reason_wireless_manual_step">Wireless Debugging needs a manual tap.</string>
+    <string name="onb_reason_developer_manual_step">Developer options need a manual tap.</string>
+    <string name="onb_reason_accessibility_unavailable">Accessibility settings could not be opened.</string>
+    <string name="onb_reason_phone_pairing_timeout">The phone did not finish the pairing in time.</string>
+    <string name="onb_reason_phone_verification_failed">The phone paired, but verification did not complete.</string>
+    <string name="onb_reason_generic">Setup could not finish.</string>
 </resources>

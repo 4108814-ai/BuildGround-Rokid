@@ -108,6 +108,7 @@ private const val ACTION_DEBUG_MANUAL_PAIRING = "com.anezium.rokidbus.phone.DEBU
 private const val ACTION_INSTALL_GLASSES_APP = "com.anezium.rokidbus.phone.INSTALL_GLASSES_APP"
 private const val ACTION_QUERY_GLASSES_APP = "com.anezium.rokidbus.phone.QUERY_GLASSES_APP"
 private const val ACTION_OPEN_GLASSES_APP = "com.anezium.rokidbus.phone.OPEN_GLASSES_APP"
+private const val ACTION_START_GLASSES_SETUP = "com.anezium.rokidbus.phone.START_GLASSES_SETUP"
 private const val EXTRA_AUTH_TOKEN = "auth_token"
 private const val EXTRA_MANUAL_OPERATION = "manual_operation"
 private const val EXTRA_MANUAL_HOST = "manual_host"
@@ -739,6 +740,7 @@ class BusHubService : Service() {
             ACTION_INSTALL_GLASSES_APP -> installGlassesApp()
             ACTION_QUERY_GLASSES_APP -> queryGlassesApp()
             ACTION_OPEN_GLASSES_APP -> openGlassesAppOnLens()
+            ACTION_START_GLASSES_SETUP -> startGlassesSetupOnLens()
             else -> {
                 enableHub()
                 startCxrIfTokenAvailable()
@@ -3413,6 +3415,42 @@ class BusHubService : Service() {
         }
     }
 
+    /**
+     * One tap on the phone, one switch on the lens. Starts the setup entry point on the glasses so
+     * the wearer lands on the accessibility switch directly instead of hunting for it inside the
+     * glasses app.
+     */
+    private fun startGlassesSetupOnLens() {
+        val link = cxrLink
+        if (!isCxrUp() || link == null) {
+            log("glasses setup start skipped: CXR link down")
+            NexusPhoneState.setGlassesSetupHandoff(NexusPhoneState.SetupHandoff.FAILED)
+            return
+        }
+        NexusPhoneState.setGlassesSetupHandoff(NexusPhoneState.SetupHandoff.SENDING)
+        val started = runCatching {
+            link.appStart(
+                "$GLASSES_HUB_PACKAGE.SetupEntryActivity",
+                object : IGlassAppCbk {
+                    override fun onOpenAppResult(success: Boolean) {
+                        log("glasses setup start result=$success")
+                        NexusPhoneState.setGlassesSetupHandoff(
+                            if (success) {
+                                NexusPhoneState.SetupHandoff.IDLE
+                            } else {
+                                NexusPhoneState.SetupHandoff.FAILED
+                            },
+                        )
+                    }
+                },
+            )
+        }.isSuccess
+        if (!started) {
+            log("glasses setup start failed to dispatch")
+            NexusPhoneState.setGlassesSetupHandoff(NexusPhoneState.SetupHandoff.FAILED)
+        }
+    }
+
     private fun openGlassesAppOnLens() {
         val link = cxrLink
         if (!isCxrUp() || link == null) {
@@ -4646,6 +4684,12 @@ class BusHubService : Service() {
         fun openGlassesApp(context: android.content.Context) {
             context.startService(
                 Intent(context, BusHubService::class.java).setAction(ACTION_OPEN_GLASSES_APP),
+            )
+        }
+
+        fun startGlassesSetup(context: android.content.Context) {
+            context.startService(
+                Intent(context, BusHubService::class.java).setAction(ACTION_START_GLASSES_SETUP),
             )
         }
 

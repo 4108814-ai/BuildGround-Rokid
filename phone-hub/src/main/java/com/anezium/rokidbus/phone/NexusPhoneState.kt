@@ -83,6 +83,22 @@ internal object NexusPhoneState {
     @Volatile var glassesMaintenanceReady: Boolean = false
         private set
 
+    /**
+     * Whether the "Start setup" hand-off actually reached the glasses. Deliberately transient and
+     * unpersisted: it describes one tap, and a stale "failed" surviving a restart would push the
+     * owner to the fallback for a link that has since come back.
+     */
+    enum class SetupHandoff { IDLE, SENDING, FAILED }
+
+    @Volatile var glassesSetupHandoff: SetupHandoff = SetupHandoff.IDLE
+        private set
+
+    fun setGlassesSetupHandoff(state: SetupHandoff) {
+        if (glassesSetupHandoff == state) return
+        glassesSetupHandoff = state
+        notifyListeners()
+    }
+
     @Volatile private var appContext: Context? = null
     private val listeners = CopyOnWriteArraySet<() -> Unit>()
 

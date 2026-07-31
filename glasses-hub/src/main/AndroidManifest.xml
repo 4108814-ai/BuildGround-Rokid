@@ -55,6 +55,17 @@
             </intent-filter>
         </activity>
 
+        <!-- Started by the phone over CXR to begin setup. Exported because it arrives from
+             another process; it only opens a session and the public Accessibility screen, so the
+             worst a rogue caller achieves is showing the user a Settings page they can dismiss. -->
+        <activity
+            android:name=".SetupEntryActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <activity
             android:name=".SurfaceActivity"
             android:excludeFromRecents="true"

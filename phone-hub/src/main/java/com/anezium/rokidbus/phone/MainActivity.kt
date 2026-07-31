@@ -34,6 +34,7 @@ import com.anezium.rokidbus.client.BusClient
 import com.anezium.rokidbus.client.BusEvent
 import com.anezium.rokidbus.client.ui.BusTheme
 import com.anezium.rokidbus.shared.LinkStateBits
+import com.anezium.rokidbus.shared.SetupStage
 
 private const val TAG = "RokidNexusHome"
 private const val BLUETOOTH_PERMISSION_REQUEST = 20
@@ -635,36 +636,44 @@ class MainActivity : Activity() {
         val hasPlugin = BusHubService.pluginCatalog(this).entries.any { it.state == PluginCatalogState.ENABLED }
 
         val glassesStatus = if (!cxrReady && !NexusPhoneState.glassesAppInstalled) {
-            "Connect your glasses first."
+            getString(R.string.onb_install_status_connect_first)
         } else {
             when (glassesAppState) {
-                GlassesAppInstallState.Unknown -> "Ready to check the glasses."
-                GlassesAppInstallState.Querying -> "Checking whether Nexus is installed..."
-                GlassesAppInstallState.NotInstalled -> "Ready to install over Hi Rokid."
-                GlassesAppInstallState.Resolving -> "Finding the latest glasses app..."
+                GlassesAppInstallState.Unknown -> getString(R.string.onb_install_status_ready)
+                GlassesAppInstallState.Querying -> getString(R.string.onb_install_status_querying)
+                GlassesAppInstallState.NotInstalled ->
+                    getString(R.string.onb_install_status_not_installed)
+                GlassesAppInstallState.Resolving ->
+                    getString(R.string.onb_install_status_resolving)
                 is GlassesAppInstallState.Downloading -> glassesAppState.totalBytes
                     ?.takeIf { it > 0L }
                     ?.let { total ->
-                        "Downloading... ${(glassesAppState.downloadedBytes * 100L / total).coerceIn(0L, 100L)}%"
+                        getString(
+                            R.string.onb_install_status_downloading_pct,
+                            (glassesAppState.downloadedBytes * 100L / total).coerceIn(0L, 100L).toInt(),
+                        )
                     }
-                    ?: "Downloading the glasses app..."
-                GlassesAppInstallState.Installing -> "Installing on your glasses..."
-                GlassesAppInstallState.Installed -> "Nexus is installed on your glasses."
+                    ?: getString(R.string.onb_install_status_downloading)
+                GlassesAppInstallState.Installing ->
+                    getString(R.string.onb_install_status_installing)
+                GlassesAppInstallState.Installed ->
+                    getString(R.string.onb_install_status_installed)
                 is GlassesAppInstallState.Error -> glassesAppState.message
             }
         }
         val glassesActionLabel = when (glassesAppState) {
-            GlassesAppInstallState.Unknown -> "Install Nexus"
-            GlassesAppInstallState.Querying -> "Checking..."
-            GlassesAppInstallState.NotInstalled -> "Install Nexus"
-            GlassesAppInstallState.Resolving -> "Finding release..."
-            is GlassesAppInstallState.Downloading -> "Downloading..."
-            GlassesAppInstallState.Installing -> "Installing..."
+            GlassesAppInstallState.Unknown -> getString(R.string.onb_install_action)
+            GlassesAppInstallState.Querying -> getString(R.string.onb_install_action_checking)
+            GlassesAppInstallState.NotInstalled -> getString(R.string.onb_install_action)
+            GlassesAppInstallState.Resolving -> getString(R.string.onb_install_action_resolving)
+            is GlassesAppInstallState.Downloading ->
+                getString(R.string.onb_install_action_downloading)
+            GlassesAppInstallState.Installing -> getString(R.string.onb_install_action_installing)
             GlassesAppInstallState.Installed -> null
             is GlassesAppInstallState.Error -> if (glassesAppState.retry == GlassesAppRetry.QUERY) {
-                "Check again"
+                getString(R.string.onb_install_action_check)
             } else {
-                "Retry install"
+                getString(R.string.onb_install_action_retry)
             }
         }
         val glassesActionEnabled = cxrReady && when (glassesAppState) {
@@ -696,69 +705,72 @@ class MainActivity : Activity() {
         val wifiReady = isPhoneWifiEnabled()
         val wifiBlocksInstall = cxrReady && installNeedsWifi && !wifiReady
 
+        val handoff = NexusPhoneState.glassesSetupHandoff
+        val setupUnfinished = NexusPhoneState.glassesAppInstalled &&
+            !NexusPhoneState.glassesSetupComplete
+        val handoffFailed = handoff == NexusPhoneState.SetupHandoff.FAILED
+
         val steps = listOf(
             OnboardingStep(
-                title = "Connect your glasses",
-                body = "Authorize Nexus with the Hi Rokid app so it can reach your glasses.",
+                title = getString(R.string.onb_authorize_title),
+                body = getString(R.string.onb_authorize_body),
                 done = savedToken().isNotBlank(),
-                actionLabel = "Authorize",
+                actionLabel = getString(R.string.onb_authorize_action),
                 onAction = { startAuthorization() },
             ),
             OnboardingStep(
-                title = "Allow Bluetooth",
-                body = "Nexus needs the nearby-devices permission to hold the glasses link.",
+                title = getString(R.string.onb_bluetooth_title),
+                body = getString(R.string.onb_bluetooth_body),
                 done = !needsBluetoothPermission(),
-                actionLabel = "Allow",
+                actionLabel = getString(R.string.onb_bluetooth_action),
                 onAction = { requestBluetoothConnectIfNeeded() },
             ),
             OnboardingStep(
-                title = "Allow notifications",
-                body = "Nexus keeps a quiet status notification while it holds the " +
-                    "glasses link.",
-                done = notificationsSettled(),
-                actionLabel = "Allow",
-                onAction = { requestNotificationsIfNeeded() },
-            ),
-            OnboardingStep(
-                title = "Install Nexus on your glasses",
-                body = "Nexus downloads the latest glasses app and installs it over Hi Rokid.",
+                title = getString(R.string.onb_install_title),
+                body = getString(R.string.onb_install_body),
                 done = NexusPhoneState.glassesAppInstalled,
-                actionLabel = if (wifiBlocksInstall) "Turn on Wi-Fi" else glassesActionLabel,
+                actionLabel = if (wifiBlocksInstall) {
+                    getString(R.string.onb_install_action_wifi)
+                } else {
+                    glassesActionLabel
+                },
                 actionEnabled = if (wifiBlocksInstall) true else glassesActionEnabled,
                 onAction = if (wifiBlocksInstall) ::openWifiPanel else glassesAction,
                 statusLine = if (wifiBlocksInstall) {
-                    "The app reaches the glasses over Wi-Fi — turn it on first."
+                    getString(R.string.onb_install_status_wifi_needed)
                 } else {
                     glassesStatus
                 },
             ),
             OnboardingStep(
-                title = "Set up your glasses",
-                body = "Connect the glasses to Wi-Fi in the Hi Rokid app, then put them on and " +
-                    "follow the two prompts on the lens — Nexus arms itself and the plugin launcher appears.",
+                title = getString(R.string.onb_glasses_title),
+                body = getString(R.string.onb_glasses_body),
                 done = NexusPhoneState.glassesSetupComplete,
-                actionLabel = "Open glasses app",
-                actionEnabled = cxrReady,
-                onAction = { BusHubService.openGlassesApp(this) },
-                statusLine = if (NexusPhoneState.glassesAppInstalled &&
-                    !NexusPhoneState.glassesSetupComplete
-                ) {
-                    if (NexusPhoneState.glassesSetupFailureState.isNotBlank()) {
-                        "Automatic setup failed — use Manual setup below."
-                    } else {
-                        "Waiting for setup. If it stalls, use Manual setup below."
-                    }
+                // If the remote start could not be delivered, say so and offer the honest
+                // alternative rather than leaving a button that already failed once.
+                actionLabel = if (handoffFailed) {
+                    getString(R.string.onb_glasses_action_open_app)
                 } else {
-                    null
+                    getString(R.string.onb_glasses_action)
                 },
+                actionEnabled = cxrReady && handoff != NexusPhoneState.SetupHandoff.SENDING,
+                onAction = {
+                    if (handoffFailed) {
+                        BusHubService.openGlassesApp(this)
+                    } else {
+                        BusHubService.startGlassesSetup(this)
+                    }
+                },
+                statusLine = glassesSetupStatusLine(handoff, setupUnfinished),
                 // Never gate recovery on a diagnostic from the failing transport. If the app is
                 // installed but setup is incomplete, the fallback must already be reachable.
                 secondaryActionLabel = if (shouldOfferManualSetup(
-                    cxrReady = cxrReady,
-                    glassesAppInstalled = NexusPhoneState.glassesAppInstalled,
-                    glassesSetupComplete = NexusPhoneState.glassesSetupComplete,
-                )) {
-                    "Manual setup"
+                        cxrReady = cxrReady,
+                        glassesAppInstalled = NexusPhoneState.glassesAppInstalled,
+                        glassesSetupComplete = NexusPhoneState.glassesSetupComplete,
+                    )
+                ) {
+                    getString(R.string.onb_glasses_action_guided)
                 } else {
                     null
                 },
@@ -769,19 +781,27 @@ class MainActivity : Activity() {
                     startActivity(Intent(this, GlassesSetupGuideActivity::class.java))
                 },
             ),
+            // Asked once the link it describes actually exists, instead of up front where the
+            // notification it promises has nothing to report yet.
             OnboardingStep(
-                title = "Allow app installs",
-                body = "Plugins and app updates install like regular Android apps, so " +
-                    "Android asks you to approve Nexus as an install source.",
+                title = getString(R.string.onb_notifications_title),
+                body = getString(R.string.onb_notifications_body),
+                done = notificationsSettled(),
+                actionLabel = getString(R.string.onb_notifications_action),
+                onAction = { requestNotificationsIfNeeded() },
+            ),
+            OnboardingStep(
+                title = getString(R.string.onb_installs_title),
+                body = getString(R.string.onb_installs_body),
                 done = canInstallApps(),
-                actionLabel = "Open settings",
+                actionLabel = getString(R.string.onb_installs_action),
                 onAction = { openInstallSourceSettings() },
             ),
             OnboardingStep(
-                title = "Add your first plugin",
-                body = "Open the Store and install a plugin, then approve its access.",
+                title = getString(R.string.onb_plugin_title),
+                body = getString(R.string.onb_plugin_body),
                 done = hasPlugin,
-                actionLabel = "Open the Store",
+                actionLabel = getString(R.string.onb_plugin_action),
                 onAction = { startActivity(Intent(this, StoreActivity::class.java)) },
             ),
         )
@@ -791,7 +811,10 @@ class MainActivity : Activity() {
             return
         }
         setupSection.visibility = View.VISIBLE
-        setupSection.addView(NexusUi.sectionRow(this, "Get started"), NexusUi.block())
+        setupSection.addView(
+            NexusUi.sectionRow(this, getString(R.string.onb_section_title)),
+            NexusUi.block(),
+        )
         setupSection.addView(BusTheme.gap(this, 12))
         val activeIndex = steps.indexOfFirst { !it.done }
         steps.forEachIndexed { index, step ->
@@ -806,9 +829,69 @@ class MainActivity : Activity() {
         setupSection.addView(BusTheme.gap(this, 28))
     }
 
+    /**
+     * What the glasses are actually doing, in the owner's language rather than the wire's. Falls
+     * back to the stage the capabilities carried, so an older glasses build that only reports
+     * complete/failed still reads as something honest instead of a permanent "Waiting…".
+     */
+    private fun glassesSetupStatusLine(
+        handoff: NexusPhoneState.SetupHandoff,
+        setupUnfinished: Boolean,
+    ): String? {
+        if (handoff == NexusPhoneState.SetupHandoff.SENDING) {
+            return getString(R.string.onb_glasses_status_starting)
+        }
+        if (handoff == NexusPhoneState.SetupHandoff.FAILED) {
+            return getString(R.string.onb_glasses_status_open_failed)
+        }
+        if (!setupUnfinished) return null
+        val phase = getString(
+            when (NexusPhoneState.glassesSetupStage) {
+                SetupStage.WAITING_FOR_ACCESSIBILITY -> R.string.onb_phase_waiting_for_accessibility
+                SetupStage.WAITING_FOR_WIFI -> R.string.onb_phase_waiting_for_wifi
+                SetupStage.ENABLING_DEVELOPER_OPTIONS -> R.string.onb_phase_enabling_developer_options
+                SetupStage.OPENING_WIRELESS_DEBUGGING -> R.string.onb_phase_opening_wireless_debugging
+                SetupStage.READING_PAIRING_DIALOG -> R.string.onb_phase_reading_pairing_dialog
+                SetupStage.PAIRING_LOCALLY -> R.string.onb_phase_pairing_locally
+                SetupStage.PAIRING_VIA_PHONE -> R.string.onb_phase_pairing_via_phone
+                SetupStage.ARMING -> R.string.onb_phase_arming
+                SetupStage.COMPLETE -> R.string.onb_phase_complete
+                SetupStage.MANUAL_REQUIRED -> R.string.onb_phase_manual_required
+                SetupStage.FAILED -> R.string.onb_phase_failed
+                else -> R.string.onb_phase_unknown
+            },
+        )
+        return buildString {
+            append(phase)
+            if (NexusPhoneState.glassesSetupRunning) {
+                append("  ")
+                append(getString(R.string.onb_glasses_status_duration))
+            }
+            NexusPhoneState.glassesSetupSupportCode
+                .takeIf { it.isNotBlank() && NexusPhoneState.glassesSetupFailureState.isNotBlank() }
+                ?.let {
+                    append("  ")
+                    append(getString(R.string.onb_glasses_status_support, it))
+                }
+        }
+    }
+
     private fun onboardingStepCard(number: Int, state: StepState, step: OnboardingStep): LinearLayout =
         NexusUi.card(this).apply {
-            if (state == StepState.PENDING) alpha = 0.55f
+            if (state == StepState.PENDING) alpha = 0.45f
+            // Only the step you can act on earns its full card. What is finished collapses to a
+            // ticked line, what is still ahead to a dimmed one: the eye lands on the one thing
+            // being asked for instead of scanning seven equal blocks.
+            val expanded = state == StepState.ACTIVE
+            contentDescription = getString(
+                when (state) {
+                    StepState.DONE -> R.string.a11y_step_done
+                    StepState.ACTIVE -> R.string.a11y_step_active
+                    StepState.PENDING -> R.string.a11y_step_pending
+                },
+                number,
+                step.title,
+            )
             addView(
                 LinearLayout(this@MainActivity).apply {
                     orientation = LinearLayout.HORIZONTAL
@@ -817,8 +900,10 @@ class MainActivity : Activity() {
                         LinearLayout(this@MainActivity).apply {
                             orientation = LinearLayout.VERTICAL
                             addView(NexusUi.cardTitle(this@MainActivity, step.title))
-                            addView(BusTheme.gap(this@MainActivity, 4))
-                            addView(NexusUi.cardBody(this@MainActivity, step.body))
+                            if (expanded) {
+                                addView(BusTheme.gap(this@MainActivity, 4))
+                                addView(NexusUi.cardBody(this@MainActivity, step.body))
+                            }
                         },
                         LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                             marginStart = NexusUi.dp(this@MainActivity, 12)
@@ -827,10 +912,15 @@ class MainActivity : Activity() {
                 },
                 NexusUi.block(),
             )
+            if (!expanded) return@apply
             step.onGuide?.takeIf { state == StepState.ACTIVE }?.let { guide ->
                 addView(BusTheme.gap(this@MainActivity, 8))
                 addView(
-                    NexusUi.metaLabel(this@MainActivity, "HOW IT WORKS  ›", NexusUi.GREEN).apply {
+                    NexusUi.metaLabel(
+                        this@MainActivity,
+                        getString(R.string.onb_how_it_works),
+                        NexusUi.GREEN,
+                    ).apply {
                         textSize = 10.5f
                         letterSpacing = 0.12f
                         isClickable = true

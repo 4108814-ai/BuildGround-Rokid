@@ -1,0 +1,134 @@
+<resources>
+    <!-- ===== Assistant de première configuration ===== -->
+    <string name="onb_section_title">Pour commencer</string>
+
+    <string name="onb_authorize_title">Connectez vos lunettes</string>
+    <string name="onb_authorize_body">Autorisez Nexus dans l’app Hi Rokid pour qu’il puisse joindre vos lunettes.</string>
+    <string name="onb_authorize_action">Autoriser</string>
+
+    <string name="onb_bluetooth_title">Autoriser le Bluetooth</string>
+    <string name="onb_bluetooth_body">Nexus a besoin de l’autorisation « appareils à proximité » pour maintenir le lien.</string>
+    <string name="onb_bluetooth_action">Autoriser</string>
+
+    <string name="onb_install_title">Installer Nexus sur vos lunettes</string>
+    <string name="onb_install_body">Nexus télécharge la dernière version de l’app lunettes et l’installe via Hi Rokid.</string>
+    <string name="onb_install_action">Installer Nexus</string>
+    <string name="onb_install_action_check">Revérifier</string>
+    <string name="onb_install_action_retry">Réessayer</string>
+    <string name="onb_install_action_checking">Vérification…</string>
+    <string name="onb_install_action_resolving">Recherche de la version…</string>
+    <string name="onb_install_action_downloading">Téléchargement…</string>
+    <string name="onb_install_action_installing">Installation…</string>
+    <string name="onb_install_action_wifi">Activer le Wi-Fi</string>
+    <string name="onb_install_status_connect_first">Connectez d’abord vos lunettes.</string>
+    <string name="onb_install_status_ready">Prêt à vérifier les lunettes.</string>
+    <string name="onb_install_status_querying">Vérification de la présence de Nexus…</string>
+    <string name="onb_install_status_not_installed">Prêt à installer via Hi Rokid.</string>
+    <string name="onb_install_status_resolving">Recherche de la dernière app lunettes…</string>
+    <string name="onb_install_status_downloading">Téléchargement de l’app lunettes…</string>
+    <string name="onb_install_status_downloading_pct">Téléchargement… %1$d %%</string>
+    <string name="onb_install_status_installing">Installation sur vos lunettes…</string>
+    <string name="onb_install_status_installed">Nexus est installé sur vos lunettes.</string>
+    <string name="onb_install_status_wifi_needed">L’app passe par le Wi-Fi — activez-le d’abord.</string>
+
+    <string name="onb_glasses_title">Configurez vos lunettes</string>
+    <string name="onb_glasses_body">Mettez les lunettes et touchez Démarrer la configuration. Nexus ouvre le seul interrupteur à activer, puis fait le reste tout seul.</string>
+    <string name="onb_glasses_action">Démarrer la configuration</string>
+    <string name="onb_glasses_action_open_app">Ouvrir l’app lunettes</string>
+    <string name="onb_glasses_action_guided">Configuration guidée</string>
+    <string name="onb_how_it_works">COMMENT ÇA MARCHE  ›</string>
+    <string name="onb_glasses_status_starting">Ouverture de la configuration sur les lunettes…</string>
+    <string name="onb_glasses_status_open_failed">Lunettes injoignables. Ouvrez l’app Nexus depuis l’optique.</string>
+    <string name="onb_glasses_status_duration">Comptez 1 à 2 minutes.</string>
+    <string name="onb_glasses_status_support">Code support : %1$s</string>
+
+    <string name="onb_notifications_title">Autoriser les notifications</string>
+    <string name="onb_notifications_body">Nexus garde une notification d’état discrète tant qu’il maintient le lien.</string>
+    <string name="onb_notifications_action">Autoriser</string>
+
+    <string name="onb_installs_title">Autoriser l’installation d’apps</string>
+    <string name="onb_installs_body">Les plugins et les mises à jour s’installent comme des apps Android : Android vous demande d’autoriser Nexus comme source d’installation.</string>
+    <string name="onb_installs_action">Ouvrir les réglages</string>
+
+    <string name="onb_plugin_title">Ajoutez votre premier plugin</string>
+    <string name="onb_plugin_body">Ouvrez le Store, installez un plugin, puis approuvez ses accès.</string>
+    <string name="onb_plugin_action">Ouvrir le Store</string>
+
+    <!-- Étape en cours, remontée par les lunettes. Une ligne, honnête sur ce qui se passe. -->
+    <string name="onb_phase_unknown">Préparation…</string>
+    <string name="onb_phase_waiting_for_accessibility">Activez « Rokid Nexus Glasses » depuis l’optique.</string>
+    <string name="onb_phase_waiting_for_wifi">En attente de la connexion Wi-Fi des lunettes.</string>
+    <string name="onb_phase_enabling_developer_options">Déverrouillage des options développeur…</string>
+    <string name="onb_phase_opening_wireless_debugging">Ouverture du débogage sans fil sur les lunettes…</string>
+    <string name="onb_phase_reading_pairing_dialog">Lecture des infos d’appairage…</string>
+    <string name="onb_phase_pairing_locally">Appairage sécurisé des lunettes…</string>
+    <string name="onb_phase_pairing_via_phone">Finalisation de l’appairage depuis le téléphone…</string>
+    <string name="onb_phase_arming">Armement de Nexus sur les lunettes…</string>
+    <string name="onb_phase_complete">Vos lunettes sont prêtes.</string>
+    <string name="onb_phase_manual_required">Configuration automatique impossible — passez par la configuration guidée.</string>
+    <string name="onb_phase_failed">La configuration s’est arrêtée avant la fin.</string>
+
+    <!-- ===== Configuration guidée (le repli quand l’automatique n’aboutit pas) ===== -->
+    <string name="guided_title">Configuration guidée</string>
+    <string name="guided_intro">Nexus vérifie ce qui est déjà en place, puis ne vous fait faire que ce qui manque.</string>
+
+    <string name="guided_preflight_title">Avant de commencer</string>
+    <string name="guided_check_link">Lunettes connectées</string>
+    <string name="guided_check_link_fail">Connectez vos lunettes dans l’app Hi Rokid.</string>
+    <string name="guided_check_accessibility">Rokid Nexus Glasses activé</string>
+    <string name="guided_check_accessibility_fail">Activez « Rokid Nexus Glasses » depuis l’optique. C’est la seule étape que Nexus ne peut pas faire à votre place.</string>
+    <string name="guided_check_wifi">Lunettes en Wi-Fi</string>
+    <string name="guided_check_wifi_fail">Connectez les lunettes au Wi-Fi depuis l’app Hi Rokid.</string>
+    <string name="guided_check_developer">Options développeur disponibles</string>
+    <string name="guided_check_developer_fail">Nexus les déverrouille pour vous à l’étape suivante.</string>
+    <string name="guided_check_pending">Vérification…</string>
+    <string name="guided_check_skipped">Déjà fait</string>
+
+    <string name="guided_action_prepare">Préparer l’appairage</string>
+    <string name="guided_action_continue">Continuer</string>
+    <string name="guided_action_recheck">Revérifier</string>
+    <string name="guided_action_cancel">Annuler</string>
+
+    <string name="guided_status_waiting">En attente des lunettes…</string>
+    <string name="guided_status_acked">Les lunettes ont ouvert l’écran.</string>
+    <string name="guided_status_pairing">Appairage…</string>
+    <string name="guided_status_success">Vos lunettes sont configurées.</string>
+    <string name="guided_status_blocked">Les lunettes n’ont pas ouvert cet écran. Suivez l’étape ci-dessous sur l’optique.</string>
+
+    <!-- Une instruction à la fois. La variante avec libellé l’emporte dès que les lunettes nous
+         ont donné le texte exact qu’elles ont résolu : un téléphone FR peut guider une optique EN. -->
+    <string name="guided_step_open_labeled">Sur les lunettes, ouvrez « %1$s ».</string>
+    <string name="guided_step_developer_generic">Sur les lunettes, ouvrez les Réglages puis l’écran des options développeur.</string>
+    <string name="guided_step_wireless_generic">Sur les lunettes, ouvrez l’écran de débogage sans fil dans les options développeur.</string>
+    <string name="guided_step_pairing_generic">Sur les lunettes, choisissez l’option qui appaire l’appareil avec un code.</string>
+    <string name="guided_step_confirm">Touchez Continuer une fois cet écran ouvert dans l’optique.</string>
+
+    <string name="guided_advanced_title">Saisie manuelle avancée</string>
+    <string name="guided_advanced_body">Utile seulement si Nexus n’arrive toujours pas à lire les infos d’appairage. Les lunettes les affichent sur l’écran d’appairage.</string>
+    <string name="guided_advanced_endpoint_label">Adresse d’appairage (IP:port)</string>
+    <string name="guided_advanced_endpoint_hint">192.168.1.20:37135</string>
+    <string name="guided_advanced_code_label">Code d’appairage</string>
+    <string name="guided_advanced_code_hint">6 chiffres</string>
+    <string name="guided_advanced_submit">Appairer</string>
+    <string name="guided_error_endpoint_empty">Saisissez l’adresse affichée sur les lunettes.</string>
+    <string name="guided_error_endpoint_format">Utilisez la forme IP:port, par exemple 192.168.1.20:37135.</string>
+    <string name="guided_error_endpoint_ip">Cette adresse IPv4 n’est pas valide.</string>
+    <string name="guided_error_endpoint_port">Le port doit être compris entre 1 et 65535.</string>
+    <string name="guided_error_code_empty">Saisissez le code à 6 chiffres affiché sur les lunettes.</string>
+    <string name="guided_error_code_format">Le code d’appairage fait 6 chiffres.</string>
+
+    <string name="guided_error_link_down">Lien perdu avec les lunettes. Reconnectez-les, puis réessayez.</string>
+    <string name="guided_error_rejected">Les lunettes ont refusé cette étape.</string>
+    <string name="guided_error_timeout">Les lunettes n’ont pas répondu à temps.</string>
+    <string name="guided_error_pairing_refused">Le code d’appairage a été refusé. Relisez-le dans l’optique.</string>
+    <string name="guided_error_generic">Cette étape n’est pas passée.</string>
+    <string name="guided_support_code">Code support : %1$s</string>
+
+    <!-- TalkBack -->
+    <string name="a11y_step_done">Étape %1$d, terminée : %2$s</string>
+    <string name="a11y_step_active">Étape %1$d, en cours : %2$s</string>
+    <string name="a11y_step_pending">Étape %1$d, à venir : %2$s</string>
+    <string name="a11y_check_pass">Vérification réussie : %1$s</string>
+    <string name="a11y_check_fail">Vérification échouée : %1$s</string>
+    <string name="a11y_busy">Traitement en cours, veuillez patienter.</string>
+</resources>

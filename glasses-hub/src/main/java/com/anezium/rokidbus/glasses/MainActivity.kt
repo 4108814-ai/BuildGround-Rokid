@@ -21,6 +21,7 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
 import com.anezium.rokidbus.shared.BusConstants
+import com.anezium.rokidbus.shared.SetupStage
 
 class MainActivity : Activity() {
     private lateinit var emptyView: TextView
@@ -43,6 +44,7 @@ class MainActivity : Activity() {
     )
     private var unsubscribeLauncher: (() -> Unit)? = null
     private var onboardingReceiverRegistered = false
+    private var confirmationShownForSession = ""
     private val swipeDedupe = DpadPairDedupe()
     private val onboardingReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -233,10 +235,14 @@ class MainActivity : Activity() {
             addView(onboardingDiagnosticView, matchWrap())
             addView(onboardingActionView, matchWrap())
             addView(gap(10))
-            addView(text(11f, BusTheme.dim).apply {
-                text = "Swipe: focus  •  Tap: select  •  Back: exit"
-                gravity = Gravity.CENTER_HORIZONTAL
-            }, matchWrap())
+            addView(
+                text(11f, BusTheme.dim).apply {
+                    // Swipe is filtered out during onboarding, so promising it here was a lie.
+                    text = getString(R.string.onb_footer)
+                    gravity = Gravity.CENTER_HORIZONTAL
+                },
+                matchWrap(),
+            )
         }
         setContentView(FrameLayout(this).apply {
             setBackgroundColor(BusTheme.glassesBg)
@@ -264,67 +270,148 @@ class MainActivity : Activity() {
         val snapshot = SelfArmOnboardingStore.snapshot(applicationContext)
         onboardingState = SelfArmOnboardingStateMachine.evaluate(snapshot)
         val complete = onboardingState.stage == SelfArmOnboardingState.Stage.COMPLETE
-        launcherView.visibility = if (complete) View.VISIBLE else View.GONE
-        onboardingView.visibility = if (complete) View.GONE else View.VISIBLE
-        if (complete) return
+        if (complete) {
+            // Land on a moment of confirmation rather than blinking straight to a plugin list:
+            // the wearer just did the one thing we asked of them and deserves to see it took.
+            if (showSetupConfirmation()) return
+            launcherView.visibility = View.VISIBLE
+            onboardingView.visibility = View.GONE
+            return
+        }
+        confirmationShownForSession = ""
+        launcherView.visibility = View.GONE
+        onboardingView.visibility = View.VISIBLE
 
         val diagnostic = onboardingState.diagnostic.takeIf {
-            onboardingState.stage == SelfArmOnboardingState.Stage.FAILED && it.isNotBlank()
+            onboardingState.stage != SelfArmOnboardingState.Stage.RUNNING && it.isNotBlank()
         }
-        onboardingDiagnosticView.text = diagnostic?.let { "Support code: $it" }.orEmpty()
+        onboardingDiagnosticView.text = diagnostic
+            ?.let { getString(R.string.onb_support_code, it) }
+            .orEmpty()
         onboardingDiagnosticView.visibility = if (diagnostic == null) View.GONE else View.VISIBLE
 
         when (onboardingState.stage) {
             SelfArmOnboardingState.Stage.ENABLE_ACCESSIBILITY -> {
-                onboardingStepView.text = "FIRST-RUN SETUP  •  1/2"
-                onboardingTitleView.text = "Turn on Rokid Nexus Glasses"
-                onboardingBodyView.text =
-                    "Tap Open settings, then switch on “Rokid Nexus Glasses” in the list.\n\n" +
-                    "Nexus brings you right back here the moment you do — no need to press Back."
-                onboardingActionView.text = "OPEN SETTINGS"
+                onboardingStepView.setText(R.string.onb_accessibility_eyebrow)
+                onboardingTitleView.setText(R.string.onb_accessibility_title)
+                onboardingBodyView.setText(R.string.onb_accessibility_body)
+                onboardingActionView.setText(R.string.onb_accessibility_action)
             }
-            SelfArmOnboardingState.Stage.READY_FOR_WIRELESS -> {
-                onboardingStepView.text = "FIRST-RUN SETUP  •  2/2"
-                onboardingTitleView.text = "Finish setup"
-                onboardingBodyView.text =
-                    "Nexus takes it from here — it secures the connection and locks the setup " +
-                    "down on its own. Just keep the glasses on for a few seconds.\n\n" +
-                    "Everything stays on-device over an encrypted link."
-                onboardingActionView.text = "FINISH SETUP"
-            }
-            SelfArmOnboardingState.Stage.RUNNING -> {
-                onboardingStepView.text = "ARMING SECURELY"
-                onboardingTitleView.text = "Almost there"
-                onboardingBodyView.text =
-                    "Nexus is finishing the secure setup. Keep the glasses on — this only " +
-                    "takes a few seconds.\n\n" +
-                    humanSetupState(onboardingState.detail)
-                onboardingActionView.text = "WORKING…"
-            }
-            SelfArmOnboardingState.Stage.WAITING_FOR_WIFI,
-            SelfArmOnboardingState.Stage.MANUAL_REQUIRED,
-            SelfArmOnboardingState.Stage.FAILED,
+            // Reaching this state means the automatic hand-off did not fire. It is a recovery
+            // door, not the second half of a two-step wizard, so it no longer announces itself
+            // as one.
+            SelfArmOnboardingState.Stage.READY_FOR_WIRELESS,
+            SelfArmOnboardingState.Stage.RUNNING,
             -> {
-                onboardingStepView.text = "SETUP HIT A SNAG"
-                onboardingTitleView.text = "Let’s try again"
-                onboardingBodyView.text =
-                    humanSetupState(onboardingState.detail) + "\n\n" +
-                    "Tap retry — Nexus will reopen the secure setup and finish arming."
-                onboardingActionView.text = "RETRY"
+                onboardingStepView.setText(R.string.onb_running_eyebrow)
+                onboardingTitleView.setText(R.string.onb_running_title)
+                onboardingBodyView.text = getString(R.string.onb_running_body, phaseLabel(snapshot))
+                onboardingActionView.text = if (
+                    onboardingState.stage == SelfArmOnboardingState.Stage.READY_FOR_WIRELESS
+                ) {
+                    getString(R.string.onb_running_recovery_action)
+                } else {
+                    getString(R.string.onb_running_status)
+                }
+            }
+            SelfArmOnboardingState.Stage.WAITING_FOR_WIFI -> {
+                onboardingStepView.setText(R.string.onb_wifi_eyebrow)
+                onboardingTitleView.setText(R.string.onb_wifi_title)
+                onboardingBodyView.setText(R.string.onb_wifi_body)
+                onboardingActionView.setText(R.string.onb_wifi_action)
+            }
+            SelfArmOnboardingState.Stage.MANUAL_REQUIRED -> {
+                onboardingStepView.setText(R.string.onb_manual_eyebrow)
+                onboardingTitleView.setText(R.string.onb_manual_title)
+                onboardingBodyView.setText(R.string.onb_manual_body)
+                onboardingActionView.setText(R.string.onb_manual_action)
+            }
+            SelfArmOnboardingState.Stage.FAILED -> {
+                onboardingStepView.setText(R.string.onb_failed_eyebrow)
+                onboardingTitleView.setText(R.string.onb_failed_title)
+                onboardingBodyView.text = getString(
+                    R.string.onb_failed_body,
+                    reasonLabel(onboardingState.detail),
+                )
+                onboardingActionView.setText(R.string.onb_failed_action)
             }
             SelfArmOnboardingState.Stage.UNSUPPORTED -> {
-                onboardingStepView.text = "SETUP UNAVAILABLE"
-                onboardingTitleView.text = "Android 11 required"
-                onboardingBodyView.text =
-                    "This firmware does not provide the Wireless Debugging pairing API. Use the " +
-                    "documented ADB pm grant fallback."
-                onboardingActionView.text = "NO WIRELESS SETUP"
+                onboardingStepView.setText(R.string.onb_unsupported_eyebrow)
+                onboardingTitleView.setText(R.string.onb_unsupported_title)
+                onboardingBodyView.setText(R.string.onb_unsupported_body)
+                onboardingActionView.setText(R.string.onb_unsupported_action)
             }
             SelfArmOnboardingState.Stage.COMPLETE -> Unit
         }
-        onboardingActionView.alpha =
-            if (onboardingState.action == SelfArmOnboardingState.Action.NONE) 0.45f else 1f
+        // A state with nothing to tap is a status line, not a dimmed button: drop the outline so
+        // the wearer never sits there pressing something that was never going to answer.
+        val actionable = onboardingState.action != SelfArmOnboardingState.Action.NONE &&
+            onboardingState.stage != SelfArmOnboardingState.Stage.RUNNING
+        onboardingActionView.background = if (actionable) outline(true) else null
+        onboardingActionView.setTextColor(if (actionable) BusTheme.phosphor else BusTheme.muted)
+        onboardingActionView.alpha = if (actionable) 1f else 0.85f
     }
+
+    /** Returns true while the confirmation panel owns the screen. */
+    private fun showSetupConfirmation(): Boolean {
+        val sessionId = SelfArmOnboardingStore.currentSessionId(applicationContext)
+            .ifBlank { CONFIRMATION_SESSIONLESS }
+        if (confirmationShownForSession == sessionId) return false
+        if (onboardingView.visibility != View.VISIBLE) {
+            // Already on the launcher (a resume, a reboot) — nothing was just completed on screen.
+            confirmationShownForSession = sessionId
+            return false
+        }
+        confirmationShownForSession = sessionId
+        onboardingStepView.setText(R.string.onb_done_eyebrow)
+        onboardingTitleView.setText(R.string.onb_done_title)
+        onboardingBodyView.setText(R.string.onb_done_body)
+        onboardingDiagnosticView.visibility = View.GONE
+        onboardingActionView.text = ""
+        onboardingActionView.background = null
+        launcherView.visibility = View.GONE
+        onboardingView.visibility = View.VISIBLE
+        onboardingView.postDelayed({ renderScreen() }, SETUP_CONFIRMATION_MS)
+        return true
+    }
+
+    private fun phaseLabel(snapshot: SelfArmOnboardingSnapshot): String = getString(
+        when (snapshot.stage) {
+            SetupStage.WAITING_FOR_ACCESSIBILITY -> R.string.onb_phase_waiting_for_accessibility
+            SetupStage.WAITING_FOR_WIFI -> R.string.onb_phase_waiting_for_wifi
+            SetupStage.ENABLING_DEVELOPER_OPTIONS -> R.string.onb_phase_enabling_developer_options
+            SetupStage.OPENING_WIRELESS_DEBUGGING -> R.string.onb_phase_opening_wireless_debugging
+            SetupStage.READING_PAIRING_DIALOG -> R.string.onb_phase_reading_pairing_dialog
+            SetupStage.PAIRING_LOCALLY -> R.string.onb_phase_pairing_locally
+            SetupStage.PAIRING_VIA_PHONE -> R.string.onb_phase_pairing_via_phone
+            SetupStage.ARMING -> R.string.onb_phase_arming
+            SetupStage.COMPLETE -> R.string.onb_phase_complete
+            SetupStage.MANUAL_REQUIRED -> R.string.onb_phase_manual_required
+            SetupStage.FAILED -> R.string.onb_phase_failed
+            else -> R.string.onb_phase_unknown
+        },
+    )
+
+    private fun reasonLabel(failureState: String): String = getString(
+        when {
+            failureState == SelfArmOnboardingStore.LEASE_EXPIRED_FAILURE ->
+                R.string.onb_reason_lease_expired
+            failureState.contains("wifi") -> R.string.onb_reason_wifi_required
+            failureState.contains("pairing_code_expired") -> R.string.onb_reason_pairing_expired
+            failureState.contains("wireless_setup_timeout") -> R.string.onb_reason_wireless_timeout
+            failureState.contains("wireless_debugging_manual_step") ->
+                R.string.onb_reason_wireless_manual_step
+            failureState.contains("developer_options_manual_step") ->
+                R.string.onb_reason_developer_manual_step
+            failureState.contains("accessibility_settings_unavailable") ->
+                R.string.onb_reason_accessibility_unavailable
+            failureState.contains("manual_pairing_timeout") ->
+                R.string.onb_reason_phone_pairing_timeout
+            failureState.contains("verification_failed") ->
+                R.string.onb_reason_phone_verification_failed
+            else -> R.string.onb_reason_generic
+        },
+    )
 
     private fun renderLauncher() {
         if (!::listContainer.isInitialized) return
@@ -418,11 +505,8 @@ class MainActivity : Activity() {
             SelfArmOnboardingState.Action.OPEN_ACCESSIBILITY -> {
                 val sessionId = SelfArmOnboardingStore.beginSession(applicationContext)
                 SelfArmOnboardingStore.markAwaitingAccessibility(applicationContext)
-                val settings = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                    .setPackage("com.android.settings")
-                val opened = runCatching { startActivity(settings) }.isSuccess ||
-                    runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }.isSuccess
-                if (!opened) {
+                val landing = SelfArmAccessibilityHandoff.open(this)
+                if (landing == SelfArmAccessibilityHandoff.Landing.UNAVAILABLE) {
                     SelfArmOnboardingStore.finish(
                         context = applicationContext,
                         sessionId = sessionId,
@@ -467,34 +551,6 @@ class MainActivity : Activity() {
             SelfArmOnboardingState.Action.NONE -> Unit
         }
         renderScreen()
-    }
-
-    private fun humanSetupState(value: String): String = when (value) {
-        "" -> "Waiting to begin."
-        "waiting_for_nexus_accessibility" -> "Waiting for Rokid Nexus Glasses to be enabled."
-        "starting_wireless_debugging_setup" -> "Opening Wireless Debugging…"
-        "enabling_wifi" -> "Turning Wi-Fi on…"
-        "waiting_for_wifi_network" -> "Connect the glasses to Wi-Fi in the Hi Rokid app…"
-        "opening_developer_options" -> "Opening Developer options…"
-        "opening_wireless_debugging" -> "Opening Wireless Debugging…"
-        "turning_wireless_debugging_on" -> "Enable Wireless Debugging when Settings asks."
-        "confirming_wireless_debugging" -> "Confirm Wireless Debugging."
-        "opening_pairing_code" -> "Opening the pairing-code screen…"
-        "waiting_for_pairing_code",
-        "searching_pairing_code",
-        -> "Waiting for the 6-digit pairing code and ports…"
-        "wireless_bootstrap_complete" -> "Secure self-arm completed."
-        "self_pairing_in_progress" -> "Code read — finishing the secure setup…"
-        "manual_pairing_waiting" -> "Type the code shown here into the phone app."
-        "manual_pairing_timeout" -> "Phone pairing timed out. Start the manual fallback again."
-        "manual_pairing_verification_failed" -> "Phone pairing finished, but verification did not complete."
-        "pairing_code_expired" -> "The pairing step timed out. Restart the glasses, then tap retry."
-        "wireless_setup_timeout" -> "Wireless Debugging setup timed out."
-        "wifi_network_required" -> "No Wi-Fi network. Connect the glasses to Wi-Fi in the Hi Rokid app, then retry."
-        "wireless_debugging_manual_step_needed" -> "Wireless Debugging needs a manual tap."
-        "developer_options_manual_step_needed" -> "Developer options need a manual tap."
-        "accessibility_settings_unavailable" -> "Accessibility Settings could not be opened."
-        else -> value.replace('_', ' ').replaceFirstChar { it.uppercase() } + "."
     }
 
     private fun requestBluetoothConnectIfNeeded() {
@@ -545,5 +601,8 @@ class MainActivity : Activity() {
     private companion object {
         const val PLUGIN_ROW_HEIGHT_DP = 52
         const val PLUGIN_ROW_MARGIN_DP = 8
+        /** Long enough to read four words, short enough that nobody waits on it. */
+        const val SETUP_CONFIRMATION_MS = 1_600L
+        const val CONFIRMATION_SESSIONLESS = "-"
     }
 }
