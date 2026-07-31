@@ -138,7 +138,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
             pendingShow = null
             activeNotice = true
             lastNoticeMessageAtMs = SystemClock.uptimeMillis()
-        } else if (result != NexusSdkResult.CAPABILITY_NOT_AVAILABLE) {
+        } else if (result !in RETRYABLE_SHOW_RESULTS) {
             closeClient()
         }
     }
@@ -343,6 +343,26 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         const val SHOW_TIMEOUT_MS = 5_000L
         const val HIDE_FALLBACK_MS = 500L
         const val MIN_NOTICE_MESSAGE_INTERVAL_MS = 210L
+
+        /**
+         * Neither of these is a refusal — both mean "not yet", and both are
+         * resolved by an event that is already on its way.
+         *
+         * `CAPABILITY_NOT_AVAILABLE` is the glasses being out of reach; the hub
+         * holds the band and `onLinkState` brings us back.
+         * `CAPABILITY_NOT_GRANTED` is subtler and cost an afternoon on hardware:
+         * `registerPlugin` answers APPROVED synchronously, while the grant list
+         * follows as a separate `/plugin/registration` message ~16 ms later. A
+         * notice pushed the instant approval lands therefore asks about a grant
+         * set that is still empty. APPROVED arrives a second time with the
+         * grants on it, so the only correct move is to keep the pending show and
+         * let the retry happen. Closing here threw away a notice the wearer was
+         * entitled to see. The show timeout is what stops us waiting forever.
+         */
+        val RETRYABLE_SHOW_RESULTS = setOf(
+            NexusSdkResult.CAPABILITY_NOT_AVAILABLE,
+            NexusSdkResult.CAPABILITY_NOT_GRANTED,
+        )
 
         const val ACTION_REPLY = "reply"
         const val ACTION_DISMISS = "dismiss"

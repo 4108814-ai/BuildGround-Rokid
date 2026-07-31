@@ -340,6 +340,12 @@ class NexusPluginClient internal constructor(
         // onLinkState is a race, and the loser reads every capability as absent.
         if (result == PluginRegistrationResult.APPROVED) {
             hubCapabilities = transport.capabilities()
+            // The plugin's *own* grants are not here yet, and cannot be: `registerPlugin`
+            // answers APPROVED synchronously while the capability list follows behind it
+            // as a `/plugin/registration` message — measured on hardware at 16 ms apart.
+            // So APPROVED is delivered twice, and only the second carries the grants.
+            // A plugin that acts on approval must treat CAPABILITY_NOT_GRANTED on the
+            // first as "not yet" and wait for the second, not as a refusal.
         }
         if (result != PluginRegistrationResult.APPROVED) {
             approvedCapabilities = emptySet()
