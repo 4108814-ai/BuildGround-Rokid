@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Rokid Nexus — install a phone app, get a glasses app</title>
+<meta name="description" content="Rokid Nexus is a plugin platform for Rokid AR glasses. One permanent hub lives on the glasses and renders everything; every feature ships as an ordinary phone app. Nothing is ever installed on the glasses again." />
+<meta name="theme-color" content="#05070a" />
+<link rel="canonical" href="https://rokid-nexus.anezium.me/" />
+<link rel="icon" href="assets/logo.png" type="image/png" />
+<link rel="apple-touch-icon" href="assets/logo.png" />
+
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Rokid Nexus" />
+<meta property="og:title" content="Rokid Nexus — install a phone app, get a glasses app" />
+<meta property="og:description" content="A plugin platform for Rokid AR glasses. One hub on the glasses renders everything; every feature ships as an ordinary phone APK." />
+<meta property="og:url" content="https://rokid-nexus.anezium.me/" />
+<meta property="og:image" content="https://rokid-nexus.anezium.me/assets/logo.png" />
+<meta name="twitter:card" content="summary_large_image" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Newsreader:ital,opsz,wght@0,6..72,200..500;1,6..72,200..400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div class="grain" aria-hidden="true"></div>
+
+<header class="nav" id="nav">
+  <a class="nav__brand" href="#top">
+    <img src="assets/logo.png" alt="" width="30" height="30" />
+    <span>Rokid&nbsp;Nexus</span>
+  </a>
+  <nav class="nav__links" aria-label="Sections">
+    <a href="#platform">Platform</a>
+    <a href="#plugins">Plugins</a>
+    <a href="#setup">Setup</a>
+    <a href="#roadmap">Roadmap</a>
+    <a href="#build">Build</a>
+  </nav>
+  <a class="nav__cta" href="https://github.com/Anezium/Rokid-Nexus/releases">Get the app</a>
+</header>
+
+<main id="top">
+
+<!-- ─────────────────────────  HERO  ───────────────────────── -->
+<section class="hero">
+  <div class="hero__field" aria-hidden="true">
+    <svg viewBox="0 0 900 900" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <radialGradient id="lens" cx="50%" cy="50%">
+          <stop offset="0%" stop-color="rgba(60,240,123,.22)" />
+          <stop offset="55%" stop-color="rgba(60,240,123,.05)" />
+          <stop offset="100%" stop-color="rgba(60,240,123,0)" />
+        </radialGradient>
+      </defs>
+      <circle cx="450" cy="450" r="430" fill="url(#lens)" />
+      <g class="rings">
+        <circle cx="450" cy="450" r="150" /><circle cx="450" cy="450" r="245" />
+        <circle cx="450" cy="450" r="340" /><circle cx="450" cy="450" r="425" />
+      </g>
+      <g class="mesh">
+        <line x1="450" y1="450" x2="726" y2="271" /><line x1="450" y1="450" x2="196" y2="352" />
+        <line x1="450" y1="450" x2="622" y2="742" /><line x1="450" y1="450" x2="240" y2="690" />
+        <line x1="726" y1="271" x2="622" y2="742" /><line x1="196" y1="352" x2="240" y2="690" />
+      </g>
+      <g class="nodes">
+        <circle cx="450" cy="450" r="9" class="n0" />
+        <circle cx="726" cy="271" r="5.5" class="n1" /><circle cx="196" cy="352" r="5.5" class="n2" />
+        <circle cx="622" cy="742" r="5.5" class="n3" /><circle cx="240" cy="690" r="5.5" class="n4" />
+      </g>
+    </svg>
+  </div>
+
+  <div class="hero__inner">
+    <div class="hero__copy">
+      <p class="eyebrow reveal">Plugin platform · Rokid AR glasses</p>
+      <h1 class="reveal" style="--i:1">
+        Install a phone app,<br />
+        get a <em>glasses</em> app.
+      </h1>
+      <p class="lede reveal" style="--i:2">
+        One permanent hub lives on the glasses and renders everything. Every
+        feature ships as an ordinary Android APK on your phone. Nothing is ever
+        installed on the glasses again — not the first time, not once.
+      </p>
+      <div class="hero__actions reveal" style="--i:3">
+        <a class="btn btn--solid" href="https://github.com/Anezium/Rokid-Nexus/releases">
+          Download for Android
+          <span class="btn__meta">v1.1.2 · APK</span>
+        </a>
+        <a class="btn btn--ghost" href="#roadmap">See the roadmap</a>
+      </div>
+      <ul class="hero__facts reveal" style="--i:4">
+        <li><b>8</b> plugins</li>
+        <li><b>1</b> gesture claimed</li>
+        <li><b>0</b> cables, PCs, or ADB</li>
+      </ul>
+    </div>
+
+    <div class="hero__optic reveal" style="--i:2">
+      <figure class="optic">
+        <img src="assets/shot-glasses-launcher.png" alt="The Nexus launcher on the glasses HUD, listing installed plugins in green monochrome" />
+        <figcaption>Triple-tap. From anywhere.</figcaption>
+      </figure>
+      <figure class="optic optic--phone">
+        <img src="assets/shot-phone-home.png" alt="The Nexus phone app home screen, listing installed plugins with update badges" />
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────  WHY IT FEELS NATIVE  ───────────────────── -->
+<section class="section" id="platform">
+  <div class="section__head">
+    <span class="tick" aria-hidden="true"></span>
+    <h2>Three properties, and everything else follows</h2>
+    <p class="section__sub">
+      All three were validated on real hardware before a single plugin was
+      written. They are the reason you never touch the glasses.
+    </p>
+  </div>
+
+  <div class="props">
+    <article class="prop reveal">
+      <span class="prop__num">01</span>
+      <h3>Wake-on-message</h3>
+      <p>
+        A plugin does not need to be running to receive traffic. The hub binds
+        it awake when something arrives for it — a message, a track change, a
+        departure — and it goes quiet again after.
+      </p>
+    </article>
+    <article class="prop reveal" style="--i:1">
+      <span class="prop__num">02</span>
+      <h3>One hub-owned link</h3>
+      <p>
+        A single hub-owned session over the Rokid link, with a binary fallback
+        underneath it. No more apps fighting over the connection, and no plugin
+        ever has to know which path its bytes took.
+      </p>
+    </article>
+    <article class="prop reveal" style="--i:2">
+      <span class="prop__num">03</span>
+      <h3>Declarative surfaces</h3>
+      <p>
+        Plugins push descriptions of content — a card, a band, a list, an
+        image. The glasses hub renders them locally, in the HUD's one green.
+        Zero glasses-side deployment, forever.
+      </p>
+    </article>
+  </div>
+
+  <div class="tiers reveal">
+    <div class="tiers__label">
+      <h3>Every tier of the display, shipped</h3>
+      <p>
+        Nothing on the HUD is improvised. Each piece of content declares which
+        tier it belongs to, and the platform — not the plugin — decides how
+        loudly it may speak.
+      </p>
+    </div>
+    <ul class="tiers__list">
+      <li><b>Ambient</b><span>Silent updates. Lyrics advancing, a glanceable refreshing.</span></li>
+      <li><b>Pin</b><span>A persistent corner that survives across native screens.</span></li>
+      <li><b>Activity</b><span>An ongoing process holding a stable corner, expandable into a panel with real actions.</span></li>
+      <li><b>Notice</b><span>A band over whatever is underneath. Sixteen structured lines, paged on the glasses, one answer taken.</span></li>
+      <li><b>Surface</b><span>The full thing: cards, timed lines, media decks, list rows, real photographs.</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ─────────────────────────  PLUGINS  ───────────────────────── -->
+<section class="section section--plugins" id="plugins">
+  <div class="section__head">
+    <span class="tick" aria-hidden="true"></span>
+    <h2>Eight plugins, none of them built in</h2>
+    <p class="section__sub">
+      Every one is an ordinary phone APK installed from the in-app Store, backed
+      by a public registry with SHA-256 and signer pinning checked before the
+      install runs. The hub itself ships empty.
+    </p>
+  </div>
+
+  <div class="grid">
+    <article class="card card--wide reveal">
+      <div class="card__shots">
+        <img src="assets/shot-relay-notice.png" alt="A Relay notice band over the glasses home screen showing a two-message thread with a Reply action" loading="lazy" />
+        <img src="assets/shot-relay-inbox.png" alt="The Relay inbox listing conversations still waiting for a reply" loading="lazy" />
+      </div>
+      <div class="card__body">
+        <h3>Relay</h3>
+        <p>
+          A message you can answer arrives as a band over whatever you were
+          already looking at, lights the display if it was dark, and is answered
+          out loud. Let one go and it waits in Messages, newest first.
+        </p>
+      </div>
+    </article>
+
+    <article class="card card--wide reveal" style="--i:1">
+      <div class="card__shots">
+        <img src="assets/shot-lens-live.png" alt="Lens translating a screen of English text into French live on the HUD" loading="lazy" />
+        <img src="assets/shot-lens-freeze.png" alt="Lens freeze mode showing a full-resolution still with the translated result" loading="lazy" />
+      </div>
+      <div class="card__body">
+        <h3>Lens</h3>
+        <p>
+          The glasses camera streams to the phone, where OCR and translation run
+          offline; the overlays come back in real time. Freeze mode captures a
+          full-resolution still through the same link.
+        </p>
+      </div>
+    </article>
+
+    <article class="card reveal">
+      <div class="card__shots card__shots--one">
+        <img src="assets/shot-feeds.png" alt="The Feeds plugin showing a timeline post on the glasses HUD" loading="lazy" />
+      </div>
+      <div class="card__body">
+        <h3>Feeds</h3>
+        <p>Bluesky and X timelines — posts, threads, and the actual photos full-screen.</p>
+      </div>
+    </article>
+
+    <article class="card reveal" style="--i:1">
+      <div class="card__shots card__shots--one">
+        <img src="assets/shot-transit.png" alt="The Transit plugin showing nearby stops and live departure countdowns" loading="lazy" />
+      </div>
+      <div class="card__body">
+        <h3>Transit</h3>
+        <p>Nearby stops and live departures, with the ones you actually take kept on top.</p>
+      </div>
+    </article>
+
+    <article class="card reveal" style="--i:2">
+      <div class="card__shots card__shots--one">
+        <img src="assets/shot-media.png" alt="The Media Deck plugin showing album art, track title, and transport controls" loading="lazy" />
+      </div>
+      <div class="card__body">
+        <h3>Media Deck</h3>
+        <p>Now playing with album art and transport, from whatever app is playing.</p>
+      </div>
+    </article>
+
+    <article class="card reveal" style="--i:3">
+      <div class="card__shots card__shots--one">
+        <img src="assets/shot-lyrics.png" alt="The Lyrics plugin showing the current line time-synced to the playing track" loading="lazy" />
+      </div>
+      <div class="card__body">
+        <h3>Lyrics</h3>
+        <p>Time-synced lines for whatever is playing, pulled from four sources.</p>
+      </div>
+    </article>
+
+    <article class="card card--text reveal">
+      <div class="card__body">
+        <h3>Photos Sync</h3>
+        <p>
+          Not a HUD plugin. It copies the photos and videos you shoot on the
+          glasses into your phone gallery by itself, and hands you the switches
+          for it.
+        </p>
+      </div>
+    </article>
+
+    <article class="card card--text reveal" style="--i:1">
+      <div class="card__body">
+        <h3>Sample</h3>
+        <p>
+          The minimal copyable plugin. Clone it, change the id, and you have a
+          working glasses app that never runs on the glasses.
+        </p>
+      </div>
+    </article>
+  </div>
+
+  <p class="grid__foot reveal">
+    Installation alone grants nothing. <b>Surfaces</b>, <b>microphone</b>,
+    <b>camera</b>, and <b>HTTP proxy</b> are approved one by one, per plugin,
+    keyed to its package, its plugin id, and its signing certificate.
+  </p>
+</section>
+
+<!-- ──────────────────────────  SETUP  ────────────────────────── -->
+<section class="section section--setup" id="setup">
+  <div class="section__head">
+    <span class="tick" aria-hidden="true"></span>
+    <h2>A phone is all you need</h2>
+    <p class="section__sub">
+      No cable. No PC. No ADB, at any point — including the privileged parts,
+      which the glasses arm by themselves in two cards.
+    </p>
+  </div>
+
+  <ol class="steps">
+    <li class="reveal"><span class="steps__n">1</span>
+      <h3>Install the phone app</h3>
+      <p>One APK from the releases page. It is the hub, the Store, and the setup guide.</p>
+    </li>
+    <li class="reveal" style="--i:1"><span class="steps__n">2</span>
+      <h3>Follow the seven steps</h3>
+      <p>The phone drives the pairing, turns the glasses' Wi-Fi on, and pushes the glasses app over the Rokid link.</p>
+    </li>
+    <li class="reveal" style="--i:2"><span class="steps__n">3</span>
+      <h3>Say yes once, on the glasses</h3>
+      <p>Enable accessibility when asked. Nexus bootstraps the rest of its glasses-side setup on its own.</p>
+    </li>
+    <li class="reveal" style="--i:3"><span class="steps__n">4</span>
+      <h3>Install a plugin</h3>
+      <p>From the Store, in the app. From then on the phone, the glasses, and every plugin keep themselves current.</p>
+    </li>
+  </ol>
+</section>
+
+<!-- ─────────────────────────  ROADMAP  ───────────────────────── -->
+<section class="section section--roadmap" id="roadmap">
+  <div class="section__head">
+    <span class="tick" aria-hidden="true"></span>
+    <h2>Roadmap</h2>
+    <p class="section__sub">
+      No dates. Items are ordered by the problem they solve, and nothing is
+      listed as shipped until it has run on real hardware.
+    </p>
+  </div>
+
+  <div class="road">
+
+    <div class="road__group reveal" data-state="shipped">
+      <div class="road__meta">
+        <span class="chip chip--shipped">Shipped</span>
+        <p>The beta gate is behind us: a stranger sets up Nexus with nothing but a phone.</p>
+      </div>
+      <ul class="road__items">
+        <li><h3>The bus and its trust boundary</h3><p>Per-plugin capabilities keyed to package, plugin id, and signing certificate, enforced at the hub.</p></li>
+        <li><h3>Setup without a computer</h3><p>Seven steps on the phone, then a two-card self-arm on the glasses. No ADB, no cable.</p></li>
+        <li><h3>The distribution loop, closed</h3><p>SDK on JitPack, plugins ingested by a public registry, installs verified by hash and signer, everything self-updating.</p></li>
+        <li><h3>The whole display model</h3><p>Ambient, pin, activity, notice, surface — plus HUD motion, a shared glyph set, and plugin marks that travel to the glasses.</p></li>
+        <li><h3>The camera capability</h3><p>Live H.264 over Wi-Fi Direct, decoded on the phone — and the roles invert when the phone's Wi-Fi is off, so it works anyway.</p></li>
+        <li><h3>Bands that can wake a dark display</h3><p>At most one pulse every five seconds across every plugin, always brief, never held on.</p></li>
+      </ul>
+    </div>
+
+    <div class="road__group reveal" data-state="building">
+      <div class="road__meta">
+        <span class="chip chip--building">Building</span>
+        <p>Specified and underway.</p>
+      </div>
+      <ul class="road__items">
+        <li><h3>Display arbitration</h3><p>The protocol has carried an <code>actionable</code> class since v1, and v1 still renders it as a toast. This is the first problem two chatty plugins will create.</p></li>
+        <li><h3>Continuous speech</h3><p>Speech-to-text ships in short takes. The remaining slice is the continuous mode that live captions and a voice assistant are both blocked behind.</p></li>
+      </ul>
+    </div>
+
+    <div class="road__group reveal" data-state="next">
+      <div class="road__meta">
+        <span class="chip chip--next">Next</span>
+        <p>Committed, not started.</p>
+      </div>
+      <ul class="road__items">
+        <li><h3>Native apps in the menu</h3><p>List and launch real glasses APKs from the same triple-tap menu. Nexus does not port them; it stops you having to leave.</p></li>
+        <li><h3>A <code>nav</code> surface kind</h3><p>Turn-by-turn deserves a real surface. Navigation degrades to a text card until it exists.</p></li>
+        <li><h3>Maven Central</h3><p>JitPack carries the SDK today. Central once the AIDL surface is stable — a published coordinate is what makes a platform safe to bet on.</p></li>
+      </ul>
+    </div>
+
+    <div class="road__group reveal" data-state="exploring">
+      <div class="road__meta">
+        <span class="chip chip--exploring">Exploring</span>
+        <p>Not committed. Each one is an ordinary phone APK against a capability that already exists.</p>
+      </div>
+      <ul class="road__items road__items--compact">
+        <li><h3>Live captions and translation</h3></li>
+        <li><h3>A voice assistant</h3></li>
+        <li><h3>Teleprompter and glanceables</h3></li>
+        <li><h3>A visual assistant, FoodFacts</h3></li>
+        <li><h3>Sport HUD, CGM glucose</h3></li>
+      </ul>
+    </div>
+
+  </div>
+
+  <div class="nogo reveal">
+    <h3>And what stays off it</h3>
+    <p>
+      Native glasses apps are launched from the menu, never absorbed into it.
+      Plugin code stays on the phone — the glasses half of any capability lives
+      in the hub, which is exactly what makes zero glasses-side deployment
+      possible. And there is no signature-only plugin permission, because no
+      third-party developer can be signed with our key.
+    </p>
+  </div>
+</section>
+
+<!-- ──────────────────────────  BUILD  ────────────────────────── -->
+<section class="section section--build" id="build">
+  <div class="build">
+    <div class="build__copy">
+      <span class="tick" aria-hidden="true"></span>
+      <h2>Write one yourself</h2>
+      <p>
+        A plugin is a headless phone APK against the published SDK. No glasses
+        code, no emulator, no device flashing — you describe what should appear,
+        and the glasses draw it.
+      </p>
+      <ul class="build__links">
+        <li><a href="https://github.com/Anezium/Rokid-Nexus/blob/main/plugins/AGENTS.md">The plugin contract <span>complete and self-contained</span></a></li>
+        <li><a href="https://github.com/Anezium/Rokid-Nexus/blob/main/docs/PLUGIN_SDK.md">SDK reference <span>surfaces, lifecycle, design kit</span></a></li>
+        <li><a href="https://github.com/Anezium/Rokid-Nexus/tree/main/plugins/sample">The sample plugin <span>the canonical template</span></a></li>
+        <li><a href="https://github.com/Anezium/RokidBrew-Registry">Publish to the registry <span>F-Droid-like: you host, we index</span></a></li>
+      </ul>
+    </div>
+    <div class="build__code">
+      <div class="code">
+        <div class="code__bar"><span>build.gradle.kts</span></div>
+<pre><code><span class="k">repositories</span> { <span class="f">maven</span>(<span class="s">"https://jitpack.io"</span>) }
+
+<span class="k">dependencies</span> {
+    <span class="f">implementation</span>(
+        <span class="s">"com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.9.0"</span>
+    )
+}</code></pre>
+      </div>
+      <p class="code__note">
+        Your plugin declares an id, a mark, and the capabilities it needs. The
+        user grants them. The hub enforces them.
+      </p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="foot__brand">
+    <img src="assets/logo.png" alt="" width="34" height="34" />
+    <div>
+      <b>Rokid Nexus</b>
+      <span>Apache-2.0 · built by Anezium</span>
+    </div>
+  </div>
+  <nav class="foot__links" aria-label="Elsewhere">
+    <a href="https://github.com/Anezium/Rokid-Nexus">GitHub</a>
+    <a href="https://github.com/Anezium/Rokid-Nexus/releases">Releases</a>
+    <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/ROADMAP.md">Roadmap source</a>
+    <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/CHANGELOG.md">Changelog</a>
+    <a href="https://github.com/Anezium/awesome-rokid">Awesome Rokid</a>
+    <a href="https://ko-fi.com/M8R61ZTXMI">Ko-fi</a>
+  </nav>
+  <p class="foot__legal">
+    Not affiliated with or endorsed by Rokid. Built for Rokid Glasses on Hi Rokid Global.
+  </p>
+</footer>
+
+<script src="main.js" defer></script>
+</body>
+</html>

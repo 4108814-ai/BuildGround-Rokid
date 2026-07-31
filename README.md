@@ -6,6 +6,8 @@
 
 <p align="center"><b>Install a phone app, get a glasses app.</b></p>
 
+<p align="center"><a href="https://rokid-nexus.anezium.me">rokid-nexus.anezium.me</a></p>
+
 <p align="center">
   <a href="https://github.com/Anezium/Rokid-Nexus/releases"><img src="https://img.shields.io/github/v/release/Anezium/Rokid-Nexus?filter=v*&label=app&color=00c853" alt="App release" /></a>
   <a href="https://github.com/Anezium/Rokid-Nexus/releases?q=sdk"><img src="https://img.shields.io/github/v/release/Anezium/Rokid-Nexus?filter=sdk-v*&label=SDK&color=00c853" alt="SDK release" /></a>
@@ -33,6 +35,7 @@ timed lines, media decks, and real images.
 
 | Plugin | What it puts on the HUD |
 |---|---|
+| **[Relay](plugins/relay/)** | Phone messages as a band over whatever you were looking at, answered out loud — plus an inbox for the ones you let go |
 | **[Lens](plugins/lens/)** | Google-Lens-style live translation: the glasses camera streams to the phone, ML Kit OCR + translation run there (offline), translated overlays come back in real time — plus a freeze mode for full-resolution stills |
 | **[Feeds](plugin-feeds/)** | Bluesky and X timelines — browse posts, open threads, and view the actual photos full-screen |
 | **[Transit](plugins/transit/)** | Nearby stops and live departures (Transitous/MOTIS), with favourites |
@@ -168,7 +171,8 @@ SDK publication and the published-coordinate sample build do not require it.
 
 ## More
 
-[Product vision](VISION.md) · [wire specification](BUSSPEC.md) ·
-[protocol guide](docs/PROTOCOL.md) · [verification matrix](TESTPLAN.md)
+[Product vision](VISION.md) · [roadmap](ROADMAP.md) ·
+[wire specification](BUSSPEC.md) · [protocol guide](docs/PROTOCOL.md) ·
+[verification matrix](TESTPLAN.md)
 
 This project is licensed under the [Apache License 2.0](LICENSE).

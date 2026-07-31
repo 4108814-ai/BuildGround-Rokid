@@ -22,3 +22,6 @@ local.properties
 /scratchpad/
 /.claude/
 /release-assets/
+
+# Site assets are copied from docs/assets at build time
+/site/assets/
