@@ -35,10 +35,10 @@
     <string name="onb_install_status_wifi_needed">The app reaches the glasses over Wi-Fi — turn it on first.</string>
 
     <string name="onb_glasses_title">Set up your glasses</string>
-    <string name="onb_glasses_body">Put the glasses on and tap Start setup. Nexus opens the one switch you need to flip, then finishes the rest on its own.</string>
-    <string name="onb_glasses_action">Start setup</string>
+    <string name="onb_glasses_body">Put the glasses on and tap Automatic setup. Nexus opens the one switch you need to flip, then finishes the rest on its own.</string>
+    <string name="onb_glasses_action">Automatic setup</string>
     <string name="onb_glasses_action_open_app">Open glasses app</string>
-    <string name="onb_glasses_action_guided">Guided setup</string>
+    <string name="onb_glasses_action_guided">Manual setup</string>
     <string name="onb_how_it_works">HOW IT WORKS  ›</string>
     <string name="onb_glasses_status_starting">Opening setup on the glasses…</string>
     <string name="onb_glasses_status_open_failed">Could not reach the glasses. Open the Nexus app on the lens instead.</string>
@@ -50,7 +50,7 @@
     <string name="onb_progress_no_action">No action needed right now. Keep the glasses on while Nexus finishes.</string>
     <string name="onb_progress_accessibility_action">On the glasses, switch on Rokid Nexus Glasses. This is the only switch Nexus asks you to change.</string>
     <string name="onb_progress_wifi_action">If this does not resume automatically, connect the glasses to Wi-Fi from the Hi Rokid app.</string>
-    <string name="onb_progress_guided_action">Open Guided setup on this phone to finish the remaining step.</string>
+    <string name="onb_progress_guided_action">Open Manual setup on this phone to finish the remaining step.</string>
 
     <string name="onb_notifications_title">Allow notifications</string>
     <string name="onb_notifications_body">Nexus keeps a quiet status notification while it holds the glasses link.</string>
@@ -76,16 +76,27 @@
     <string name="onb_phase_pairing_via_phone">Finishing the pairing from your phone…</string>
     <string name="onb_phase_arming">Arming Nexus on the glasses…</string>
     <string name="onb_phase_complete">Your glasses are ready.</string>
-    <string name="onb_phase_manual_required">Automatic setup could not finish — use guided setup.</string>
+    <string name="onb_phase_manual_required">Automatic setup could not finish — use manual setup.</string>
     <string name="onb_phase_failed">Setup stopped before it finished.</string>
 
-    <!-- ===== Guided setup (the fallback when the automatic path cannot finish) ===== -->
-    <string name="guided_title">Guided setup</string>
-    <string name="guided_intro">Nexus checks what is already in place, then walks you through only what is missing.</string>
+    <!-- ===== Manual setup (the fallback when the automatic path cannot finish) =====
+         The resource keys still read guided_* for churn reasons; the surface is called Manual
+         setup everywhere the owner can see it, paired with Automatic setup on the home screen. -->
+    <string name="guided_title">Manual setup</string>
+    <string name="guided_intro">Nexus checks what is already in place, then walks you through only what is missing. Every screen it can open on the glasses is also a button here.</string>
+
+    <string name="manual_open_glasses_app">Open Nexus on the glasses</string>
+    <string name="manual_open_group">Open on the glasses</string>
+    <string name="manual_open_hint">Use these when a screen does not open on its own. Wireless debugging is the one Nexus most often cannot reach by itself.</string>
+    <string name="manual_open_accessibility">Accessibility settings</string>
+    <string name="manual_open_developer">Developer options</string>
+    <string name="manual_open_wireless">Wireless debugging</string>
 
     <string name="guided_preflight_title">Before we start</string>
     <string name="guided_check_link">Glasses connected</string>
     <string name="guided_check_link_fail">Connect your glasses in the Hi Rokid app.</string>
+    <string name="guided_check_glasses_app">Nexus running on the glasses</string>
+    <string name="guided_check_glasses_app_fail">Nexus is not open on the glasses yet. Every step here is a message to the lens, so it has to be running first.</string>
     <string name="guided_check_accessibility">Rokid Nexus Glasses switched on</string>
     <string name="guided_check_accessibility_fail">Switch on “Rokid Nexus Glasses” from the lens. This is the one step Nexus cannot do for you.</string>
     <string name="guided_check_wifi">Glasses on Wi-Fi</string>
@@ -101,6 +112,7 @@
     <string name="guided_action_cancel">Cancel</string>
 
     <string name="guided_status_waiting">Waiting for the glasses…</string>
+    <string name="guided_status_opening_app">Opening Nexus on the glasses…</string>
     <string name="guided_status_acked">The glasses opened it.</string>
     <string name="guided_status_pairing">Pairing…</string>
     <string name="guided_status_success">Your glasses are set up.</string>
@@ -135,7 +147,7 @@
     <string name="guided_error_generic">That step did not go through.</string>
     <string name="guided_support_code">Support code: %1$s</string>
 
-    <string name="guided_wordmark">GUIDED SETUP</string>
+    <string name="guided_wordmark">MANUAL SETUP</string>
     <string name="guided_working_pairing_title">Pairing…</string>
     <string name="guided_working_pairing_body">Connecting to your glasses. Keep them on.</string>
     <string name="guided_working_connecting_title">Almost there…</string>
@@ -151,7 +163,7 @@
     <string name="guided_failed_check_retry">Running the checks again from the top</string>
     <string name="guided_failed_action">Try again</string>
     <string name="guided_unavailable_title">Not connected</string>
-    <string name="guided_unavailable_body">Nexus isn’t linked to your glasses right now. Go back, make sure the glasses are connected, and open guided setup again.</string>
+    <string name="guided_unavailable_body">Nexus isn’t linked to your glasses right now. Go back, make sure the glasses are connected, and open manual setup again.</string>
 
     <!-- Illustration of the pairing dialog the glasses show, so the owner knows which number is which. -->
     <string name="guided_mock_dialog_title">Pair with device</string>

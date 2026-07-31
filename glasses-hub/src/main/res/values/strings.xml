@@ -28,8 +28,7 @@
 
     <string name="onb_manual_eyebrow">FINISH ON YOUR PHONE</string>
     <string name="onb_manual_title">Nexus needs a hand</string>
-    <string name="onb_phase_enabling_wifi">Turning on Wi-Fi…</string>
-    <string name="onb_manual_body">Automatic setup could not finish here. Open Rokid Nexus on your phone and follow the guided setup.</string>
+    <string name="onb_manual_body">Automatic setup could not finish here. Open Rokid Nexus on your phone and use Manual setup.</string>
     <string name="onb_manual_action">RETRY HERE</string>
 
     <string name="onb_failed_eyebrow">SETUP STOPPED</string>
@@ -49,6 +48,7 @@
     <!-- Phase lines. One short sentence: it sits inside onb_running_body. -->
     <string name="onb_phase_unknown">Getting ready…</string>
     <string name="onb_phase_waiting_for_accessibility">Waiting for Rokid Nexus Glasses to be switched on.</string>
+    <string name="onb_phase_enabling_wifi">Turning on Wi-Fi…</string>
     <string name="onb_phase_waiting_for_wifi">Waiting for a Wi-Fi network.</string>
     <string name="onb_phase_enabling_developer_options">Unlocking developer options…</string>
     <string name="onb_phase_opening_wireless_debugging">Opening Wireless Debugging…</string>

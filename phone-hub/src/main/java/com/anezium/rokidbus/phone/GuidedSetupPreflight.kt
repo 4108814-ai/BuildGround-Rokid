@@ -1,5 +1,7 @@
 package com.anezium.rokidbus.phone
 
+import com.anezium.rokidbus.shared.SetupStage
+
 /**
  * What guided setup checks before it asks the owner to do anything.
  *
@@ -10,6 +12,15 @@ package com.anezium.rokidbus.phone
 internal enum class GuidedCheckId {
     /** The phone can reach the glasses at all. Nothing else is worth trying without it. */
     LINK,
+
+    /**
+     * Nexus is actually running on the lens.
+     *
+     * Every button on this screen is a message to the glasses app. With the app installed but
+     * never opened there is nobody to receive them, and the screen used to sit on "Waiting for the
+     * glasses…" forever without ever saying what was missing.
+     */
+    GLASSES_APP,
 
     /** The one switch only a human can flip. */
     ACCESSIBILITY,
@@ -42,6 +53,7 @@ internal object GuidedSetupPreflightPolicy {
      */
     fun evaluate(
         linkReady: Boolean,
+        glassesAppRunning: Boolean,
         accessibilityEnabled: Boolean,
         wifiReady: Boolean,
         developerOptionsReady: Boolean,
@@ -49,6 +61,7 @@ internal object GuidedSetupPreflightPolicy {
     ): GuidedPreflight {
         val checks = listOf(
             GuidedCheck(GuidedCheckId.LINK, linkReady),
+            GuidedCheck(GuidedCheckId.GLASSES_APP, glassesAppRunning),
             GuidedCheck(GuidedCheckId.ACCESSIBILITY, accessibilityEnabled),
             GuidedCheck(GuidedCheckId.WIFI, wifiReady),
             GuidedCheck(GuidedCheckId.DEVELOPER, developerOptionsReady),
@@ -62,9 +75,42 @@ internal object GuidedSetupPreflightPolicy {
         return GuidedPreflight(checks = checks, blocking = blocking, alreadyComplete = false)
     }
 
+    /**
+     * The same verdict, read from what the glasses have actually told us.
+     *
+     * A blank stage means the lens has never reported anything, which is not the same as "all
+     * clear". Treating that silence as satisfied is what offered a pairing to an owner whose
+     * accessibility service had never been switched on, and then blamed the link when the command
+     * went nowhere.
+     */
+    fun fromReportedStage(
+        linkReady: Boolean,
+        reportedStage: String,
+        coreReady: Boolean,
+    ): GuidedPreflight {
+        val reported = reportedStage.isNotBlank()
+        return evaluate(
+            linkReady = linkReady,
+            // A lens that has said nothing has not started its app. Anything this screen sends it
+            // would be dropped on the floor.
+            glassesAppRunning = coreReady || reported,
+            accessibilityEnabled = coreReady ||
+                (reported && reportedStage != SetupStage.WAITING_FOR_ACCESSIBILITY),
+            wifiReady = coreReady ||
+                (
+                    reported && reportedStage != SetupStage.ENABLING_WIFI &&
+                        reportedStage != SetupStage.WAITING_FOR_WIFI
+                    ),
+            // The glasses do not advertise this, and Nexus unlocks it during the run anyway.
+            developerOptionsReady = true,
+            coreReady = coreReady,
+        )
+    }
+
     /** Developer options are deliberately absent: Nexus turns them on, it does not ask. */
     private val BLOCKING_ORDER = listOf(
         GuidedCheckId.LINK,
+        GuidedCheckId.GLASSES_APP,
         GuidedCheckId.ACCESSIBILITY,
         GuidedCheckId.WIFI,
     )

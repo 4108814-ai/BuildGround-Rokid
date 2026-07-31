@@ -119,7 +119,15 @@ internal class GlassesManualPairingEngine(
     fun showWirelessDebugging(): Boolean = requestSettings(GlassesManualControlAction.OPEN_WIRELESS_DEBUGGING)
 
     private fun requestSettings(action: GlassesManualControlAction): Boolean {
-        if (state != GlassesManualPairingState.WAITING_FOR_CODE) return false
+        // Opening a screen on the lens is navigation, not a pairing step. Gating it on
+        // WAITING_FOR_CODE meant every button on the manual screen fired before the engine had
+        // been started, returned false, and was reported to the owner as a lost link — while the
+        // link was up the whole time. IDLE is precisely when this help is needed.
+        if (state != GlassesManualPairingState.IDLE &&
+            state != GlassesManualPairingState.WAITING_FOR_CODE
+        ) {
+            return false
+        }
         val attempt = synchronized(lock) { generation }
         return requestManualControl(attempt, action)
     }

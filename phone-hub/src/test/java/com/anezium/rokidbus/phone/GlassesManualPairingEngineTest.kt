@@ -38,6 +38,46 @@ class GlassesManualPairingEngineTest {
         assertEquals(GlassesManualPairingState.DONE, states.last())
     }
 
+    /**
+     * The manual screen opens on IDLE and its buttons are the whole point of the screen. Requiring
+     * WAITING_FOR_CODE first made every one of them return false, which the UI then reported as a
+     * lost link while the link was perfectly healthy.
+     */
+    @Test
+    fun settingsScreensOpenBeforeAnyPairingAttemptHasStarted() {
+        val fixture = fixture()
+
+        assertEquals(GlassesManualPairingState.IDLE, fixture.engine.state)
+        // One command in flight at a time, so each is acknowledged before the next is offered —
+        // which is exactly what the screen does by disabling its buttons while one is pending.
+        assertTrue(fixture.engine.openAccessibilitySettings())
+        assertTrue(fixture.engine.onManualControlResponse(fixture.control.requestIds.last(), null))
+        assertTrue(fixture.engine.openDeveloperOptions())
+        assertTrue(fixture.engine.onManualControlResponse(fixture.control.requestIds.last(), null))
+        assertTrue(fixture.engine.showWirelessDebugging())
+
+        assertEquals(
+            listOf(
+                GlassesManualControlAction.OPEN_ACCESSIBILITY_SETTINGS,
+                GlassesManualControlAction.OPEN_DEVELOPER_OPTIONS,
+                GlassesManualControlAction.OPEN_WIRELESS_DEBUGGING,
+            ),
+            fixture.control.actions,
+        )
+        assertEquals(GlassesManualPairingState.IDLE, fixture.engine.state)
+    }
+
+    /** Navigation is still refused once an attempt is genuinely in flight. */
+    @Test
+    fun settingsScreensAreRefusedWhilePairingIsRunning() {
+        val fixture = fixture()
+        fixture.engine.start()
+        fixture.engine.submit(HOST, PAIR_PORT, CODE)
+
+        assertEquals(GlassesManualPairingState.ARMING, fixture.engine.state)
+        assertFalse(fixture.engine.showWirelessDebugging())
+    }
+
     @Test
     fun assistedPathFinishesAfterArmWithoutOpeningOrClosingManualUi() {
         val fixture = fixture()

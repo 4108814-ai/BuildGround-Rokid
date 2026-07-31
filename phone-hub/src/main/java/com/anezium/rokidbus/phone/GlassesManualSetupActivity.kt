@@ -56,6 +56,24 @@ class GlassesManualSetupActivity : Activity() {
     private var commandPending = false
     private var lastState: GlassesManualPairingState = GlassesManualPairingState.IDLE
 
+    // The preflight is drawn from what the lens has reported, so it has to redraw when that
+    // changes — otherwise waking the glasses app leaves the screen still insisting it is down.
+    // Marshalled, because these updates arrive on a Binder thread.
+    private val stateRenderDispatcher by lazy {
+        PhoneHomeRenderDispatcher(
+            isMainThread = { Looper.myLooper() == Looper.getMainLooper() },
+            postToMain = { action -> runOnUiThread { action() } },
+            render = {
+                if (!isDestroyed && !isFinishing &&
+                    lastState == GlassesManualPairingState.IDLE
+                ) {
+                    rerenderCurrent()
+                }
+            },
+        )
+    }
+    private val phoneStateListener: () -> Unit = stateRenderDispatcher::requestRender
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         BusHubService.noteGlassesSetupUserIntent()
@@ -105,6 +123,16 @@ class GlassesManualSetupActivity : Activity() {
         // sure regardless, then attach once the service instance exists.
         BusHubService.start(this)
         attachEngineWhenReady(attempts = 0)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        NexusPhoneState.addUpdateListener(phoneStateListener)
+    }
+
+    override fun onStop() {
+        NexusPhoneState.removeUpdateListener(phoneStateListener)
+        super.onStop()
     }
 
     private fun attachEngineWhenReady(attempts: Int) {
@@ -210,14 +238,44 @@ class GlassesManualSetupActivity : Activity() {
         val blocking = preflight.blocking
         if (blocking != null) {
             // Do not offer to prepare a pairing that cannot possibly work yet: say what is in the
-            // way, and let the owner re-check once they have fixed it.
+            // way, and lead with the button that actually clears it. Offering only "Check again"
+            // left the owner staring at a blocker they had no way to act on from here.
             body.addView(
                 NexusUi.cardBody(this, getString(blockingMessage(blocking))),
                 NexusUi.block(),
             )
             body.addView(BusTheme.gap(this, 14))
+            when (blocking) {
+                // Nothing this screen sends can land until Nexus is actually running on the lens,
+                // so waking it is the offer rather than a step buried in the instructions.
+                GuidedCheckId.GLASSES_APP -> {
+                    body.addView(
+                        primary(getString(R.string.manual_open_glasses_app)) {
+                            BusHubService.openGlassesApp(this)
+                            inlineStatus = getString(R.string.guided_status_opening_app)
+                            inlineIsError = false
+                            rerenderCurrent()
+                        },
+                        NexusUi.block(),
+                    )
+                    body.addView(BusTheme.gap(this, 8))
+                }
+                GuidedCheckId.ACCESSIBILITY -> {
+                    body.addView(
+                        primary(getString(R.string.manual_open_accessibility)) {
+                            dispatch(R.string.guided_status_waiting) { it.openAccessibilitySettings() }
+                        },
+                        NexusUi.block(),
+                    )
+                    body.addView(BusTheme.gap(this, 8))
+                }
+                else -> Unit
+            }
             body.addView(
-                primary(getString(R.string.guided_action_recheck)) { rerenderCurrent() },
+                NexusUi.textButton(this, getString(R.string.guided_action_recheck)).apply {
+                    gravity = Gravity.CENTER
+                    setOnClickListener { rerenderCurrent() }
+                },
                 NexusUi.block(),
             )
         } else {
@@ -229,22 +287,30 @@ class GlassesManualSetupActivity : Activity() {
             )
         }
         addInlineStatus()
+        // With the lens app down every one of these would hang on "Waiting for the glasses…", so
+        // the screen offers nothing it cannot deliver until Nexus is up over there.
+        if (blocking != GuidedCheckId.GLASSES_APP) {
+            body.addView(BusTheme.gap(this, 20))
+            // Whatever the screen already leads with needs no second button underneath.
+            body.addView(
+                manualStepButtons(
+                    skip = R.string.manual_open_accessibility
+                        .takeIf { blocking == GuidedCheckId.ACCESSIBILITY },
+                ),
+                NexusUi.block(),
+            )
+        }
         body.addView(BusTheme.gap(this, 8))
         body.addView(advancedDisclosure(), NexusUi.block())
     }
 
     /** Derived only from what the glasses actually report, so it never claims to know more. */
-    private fun currentPreflight(): GuidedPreflight {
-        val stage = NexusPhoneState.glassesSetupStage
-        return GuidedSetupPreflightPolicy.evaluate(
+    private fun currentPreflight(): GuidedPreflight =
+        GuidedSetupPreflightPolicy.fromReportedStage(
             linkReady = engine != null,
-            accessibilityEnabled = stage != SetupStage.WAITING_FOR_ACCESSIBILITY,
-            wifiReady = stage != SetupStage.WAITING_FOR_WIFI,
-            // The glasses do not advertise this, and Nexus unlocks it during the run anyway.
-            developerOptionsReady = true,
+            reportedStage = NexusPhoneState.glassesSetupStage,
             coreReady = NexusPhoneState.glassesCoreReady,
         )
-    }
 
     private fun preflightCard(preflight: GuidedPreflight): View = NexusUi.card(this).apply {
         val host = this@GlassesManualSetupActivity
@@ -267,13 +333,49 @@ class GlassesManualSetupActivity : Activity() {
 
     private fun checkLabel(id: GuidedCheckId): Int = when (id) {
         GuidedCheckId.LINK -> R.string.guided_check_link
+        GuidedCheckId.GLASSES_APP -> R.string.guided_check_glasses_app
         GuidedCheckId.ACCESSIBILITY -> R.string.guided_check_accessibility
         GuidedCheckId.WIFI -> R.string.guided_check_wifi
         GuidedCheckId.DEVELOPER -> R.string.guided_check_developer
     }
 
+    /**
+     * Every screen the lens can be sent to, as plain buttons the owner can reach at any point.
+     *
+     * The automatic run drives these itself, but it is exactly here that it gives up: the
+     * developer-options list does not always scroll under the accessibility gesture, so wireless
+     * debugging stays out of reach. Opening that page is a direct intent on the glasses and needs
+     * no automation at all, so the manual screen offers it outright rather than leaving the owner
+     * with a wizard that cannot get there either.
+     */
+    private fun manualStepButtons(skip: Int? = null): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        val host = this@GlassesManualSetupActivity
+        addView(NexusUi.metaLabel(host, getString(R.string.manual_open_group), NexusUi.INK3))
+        addView(BusTheme.gap(host, 6))
+        addView(NexusUi.cardBody(host, getString(R.string.manual_open_hint)).apply { textSize = 12f })
+        addView(BusTheme.gap(host, 10))
+        listOf(
+            R.string.manual_open_accessibility to
+                { e: GlassesManualPairingEngine -> e.openAccessibilitySettings() },
+            R.string.manual_open_developer to
+                { e: GlassesManualPairingEngine -> e.openDeveloperOptions() },
+            R.string.manual_open_wireless to
+                { e: GlassesManualPairingEngine -> e.showWirelessDebugging() },
+        ).filterNot { (label, _) -> label == skip }.forEachIndexed { index, (label, request) ->
+            if (index > 0) addView(BusTheme.gap(host, 6))
+            addView(
+                NexusUi.textButton(host, getString(label)).apply {
+                    gravity = Gravity.START
+                    setOnClickListener { dispatch(R.string.guided_status_waiting, request) }
+                },
+            )
+        }
+    }
+
     private fun blockingMessage(id: GuidedCheckId): Int = when (id) {
         GuidedCheckId.LINK -> R.string.guided_check_link_fail
+        GuidedCheckId.GLASSES_APP -> R.string.guided_check_glasses_app_fail
         GuidedCheckId.ACCESSIBILITY -> R.string.guided_check_accessibility_fail
         GuidedCheckId.WIFI -> R.string.guided_check_wifi_fail
         GuidedCheckId.DEVELOPER -> R.string.guided_check_developer_fail
