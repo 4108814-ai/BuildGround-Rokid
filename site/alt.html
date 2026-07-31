@@ -23,7 +23,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Newsreader:ital,opsz,wght@0,6..72,200..500;1,6..72,200..400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body class="layout-b">
 
 <div class="grain" aria-hidden="true"></div>
 
@@ -37,7 +37,7 @@
     <a href="#display">The display</a>
     <a href="#plugins">Plugins</a>
     <a href="#start">Get started</a>
-    <a href="alt.html">Layout B ↗</a>
+    <a href="index.html">Layout A ↗</a>
     <a href="docs.html">Docs</a>
   </nav>
   <a class="nav__cta" href="https://github.com/Anezium/Rokid-Nexus/releases">Get the app</a>
@@ -46,7 +46,7 @@
 <main id="top">
 
 <!-- ─────────────────────────  HERO  ───────────────────────── -->
-<section class="hero">
+<section class="hero hero--tight">
   <div class="hero__field" aria-hidden="true">
     <svg viewBox="0 0 900 900" preserveAspectRatio="xMidYMid meet">
       <defs>
@@ -73,7 +73,7 @@
       </g>
     </svg>
   </div>
-  <div class="hero__inner">
+  <div class="hero__inner hero__inner--single">
     <div class="hero__copy">
       <p class="eyebrow reveal">Plugin platform · Rokid AR glasses</p>
       <h1 class="reveal" style="--i:1">
@@ -81,32 +81,40 @@
         get a <em>glasses</em> app.
       </h1>
       <p class="lede reveal" style="--i:2">
-        One hub lives on the glasses and renders everything. Every feature ships
-        as an ordinary Android APK on your phone — and nothing is ever installed
-        on the glasses again.
+        One hub on the glasses renders everything; every feature is an ordinary
+        phone APK. Here is exactly where it stands.
       </p>
-      <ul class="hero__facts hero__facts--lead reveal" style="--i:3">
+      <div class="hero__actions reveal" style="--i:3">
+        <a class="btn btn--solid" href="#roadmap">
+          Read the roadmap
+          <span class="btn__meta">shipped · building · next</span>
+        </a>
+        <a class="btn btn--ghost" href="https://github.com/Anezium/Rokid-Nexus/releases">Download for Android</a>
+      </div>
+      <ul class="hero__facts reveal" style="--i:4">
         <li><b>8</b> plugins</li>
-        <li><b>1</b> gesture claimed</li>
+        <li><b>5</b> display tiers</li>
         <li><b>0</b> cables, PCs, or ADB</li>
       </ul>
-      <div class="hero__actions reveal" style="--i:4">
-        <a class="btn btn--solid" href="https://github.com/Anezium/Rokid-Nexus/releases">
-          Download for Android
-          <span class="btn__meta">v1.1.2 · APK</span>
-        </a>
-        <a class="btn btn--ghost" href="#roadmap">Read the roadmap</a>
-      </div>
-    </div>
 
-    <div class="hero__optic reveal" style="--i:2">
-      <figure class="optic">
-        <img src="assets/shot-glasses-launcher.png" alt="The Nexus launcher on the glasses HUD, listing installed plugins in green monochrome" />
-        <figcaption>Triple-tap. From anywhere.</figcaption>
-      </figure>
-      <figure class="optic optic--phone">
-        <img src="assets/shot-phone-home.png" alt="The Nexus phone app home screen, listing installed plugins with update badges" />
-      </figure>
+      <div class="board reveal" style="--i:5">
+        <a class="board__cell" href="#roadmap" data-state="shipped">
+          <b>7</b><span>shipped</span>
+          <i>on hardware, in a public release</i>
+        </a>
+        <a class="board__cell" href="#roadmap" data-state="building">
+          <b>2</b><span>building</span>
+          <i>display arbitration · continuous speech</i>
+        </a>
+        <a class="board__cell" href="#roadmap" data-state="next">
+          <b>3</b><span>next</span>
+          <i>committed, not started</i>
+        </a>
+        <a class="board__cell" href="#roadmap" data-state="exploring">
+          <b>5</b><span>exploring</span>
+          <i>each one an ordinary phone APK</i>
+        </a>
+      </div>
     </div>
   </div>
 </section>
