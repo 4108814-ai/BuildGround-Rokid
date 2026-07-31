@@ -6,9 +6,9 @@ import org.junit.Test
 
 class GlassesOutboundTransportPolicyTest {
     @Test
-    fun `a control message takes CXR first, keeping it out of the bulk queue`() {
+    fun `a control message takes SPP first, the path that still arrives`() {
         assertEquals(
-            listOf(GlassesOutboundTransport.CXR, GlassesOutboundTransport.SPP),
+            listOf(GlassesOutboundTransport.SPP, GlassesOutboundTransport.CXR),
             GlassesOutboundTransportPolicy.order(
                 sppConnected = true,
                 cxrUp = true,
@@ -18,7 +18,7 @@ class GlassesOutboundTransportPolicyTest {
     }
 
     @Test
-    fun `SPP still backs up a control message when CXR is down`() {
+    fun `SPP alone when CXR is down`() {
         assertEquals(
             listOf(GlassesOutboundTransport.SPP),
             GlassesOutboundTransportPolicy.order(

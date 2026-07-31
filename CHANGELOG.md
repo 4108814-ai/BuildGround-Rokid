@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.1.3
+
+- **Messages leave the glasses over SPP again.** 1.1.2 sent control traffic over
+  CXR first, on the reasoning that it kept small messages out of the queue photo
+  sync moves megabytes through. That reasoning still holds; the path no longer
+  does. On Hi Rokid Global G1.11.11.0727 the glasses-to-phone CXR direction does
+  not arrive: the glasses report `CXR-S TX ... result=0`, the phone's Rokid app
+  logs the frame with its full payload and answers RESPONSE_SUCCEED, and the
+  bound third-party client is never called. Opening a plugin from the glasses
+  did nothing at all on an updated phone.
+
+  Phone-to-glasses over the same link is unaffected, so the ordering is now
+  deliberately asymmetric - the two directions no longer have the same
+  reliability, and pretending otherwise cost a working feature. Thanks to
+  @gtacoder-collab for the report that pinned it to the callback and for holding
+  the line when we reverted it in 1.1.2.
+
+- **The CXR receive path says when it drops something.** An unexpected key or an
+  undecodable payload used to return in silence, which made "the callback was
+  never invoked" and "the callback ran and threw the frame away" impossible to
+  tell apart from a log. They have completely different causes; the absence of
+  these lines is what proved which one this was.
+
 ## 1.1.2
 
 - **Control messages leave the glasses over CXR again**, with SPP as the

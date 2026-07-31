@@ -513,8 +513,19 @@ class BusHubService : Service() {
 
     private val customCmdCallback = object : ICustomCmdCbk {
         override fun onCustomCmdResult(key: String, payload: ByteArray) {
-            if (key != BusConstants.CXR_KEY) return
-            val envelope = decodeCxrPayload(payload) ?: return
+            // Every way out of this callback says so. A frame that reaches the phone's Rokid app
+            // and then vanishes here used to leave no trace at all, which made "the callback was
+            // never invoked" and "the callback ran and dropped the frame" impossible to tell apart
+            // from a log - the two have completely different causes.
+            if (key != BusConstants.CXR_KEY) {
+                log("CXR RX ignored: key=$key")
+                return
+            }
+            val envelope = decodeCxrPayload(payload)
+            if (envelope == null) {
+                log("CXR RX undecodable: ${payload.size} bytes")
+                return
+            }
             log("CXR RX ${envelope.path} id=${envelope.id}")
             routeRemote(envelope)
         }
