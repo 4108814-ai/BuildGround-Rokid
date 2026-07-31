@@ -22,6 +22,7 @@ internal object NexusPhoneState {
     const val PREF_GLASSES_CORE_READY = "glasses_core_ready"
     const val PREF_GLASSES_MAINTENANCE_READY = "glasses_maintenance_ready"
     const val PREF_INSTALLED_GLASSES_VERSION_NAME = "installed_glasses_version_name"
+    const val PREF_LATEST_GLASSES_VERSION_NAME = "latest_glasses_version_name"
     const val EXTRA_GLASSES_APP_STATE = "glasses_app_state"
     const val EXTRA_GLASSES_APP_DOWNLOADED = "glasses_app_downloaded"
     const val EXTRA_GLASSES_APP_TOTAL = "glasses_app_total"
@@ -55,6 +56,8 @@ internal object NexusPhoneState {
     @Volatile var glassesAppInstallState: GlassesAppInstallState = GlassesAppInstallState.Unknown
         private set
     @Volatile var installedGlassesVersionName: String? = null
+        private set
+    @Volatile var latestGlassesVersionName: String? = null
         private set
     @Volatile var glassesAppUpdateState: GlassesAppUpdateState = GlassesAppUpdateState.Unknown
         private set
@@ -135,6 +138,13 @@ internal object NexusPhoneState {
                 false,
             )
             installedGlassesVersionName = preferences.getString(PREF_INSTALLED_GLASSES_VERSION_NAME, null)
+            latestGlassesVersionName = preferences.getString(PREF_LATEST_GLASSES_VERSION_NAME, null)
+            // Both version names outlived the hub, so the verdict does too. Starting
+            // from Unknown would ask the wearer to reinstall an app we know is current.
+            glassesAppUpdateState = GlassesAppUpdatePolicy.compareVersionNames(
+                installedGlassesVersionName,
+                latestGlassesVersionName,
+            )
             appContext = applicationContext
         }
     }
@@ -179,6 +189,16 @@ internal object NexusPhoneState {
             ?.putString(PREF_INSTALLED_GLASSES_VERSION_NAME, normalized)
             ?.apply()
         notifyListeners()
+    }
+
+    fun setLatestGlassesVersionName(versionName: String?) {
+        val normalized = versionName?.trim()?.takeIf { it.isNotEmpty() } ?: return
+        if (latestGlassesVersionName == normalized) return
+        latestGlassesVersionName = normalized
+        appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            ?.edit()
+            ?.putString(PREF_LATEST_GLASSES_VERSION_NAME, normalized)
+            ?.apply()
     }
 
     fun setGlassesAppUpdateState(state: GlassesAppUpdateState) {
@@ -312,20 +332,29 @@ internal object NexusPhoneState {
         }
         if (intent.hasExtra(EXTRA_GLASSES_APP_UPDATE_STATE)) {
             val installed = installedGlassesVersionName?.let(NexusSemVersion::parse)
-            val latest = intent.getStringExtra(EXTRA_GLASSES_APP_LATEST_VERSION_NAME)
-                ?.let(NexusSemVersion::parse)
+            setLatestGlassesVersionName(
+                intent.getStringExtra(EXTRA_GLASSES_APP_LATEST_VERSION_NAME),
+            )
+            val latest = latestGlassesVersionName?.let(NexusSemVersion::parse)
+            // A hub that has just started has not asked GitHub anything yet and says
+            // "unknown". That is a statement about the hub, not about the glasses,
+            // so fall back to what both remembered version names already prove.
+            val remembered = GlassesAppUpdatePolicy.compareVersionNames(
+                installedGlassesVersionName,
+                latestGlassesVersionName,
+            )
             val updateState = when (intent.getStringExtra(EXTRA_GLASSES_APP_UPDATE_STATE)) {
                 "up_to_date" -> if (installed != null && latest != null) {
                     GlassesAppUpdateState.UpToDate(installed, latest)
                 } else {
-                    GlassesAppUpdateState.Unknown
+                    remembered
                 }
                 "update_available" -> if (installed != null && latest != null) {
                     GlassesAppUpdateState.UpdateAvailable(installed, latest)
                 } else {
-                    GlassesAppUpdateState.Unknown
+                    remembered
                 }
-                else -> GlassesAppUpdateState.Unknown
+                else -> remembered
             }
             setGlassesAppUpdateState(updateState)
             updated = true
@@ -372,11 +401,23 @@ internal object NexusPhoneState {
         return true
     }
 
+    /**
+     * Whether not knowing is worth acting on.
+     *
+     * Unknown covers two different situations, and only one of them is the
+     * wearer's problem: an app whose version we cannot read is worth reinstalling,
+     * while a hub that has not reported in yet is worth waiting for. Offering to
+     * reinstall in the second case asks for a fix to something that isn't broken.
+     */
+    private fun unknownVersionIsActionable(): Boolean =
+        glassesAppUpdateState == GlassesAppUpdateState.Unknown &&
+            installedGlassesVersionName == null
+
     fun glassesUpdateVersionLabel(): String? = when (val state = glassesAppUpdateState) {
         is GlassesAppUpdateState.UpdateAvailable -> "Update glasses to v${state.latest}"
         GlassesAppUpdateState.Unknown -> if (
             glassesAppInstallState == GlassesAppInstallState.Installed &&
-            installedGlassesVersionName == null
+            unknownVersionIsActionable()
         ) {
             "Reinstall latest glasses app"
         } else {
@@ -392,12 +433,12 @@ internal object NexusPhoneState {
         } ?: "Downloading"
         GlassesAppInstallState.Installing -> "Installing"
         is GlassesAppInstallState.Error -> "Retry"
-        else -> if (glassesAppUpdateState == GlassesAppUpdateState.Unknown) "Reinstall" else "Update"
+        else -> if (unknownVersionIsActionable()) "Reinstall" else "Update"
     }
 
     fun glassesUpdateActionEnabled(): Boolean =
         (glassesAppUpdateState is GlassesAppUpdateState.UpdateAvailable ||
-            glassesAppUpdateState == GlassesAppUpdateState.Unknown) &&
+            unknownVersionIsActionable()) &&
             when (val state = glassesAppInstallState) {
             GlassesAppInstallState.Installed -> true
             is GlassesAppInstallState.Error -> state.retry == GlassesAppRetry.INSTALL

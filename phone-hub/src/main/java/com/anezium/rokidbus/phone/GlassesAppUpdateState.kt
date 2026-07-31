@@ -18,10 +18,24 @@ internal object GlassesAppUpdatePolicy {
     fun compare(
         installedVersionName: String?,
         latestRelease: NexusReleaseAsset?,
+    ): GlassesAppUpdateState =
+        compareVersionNames(installedVersionName, latestRelease?.version?.toString())
+
+    /**
+     * The same comparison from two remembered version names.
+     *
+     * Both halves survive on disk, so the answer does too: a hub that is not
+     * running yet has nothing to say about the glasses, but that is not the same
+     * as knowing nothing about them.
+     */
+    fun compareVersionNames(
+        installedVersionName: String?,
+        latestVersionName: String?,
     ): GlassesAppUpdateState {
         val installed = installedVersionName?.let(NexusSemVersion::parse)
             ?: return GlassesAppUpdateState.Unknown
-        val latest = latestRelease?.version ?: return GlassesAppUpdateState.Unknown
+        val latest = latestVersionName?.let(NexusSemVersion::parse)
+            ?: return GlassesAppUpdateState.Unknown
         return if (latest > installed) {
             GlassesAppUpdateState.UpdateAvailable(installed, latest)
         } else {

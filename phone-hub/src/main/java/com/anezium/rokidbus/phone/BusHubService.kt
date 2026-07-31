@@ -4509,7 +4509,14 @@ class BusHubService : Service() {
             // to resend, so it must refuse while the link is down.
             // Keep the last-known setup state across link drops: powered-off glasses must
             // not re-open the setup step. Only a live announcement may report false.
-            updateRemoteGlassesAppState(null, setupComplete = remoteGlassesSetupComplete)
+            // The installed version is kept for the same reason — glasses that went quiet
+            // did not uninstall their app, and forgetting the version turns the update
+            // check into "Reinstall" for something we know is current. The next announce
+            // overwrites it, so swapping in another unit still corrects itself.
+            updateRemoteGlassesAppState(
+                remoteGlassesVersionName,
+                setupComplete = remoteGlassesSetupComplete,
+            )
             imageSurfaceRateLimiter.clear()
         }
         if (::mediaSyncCoordinator.isInitialized &&
