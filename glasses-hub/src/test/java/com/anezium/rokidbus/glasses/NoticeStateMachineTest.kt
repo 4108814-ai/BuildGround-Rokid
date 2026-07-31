@@ -640,6 +640,25 @@ class NoticeStateMachineTest {
     }
 
     @Test
+    fun `a notice with one answer still pages, since nothing steps along a row of one`() {
+        val state = NoticeStateMachine()
+        state.show(
+            "relay:notice",
+            seq = 1,
+            content = content(actions = listOf(NoticeAction("reply", "reply", "Reply"))),
+            nowMs = 0L,
+        )
+
+        assertTrue(state.setPageCount("relay:notice", seq = 1, count = 4) is NoticeStateDecision.Updated)
+        val notice = state.activeNotice()!!
+        assertEquals(4, notice.pageCount)
+        assertTrue(notice.isPaged)
+        assertTrue(notice.claimsDirection)
+        // Still answerable: paging did not cost the band its tap.
+        assertTrue(notice.expectsInput)
+    }
+
+    @Test
     fun `a plain single page notice claims no input or direction`() {
         val state = NoticeStateMachine()
         state.show("relay:notice", seq = 1, content = content(), nowMs = 0L)

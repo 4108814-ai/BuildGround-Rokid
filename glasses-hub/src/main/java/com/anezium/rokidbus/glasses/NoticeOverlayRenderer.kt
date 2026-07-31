@@ -262,7 +262,10 @@ object NoticeOverlayRenderer {
                 text = noticeBodyText(notice.content),
                 pageIndex = notice.pageIndex,
                 firstPageLines = if (hasImage) IMAGE_PAGE_BODY_LINES else MAX_BODY_LINES,
-                paging = !notice.content.expectsInput,
+                // The same test as NoticeState.isPaged: a row of two or more
+                // needs the directions to choose along; anything less leaves
+                // them free to turn pages.
+                paging = notice.content.actions.size <= 1,
             )
             updateFooter()
             actions.render(

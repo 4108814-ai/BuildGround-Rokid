@@ -206,7 +206,12 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
                             text,
                             NoticeSurfaceContract.MAX_BODY_CHARS,
                         ),
-                        footer = "Review, then send",
+                        // Cleared, not relabelled. The chips already say Send,
+                        // Retry and Cancel; a footer repeating "Review, then
+                        // send" spends a line of the band telling the wearer
+                        // what they are already looking at, on the one screen
+                        // where the transcript itself is what they need to read.
+                        footer = "",
                         actions = CONFIRM_ACTIONS,
                         ttlMs = DECISION_TTL_MS,
                     ),
@@ -425,9 +430,19 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         const val ACTION_RETRY = "retry"
         const val ACTION_CANCEL = "cancel"
 
+        /**
+         * One answer, so the arriving band can be paged.
+         *
+         * Dismiss was a chip until wearing it showed what that cost: a row of
+         * two takes the directions to choose along, and a band whose directions
+         * are taken cannot turn pages, so a three-message thread was ellipsized
+         * at eight lines with the rest unreachable. Back already dismisses any
+         * visible band, answered or not, so the chip was buying nothing and
+         * spending the one thing the wearer actually needed — the ability to
+         * read the message they were interrupted about.
+         */
         val INITIAL_ACTIONS = listOf(
             NexusNoticeAction(ACTION_REPLY, "reply", "Reply"),
-            NexusNoticeAction(ACTION_DISMISS, "cancel", "Dismiss"),
         )
         val CONFIRM_ACTIONS = listOf(
             NexusNoticeAction(ACTION_SEND, "send", "Send"),

@@ -50,9 +50,25 @@ internal data class NexusNoticeSurface(
      */
     val expectsInput: Boolean get() = !answered && content.expectsInput
 
-    val isPaged: Boolean get() = !content.expectsInput && pageCount > 1
+    /**
+     * A band pages unless its row needs the directions to choose along.
+     *
+     * The rule used to be stricter — paged or answerable, never both — and its
+     * reason was sound: forward and backward must never mean two things at
+     * once. That reason survives; the line was simply drawn in the wrong place.
+     * With at most one action there is nothing to step along, so the directions
+     * are free to turn pages while the tap still answers.
+     *
+     * A relayed conversation is exactly that shape — long, and worth one reply —
+     * and under the old rule it was ellipsized at eight lines with the rest
+     * unreachable, in the tier built to carry it.
+     *
+     * Two or more actions still claim the directions, and such a band does not
+     * page. No gesture ever carries two meanings.
+     */
+    val isPaged: Boolean get() = content.actions.size <= 1 && pageCount > 1
 
-    val claimsDirection: Boolean get() = liveActions.isNotEmpty() || isPaged
+    val claimsDirection: Boolean get() = liveActions.size > 1 || isPaged
 }
 
 /**
@@ -249,8 +265,10 @@ internal class NoticeStateMachine {
             } else {
                 current.answered
             },
-            pageCount = if (!patched.expectsInput) current.pageCount else 1,
-            pageIndex = if (!patched.expectsInput) current.pageIndex else 0,
+            // Paging survives an update that leaves the band pageable; a row of
+            // two or more takes the directions back, and with them the pages.
+            pageCount = if (patched.actions.size <= 1) current.pageCount else 1,
+            pageIndex = if (patched.actions.size <= 1) current.pageIndex else 0,
             engaged = remainsEngaged,
         )
         active = notice
@@ -308,7 +326,10 @@ internal class NoticeStateMachine {
         if (current.surfaceId != surfaceId || current.seq != seq) {
             return NoticeStateDecision.Ignored
         }
-        val nextCount = if (!current.content.expectsInput) count.coerceAtLeast(1) else 1
+        // Measured pages are kept whenever the directions are free to turn them,
+        // which is any row of at most one. Only a row of two or more collapses
+        // back to a single page, because there the directions are choosing.
+        val nextCount = if (current.content.actions.size <= 1) count.coerceAtLeast(1) else 1
         val nextIndex = current.pageIndex.coerceIn(0, nextCount - 1)
         if (current.pageCount == nextCount && current.pageIndex == nextIndex) {
             return NoticeStateDecision.Ignored
@@ -469,10 +490,14 @@ internal object NoticeController {
     fun handleDirection(delta: Int): Boolean {
         if (!claimsDirection()) return false
         runOnMain {
-            val decision = if (state.activeNotice()?.liveActions?.isNotEmpty() == true) {
-                state.moveSelection(delta)
-            } else {
+            // The same test that decided the band could page in the first place.
+            // Asking "does it have any actions" instead sent a one-chip band's
+            // swipes into a row with nowhere to go, so a paged conversation
+            // could be seen but never turned.
+            val decision = if (state.activeNotice()?.isPaged == true) {
                 state.movePage(delta, SystemClock.elapsedRealtime())
+            } else {
+                state.moveSelection(delta)
             }
             applyDecision(decision)
         }

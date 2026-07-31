@@ -614,10 +614,14 @@ fields by hand to stop an ordinary text update putting an answered question back
 in front of the wearer.
 
 Actions buy the band nothing else. They do not extend the TTL, they do not
-touch the 90 s absolute lifetime, and they do not change what BACK does. An
-answerable notice is one unpaged question, whether it offers actions or asks
-for the plain confirming gesture; paging is reserved for a notice that asks
-nothing so forward and backward never have two meanings.
+touch the 90 s absolute lifetime, and they do not change what BACK does.
+
+**A band pages unless its row needs the directions to choose along.** Forward
+and backward step a row of two or more, and such a notice draws a single page.
+With one action or none there is nothing to step along, so the directions turn
+pages while the tap still answers and BACK still dismisses — a long message
+worth exactly one reply is both readable and answerable. No gesture ever
+carries two meanings, which is the rule this serves.
 
 ### Two limits that are not the TTL
 

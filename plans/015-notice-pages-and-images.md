@@ -68,6 +68,20 @@ keeps forward/backward from meaning two things at once. `claimsDirection()`
 currently returns true only when live actions exist; it gains the paged case,
 and the two are mutually exclusive by construction.
 
+> **Superseded 2026-07-31, by wearing it.** The reasoning survives; the boundary
+> was drawn in the wrong place. What must never happen is a direction meaning
+> two things — and with **at most one action** there is nothing to step along,
+> so the directions are free to turn pages while the tap still answers. The rule
+> is now **a band pages unless its row needs the directions**: one action or
+> none pages, two or more does not.
+>
+> What broke it is the case this tier was built for. A relayed conversation is
+> long *and* worth one reply; under the old rule it was ellipsized at eight
+> lines with the rest unreachable. Relay's second chip, Dismiss, was buying
+> nothing either — Back already dismisses any visible band — while costing the
+> wearer the ability to read the message they were interrupted about. It now
+> sends one action, and its threads page.
+
 **Page position is drawn by the platform, not the plugin.** When there is more
 than one page, the footer line carries the plugin's footer at the start and a
 muted `2/4` at the end. One page draws no indicator and adds no line.
