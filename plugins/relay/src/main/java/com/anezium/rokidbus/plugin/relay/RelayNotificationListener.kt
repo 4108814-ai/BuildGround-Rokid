@@ -48,6 +48,11 @@ class RelayNotificationListener : NotificationListenerService() {
         super.onDestroy()
     }
 
+    /** Hands the bus to the inbox: the band's client closes and its notice goes. */
+    internal fun suspendBand() {
+        runtime.shutdown()
+    }
+
     internal fun refreshFromSettings() {
         if (!RelaySettings(this).enabled()) {
             ReplyRepository.clear()

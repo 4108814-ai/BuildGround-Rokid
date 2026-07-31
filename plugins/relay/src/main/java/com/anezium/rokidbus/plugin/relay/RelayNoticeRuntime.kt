@@ -46,6 +46,12 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
     private var sendDeadlineMs: Long? = null
 
     fun show(reply: ReplyRepository.PendingReply) = onMain {
+        // The inbox owns the bus while it is open, and it is already showing
+        // this conversation — the capture reached the repository before us.
+        if (NotificationControl.inboxOpen) {
+            Log.i(TAG, "band suppressed: inbox has the bus")
+            return@onMain
+        }
         showGeneration += 1
         val generation = showGeneration
         invalidateSpeech()

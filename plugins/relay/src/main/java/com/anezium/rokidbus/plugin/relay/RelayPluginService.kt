@@ -55,6 +55,9 @@ class RelayPluginService : NexusPluginService() {
     private var speech: NexusSpeechSession? = null
 
     override fun onNexusOpen() {
+        // One client per plugin id on the bus: the band steps aside while the
+        // wearer is in here. See NotificationControl.inboxOpen.
+        NotificationControl.inboxOpened()
         invalidateSpeech()
         entries = ReplyRepository.inboxEntries()
         selection.reset(entries.map(RelayInboxEntry::id))
@@ -64,6 +67,7 @@ class RelayPluginService : NexusPluginService() {
     }
 
     override fun onNexusClose() {
+        NotificationControl.inboxClosed()
         invalidateSpeech()
         entries = emptyList()
         selection.reset(emptyList())
