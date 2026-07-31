@@ -141,10 +141,8 @@ class GlassesManualSetupActivity : Activity() {
         super.onDestroy()
     }
 
-    override fun onBackPressed() {
-        engine?.cancel()
-        super.onBackPressed()
-    }
+    // No onBackPressed override: it was redundant with onDestroy, which already cancels, and it
+    // stopped being called at all once a device navigates by back gesture.
 
     // ---- Rendering -----------------------------------------------------------------------------
 

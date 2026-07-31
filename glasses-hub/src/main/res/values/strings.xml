@@ -1,6 +1,8 @@
 <resources>
-    <string name="app_name">Rokid Nexus Glasses</string>
-    <string name="accessibility_service_label">Rokid Nexus Glasses</string>
+    <!-- Product names: the same in every language, and the string the wearer hunts for in the
+         Settings list. Translating either would send them looking for something that is not there. -->
+    <string name="app_name" translatable="false">Rokid Nexus Glasses</string>
+    <string name="accessibility_service_label" translatable="false">Rokid Nexus Glasses</string>
     <string name="accessibility_service_description">Runs Nexus controls and guides secure Wireless Debugging pairing during first-run setup.</string>
     <string name="accessibility_service_summary">Nexus controls and secure first-run setup</string>
 
