@@ -3,6 +3,7 @@ package com.anezium.rokidbus.phone
 import android.app.Activity
 import android.graphics.Rect
 import android.graphics.Typeface
+import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -19,6 +20,9 @@ import com.anezium.rokidbus.client.ui.BusTheme
 import com.anezium.rokidbus.client.ui.NexusUi
 import com.anezium.rokidbus.shared.SetupStage
 import java.io.Closeable
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * The guided, phone-driven manual pairing wizard. It is the fallback for glasses whose on-device
@@ -231,6 +235,10 @@ class GlassesManualSetupActivity : Activity() {
             )
             body.addView(BusTheme.gap(this, 12))
             body.addView(primary(getString(R.string.guided_action_cancel)) { finish() }, NexusUi.block())
+            // Shown even when there is nothing left to do: an owner comes back here to send what
+            // happened, and a successful run is still worth reading when the last one failed.
+            body.addView(BusTheme.gap(this, 20))
+            body.addView(setupJournalBlock(), NexusUi.block())
             return
         }
 
@@ -302,6 +310,68 @@ class GlassesManualSetupActivity : Activity() {
         }
         body.addView(BusTheme.gap(this, 8))
         body.addView(advancedDisclosure(), NexusUi.block())
+        body.addView(BusTheme.gap(this, 20))
+        body.addView(setupJournalBlock(), NexusUi.block())
+    }
+
+    /**
+     * The trail, on the screen that produces it.
+     *
+     * An owner whose setup keeps stopping has nothing to tell us today beyond "it does not work".
+     * The lines that would answer it -- a Settings list that would not scroll, a screen that never
+     * came up -- exist only in the lens's logcat, which no phone can reach. Here they are readable,
+     * and one tap sends them.
+     */
+    private fun setupJournalBlock(): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        val host = this@GlassesManualSetupActivity
+        val entries = SetupJournal.entries(host)
+        addView(NexusUi.metaLabel(host, getString(R.string.manual_log_title), NexusUi.INK3))
+        addView(BusTheme.gap(host, 6))
+        addView(NexusUi.cardBody(host, getString(R.string.manual_log_hint)).apply { textSize = 12f })
+        addView(BusTheme.gap(host, 10))
+        if (entries.isEmpty()) {
+            addView(NexusUi.statusLine(host).apply { text = getString(R.string.manual_log_empty) })
+            return@apply
+        }
+        // The tail is what matters: the last thing that happened is why the owner is on this
+        // screen at all. The whole trail still goes out when they share it.
+        entries.takeLast(JOURNAL_LINES_SHOWN).forEach { entry ->
+            addView(
+                NexusUi.statusLine(host).apply {
+                    text = SetupJournalFormatter.line(entry, host::formatJournalTime)
+                    textSize = 11f
+                    if (entry.isFailure) setTextColor(NexusUi.DANGER)
+                },
+            )
+        }
+        addView(BusTheme.gap(host, 10))
+        addView(
+            NexusUi.textButton(host, getString(R.string.manual_log_share)).apply {
+                setOnClickListener { shareSetupJournal() }
+            },
+        )
+    }
+
+    private fun formatJournalTime(atMillis: Long): String =
+        SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(atMillis))
+
+    private fun shareSetupJournal() {
+        val text = SetupJournalFormatter.shareText(
+            entries = SetupJournal.entries(this),
+            phoneVersion = runCatching {
+                packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
+            }.getOrDefault(""),
+            glassesVersion = NexusPhoneState.installedGlassesVersionName.orEmpty(),
+            clock = ::formatJournalTime,
+        )
+        val send = Intent(Intent.ACTION_SEND)
+            .setType("text/plain")
+            .putExtra(Intent.EXTRA_SUBJECT, getString(R.string.manual_log_share_subject))
+            .putExtra(Intent.EXTRA_TEXT, text)
+        runCatching {
+            startActivity(Intent.createChooser(send, getString(R.string.manual_log_share)))
+        }
     }
 
     /** Derived only from what the glasses actually report, so it never claims to know more. */
@@ -433,9 +503,16 @@ class GlassesManualSetupActivity : Activity() {
         val live = engine
         if (live == null || !request(live)) {
             commandPending = false
+            SetupJournal.record(
+                context = this,
+                fromGlasses = false,
+                code = "manual_command_refused",
+                detail = if (live == null) "hub not attached" else "engine declined",
+            )
             inlineStatus = getString(R.string.guided_error_link_down)
             inlineIsError = true
         } else {
+            SetupJournal.record(this, fromGlasses = false, code = "manual_command_sent")
             commandPending = true
             inlineStatus = getString(waitingMessage)
             inlineIsError = false
@@ -672,6 +749,9 @@ class GlassesManualSetupActivity : Activity() {
         }
         body.addView(BusTheme.gap(this, 22))
         body.addView(primary(getString(R.string.guided_failed_action)) { engine?.start() }, NexusUi.block())
+        // The screen an owner reaches when it went wrong is the screen the log has to be on.
+        body.addView(BusTheme.gap(this, 20))
+        body.addView(setupJournalBlock(), NexusUi.block())
         body.addView(BusTheme.gap(this, 8))
         body.addView(
             NexusUi.textButton(this, "Close").apply {
@@ -838,6 +918,8 @@ class GlassesManualSetupActivity : Activity() {
         const val KEYBOARD_SETTLE_MS = 250L
         const val STEP_COUNT = 4
         const val MAX_ENGINE_ATTACH_ATTEMPTS = 20
+        /** Enough to see how the run ended without turning the screen into a log viewer. */
+        const val JOURNAL_LINES_SHOWN = 8
         const val ENGINE_ATTACH_RETRY_MS = 150L
         const val STATE_ADVANCED_EXPANDED = "advanced_expanded"
         const val STATE_ADVANCED_ENDPOINT = "advanced_endpoint"

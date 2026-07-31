@@ -30,6 +30,8 @@ import com.anezium.rokidbus.shared.PhoneHubCapabilities
 import com.anezium.rokidbus.shared.PhoneHubCapabilitiesContract
 import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import com.anezium.rokidbus.shared.PinSurfaceContract
+import com.anezium.rokidbus.shared.SetupNoteContract
+import com.anezium.rokidbus.shared.SetupNoteMessage
 import com.anezium.rokidbus.shared.SetupPairingOfferContract
 import com.anezium.rokidbus.shared.SetupStage
 import com.anezium.rokidbus.shared.plugin.PathRules
@@ -327,6 +329,23 @@ object GlassesHub {
         }
         val transportBits = LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP
         if (linkState() and transportBits != 0) announceRendererCapabilities()
+    }
+
+    /**
+     * Sends one note to the phone, where the setup journal keeps it.
+     *
+     * Fire and forget: a note is a diagnostic, and losing one to a link that happens to be down is
+     * strictly better than making setup wait on it or retry it.
+     */
+    internal fun onSetupNote(message: SetupNoteMessage) {
+        runCatching {
+            sendRemote(
+                BusEnvelope(
+                    path = BusPaths.GLASSES_SETUP_NOTE,
+                    payload = SetupNoteContract.toJson(message),
+                ),
+            )
+        }
     }
 
     internal fun onSetupProgressChanged(reportedStage: String?) {

@@ -94,6 +94,7 @@ object BusPaths {
     const val GLASSES_WIFI_REQUEST = "/glasses/wifi/request"
     const val GLASSES_SELFARM_MANUAL = "/glasses/selfarm/manual"
     const val GLASSES_SELFARM_MANUAL_REPLY = "/glasses/selfarm/manual/reply"
+    const val GLASSES_SETUP_NOTE = "/glasses/setup/note"
     const val GLASSES_SETUP_PAIRING_OFFER = "/glasses/setup/pairing/offer"
     const val GLASSES_SETUP_PAIRING_RESULT = "/glasses/setup/pairing/result"
     const val GLASSES_BRIGHTNESS_REQUEST = "/glasses/brightness/request"

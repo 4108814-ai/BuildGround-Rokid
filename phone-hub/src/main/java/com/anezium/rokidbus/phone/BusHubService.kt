@@ -40,6 +40,7 @@ import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.FrameProtocol
 import com.anezium.rokidbus.shared.GlassesHubCapabilitiesContract
 import com.anezium.rokidbus.shared.ImageSurfaceContract
+import com.anezium.rokidbus.shared.SetupNoteContract
 import com.anezium.rokidbus.shared.ImageSurfaceMetadata
 import com.anezium.rokidbus.shared.ImageSurfaceValidationResult
 import com.anezium.rokidbus.shared.LinkStateBits
@@ -1105,6 +1106,21 @@ class BusHubService : Service() {
             }
             return
         }
+        if (envelope.path == BusPaths.GLASSES_SETUP_NOTE) {
+            // Diagnostics only: file it and move on. Nothing about setup waits on a note.
+            SetupNoteContract.fromJson(envelope.payload)?.let { note ->
+                SetupJournal.record(
+                    context = applicationContext,
+                    fromGlasses = true,
+                    code = note.code,
+                    detail = listOfNotNull(
+                        note.stage.takeIf { it.isNotBlank() },
+                        note.detail.takeIf { it.isNotBlank() },
+                    ).joinToString(" · "),
+                )
+            }
+            return
+        }
         if (envelope.path == BusPaths.GLASSES_SETUP_PAIRING_OFFER) {
             val arrivedAtMillis = SystemClock.elapsedRealtime()
             executor.execute { handlePhoneAssistedSetupOffer(envelope, arrivedAtMillis) }
@@ -1929,6 +1945,7 @@ class BusHubService : Service() {
 
     private fun isStrictlyHubOwnedGlassesPath(path: String): Boolean =
         path == BusPaths.GLASSES_SELFARM_MANUAL ||
+            path == BusPaths.GLASSES_SETUP_NOTE ||
             path == BusPaths.GLASSES_SETUP_PAIRING_OFFER ||
             path == BusPaths.GLASSES_SETUP_PAIRING_RESULT
 
@@ -3457,12 +3474,23 @@ class BusHubService : Service() {
             return
         }
         NexusPhoneState.setGlassesSetupHandoff(NexusPhoneState.SetupHandoff.SENDING)
+        SetupJournal.record(applicationContext, fromGlasses = false, code = "start_requested")
         val started = runCatching {
             link.appStart(
                 "$GLASSES_HUB_PACKAGE.SetupEntryActivity",
                 object : IGlassAppCbk {
                     override fun onOpenAppResult(success: Boolean) {
                         log("glasses setup start result=$success")
+                        SetupJournal.record(
+                            context = applicationContext,
+                            fromGlasses = false,
+                            code = if (success) "start_delivered" else "start_not_confirmed",
+                            detail = if (success) {
+                                ""
+                            } else {
+                                "CXR did not confirm the entry point stayed on screen"
+                            },
+                        )
                         NexusPhoneState.setGlassesSetupHandoff(
                             if (success) {
                                 NexusPhoneState.SetupHandoff.IDLE

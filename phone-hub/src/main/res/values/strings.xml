@@ -86,6 +86,11 @@
     <string name="guided_intro">Nexus checks what is already in place, then walks you through only what is missing. Every screen it can open on the glasses is also a button here.</string>
 
     <string name="manual_open_glasses_app">Open Nexus on the glasses</string>
+    <string name="manual_log_title">Setup log</string>
+    <string name="manual_log_hint">What setup tried, and where it stopped. Share it if you need help.</string>
+    <string name="manual_log_empty">Nothing recorded yet.</string>
+    <string name="manual_log_share">Share this log</string>
+    <string name="manual_log_share_subject">Rokid Nexus setup log</string>
     <string name="manual_open_group">Open on the glasses</string>
     <string name="manual_open_hint">Use these when a screen does not open on its own. Wireless debugging is the one Nexus most often cannot reach by itself.</string>
     <string name="manual_open_accessibility">Accessibility settings</string>

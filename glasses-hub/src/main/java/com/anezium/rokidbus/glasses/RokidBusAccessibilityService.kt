@@ -15,6 +15,7 @@ import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import com.anezium.rokidbus.shared.SetupCompletionMode
 import com.anezium.rokidbus.shared.SetupPairingResult
+import com.anezium.rokidbus.shared.SetupNote
 import com.anezium.rokidbus.shared.SetupStage
 
 class RokidBusAccessibilityService : AccessibilityService() {
@@ -686,25 +687,23 @@ class RokidBusAccessibilityService : AccessibilityService() {
             pauseWirelessBootstrapIfActive("manual_pairing_opening")
         }
         if (!manualNavigationActive) {
-            val staged = runCatching { SelfArmManualArmAssets.stage(applicationContext) }
+            // Staging prepares the scripts the phone will read once it drives the arm. Opening a
+            // Settings screen needs none of them, so a staging failure is recorded and the
+            // navigation goes ahead. It used to abort here, which meant a file problem -- the
+            // channel directory refusing to be created, for one -- killed a button whose whole
+            // job was to fire an intent, and dropped the owner into an error screen blaming the
+            // Wi-Fi instead of the instruction that would have got them there by hand.
+            runCatching { SelfArmManualArmAssets.stage(applicationContext) }
                 .onFailure {
-                    log(
-                        "Manual self-arm asset staging failed: " +
-                            sanitizeSupportDiagnostic(it.message.orEmpty()),
+                    val detail = sanitizeSupportDiagnostic(it.message.orEmpty())
+                    log("Manual self-arm asset staging failed: $detail")
+                    SelfArmOnboardingStore.note(
+                        applicationContext,
+                        sessionId,
+                        SetupNote.MANUAL_ASSETS_FAILED,
+                        detail,
                     )
                 }
-                .isSuccess
-            if (!staged) {
-                if (!SelfArmOnboardingStore.isCurrentSession(applicationContext, sessionId)) return
-                SelfArmOnboardingStore.reportProgress(
-                    applicationContext,
-                    sessionId,
-                    "manual_pairing_assets_failed",
-                )
-                returnToOnboarding(sessionId)
-                onFinished(false)
-                return
-            }
             manualNavigationActive = true
         }
         manualNavigationSessionId = sessionId

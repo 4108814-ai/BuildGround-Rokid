@@ -10,6 +10,8 @@ import android.os.Build
 import android.os.Process
 import android.provider.Settings
 import com.anezium.rokidbus.shared.SetupCompletionMode
+import com.anezium.rokidbus.shared.SetupNote
+import com.anezium.rokidbus.shared.SetupNoteMessage
 import com.anezium.rokidbus.shared.SetupStage
 import java.security.SecureRandom
 import java.util.Locale
@@ -379,6 +381,18 @@ internal object SelfArmOnboardingStore {
             .putBoolean(KEY_RUNNING, false)
             .apply()
         notifyChanged(context)
+    }
+
+    /**
+     * Files one diagnostic note and pushes it to the phone, which is the only place an owner can
+     * ever read it. Nothing about the run changes: a note explains, it does not decide.
+     */
+    fun note(context: Context, sessionId: String, code: String, detail: String = "") {
+        if (sessionId.isNotBlank() && !canMutateSession(context, sessionId)) return
+        val normalized = SetupNote.normalize(code)
+        if (normalized.isEmpty()) return
+        val stage = SetupStage.normalize(prefs(context).getString(KEY_STAGE, ""))
+        GlassesHub.onSetupNote(SetupNoteMessage(normalized, stage, detail))
     }
 
     fun notifyChanged(context: Context, stage: String? = null) {

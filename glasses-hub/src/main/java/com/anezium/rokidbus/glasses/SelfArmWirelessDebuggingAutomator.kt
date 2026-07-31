@@ -18,6 +18,7 @@ import com.anezium.rokidbus.glasses.SelfArmVerifiedSettingsScroller.Outcome as S
 import com.anezium.rokidbus.glasses.SelfArmVerifiedSettingsScroller.Surface as ScrollSurface
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.SetupCompletionMode
+import com.anezium.rokidbus.shared.SetupNote
 import com.anezium.rokidbus.shared.SetupPairingOfferContract
 import com.anezium.rokidbus.shared.SetupPairingResult
 import com.anezium.rokidbus.shared.SetupStage
@@ -1237,6 +1238,15 @@ internal class SelfArmWirelessDebuggingAutomator(
         }
         directWirelessProbePending = false
         directWirelessFallbackUsed = true
+        // The ROM took the direct fragment intent and put us somewhere else. Worth recording:
+        // from here on the run depends on scrolling the developer options list, which is the part
+        // that does not always work.
+        SelfArmOnboardingStore.note(
+            service.applicationContext,
+            sessionId,
+            SetupNote.DIRECT_ROUTE_REDIRECTED,
+            "wireless debugging: falling back to the developer options traversal",
+        )
         report("opening_developer_options")
         noteDeveloperOpenAttempt()
         settingsScroller.reset(ScrollSurface.DEVELOPER_OPTIONS)
