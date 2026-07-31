@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.1.1
+
+A fix for something that only ever worked on one desk, found and fixed by
+someone it did not work for.
+
+- **The glasses are found by what they are, not by whose they are.** The phone
+  hub matched one hard-coded Bluetooth address, written on the first day of the
+  project and never generalised because the only tester owned that unit. Any
+  other pair was invisible to it. The hub now identifies the glasses by the
+  Nexus SPP service they advertise, with the `Glasses_*` name and the
+  last-known address as fallbacks for when Android drops the remote metadata
+  after a disconnect. Reported and fixed by Alexander Zhilin (#1, #2).
+- **Photo Sync can move captures off any pair of glasses.** Outbound binary
+  frames are the one path with no CXR fallback, so without a working SPP socket
+  a capture could not leave the glasses at all. It could not have worked for
+  anyone but us, and now it does.
+- **Control messages from the glasses prefer the live SPP socket**, falling
+  back to CXR, rather than the other way round.
+- **The update banner no longer asks you to reinstall an app that is current.**
+  Glasses going quiet used to erase the record of what they were running, so a
+  stopped hub or a dropped link turned into "Reinstall latest glasses app" for
+  an app that was already up to date. Both version numbers now survive the hub,
+  and a hub that has not reported in yet no longer overrides what they prove.
+
 ## 1.1.0
 
 The release Relay arrived in: messages on your glasses, answered out loud,
