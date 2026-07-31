@@ -24,7 +24,17 @@ class RelayNotificationListener : NotificationListenerService() {
         ReplyRepository.forget(sbn)
     }
 
+    /**
+     * Losing the grant drops what the grant bought.
+     *
+     * Detaching alone left captured message text and live reply tokens in
+     * memory, usable for as long as the inbox kept the process alive — so a
+     * wearer could revoke Notification Access and still be shown the message,
+     * and still send through the retained PendingIntent. The authority is gone;
+     * so is everything it authorised.
+     */
     override fun onListenerDisconnected() {
+        ReplyRepository.clear()
         NotificationControl.detach(this)
         runtime.shutdown()
         Log.w(TAG, "notification listener disconnected")

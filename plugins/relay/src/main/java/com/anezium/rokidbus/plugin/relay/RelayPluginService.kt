@@ -160,7 +160,12 @@ class RelayPluginService : NexusPluginService() {
                 sendConfirmedReply()
                 return
             }
-            renderThread(show = false)
+            if (!renderThread(show = false)) {
+                // The wearer stopped being able to see the countdown, so it
+                // stops counting. Send stays available by hand.
+                cancelSendCountdown()
+                return
+            }
             main.postDelayed(this, SEND_TICK_MS)
         }
     }
@@ -231,7 +236,8 @@ class RelayPluginService : NexusPluginService() {
         )
     }
 
-    private fun renderThread(show: Boolean) {
+    /** Returns whether the glasses took the card; the countdown depends on it. */
+    private fun renderThread(show: Boolean): Boolean {
         // Not while confirming a send: the repository has already dropped the
         // conversation, so refreshing here would lose the entry mid-render and
         // bounce the wearer to the list before they could read "Sent".
@@ -240,7 +246,7 @@ class RelayPluginService : NexusPluginService() {
         if (entry == null) {
             resetThreadMode()
             renderList(show = false)
-            return
+            return false
         }
         val snapshot = entry.snapshot
         val rows = when (threadMode) {
@@ -309,7 +315,7 @@ class RelayPluginService : NexusPluginService() {
             .filter(String::isNotBlank)
             .joinToString(" · ")
             .take(MAX_CARD_LINE_CHARS)
-        sendCard(
+        return sendCard(
             NexusCard(
                 title = cardTitle(snapshot.sender.ifBlank { snapshot.appLabel }),
                 lines = emptyList(),
@@ -422,8 +428,16 @@ class RelayPluginService : NexusPluginService() {
                 threadStatus = null
                 threadMode = ThreadMode.REVIEW
                 selectedChoice = 0
-                startSendCountdown(finalText)
-                renderThread(show = false)
+                // Render first, and only start the clock if the review reached
+                // the glasses. Starting it blind meant a dark display or a
+                // dropped link still sent the transcript three seconds later —
+                // the wearer had approved nothing because they had seen nothing.
+                if (renderThread(show = false)) {
+                    startSendCountdown(finalText)
+                } else {
+                    threadStatus = "Reply is ready. Tap to send."
+                    renderThread(show = false)
+                }
             }
 
             override fun onSpeechStopped(
@@ -535,16 +549,27 @@ class RelayPluginService : NexusPluginService() {
     private fun acceptSpeechCallback(generation: Int): Boolean =
         generation == speechGeneration && threadMode == ThreadMode.LISTENING
 
+    /**
+     * What the wearer will actually see — which is also exactly what gets sent.
+     *
+     * A card line holds 240 characters, not the notice tier's 1024. Fitting to
+     * the larger number and then handing the result to one `NexusCardLine` threw
+     * while rendering, so a paragraph of dictation took the inbox down instead
+     * of showing the review. Trimming from the top keeps the end of what was
+     * said, which is the part still in the speaker's head.
+     */
     private fun fitTranscript(value: String): String = NotificationTextExtractor.trimFromTop(
         value,
-        NoticeSurfaceContract.MAX_BODY_CHARS,
+        MAX_CARD_LINE_CHARS,
     )
 
     private fun cardTitle(value: String): String = value.trim().ifBlank { "Relay" }.take(MAX_CARD_TITLE_CHARS)
 
-    private fun sendCard(card: NexusCard, show: Boolean) {
-        val session = surface ?: return
-        if (show) session.showCard(card) else session.updateCard(card)
+    /** Returns whether the glasses actually took it. */
+    private fun sendCard(card: NexusCard, show: Boolean): Boolean {
+        val session = surface ?: return false
+        val result = if (show) session.showCard(card) else session.updateCard(card)
+        return result == NexusSdkResult.SENT
     }
 
     private fun speechStartFailure(result: NexusSdkResult): String = when (result) {

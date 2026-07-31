@@ -43,6 +43,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
     private var pendingPartial: NexusNoticeUpdate? = null
     private var updateDrainScheduled = false
     private var lastNoticeMessageAtMs = Long.MIN_VALUE
+    private var sendDeadlineMs: Long? = null
 
     fun show(reply: ReplyRepository.PendingReply) = onMain {
         showGeneration += 1
@@ -89,6 +90,8 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
     }
 
     override fun onNoticeAction(id: String) = onMain {
+        // The wearer decided, so the clock stops rather than firing behind them.
+        cancelSendCountdown()
         when (id) {
             ACTION_REPLY, ACTION_RETRY -> startListening()
             ACTION_SEND -> sendConfirmedReply()
@@ -198,21 +201,27 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
                     return@onMain
                 }
                 speechFinalReceived = true
-                currentTranscript = text
+                // Trim once, then show and send the same string. Keeping the
+                // full transcript while displaying a trimmed one meant the
+                // recipient got opening words the wearer had never seen —
+                // approving the end of a long dictation quietly sent the start
+                // of it too, corrections and all.
+                val reviewed = NotificationTextExtractor.trimFromTop(
+                    text,
+                    NoticeSurfaceContract.MAX_BODY_CHARS,
+                )
+                currentTranscript = reviewed
                 pendingPartial = null
                 queueEssential(
                     NexusNoticeUpdate(
-                        body = NotificationTextExtractor.trimFromTop(
-                            text,
-                            NoticeSurfaceContract.MAX_BODY_CHARS,
-                        ),
+                        body = reviewed,
                         // Cleared, not relabelled. The chips already say Send,
                         // Retry and Cancel; a footer repeating "Review, then
                         // send" spends a line of the band telling the wearer
                         // what they are already looking at, on the one screen
                         // where the transcript itself is what they need to read.
                         footer = "",
-                        actions = CONFIRM_ACTIONS,
+                        actions = confirmActions(startSendCountdown(reviewed)),
                         ttlMs = DECISION_TTL_MS,
                     ),
                     dropPartial = true,
@@ -264,11 +273,53 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         }
     }
 
+    /**
+     * Sends the transcript on its own unless the wearer steps in.
+     *
+     * Same shape and same numbers as the inbox: the wearer has just spoken and
+     * is looking at their words, so asking them to confirm what they can read
+     * buys nothing. Visible on the chip and cancellable for its whole length,
+     * which is what keeps it from being a blind send. Returns the seconds the
+     * first chip should show.
+     */
+    private fun startSendCountdown(text: String): Int {
+        cancelSendCountdown()
+        val words = text.trim().split(WHITESPACE).count(String::isNotBlank)
+        val span = (SEND_BASE_MS + words * SEND_MS_PER_WORD).coerceIn(SEND_MIN_MS, SEND_MAX_MS)
+        sendDeadlineMs = SystemClock.uptimeMillis() + span
+        main.postDelayed(sendTick, SEND_TICK_MS)
+        return ((span + 999L) / 1000L).toInt()
+    }
+
+    private fun cancelSendCountdown() {
+        sendDeadlineMs = null
+        main.removeCallbacks(sendTick)
+    }
+
+    private val sendTick = object : Runnable {
+        override fun run() {
+            val deadline = sendDeadlineMs ?: return
+            if (!activeNotice || currentTranscript.isNullOrBlank()) return cancelSendCountdown()
+            val remaining = deadline - SystemClock.uptimeMillis()
+            if (remaining <= 0L) {
+                cancelSendCountdown()
+                sendConfirmedReply()
+                return
+            }
+            val seconds = ((remaining + 999L) / 1000L).toInt()
+            queueEssential(
+                NexusNoticeUpdate(actions = confirmActions(seconds), ttlMs = DECISION_TTL_MS),
+                dropPartial = false,
+            )
+            main.postDelayed(this, SEND_TICK_MS)
+        }
+    }
+
     private fun queueSendFailure(cause: String) {
         queueEssential(
             NexusNoticeUpdate(
                 footer = fitFooter("Reply failed: $cause"),
-                actions = CONFIRM_ACTIONS,
+                actions = confirmActions(null),
                 ttlMs = DECISION_TTL_MS,
             ),
             dropPartial = true,
@@ -298,6 +349,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
     }
 
     private fun invalidateSpeech() {
+        cancelSendCountdown()
         speechGeneration += 1
         speechFinalReceived = false
         speech?.stop()
@@ -340,6 +392,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
     }
 
     private fun closeClient() {
+        cancelSendCountdown()
         showGeneration += 1
         invalidateSpeech()
         essentialUpdates.clear()
@@ -357,11 +410,35 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block)
     }
 
-    private fun messageLines(rendered: String): List<String> =
-        rendered.split('\n')
+    /**
+     * Lines that fit the contract's budget, separators included.
+     *
+     * The budget charges each line its length plus one, so a body already
+     * trimmed to exactly MAX_BODY_CHARS overflows the instant it is split, and
+     * `NexusNotice` throws while being constructed — a crash on the one path
+     * that has to survive whatever an app decides to send. Newest lines win,
+     * for the same reason the character trim drops from the top.
+     */
+    private fun messageLines(rendered: String): List<String> {
+        val candidates = rendered.split('\n')
             .map(String::trim)
             .filter(String::isNotEmpty)
             .takeLast(NoticeSurfaceContract.MAX_LINES)
+        val kept = ArrayDeque<String>()
+        var budget = NoticeSurfaceContract.MAX_BODY_CHARS
+        for (line in candidates.asReversed()) {
+            val cost = line.length + 1
+            if (cost > budget) {
+                // One line can outrun what is left on its own; keep its newest
+                // words rather than dropping the message the wearer was sent.
+                if (kept.isEmpty() && budget > 1) kept.addFirst(line.takeLast(budget - 1))
+                break
+            }
+            kept.addFirst(line)
+            budget -= cost
+        }
+        return kept.toList()
+    }
 
     private fun fitFooter(value: String): String =
         value.trim().take(NoticeSurfaceContract.MAX_FOOTER_CHARS)
@@ -445,14 +522,40 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         val INITIAL_ACTIONS = listOf(
             NexusNoticeAction(ACTION_REPLY, "reply", "Reply"),
         )
-        val CONFIRM_ACTIONS = listOf(
-            NexusNoticeAction(ACTION_SEND, "send", "Send"),
+        /**
+         * The same two answers the inbox offers, for the same reasons.
+         *
+         * Send carries the countdown as its label, so the seconds are on the
+         * chip the wearer is deciding about. Cancel is gone: Back dismisses a
+         * band from anywhere, and a chip that duplicates it costs a slot and
+         * teaches a second way to do one thing. The two paths must agree —
+         * dictating from a band and dictating from the inbox are the same act.
+         */
+        fun confirmActions(secondsLeft: Int?): List<NexusNoticeAction> = listOf(
+            NexusNoticeAction(
+                ACTION_SEND,
+                "send",
+                when {
+                    secondsLeft == null -> "Send"
+                    secondsLeft > 0 -> "Sending ${secondsLeft}s"
+                    else -> "Sending…"
+                },
+            ),
             NexusNoticeAction(ACTION_RETRY, "retry", "Retry"),
-            NexusNoticeAction(ACTION_CANCEL, "cancel", "Cancel"),
         )
+
         val SPEECH_FAILURE_ACTIONS = listOf(
             NexusNoticeAction(ACTION_RETRY, "mic", "Speak again"),
-            NexusNoticeAction(ACTION_CANCEL, "cancel", "Cancel"),
         )
+
+        // Time to re-read what you just said, scaled to how much there is.
+        // Kept identical to the inbox: one behaviour, two doors into it.
+        const val SEND_BASE_MS = 2_200L
+        const val SEND_MS_PER_WORD = 180L
+        const val SEND_MIN_MS = 3_000L
+        const val SEND_MAX_MS = 6_000L
+        const val SEND_TICK_MS = 1_000L
+
+        val WHITESPACE = Regex("""\s+""")
     }
 }
