@@ -25,10 +25,17 @@ class RelayPluginService : NexusPluginService() {
         SENT,
     }
 
+    /**
+     * Two answers, because the third and fourth were already there.
+     *
+     * Send is the countdown itself — tapping it only means "go now" — so it
+     * needs no separate button, and its row is where the seconds are counted
+     * rather than in a footer nobody looks at while reading their own words.
+     * Cancel is Back, which dismisses from anywhere and always has.
+     */
     private enum class ReplyChoice(val label: String) {
         SEND("Send"),
         RETRY("Retry"),
-        CANCEL("Cancel"),
     }
 
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
@@ -294,11 +301,8 @@ class RelayPluginService : NexusPluginService() {
                 "read only · back to inbox"
             }
             ThreadMode.LISTENING -> "speak now · back cancels"
-            ThreadMode.REVIEW -> sendSecondsLeft()?.let { seconds ->
-                if (seconds > 0) "sending in ${seconds}s · scroll to choose" else "sending…"
-            } ?: "${visibleChoices().getOrNull(selectedChoice)?.label.orEmpty()} · scroll · tap"
-            ThreadMode.VOICE_FAILURE ->
-                "${visibleChoices().getOrNull(selectedChoice)?.label.orEmpty()} · scroll · tap"
+            ThreadMode.REVIEW -> "scroll · tap · back cancels"
+            ThreadMode.VOICE_FAILURE -> "tap to try again · back cancels"
             ThreadMode.SENT -> "back"
         }
         val footer = listOf(snapshot.appLabel.trim().take(MAX_FOOTER_SOURCE_CHARS), instruction)
@@ -350,8 +354,13 @@ class RelayPluginService : NexusPluginService() {
      */
     private fun choiceRows(): List<NexusCardLine> =
         visibleChoices().mapIndexed { index, choice ->
+            val seconds = if (choice == ReplyChoice.SEND) sendSecondsLeft() else null
             NexusCardLine(
-                text = choice.label,
+                text = when {
+                    seconds == null -> choice.label
+                    seconds > 0 -> "Sending in ${seconds}s"
+                    else -> "Sending…"
+                },
                 selected = index == selectedChoice,
                 tone = if (index == selectedChoice) NexusRowTone.ALERT else NexusRowTone.NORMAL,
             )
@@ -445,11 +454,6 @@ class RelayPluginService : NexusPluginService() {
         when (visibleChoices().getOrNull(selectedChoice)) {
             ReplyChoice.SEND -> sendConfirmedReply()
             ReplyChoice.RETRY -> startListening()
-            ReplyChoice.CANCEL -> {
-                invalidateSpeech()
-                resetThreadMode()
-                renderThread(show = false)
-            }
             null -> Unit
         }
     }
@@ -593,8 +597,7 @@ class RelayPluginService : NexusPluginService() {
 
         val WHITESPACE = Regex("""\s+""")
 
-        val REVIEW_CHOICES = listOf(ReplyChoice.SEND, ReplyChoice.RETRY, ReplyChoice.CANCEL)
-        val FAILURE_CHOICES = listOf(ReplyChoice.RETRY, ReplyChoice.CANCEL)
-        val ALL_CHOICE_LABELS = ReplyChoice.entries.map(ReplyChoice::label).toSet()
+        val REVIEW_CHOICES = listOf(ReplyChoice.SEND, ReplyChoice.RETRY)
+        val FAILURE_CHOICES = listOf(ReplyChoice.RETRY)
     }
 }
