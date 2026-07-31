@@ -1,9 +1,12 @@
 package com.anezium.rokidbus.plugin.sample
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.os.Handler
+import android.os.Looper
 import android.view.KeyEvent
 import com.anezium.rokidbus.client.plugin.NexusCard
 import com.anezium.rokidbus.client.plugin.NexusImage
@@ -29,6 +32,27 @@ import com.anezium.rokidbus.shared.plugin.NexusInputEvent
 
 class HelloPluginService : NexusPluginService() {
     private fun log(message: String) = android.util.Log.i("ROKIDBUS", message)
+
+    /**
+     * Pushes the demo band after a delay, so a wake can be observed on a screen
+     * that went dark on its own. Every other route into a notice starts with the
+     * wearer tapping something, which lights the display before the notice can
+     * ask for it — useless for judging what a notice does to a dark one.
+     *
+     *     adb shell am start-foreground-service \
+     *       -n com.anezium.rokidbus.plugin.sample/.HelloPluginService \
+     *       -a com.anezium.rokidbus.plugin.sample.DEMO_NOTICE --ei delayMs 12000
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_DEMO_NOTICE) {
+            val delayMs = intent.getIntExtra("delayMs", 10_000).toLong().coerceIn(0L, 120_000L)
+            log("demo notice scheduled in ${delayMs}ms")
+            Handler(Looper.getMainLooper()).postDelayed({
+                log("demo notice push result=${nexusClient?.showNotice(DEMO_NOTICE_BAND)}")
+            }, delayMs)
+        }
+        return super.onStartCommand(intent, flags, startId)
+    }
 
     private val state = HelloPluginState()
     private var surface: NexusSurfaceSession? = null
@@ -290,6 +314,7 @@ class HelloPluginService : NexusPluginService() {
     }
 
     private companion object {
+        const val ACTION_DEMO_NOTICE = "com.anezium.rokidbus.plugin.sample.DEMO_NOTICE"
         const val SURFACE_ID = "main"
         const val PIN_HIDDEN = 0
         const val PIN_SMALL = 1
@@ -359,6 +384,10 @@ class HelloPluginService : NexusPluginService() {
                 NexusNoticeAction(id = "ignore", glyph = "stop", label = "Ignore"),
             ),
             ttlMs = NoticeSurfaceContract.MAX_TTL_MS,
+            // The demo band is the one notice a wearer asks for deliberately, so
+            // it is also the honest place to show what the opt-in does on a dark
+            // display. The hub still owns whether it is granted.
+            wakeDisplay = true,
         )
 
         /** No `ttlMs` of its own, so it takes the hub's 30-minute default. */
