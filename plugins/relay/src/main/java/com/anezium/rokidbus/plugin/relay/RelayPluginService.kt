@@ -32,6 +32,7 @@ class RelayPluginService : NexusPluginService() {
     }
 
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private var sendDeadlineMs: Long? = null
     private var surface: NexusSurfaceSession? = null
     private var entries: List<RelayInboxEntry> = emptyList()
     private val selection = RelayInboxSelection()
@@ -83,6 +84,9 @@ class RelayPluginService : NexusPluginService() {
     }
 
     private fun move(delta: Int) {
+        // Choosing among the answers means the wearer is deciding themselves,
+        // so the clock stops rather than firing under their hand.
+        if (selection.view == RelayInboxView.THREAD) cancelSendCountdown()
         if (selection.view == RelayInboxView.LIST) {
             refreshEntries()
             if (selection.move(delta)) renderList(show = false)
@@ -113,6 +117,51 @@ class RelayPluginService : NexusPluginService() {
             ThreadMode.VOICE_FAILURE,
             -> activateChoice()
         }
+    }
+
+    /**
+     * Reads the transcript back, then sends it unless the wearer steps in.
+     *
+     * Requiring a tap was the right call before wearing it and the wrong one
+     * after: the wearer has just spoken their reply and is looking straight at
+     * it, and asking them to confirm what they can already read turns one
+     * gesture into two for no new information. The countdown is the compromise
+     * Relay landed on — visible, proportional to how much there is to re-read,
+     * and cancellable for its whole length, which is what separates it from
+     * sending blind.
+     */
+    private fun startSendCountdown(text: String) {
+        cancelSendCountdown()
+        val words = text.trim().split(WHITESPACE).count(String::isNotBlank)
+        sendDeadlineMs = android.os.SystemClock.uptimeMillis() +
+            (SEND_BASE_MS + words * SEND_MS_PER_WORD).coerceIn(SEND_MIN_MS, SEND_MAX_MS)
+        main.post(sendTick)
+    }
+
+    private fun cancelSendCountdown() {
+        sendDeadlineMs = null
+        main.removeCallbacks(sendTick)
+    }
+
+    /** One second of the countdown: redraw the footer, or send when it runs out. */
+    private val sendTick = object : Runnable {
+        override fun run() {
+            val deadline = sendDeadlineMs ?: return
+            if (threadMode != ThreadMode.REVIEW) return cancelSendCountdown()
+            if (android.os.SystemClock.uptimeMillis() >= deadline) {
+                cancelSendCountdown()
+                sendConfirmedReply()
+                return
+            }
+            renderThread(show = false)
+            main.postDelayed(this, SEND_TICK_MS)
+        }
+    }
+
+    /** Whole seconds left, for the footer. Zero once it is on its way. */
+    private fun sendSecondsLeft(): Int? = sendDeadlineMs?.let { deadline ->
+        val remaining = deadline - android.os.SystemClock.uptimeMillis()
+        if (remaining <= 0L) 0 else ((remaining + 999L) / 1000L).toInt()
     }
 
     /** Returns to the list once "Sent" has been read, if nothing else moved since. */
@@ -192,13 +241,13 @@ class RelayPluginService : NexusPluginService() {
             // in the label column and its own text beside it, instead of a wall
             // where every line restates the name.
             ThreadMode.READING -> buildList {
-                addAll(messageRows(snapshot.renderedText))
+                addAll(messageRows(snapshot.renderedText, snapshot.sender))
                 threadStatus?.let { add(noteRow(it)) }
             }
             // Mid-dictation the wearer's own words are the only thing moving, so
             // they get the emphasis and the speaker column says whose they are.
             ThreadMode.LISTENING -> buildList {
-                addAll(messageRows(snapshot.renderedText).takeLast(LISTENING_CONTEXT_MESSAGES))
+                addAll(messageRows(snapshot.renderedText, snapshot.sender).takeLast(LISTENING_CONTEXT_MESSAGES))
                 add(
                     NexusCardLine(
                         text = speechPreview.ifBlank { speechStatus },
@@ -226,7 +275,7 @@ class RelayPluginService : NexusPluginService() {
                 addAll(choiceRows())
             }
             ThreadMode.SENT -> buildList {
-                addAll(messageRows(snapshot.renderedText).takeLast(LISTENING_CONTEXT_MESSAGES))
+                addAll(messageRows(snapshot.renderedText, snapshot.sender).takeLast(LISTENING_CONTEXT_MESSAGES))
                 add(
                     NexusCardLine(
                         text = transcript.orEmpty().ifBlank { "Sent." },
@@ -245,9 +294,11 @@ class RelayPluginService : NexusPluginService() {
                 "read only · back to inbox"
             }
             ThreadMode.LISTENING -> "speak now · back cancels"
-            ThreadMode.REVIEW,
-            ThreadMode.VOICE_FAILURE,
-            -> "${visibleChoices().getOrNull(selectedChoice)?.label.orEmpty()} · scroll · tap"
+            ThreadMode.REVIEW -> sendSecondsLeft()?.let { seconds ->
+                if (seconds > 0) "sending in ${seconds}s · scroll to choose" else "sending…"
+            } ?: "${visibleChoices().getOrNull(selectedChoice)?.label.orEmpty()} · scroll · tap"
+            ThreadMode.VOICE_FAILURE ->
+                "${visibleChoices().getOrNull(selectedChoice)?.label.orEmpty()} · scroll · tap"
             ThreadMode.SENT -> "back"
         }
         val footer = listOf(snapshot.appLabel.trim().take(MAX_FOOTER_SOURCE_CHARS), instruction)
@@ -268,14 +319,23 @@ class RelayPluginService : NexusPluginService() {
     }
 
     /** The thread as rows: speaker in the label column, message beside it. */
-    private fun messageRows(rendered: String): List<NexusCardLine> =
-        RelayInboxCatalog.threadMessages(rendered).map { message ->
+    private fun messageRows(rendered: String, title: String = ""): List<NexusCardLine> {
+        val messages = RelayInboxCatalog.threadMessages(rendered)
+        // One-to-one: the title is already that person's name, so labelling
+        // every line repeats it down the whole screen. In a group the title is
+        // the group and the labels are the only thing saying who is speaking —
+        // which is exactly when they earn their column.
+        val soloVoice = title.isNotBlank() && messages.all {
+            it.speaker.isBlank() || it.speaker.equals(title.trim(), ignoreCase = true)
+        }
+        return messages.map { message ->
             NexusCardLine(
                 text = message.text.take(MAX_CARD_LINE_CHARS),
-                badge = message.speaker.takeIf(String::isNotBlank),
+                badge = message.speaker.takeIf { it.isNotBlank() && !soloVoice },
                 tone = NexusRowTone.BODY,
             )
         }
+    }
 
     /** A line about the conversation rather than in it: dim, and unlabelled. */
     private fun noteRow(text: String): NexusCardLine =
@@ -353,6 +413,7 @@ class RelayPluginService : NexusPluginService() {
                 threadStatus = null
                 threadMode = ThreadMode.REVIEW
                 selectedChoice = 0
+                startSendCountdown(finalText)
                 renderThread(show = false)
             }
 
@@ -380,6 +441,7 @@ class RelayPluginService : NexusPluginService() {
     }
 
     private fun activateChoice() {
+        cancelSendCountdown()
         when (visibleChoices().getOrNull(selectedChoice)) {
             ReplyChoice.SEND -> sendConfirmedReply()
             ReplyChoice.RETRY -> startListening()
@@ -448,6 +510,7 @@ class RelayPluginService : NexusPluginService() {
     }
 
     private fun resetThreadMode() {
+        cancelSendCountdown()
         threadMode = ThreadMode.READING
         threadStatus = null
         selectedChoice = 0
@@ -520,6 +583,15 @@ class RelayPluginService : NexusPluginService() {
 
         /** Long enough to read "Sent", short enough not to hold the wearer there. */
         const val SENT_LINGER_MS = 1_200L
+
+        // Time to re-read what you just said, scaled to how much of it there is.
+        const val SEND_BASE_MS = 2_200L
+        const val SEND_MS_PER_WORD = 180L
+        const val SEND_MIN_MS = 3_000L
+        const val SEND_MAX_MS = 6_000L
+        const val SEND_TICK_MS = 250L
+
+        val WHITESPACE = Regex("""\s+""")
 
         val REVIEW_CHOICES = listOf(ReplyChoice.SEND, ReplyChoice.RETRY, ReplyChoice.CANCEL)
         val FAILURE_CHOICES = listOf(ReplyChoice.RETRY, ReplyChoice.CANCEL)
