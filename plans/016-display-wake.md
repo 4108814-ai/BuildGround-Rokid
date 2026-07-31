@@ -37,9 +37,10 @@ the wearer's display as often as it likes, simply by pushing a surface.
 Plan 012 also already decided the shape — per-item flag, hub-held cap, wearer
 setting, never keep-on ([012:387](012-activities.md)). It shipped without it
 because activities did not need it to be useful. This plan is that decision,
-built once, for every tier that has a case.
+built once, for every tier that has a case, minus the wearer setting and with a
+much shorter cap; both departures are argued where they land.
 
-## The four pieces
+## The three pieces
 
 ### 1. One policy object, one counter
 
@@ -47,17 +48,32 @@ built once, for every tier that has a case.
 acquires a screen wake lock. It answers one question —
 
 ```text
-(kind, requested, wearerAllows, isInteractive, budget, now) → Wake | Refused(reason)
+(kind, requested, isInteractive, budget, now) → Wake | Refused(reason)
 ```
 
 — and it is a pure function over a small state, so the whole of it is testable
 without a device. The lock acquisition itself sits behind it, unchanged from
 what `SurfaceController` does today.
 
-**The budget is global, not per plugin.** Three plugins each entitled to one
-wake per thirty seconds is a display that relights every ten. What the wearer
+**The budget is global, not per plugin.** Three plugins each entitled to their
+own quota is a display that relights three times as often. What the wearer
 experiences is one screen, so the cap governs one screen: **at most one wake per
-30 s across all plugins and all kinds.**
+5 s across all plugins and all kinds.**
+
+**Five seconds, and not the thirty plan 012 assumed.** Thirty is calibrated for
+a navigation activity, where the next maneuver is minutes away. Messages are not
+minutes apart, and a relay that swallows the second message of a conversation
+has failed at the one thing it exists for. The cap is not there to ration real
+events — it is there to stop a plugin whose loop rekindles the display ten times
+a second, and five seconds stops that just as completely.
+
+It cannot be calibrated against the ROM's screen timeout either, because that is
+the wearer's own setting (5 s, 10 s, 20 s, always on, always off), so no measured
+value would hold on the next pair of glasses. The tightest case is the shortest
+timeout: a wake at T=0 holds the screen roughly eight seconds (our three-second
+lock, then the ROM's five), an event at T=6 lands on a lit screen and spends
+nothing, and an event at T=9 finds the budget already free. There is no window
+where a message is lost.
 
 **A refused wake and an unnecessary wake are different.** When the screen is
 already interactive there is nothing to wake, so the budget is not spent and the
@@ -89,20 +105,6 @@ exactly as plan 012 specified: a maneuver change qualifies, a distance countdown
 does not. It ships here because the policy is shared and building it twice is how
 two caps end up disagreeing.
 
-### 4. The wearer's switch
-
-A per-plugin **Wake the display** toggle in Settings → Plugin access, listed with
-that plugin's capabilities but not one of them: no descriptor entry, no grant
-prompt, no re-approval when it changes. Plan 012's MUST NOT on adding a grant
-stands, and this respects it.
-
-**Default on, for a plugin that asks.** A plugin only reaches this switch after
-the wearer chose to install it and approved its capabilities; making them then
-hunt for a second toggle before the thing works is a setup step disguised as a
-safety feature. The switch exists so a wearer who finds one particular plugin
-too eager can shut it up without uninstalling it — which is the actual complaint
-it will be reached for.
-
 ## MUST NOT
 
 - MUST NOT keep the screen on, for any kind, ever. No `FLAG_KEEP_SCREEN_ON`, no
@@ -121,17 +123,17 @@ it will be reached for.
 ## Acceptance
 
 1. Pure decision test over the policy: every combination of kind, requested
-   flag, wearer setting, interactive state and budget position, including that
-   an already-interactive screen leaves the budget untouched and that a
-   surface push and a notice show draw from the same one.
+   flag, interactive state and budget position, including that an
+   already-interactive screen leaves the budget untouched and that a surface
+   push and a notice show draw from the same one.
 2. Contract and hub tests for `wakeDisplay` validation, its silent drop on
    update, and its absence from an old-SDK payload.
 3. `assembleDebug` green for `phone-hub`, `glasses-hub`, and the SDK.
 4. On-device, in a dark room, screen off: a notice with the flag lights the
-   optics and draws its band; a second notice 5 s later draws without lighting;
-   one 31 s later lights again; with the wearer switch off, none of them ever
-   light; with the screen already on, three notices in a row all draw and the
-   next dark-screen notice still lights, proving the budget was not spent.
+   optics and draws its band; a second notice 2 s later draws without lighting;
+   one 6 s later lights again; with the screen already on, three notices in a
+   row all draw and the next dark-screen notice still lights, proving the budget
+   was not spent.
 5. Battery sanity: a scripted twenty-notice hour on hardware, measured against
    the same hour with the flag off. A wake mechanism that costs a visible
    fraction of the glasses' battery is a wake mechanism we ship differently.
@@ -141,8 +143,18 @@ it will be reached for.
 - **Whether the ROM allows it** — measured 2026-07-28. It does, and Hi Rokid
   itself does it. Not reopened.
 - **Per-plugin budget** — no. One screen, one budget.
-- **A grant instead of a setting** — no. Plan 012 closed this: a wake is not a
-  data capability, and turning it into one adds an approval prompt for a
-  behaviour the wearer can already see and silence.
+- **A grant** — no. Plan 012 closed this: a wake is not a data capability, and
+  turning it into one adds an approval prompt for a behaviour the wearer can
+  already see.
+- **A wearer switch, deferred rather than decided against.** Plan 012 called for
+  a per-plugin *Wake the display* toggle. It is not built here, because the cap
+  already handles the failure it was aimed at — the plugin that relights the
+  screen in a loop — and the remaining case is narrower than it looks: a
+  *third-party* plugin the wearer wants to keep but wants quieter. Every plugin
+  in the store today is the owner's, and the fix for one of those being too eager
+  is to fix the plugin. Deferring costs nothing later: `wakeDisplay` is already
+  on the wire, so adding the toggle is hub-local, with no protocol change and no
+  SDK bump. **Reopen it the day a plugin signed by someone else requests a
+  wake.**
 - **Keeping the screen on** — forbidden, for every kind, permanently. This plan
   does not narrow that rule; it depends on it.
