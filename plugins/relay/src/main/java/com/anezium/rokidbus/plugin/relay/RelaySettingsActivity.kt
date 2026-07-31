@@ -89,15 +89,15 @@ class RelaySettingsActivity : Activity() {
         )
 
         content.addView(BusTheme.gap(this, 24))
-        content.addView(NexusUi.sectionRow(this, "Allowed apps"), NexusUi.block())
+        content.addView(NexusUi.sectionRow(this, "Apps"), NexusUi.block())
         content.addView(BusTheme.gap(this, 10))
         val packages = settings.seenPackages().sortedBy(::appLabel)
         if (packages.isEmpty()) {
             content.addView(
                 NexusUi.cardBody(
                     this,
-                    "Apps appear here only after producing a notification with a free-form reply action. " +
-                        "Every new app starts off.",
+                    "Every app that sends a message you can reply to is relayed. They appear here " +
+                        "once they have sent one, so you can silence the ones you would rather not see.",
                 ),
                 NexusUi.block(),
             )
@@ -285,7 +285,6 @@ class RelaySettingsActivity : Activity() {
                 val reply = snapshot.deliveredReply
                 if (reply != null) append(" · reply received (${reply.length} chars)")
                 if (!hasNotificationAccess()) append(" · grant listener access")
-                else if (!settings.isPackageAllowed(packageName)) append(" · enable Relay above")
             },
         ).apply { maxLines = 3 })
         snapshot.deliveredReply?.let { reply ->

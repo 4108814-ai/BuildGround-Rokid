@@ -45,8 +45,13 @@ internal class RelaySettings(context: Context) {
     fun seenPackages(): Set<String> =
         prefs.getStringSet(KEY_SEEN_PACKAGES, emptySet()).orEmpty().toSet()
 
-    fun allowedPackages(): Set<String> =
-        prefs.getStringSet(KEY_ALLOWED_PACKAGES, emptySet()).orEmpty().toSet()
+    /**
+     * Apps the wearer silenced. It gets its own key rather than reusing the old
+     * allowlist's: the two mean opposite things, and reading one as the other
+     * would mute precisely the apps that had been let through.
+     */
+    fun blockedPackages(): Set<String> =
+        prefs.getStringSet(KEY_BLOCKED_PACKAGES, emptySet()).orEmpty().toSet()
 
     fun observeRepliablePackage(packageName: String): Boolean {
         if (packageName.isBlank()) return false
@@ -56,18 +61,18 @@ internal class RelaySettings(context: Context) {
         return true
     }
 
-    fun isPackageAllowed(packageName: String): Boolean = packageName in allowedPackages()
+    fun isPackageAllowed(packageName: String): Boolean = packageName !in blockedPackages()
 
     fun setPackageAllowed(packageName: String, allowed: Boolean) {
         if (packageName.isBlank()) return
-        val updated = allowedPackages().toMutableSet().apply {
-            if (allowed) add(packageName) else remove(packageName)
+        val updated = blockedPackages().toMutableSet().apply {
+            if (allowed) remove(packageName) else add(packageName)
         }
-        prefs.edit().putStringSet(KEY_ALLOWED_PACKAGES, updated).apply()
+        prefs.edit().putStringSet(KEY_BLOCKED_PACKAGES, updated).apply()
     }
 
     fun admits(packageName: String): Boolean =
-        NotificationAdmission.appIsAdmitted(enabled(), allowedPackages(), packageName)
+        NotificationAdmission.appIsAdmitted(enabled(), blockedPackages(), packageName)
 
     companion object {
         const val DEFAULT_ENABLED = true
@@ -85,6 +90,6 @@ internal class RelaySettings(context: Context) {
         private const val KEY_PAUSE_SCREEN_ON = "pause_screen_on"
         private const val KEY_CLEAR_AFTER_REPLY = "clear_after_reply"
         private const val KEY_SEEN_PACKAGES = "seen_repliable_packages"
-        private const val KEY_ALLOWED_PACKAGES = "allowed_packages"
+        private const val KEY_BLOCKED_PACKAGES = "blocked_packages"
     }
 }

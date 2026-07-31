@@ -47,26 +47,39 @@ class NotificationAdmissionTest {
         assertFalse(
             NotificationAdmission.appIsAdmitted(
                 enabled = false,
-                allowedPackages = setOf("com.example.allowed"),
-                packageName = "com.example.allowed",
+                blockedPackages = emptySet(),
+                packageName = "com.example.app",
             ),
         )
     }
 
     @Test
-    fun `an empty allowlist admits no package`() {
+    fun `an app nobody has ever seen is admitted, because repliable is the filter`() {
+        // The first message from any app used to be lost while the wearer went
+        // and ticked it. Nothing is ticked now — only silenced.
+        assertTrue(
+            NotificationAdmission.appIsAdmitted(
+                enabled = true,
+                blockedPackages = emptySet(),
+                packageName = "com.example.never.seen.before",
+            ),
+        )
+    }
+
+    @Test
+    fun `a silenced app stays out, and silencing one leaves the others alone`() {
         assertFalse(
             NotificationAdmission.appIsAdmitted(
                 enabled = true,
-                allowedPackages = emptySet(),
-                packageName = "com.example.app",
+                blockedPackages = setOf("com.example.noisy"),
+                packageName = "com.example.noisy",
             ),
         )
         assertTrue(
             NotificationAdmission.appIsAdmitted(
                 enabled = true,
-                allowedPackages = setOf("com.example.app"),
-                packageName = "com.example.app",
+                blockedPackages = setOf("com.example.noisy"),
+                packageName = "com.example.other",
             ),
         )
     }
