@@ -15,6 +15,7 @@ import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import com.anezium.rokidbus.shared.SetupCompletionMode
 import com.anezium.rokidbus.shared.SetupPairingResult
+import com.anezium.rokidbus.shared.SetupStage
 
 class RokidBusAccessibilityService : AccessibilityService() {
     private val tripleTapDetector = TripleTapDetector()
@@ -30,6 +31,10 @@ class RokidBusAccessibilityService : AccessibilityService() {
     private var wirelessBootstrapActive = false
     private var wirelessBootstrapSessionId = ""
     private var wirelessBootstrapForced = false
+    private var setupWifiEnableActive = false
+    private var setupWifiEnableSessionId = ""
+    private var setupWifiEnableForced = false
+    private var setupWifiFallbackRunnable: Runnable? = null
     private var wifiEnableActive = false
     private var manualWifiEnableActive = false
     private var manualNavigationActive = false
@@ -287,6 +292,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
     override fun onInterrupt() {
         wirelessDebuggingAutomator?.stop()
         developerOptionsEnabler?.stop()
+        pauseSetupWifiEnableIfActive(SetupStage.ENABLING_WIFI)
         unregisterWifiResumeCallback()
         finishWifiEnableIfActive(false)
         pauseWirelessBootstrapIfActive("wireless_setup_interrupted")
@@ -297,9 +303,10 @@ class RokidBusAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         log("AccessibilityService destroyed")
         main.removeCallbacks(tapExpiry)
-        unregisterWifiResumeCallback()
         wirelessDebuggingAutomator?.stop()
         developerOptionsEnabler?.stop()
+        pauseSetupWifiEnableIfActive(SetupStage.ENABLING_WIFI)
+        unregisterWifiResumeCallback()
         finishWifiEnableIfActive(false)
         pauseWirelessBootstrapIfActive("wireless_setup_service_restarting")
         pauseManualNavigationIfActive("manual_pairing_service_restarting")
@@ -367,7 +374,18 @@ class RokidBusAccessibilityService : AccessibilityService() {
             return
         }
         if (!snapshot.wifiReady) {
-            waitForWifi(sessionId, force = false)
+            val wifiEnabled = SelfArmWirelessAdbController.isWifiEnabled(applicationContext)
+            if (SelfArmWifiAutomationPolicy.shouldAutomate(
+                    accessibilityServiceArmed = true,
+                    wifiEnabled = wifiEnabled,
+                )
+            ) {
+                startSetupWifiEnable(sessionId, force = false)
+            } else if (wifiEnabled && snapshot.stage == SetupStage.ENABLING_WIFI) {
+                awaitValidatedWifiAfterAutomaticEnable(sessionId, force = false)
+            } else {
+                waitForWifi(sessionId, force = false)
+            }
             return
         }
         startWirelessBootstrap(sessionId)
@@ -402,7 +420,15 @@ class RokidBusAccessibilityService : AccessibilityService() {
             return
         }
         if (!snapshot.wifiReady) {
-            waitForWifi(sessionId, forced)
+            if (SelfArmWifiAutomationPolicy.shouldAutomate(
+                    accessibilityServiceArmed = true,
+                    wifiEnabled = SelfArmWirelessAdbController.isWifiEnabled(applicationContext),
+                )
+            ) {
+                startSetupWifiEnable(sessionId, forced)
+            } else {
+                waitForWifi(sessionId, forced)
+            }
             return
         }
         unregisterWifiResumeCallback()
@@ -418,7 +444,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
     }
 
     private fun startWifiEnable() {
-        if (wirelessBootstrapActive || manualNavigationActive) {
+        if (wirelessBootstrapActive || setupWifiEnableActive || manualNavigationActive) {
             GlassesHub.onWifiEnableAutomationFinished(false)
             return
         }
@@ -432,6 +458,34 @@ class RokidBusAccessibilityService : AccessibilityService() {
         automator.start(SelfArmWirelessDebuggingAutomator.OperationMode.WIFI_ONLY)
     }
 
+    private fun startSetupWifiEnable(sessionId: String, force: Boolean) {
+        if (!SelfArmOnboardingStore.isCurrentSession(applicationContext, sessionId)) return
+        if (manualNavigationActive) {
+            waitForWifi(sessionId, force)
+            return
+        }
+        if (setupWifiEnableActive && setupWifiEnableSessionId == sessionId) return
+        if (setupWifiEnableActive) pauseSetupWifiEnableIfActive("waiting_for_wifi_network")
+        finishWifiEnableIfActive(false)
+        val automator = wirelessDebuggingAutomator
+        if (automator == null) {
+            waitForWifi(sessionId, force)
+            return
+        }
+        unregisterWifiResumeCallback()
+        setupWifiEnableActive = true
+        setupWifiEnableSessionId = sessionId
+        setupWifiEnableForced = force
+        SelfArmOnboardingStore.markRunning(applicationContext, sessionId)
+        SelfArmOnboardingStore.reportProgress(applicationContext, sessionId, SetupStage.ENABLING_WIFI)
+        if (!SelfArmOnboardingStore.isCurrentSession(applicationContext, sessionId)) return
+        returnToOnboarding(sessionId)
+        automator.start(
+            SelfArmWirelessDebuggingAutomator.OperationMode.WIFI_ONLY,
+            sessionId = sessionId,
+        )
+    }
+
     internal fun onSetupWaitingForWifi(sessionId: String) {
         if (!SelfArmOnboardingStore.isCurrentSession(applicationContext, sessionId)) return
         waitForWifi(sessionId, wirelessBootstrapForced)
@@ -439,7 +493,12 @@ class RokidBusAccessibilityService : AccessibilityService() {
 
     private fun waitForWifi(sessionId: String, force: Boolean) {
         if (!SelfArmOnboardingStore.isCurrentSession(applicationContext, sessionId)) return
+        setupWifiFallbackRunnable?.let(main::removeCallbacks)
+        setupWifiFallbackRunnable = null
         wirelessDebuggingAutomator?.stop()
+        setupWifiEnableActive = false
+        setupWifiEnableSessionId = ""
+        setupWifiEnableForced = false
         wirelessBootstrapActive = false
         wirelessBootstrapSessionId = ""
         wirelessBootstrapForced = false
@@ -512,6 +571,8 @@ class RokidBusAccessibilityService : AccessibilityService() {
     }
 
     private fun unregisterWifiResumeCallback() {
+        setupWifiFallbackRunnable?.let(main::removeCallbacks)
+        setupWifiFallbackRunnable = null
         wifiResumeRunnable?.let(main::removeCallbacks)
         wifiResumeRunnable = null
         val callback = wifiResumeCallback
@@ -558,9 +619,49 @@ class RokidBusAccessibilityService : AccessibilityService() {
             }
             return
         }
+        if (setupWifiEnableActive) {
+            if (setupWifiEnableSessionId != sessionId ||
+                !SelfArmOnboardingStore.isCurrentSession(applicationContext, sessionId)
+            ) {
+                return
+            }
+            setupWifiEnableActive = false
+            setupWifiEnableSessionId = ""
+            val force = setupWifiEnableForced
+            setupWifiEnableForced = false
+            if (!success) {
+                waitForWifi(sessionId, force)
+                return
+            }
+            if (SelfArmOnboardingStore.isWifiReady(applicationContext)) {
+                startWirelessBootstrap(sessionId, force)
+                return
+            }
+            awaitValidatedWifiAfterAutomaticEnable(sessionId, force)
+            return
+        }
         if (!wifiEnableActive) return
         wifiEnableActive = false
         GlassesHub.onWifiEnableAutomationFinished(success)
+    }
+
+    private fun awaitValidatedWifiAfterAutomaticEnable(sessionId: String, force: Boolean) {
+        if (!SelfArmOnboardingStore.isCurrentSession(applicationContext, sessionId)) return
+        SelfArmOnboardingStore.markRunning(applicationContext, sessionId)
+        SelfArmOnboardingStore.reportProgress(applicationContext, sessionId, SetupStage.ENABLING_WIFI)
+        registerWifiResumeCallback(sessionId, force, resumeManual = false)
+        returnToOnboarding(sessionId)
+        val fallback = Runnable {
+            setupWifiFallbackRunnable = null
+            if (!SelfArmOnboardingStore.isCurrentSession(applicationContext, sessionId)) return@Runnable
+            if (SelfArmOnboardingStore.isWifiReady(applicationContext)) {
+                resumeFromValidatedWifi(sessionId)
+            } else {
+                waitForWifi(sessionId, force)
+            }
+        }
+        setupWifiFallbackRunnable = fallback
+        main.postDelayed(fallback, SelfArmWifiAutomationPolicy.NETWORK_SETTLE_TIMEOUT_MS)
     }
 
     internal fun onManualNavigationFinished(sessionId: String) {
@@ -853,6 +954,18 @@ class RokidBusAccessibilityService : AccessibilityService() {
         GlassesHub.onWifiEnableAutomationFinished(success)
     }
 
+    private fun pauseSetupWifiEnableIfActive(progressState: String) {
+        if (!setupWifiEnableActive && setupWifiFallbackRunnable == null) return
+        val sessionId = setupWifiEnableSessionId.ifBlank { wifiResumeSessionId }
+        unregisterWifiResumeCallback()
+        setupWifiEnableActive = false
+        setupWifiEnableSessionId = ""
+        setupWifiEnableForced = false
+        if (SelfArmOnboardingStore.isCurrentSession(applicationContext, sessionId)) {
+            SelfArmOnboardingStore.pause(applicationContext, sessionId, progressState)
+        }
+    }
+
     private fun pauseWirelessBootstrapIfActive(progressState: String) {
         if (!wirelessBootstrapActive) return
         val sessionId = wirelessBootstrapSessionId
@@ -894,6 +1007,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
     private fun cancelSetupSessionWorkInternal(expectedSessionId: String? = null) {
         val trackedSessions = listOf(
             wirelessBootstrapSessionId,
+            setupWifiEnableSessionId,
             manualNavigationSessionId,
             wifiResumeSessionId,
         ).filter(String::isNotBlank)
@@ -914,6 +1028,9 @@ class RokidBusAccessibilityService : AccessibilityService() {
         manualWifiEnableActive = false
         manualWaitingForNetwork = false
         manualOpenDeadlineAt = 0L
+        setupWifiEnableActive = false
+        setupWifiEnableSessionId = ""
+        setupWifiEnableForced = false
         wirelessBootstrapActive = false
         wirelessBootstrapSessionId = ""
         wirelessBootstrapForced = false

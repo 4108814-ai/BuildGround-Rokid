@@ -60,4 +60,19 @@ class SelfArmOnboardingStoreTest {
             SelfArmOnboardingStateMachine.evaluate(expired).action,
         )
     }
+
+    @Test
+    fun setupOwnedWifiAutomationReportsAWorkingStageBeforeManualFallback() {
+        val context = RuntimeEnvironment.getApplication()
+        SelfArmOnboardingStore.invalidateSession(context)
+        val sessionId = SelfArmOnboardingStore.beginSession(context)
+        SelfArmOnboardingStore.markRunning(context, sessionId)
+
+        SelfArmOnboardingStore.reportProgress(context, sessionId, "starting_wifi_enable")
+
+        val snapshot = SelfArmOnboardingStore.snapshot(context)
+        assertTrue(snapshot.setupRunning)
+        assertEquals(SetupStage.ENABLING_WIFI, snapshot.stage)
+        assertEquals("starting_wifi_enable", snapshot.progressState)
+    }
 }

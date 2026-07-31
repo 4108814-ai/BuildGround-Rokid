@@ -74,26 +74,41 @@ class SelfArmSettingsNodePolicyTest {
     }
 
     @Test
-    fun `generic settings main switch is not enough to identify wifi`() {
+    fun `wifi screen requires the launched route and a stable resource id`() {
         assertFalse(
             SelfArmSettingsNodePolicy.isWifiScreen(
                 settingsPackage = true,
-                appBarMatches = false,
-                switchTextMatches = false,
+                openedByAutomator = false,
+                wifiActivityObserved = true,
+                hasStableToggleId = true,
             ),
         )
         assertFalse(
             SelfArmSettingsNodePolicy.isWifiScreen(
                 settingsPackage = false,
-                appBarMatches = true,
-                switchTextMatches = true,
+                openedByAutomator = true,
+                wifiActivityObserved = true,
+                hasStableToggleId = true,
             ),
         )
         assertTrue(
             SelfArmSettingsNodePolicy.isWifiScreen(
                 settingsPackage = true,
-                appBarMatches = false,
-                switchTextMatches = true,
+                openedByAutomator = true,
+                wifiActivityObserved = true,
+                hasStableToggleId = true,
+            ),
+        )
+        assertTrue(SelfArmSettingsNodePolicy.isWifiToggleId("com.android.settings:id/switch_text"))
+        assertFalse(SelfArmSettingsNodePolicy.isWifiToggleId("com.android.settings:id/title"))
+        assertTrue(
+            SelfArmSettingsNodePolicy.isWifiActivityClass(
+                "com.android.settings.Settings\$WifiSettingsActivity",
+            ),
+        )
+        assertFalse(
+            SelfArmSettingsNodePolicy.isWifiActivityClass(
+                "com.android.settings.Settings\$DevelopmentSettingsDashboardActivity",
             ),
         )
     }

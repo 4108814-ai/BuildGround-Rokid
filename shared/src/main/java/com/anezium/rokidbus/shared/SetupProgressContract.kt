@@ -5,6 +5,7 @@ import java.util.Locale
 object SetupStage {
     const val UNKNOWN = ""
     const val WAITING_FOR_ACCESSIBILITY = "waiting_for_accessibility"
+    const val ENABLING_WIFI = "enabling_wifi"
     const val WAITING_FOR_WIFI = "waiting_for_wifi"
     const val ENABLING_DEVELOPER_OPTIONS = "enabling_developer_options"
     const val OPENING_WIRELESS_DEBUGGING = "opening_wireless_debugging"
@@ -19,6 +20,7 @@ object SetupStage {
     val ALL: List<String> = listOf(
         UNKNOWN,
         WAITING_FOR_ACCESSIBILITY,
+        ENABLING_WIFI,
         WAITING_FOR_WIFI,
         ENABLING_DEVELOPER_OPTIONS,
         OPENING_WIRELESS_DEBUGGING,

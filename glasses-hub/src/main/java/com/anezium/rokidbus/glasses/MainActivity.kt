@@ -378,6 +378,7 @@ class MainActivity : Activity() {
     private fun phaseLabel(snapshot: SelfArmOnboardingSnapshot): String = getString(
         when (snapshot.stage) {
             SetupStage.WAITING_FOR_ACCESSIBILITY -> R.string.onb_phase_waiting_for_accessibility
+            SetupStage.ENABLING_WIFI -> R.string.onb_phase_enabling_wifi
             SetupStage.WAITING_FOR_WIFI -> R.string.onb_phase_waiting_for_wifi
             SetupStage.ENABLING_DEVELOPER_OPTIONS -> R.string.onb_phase_enabling_developer_options
             SetupStage.OPENING_WIRELESS_DEBUGGING -> R.string.onb_phase_opening_wireless_debugging

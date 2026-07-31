@@ -479,6 +479,9 @@ internal object SelfArmOnboardingStore {
         val normalized = value.trim().lowercase(Locale.ROOT)
         return when {
             normalized == "wifi_network_required" -> SetupStage.WAITING_FOR_WIFI
+            normalized == SetupStage.ENABLING_WIFI ||
+                normalized == "starting_wifi_enable" ||
+                normalized == "wifi_on" -> SetupStage.ENABLING_WIFI
             normalized == "manual_pairing_timeout" ||
                 normalized == "manual_pairing_verification_failed" ||
                 normalized == "wireless_setup_timeout" ||

@@ -28,6 +28,7 @@
 
     <string name="onb_manual_eyebrow">FINISH ON YOUR PHONE</string>
     <string name="onb_manual_title">Nexus needs a hand</string>
+    <string name="onb_phase_enabling_wifi">Turning on Wi-Fi…</string>
     <string name="onb_manual_body">Automatic setup could not finish here. Open Rokid Nexus on your phone and follow the guided setup.</string>
     <string name="onb_manual_action">RETRY HERE</string>
 

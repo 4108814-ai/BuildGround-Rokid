@@ -60,6 +60,7 @@
     <!-- Live setup phase, mirrored from the glasses. One line, honest about what is happening. -->
     <string name="onb_phase_unknown">Getting ready…</string>
     <string name="onb_phase_waiting_for_accessibility">Switch on “Rokid Nexus Glasses” on the lens.</string>
+    <string name="onb_phase_enabling_wifi">Turning on Wi-Fi on the glasses…</string>
     <string name="onb_phase_waiting_for_wifi">Waiting for the glasses to join Wi-Fi.</string>
     <string name="onb_phase_enabling_developer_options">Unlocking developer options on the glasses…</string>
     <string name="onb_phase_opening_wireless_debugging">Opening Wireless Debugging on the glasses…</string>

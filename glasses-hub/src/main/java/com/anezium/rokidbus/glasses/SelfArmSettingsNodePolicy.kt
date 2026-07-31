@@ -1,5 +1,7 @@
 package com.anezium.rokidbus.glasses
 
+import java.util.Locale
+
 internal object SelfArmSettingsNodePolicy {
     fun isActionTitle(
         visible: Boolean,
@@ -27,8 +29,25 @@ internal object SelfArmSettingsNodePolicy {
 
     fun isWifiScreen(
         settingsPackage: Boolean,
-        appBarMatches: Boolean,
-        switchTextMatches: Boolean,
+        openedByAutomator: Boolean,
+        wifiActivityObserved: Boolean,
+        hasStableToggleId: Boolean,
     ): Boolean =
-        settingsPackage && (appBarMatches || switchTextMatches)
+        settingsPackage && openedByAutomator && wifiActivityObserved && hasStableToggleId
+
+    fun isWifiActivityClass(className: String?): Boolean {
+        val value = className.orEmpty().lowercase(Locale.ROOT)
+        return value.endsWith("settings\$wifisettingsactivity") ||
+            value.endsWith("settings.wifisettingsactivity")
+    }
+
+    fun isWifiToggleId(viewId: String?): Boolean = viewId in WIFI_TOGGLE_IDS
+
+    private val WIFI_TOGGLE_IDS = setOf(
+        "com.android.settings:id/main_switch_bar",
+        "com.android.settings:id/switch_bar",
+        "com.android.settings:id/switch_widget",
+        "android:id/switch_widget",
+        "com.android.settings:id/switch_text",
+    )
 }

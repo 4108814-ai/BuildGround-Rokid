@@ -77,11 +77,13 @@ class GlassesHubCapabilitiesContractTest {
     @Test
     fun `setup stage normalization rejects hostile wire input`() {
         assertEquals(SetupStage.WAITING_FOR_WIFI, SetupStage.normalize(" WAITING_FOR_WIFI "))
+        assertEquals(SetupStage.ENABLING_WIFI, SetupStage.normalize(" ENABLING_WIFI "))
         assertEquals(SetupStage.UNKNOWN, SetupStage.normalize("../../pairing_locally"))
         assertEquals(SetupStage.UNKNOWN, SetupStage.normalize("failed\u0000complete"))
         assertTrue(SetupStage.isTerminal(" COMPLETE "))
         assertTrue(SetupStage.requiresUserAction("failed"))
         assertFalse(SetupStage.requiresUserAction("pairing_locally"))
+        assertFalse(SetupStage.requiresUserAction("enabling_wifi"))
     }
 
     @Test

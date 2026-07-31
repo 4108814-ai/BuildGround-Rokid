@@ -50,6 +50,7 @@ internal class SelfArmWirelessDebuggingAutomator(
     private var wifiClickAttempts = 0
     private var wifiScrolls = 0
     private var wifiSettingsOpened = false
+    private var wifiActivityObserved = false
     private var wifiNetworkWaitStartedAt = 0L
 
     private var pairingRequested = false
@@ -113,10 +114,10 @@ internal class SelfArmWirelessDebuggingAutomator(
         operationMode = mode
         manualTarget = target
         settingsStrings.refresh()
-        deadlineAt = SystemClock.uptimeMillis() + if (mode == OperationMode.MANUAL_NAVIGATION) {
-            MANUAL_TIMEOUT_MS
-        } else {
-            TIMEOUT_MS
+        deadlineAt = SystemClock.uptimeMillis() + when (mode) {
+            OperationMode.MANUAL_NAVIGATION -> MANUAL_TIMEOUT_MS
+            OperationMode.WIFI_ONLY -> SelfArmWifiAutomationPolicy.AUTOMATION_TIMEOUT_MS
+            OperationMode.FULL_BOOTSTRAP -> TIMEOUT_MS
         }
         lastClickAt = 0L
         wifiConfirmed = false
@@ -124,6 +125,7 @@ internal class SelfArmWirelessDebuggingAutomator(
         wifiClickAttempts = 0
         wifiScrolls = 0
         wifiSettingsOpened = false
+        wifiActivityObserved = false
         wifiNetworkWaitStartedAt = 0L
         pairingRequested = false
         pairingRequestedAt = 0L
@@ -232,6 +234,12 @@ internal class SelfArmWirelessDebuggingAutomator(
 
     fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (!isLiveRun()) return
+        if (wifiSettingsOpened &&
+            event?.packageName?.toString() == AccessibilityWindowRoots.SETTINGS_PACKAGE &&
+            SelfArmSettingsNodePolicy.isWifiActivityClass(event.className?.toString())
+        ) {
+            wifiActivityObserved = true
+        }
         if (!wifiConfirmed && wifiClickIssued) {
             schedule(WIFI_POLL_INTERVAL_MS)
             return
@@ -414,7 +422,7 @@ internal class SelfArmWirelessDebuggingAutomator(
                 schedule(WIFI_POLL_INTERVAL_MS)
                 return
             }
-            if (wifiClickAttempts >= MAX_WIFI_CLICK_ATTEMPTS) {
+            if (wifiClickAttempts >= SelfArmWifiAutomationPolicy.MAX_TOGGLE_ATTEMPTS) {
                 finish("wifi_enable_timeout", false)
                 return
             }
@@ -1104,41 +1112,25 @@ internal class SelfArmWirelessDebuggingAutomator(
 
     private fun clickWifiToggle(root: AccessibilityNodeInfo): Boolean {
         if (!isWifiSettingsScreen(root)) return false
-        val switchNode = findFirst(root) {
-            val cls = className(it).lowercase(Locale.US)
-            it.isVisibleToUser &&
-                it.isEnabled &&
-                (it.isCheckable || it.isClickable) &&
-                (cls.endsWith("switch") || cls.endsWith("togglebutton"))
-        }
-        val idNode = firstVisibleByViewId(root, "com.android.settings:id/main_switch_bar")
-            ?.takeIf(::isUsableToggle)
-            ?: firstVisibleByViewId(root, "com.android.settings:id/switch_bar")
-                ?.takeIf(::isUsableToggle)
-            ?: firstVisibleByViewId(root, "com.android.settings:id/switch_widget")
-                ?.takeIf(::isUsableToggle)
-            ?: firstVisibleByViewId(root, "android:id/switch_widget")
-                ?.takeIf(::isUsableToggle)
-        val textNode = findFirst(root) {
-            it.isVisibleToUser &&
-                settingsStrings.matches(rawText(it), SelfArmSettingsLabel.WIFI_PRIMARY_SWITCH)
-        }
-        val target = idNode ?: switchNode ?: textNode
+        val target = wifiToggleByStableId(root)
         return target != null && canClickNow() && clickNode(target)
     }
 
     private fun isWifiSettingsScreen(root: AccessibilityNodeInfo): Boolean =
         SelfArmSettingsNodePolicy.isWifiScreen(
             settingsPackage = isSettingsRoot(root),
-            appBarMatches = settingsStrings.matches(
-                subtreeText(firstVisibleByViewId(root, SETTINGS_APP_BAR_ID)),
-                SelfArmSettingsLabel.WIFI_PRIMARY_SWITCH,
-            ),
-            switchTextMatches = settingsStrings.matches(
-                textByViewId(root, SETTINGS_SWITCH_TEXT_ID),
-                SelfArmSettingsLabel.WIFI_PRIMARY_SWITCH,
-            ),
+            openedByAutomator = wifiSettingsOpened,
+            wifiActivityObserved = wifiActivityObserved,
+            hasStableToggleId = wifiToggleByStableId(root) != null,
         )
+
+    private fun wifiToggleByStableId(root: AccessibilityNodeInfo): AccessibilityNodeInfo? =
+        findFirst(root) { node ->
+            node.isVisibleToUser &&
+                node.isEnabled &&
+                SelfArmSettingsNodePolicy.isWifiToggleId(node.viewIdResourceName) &&
+                hasClickableAncestor(node)
+        }
 
     private fun isUsableToggle(node: AccessibilityNodeInfo): Boolean =
         SelfArmSettingsNodePolicy.isUsableToggle(
@@ -1586,7 +1578,7 @@ internal class SelfArmWirelessDebuggingAutomator(
     private fun report(setupState: String) {
         if (!isLiveRun()) return
         lastReportedProgressState = setupState
-        if (operationMode != OperationMode.WIFI_ONLY) {
+        if (operationMode != OperationMode.WIFI_ONLY || sessionId.isNotBlank()) {
             if (!SelfArmOnboardingStore.isCurrentSession(service.applicationContext, sessionId)) return
             SelfArmOnboardingStore.reportProgress(
                 service.applicationContext,
@@ -1787,7 +1779,6 @@ internal class SelfArmWirelessDebuggingAutomator(
         private const val MANUAL_HOLD_POLL_MS = 1_000L
         private const val PAIRING_PORT_GRACE_MS = 1_800L
         private const val PAIRING_READY_REPORT_INTERVAL_MS = 2_000L
-        private const val MAX_WIFI_CLICK_ATTEMPTS = 2
         private const val MAX_WIFI_SCROLLS = 8
         private const val MAX_DEVELOPER_OPEN_ATTEMPTS = 3
         private const val MAX_DEVELOPER_SCROLLS = 48
