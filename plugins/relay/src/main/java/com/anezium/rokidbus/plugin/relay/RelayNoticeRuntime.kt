@@ -118,7 +118,11 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         }
         val notice = NexusNotice(
             title = reply.content.title,
-            body = reply.content.renderedText.takeIf(String::isNotBlank),
+            // The extractor already separates messages with newlines; sending them
+            // as lines is what stops the band flattening a conversation into one
+            // paragraph. Newest win when a thread runs longer than the tier allows,
+            // for the same reason the character trim drops from the top.
+            lines = messageLines(reply.content.renderedText),
             footer = reply.footer.takeIf(String::isNotBlank),
             actions = INITIAL_ACTIONS,
             image = image?.takeIf { currentClient.supportsImageSurface },
@@ -319,6 +323,12 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
     private fun onMain(block: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block)
     }
+
+    private fun messageLines(rendered: String): List<String> =
+        rendered.split('\n')
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .takeLast(NoticeSurfaceContract.MAX_LINES)
 
     private fun fitFooter(value: String): String =
         value.trim().take(NoticeSurfaceContract.MAX_FOOTER_CHARS)
