@@ -42,37 +42,7 @@ internal class RelaySettings(context: Context) {
         prefs.edit().putBoolean(KEY_CLEAR_AFTER_REPLY, enabled).apply()
     }
 
-    fun seenPackages(): Set<String> =
-        prefs.getStringSet(KEY_SEEN_PACKAGES, emptySet()).orEmpty().toSet()
-
-    /**
-     * Apps the wearer silenced. It gets its own key rather than reusing the old
-     * allowlist's: the two mean opposite things, and reading one as the other
-     * would mute precisely the apps that had been let through.
-     */
-    fun blockedPackages(): Set<String> =
-        prefs.getStringSet(KEY_BLOCKED_PACKAGES, emptySet()).orEmpty().toSet()
-
-    fun observeRepliablePackage(packageName: String): Boolean {
-        if (packageName.isBlank()) return false
-        val updated = seenPackages() + packageName
-        if (updated.size == seenPackages().size) return false
-        prefs.edit().putStringSet(KEY_SEEN_PACKAGES, updated).apply()
-        return true
-    }
-
-    fun isPackageAllowed(packageName: String): Boolean = packageName !in blockedPackages()
-
-    fun setPackageAllowed(packageName: String, allowed: Boolean) {
-        if (packageName.isBlank()) return
-        val updated = blockedPackages().toMutableSet().apply {
-            if (allowed) remove(packageName) else add(packageName)
-        }
-        prefs.edit().putStringSet(KEY_BLOCKED_PACKAGES, updated).apply()
-    }
-
-    fun admits(packageName: String): Boolean =
-        NotificationAdmission.appIsAdmitted(enabled(), blockedPackages(), packageName)
+    fun admits(): Boolean = NotificationAdmission.appIsAdmitted(enabled())
 
     companion object {
         const val DEFAULT_ENABLED = true
@@ -89,7 +59,5 @@ internal class RelaySettings(context: Context) {
         private const val KEY_MESSAGES_PER_THREAD = "messages_per_thread"
         private const val KEY_PAUSE_SCREEN_ON = "pause_screen_on"
         private const val KEY_CLEAR_AFTER_REPLY = "clear_after_reply"
-        private const val KEY_SEEN_PACKAGES = "seen_repliable_packages"
-        private const val KEY_BLOCKED_PACKAGES = "blocked_packages"
     }
 }

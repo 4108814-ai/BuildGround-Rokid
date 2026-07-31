@@ -17,21 +17,20 @@ internal object NotificationAdmission {
         actions.indexOfFirst(::isRepliableAction).takeIf { it >= 0 }
 
     /**
-     * Everything repliable is admitted unless the wearer silenced that app.
+     * Being repliable is the whole filter.
      *
-     * This began as an allowlist, and wearing it showed the cost: a message
-     * could not reach the glasses until its app had already sent one and been
-     * ticked by hand, so the first message from every app was lost by design.
-     * The repliable-action test is itself a strong filter — it passes only
-     * notifications a human is waiting on an answer to — and that is the one
-     * worth having on its own first.
+     * There was a per-app list here, and wearing it showed what it cost: a
+     * message could not reach the glasses until its app had already sent one and
+     * been ticked by hand, so the first message from every app was lost by
+     * design. The repliable-action test already passes only notifications a
+     * human is waiting on an answer to, which is the filter worth having on its
+     * own.
      *
-     * A real per-app model, and mirroring notifications that cannot be replied
-     * to at all, is what turns this into a full replacement for the ROM's
-     * notifications. Next version.
+     * A real per-app model belongs with the version that also mirrors
+     * notifications nobody can reply to — that is the one that would replace the
+     * ROM's notifications outright, and it needs rules this does not.
      */
-    fun appIsAdmitted(enabled: Boolean, blockedPackages: Set<String>, packageName: String): Boolean =
-        enabled && packageName !in blockedPackages
+    fun appIsAdmitted(enabled: Boolean): Boolean = enabled
 }
 
 internal fun Notification.findRepliableAction(): Notification.Action? =

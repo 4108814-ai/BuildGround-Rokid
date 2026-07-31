@@ -89,36 +89,6 @@ class RelaySettingsActivity : Activity() {
         )
 
         content.addView(BusTheme.gap(this, 24))
-        content.addView(NexusUi.sectionRow(this, "Apps"), NexusUi.block())
-        content.addView(BusTheme.gap(this, 10))
-        val packages = settings.seenPackages().sortedBy(::appLabel)
-        if (packages.isEmpty()) {
-            content.addView(
-                NexusUi.cardBody(
-                    this,
-                    "Every app that sends a message you can reply to is relayed. They appear here " +
-                        "once they have sent one, so you can silence the ones you would rather not see.",
-                ),
-                NexusUi.block(),
-            )
-        } else {
-            packages.forEachIndexed { index, packageName ->
-                content.addView(
-                    switchCard(
-                        title = appLabel(packageName),
-                        subtitle = packageName,
-                        checked = settings.isPackageAllowed(packageName),
-                    ) { allowed ->
-                        settings.setPackageAllowed(packageName, allowed)
-                        NotificationControl.refreshFromSettings()
-                    },
-                    NexusUi.block(),
-                )
-                if (index != packages.lastIndex) content.addView(BusTheme.gap(this, 8))
-            }
-        }
-
-        content.addView(BusTheme.gap(this, 24))
         content.addView(NexusUi.sectionRow(this, "Notification handling"), NexusUi.block())
         content.addView(BusTheme.gap(this, 10))
         content.addView(

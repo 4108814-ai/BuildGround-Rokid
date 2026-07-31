@@ -62,13 +62,10 @@ class RelayNotificationListener : NotificationListenerService() {
         val settings = RelaySettings(this)
         if (!settings.enabled() || NotificationForwardingPolicy.isPaused(this)) return false
 
-        // Discovery is deliberately separate from admission: an app must first prove it has a
-        // free-form reply action before it can appear as an off-by-default allowlist row.
+        // Carrying a free-form reply action is the whole admission test: it passes
+        // only notifications a human is waiting on an answer to.
         val action = sbn.notification.findRepliableAction() ?: return false
-        if (settings.observeRepliablePackage(sbn.packageName)) {
-            RelaySettingsActivity.notifyDataChanged()
-        }
-        if (!settings.admits(sbn.packageName)) return true
+        if (!settings.admits()) return true
 
         val capture = ReplyRepository.capture(this, sbn, action) ?: return false
         Log.i(

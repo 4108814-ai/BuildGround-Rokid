@@ -43,45 +43,10 @@ class NotificationAdmissionTest {
     }
 
     @Test
-    fun `a disabled plugin admits no package`() {
-        assertFalse(
-            NotificationAdmission.appIsAdmitted(
-                enabled = false,
-                blockedPackages = emptySet(),
-                packageName = "com.example.app",
-            ),
-        )
-    }
-
-    @Test
-    fun `an app nobody has ever seen is admitted, because repliable is the filter`() {
-        // The first message from any app used to be lost while the wearer went
-        // and ticked it. Nothing is ticked now — only silenced.
-        assertTrue(
-            NotificationAdmission.appIsAdmitted(
-                enabled = true,
-                blockedPackages = emptySet(),
-                packageName = "com.example.never.seen.before",
-            ),
-        )
-    }
-
-    @Test
-    fun `a silenced app stays out, and silencing one leaves the others alone`() {
-        assertFalse(
-            NotificationAdmission.appIsAdmitted(
-                enabled = true,
-                blockedPackages = setOf("com.example.noisy"),
-                packageName = "com.example.noisy",
-            ),
-        )
-        assertTrue(
-            NotificationAdmission.appIsAdmitted(
-                enabled = true,
-                blockedPackages = setOf("com.example.noisy"),
-                packageName = "com.example.other",
-            ),
-        )
+    fun `admission is the plugin switch and nothing else`() {
+        // Everything repliable is relayed; there is no per-app list to be on.
+        assertFalse(NotificationAdmission.appIsAdmitted(enabled = false))
+        assertTrue(NotificationAdmission.appIsAdmitted(enabled = true))
     }
 
     private fun action(hasActionIntent: Boolean, allowsFreeForm: Boolean) =
