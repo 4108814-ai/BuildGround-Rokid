@@ -160,8 +160,13 @@ internal object ReplyRepository {
         if (RelaySettings(context).clearAfterReply()) {
             NotificationControl.cancelAfterReply(reply.notificationKey)
         }
+        // Answered, so it leaves the inbox entirely — the readable copy as well
+        // as the live reply objects. A conversation the wearer has replied to is
+        // no longer waiting on them, and keeping it as a read-only row means the
+        // list slowly fills with finished business.
         synchronized(this) {
             if (pending[notificationId] === reply) pending.remove(notificationId)
+            recent.remove(notificationId)
         }
         return ReplySendResult.Sent
     }

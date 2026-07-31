@@ -194,7 +194,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
             override fun onSpeechFinal(text: String) = onMain {
                 if (generation != speechGeneration) return@onMain
                 if (text.isBlank()) {
-                    queueSpeechFailure("No speech")
+                    queueSpeechFailure("Didn't catch that")
                     return@onMain
                 }
                 speechFinalReceived = true
@@ -226,8 +226,9 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
                 if (generation != speechGeneration) return@onMain
                 speech = null
                 if (speechFinalReceived && reason == NexusSpeechStopReason.COMPLETED) return@onMain
-                val detail = error?.kind?.takeIf(String::isNotBlank)
-                queueSpeechFailure(detail ?: speechReasonLabel(reason))
+                // The label, never error.kind: the kind is an enum name meant
+                // for a bug report, and the band is not a bug report.
+                queueSpeechFailure(speechReasonLabel(reason))
             }
         })
         speech = newSpeech
@@ -242,7 +243,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         val reply = currentReply ?: return
         val transcript = currentTranscript
         if (transcript.isNullOrBlank()) {
-            queueSpeechFailure("Empty transcript")
+            queueSpeechFailure("Didn't catch that")
             return
         }
         when (val result = ReplyRepository.sendReply(appContext, reply.id, transcript)) {
@@ -278,7 +279,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         pendingPartial = null
         queueEssential(
             NexusNoticeUpdate(
-                footer = fitFooter("Voice failed: $cause"),
+                footer = fitFooter(cause),
                 actions = SPEECH_FAILURE_ACTIONS,
                 ttlMs = DECISION_TTL_MS,
             ),
@@ -366,14 +367,14 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         value.trim().take(NoticeSurfaceContract.MAX_FOOTER_CHARS)
 
     private fun speechReasonLabel(reason: NexusSpeechStopReason): String = when (reason) {
-        NexusSpeechStopReason.COMPLETED -> "No transcript"
+        NexusSpeechStopReason.COMPLETED -> "Didn't catch that"
         NexusSpeechStopReason.CANCELLED -> "Cancelled"
-        NexusSpeechStopReason.NO_SPEECH -> "No speech"
-        NexusSpeechStopReason.ERROR -> "Recognition error"
-        NexusSpeechStopReason.LINK_LOST -> "Link lost"
-        NexusSpeechStopReason.REVOKED -> "Permission revoked"
-        NexusSpeechStopReason.DENIED_BUSY -> "Speech busy"
-        NexusSpeechStopReason.DENIED_NO_LINK -> "No glasses link"
+        NexusSpeechStopReason.NO_SPEECH -> "Didn't catch that"
+        NexusSpeechStopReason.ERROR -> "Speech failed"
+        NexusSpeechStopReason.LINK_LOST -> "Glasses disconnected"
+        NexusSpeechStopReason.REVOKED -> "Speech access revoked"
+        NexusSpeechStopReason.DENIED_BUSY -> "Speech is busy"
+        NexusSpeechStopReason.DENIED_NO_LINK -> "Glasses not connected"
         // The hub knows exactly why — no engine, no key, no microphone permission —
         // but the SDK flattens all of it to NOT_READY. Point at the screen that
         // does know rather than repeating a word the wearer cannot act on.

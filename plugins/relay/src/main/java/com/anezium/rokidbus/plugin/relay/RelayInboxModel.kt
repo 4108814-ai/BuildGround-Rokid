@@ -43,6 +43,9 @@ internal object RelayInboxCatalog {
     /** The sub line is drawn smaller, so it holds more than the title above it. */
     const val PREVIEW_CHARS = 40
 
+    /** Past this, a leading "word:" is prose with a colon in it, not a speaker. */
+    const val MAX_SPEAKER_CHARS = 20
+
     fun entries(
         snapshots: Collection<RelayInboxSnapshot>,
         liveReplyIds: Set<String>,
@@ -93,6 +96,37 @@ internal object RelayInboxCatalog {
         val mark = if (unreachable) " ·" else ""
         return fitWithEllipsis(sender, width - mark.length) + mark
     }
+
+    /** One message of a thread: who said it, and what they said. */
+    data class RelayThreadMessage(val speaker: String, val text: String)
+
+    /**
+     * Splits a rendered thread back into who-said-what.
+     *
+     * The extractor renders messaging-style threads as `"sender: text"` per
+     * line, which is the right thing to send and the wrong thing to read: on a
+     * band it becomes a wall where every line restates the name. Recovering the
+     * speaker lets the HUD set it beside the message as a label, the way the
+     * conversation actually looks.
+     *
+     * A line with no recognisable speaker keeps its whole text and no label —
+     * plenty of apps send prose, and inventing a name for it would be worse than
+     * leaving the column empty.
+     */
+    fun threadMessages(rendered: String): List<RelayThreadMessage> =
+        rendered.lineSequence()
+            .map(::compact)
+            .filter(String::isNotBlank)
+            .map { line ->
+                val separator = line.indexOf(": ")
+                val speaker = if (separator in 1..MAX_SPEAKER_CHARS) line.take(separator) else ""
+                if (speaker.isBlank()) {
+                    RelayThreadMessage("", line)
+                } else {
+                    RelayThreadMessage(speaker, line.substring(separator + 2).trim())
+                }
+            }
+            .toList()
 
     /** The newest thing said, for the row's second line. Empty if there is none. */
     fun previewFor(entry: RelayInboxEntry, width: Int = PREVIEW_CHARS): String {

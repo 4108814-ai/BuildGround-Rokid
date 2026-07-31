@@ -31,6 +31,7 @@ class RelayPluginService : NexusPluginService() {
         CANCEL("Cancel"),
     }
 
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
     private var surface: NexusSurfaceSession? = null
     private var entries: List<RelayInboxEntry> = emptyList()
     private val selection = RelayInboxSelection()
@@ -114,6 +115,14 @@ class RelayPluginService : NexusPluginService() {
         }
     }
 
+    /** Returns to the list once "Sent" has been read, if nothing else moved since. */
+    private fun leaveSentThread() {
+        if (threadMode != ThreadMode.SENT || selection.view != RelayInboxView.THREAD) return
+        resetThreadMode()
+        selection.back()
+        renderList(show = false)
+    }
+
     private fun back() {
         if (selection.view == RelayInboxView.THREAD && threadMode != ThreadMode.READING) {
             invalidateSpeech()
@@ -167,7 +176,10 @@ class RelayPluginService : NexusPluginService() {
     }
 
     private fun renderThread(show: Boolean) {
-        refreshEntries()
+        // Not while confirming a send: the repository has already dropped the
+        // conversation, so refreshing here would lose the entry mid-render and
+        // bounce the wearer to the list before they could read "Sent".
+        if (threadMode != ThreadMode.SENT) refreshEntries()
         val entry = currentEntry()
         if (entry == null) {
             resetThreadMode()
@@ -175,31 +187,54 @@ class RelayPluginService : NexusPluginService() {
             return
         }
         val snapshot = entry.snapshot
-        val lines = when (threadMode) {
+        val rows = when (threadMode) {
+            // The conversation as a conversation: each message keeps its speaker
+            // in the label column and its own text beside it, instead of a wall
+            // where every line restates the name.
             ThreadMode.READING -> buildList {
-                addAll(RelayInboxCatalog.cardLines(snapshot.renderedText))
-                threadStatus?.let {
-                    add("")
-                    add(it.take(MAX_CARD_LINE_CHARS))
-                }
+                addAll(messageRows(snapshot.renderedText))
+                threadStatus?.let { add(noteRow(it)) }
             }
+            // Mid-dictation the wearer's own words are the only thing moving, so
+            // they get the emphasis and the speaker column says whose they are.
             ThreadMode.LISTENING -> buildList {
-                add(speechStatus)
-                if (speechPreview.isNotBlank()) {
-                    add("")
-                    addAll(RelayInboxCatalog.cardLines(speechPreview))
-                }
+                addAll(messageRows(snapshot.renderedText).takeLast(LISTENING_CONTEXT_MESSAGES))
+                add(
+                    NexusCardLine(
+                        text = speechPreview.ifBlank { speechStatus },
+                        badge = "You",
+                        tone = NexusRowTone.BODY,
+                        selected = speechPreview.isNotBlank(),
+                    ),
+                )
             }
-            ThreadMode.REVIEW -> reviewLines()
+            // The transcript reads as the message it is about to become, and the
+            // answers sit under it as rows the HUD draws a rail against.
+            ThreadMode.REVIEW -> buildList {
+                add(
+                    NexusCardLine(
+                        text = transcript.orEmpty(),
+                        badge = "You",
+                        tone = NexusRowTone.BODY,
+                        selected = true,
+                    ),
+                )
+                addAll(choiceRows())
+            }
             ThreadMode.VOICE_FAILURE -> buildList {
-                add(threadStatus ?: "Voice failed.")
-                add("")
-                addAll(choiceLines(visibleChoices().map(ReplyChoice::label)))
+                add(noteRow(threadStatus ?: "That did not work."))
+                addAll(choiceRows())
             }
             ThreadMode.SENT -> buildList {
-                addAll(RelayInboxCatalog.cardLines(snapshot.renderedText))
-                add("")
-                add("Sent.")
+                addAll(messageRows(snapshot.renderedText).takeLast(LISTENING_CONTEXT_MESSAGES))
+                add(
+                    NexusCardLine(
+                        text = transcript.orEmpty().ifBlank { "Sent." },
+                        badge = "You",
+                        tone = NexusRowTone.BODY,
+                        selected = true,
+                    ),
+                )
             }
         }.takeLast(RelayInboxCatalog.MAX_CARD_LINES)
 
@@ -222,37 +257,45 @@ class RelayPluginService : NexusPluginService() {
         sendCard(
             NexusCard(
                 title = cardTitle(snapshot.sender.ifBlank { snapshot.appLabel }),
-                lines = lines,
+                lines = emptyList(),
                 footer = footer,
                 contentKey = "$THREAD_CONTENT_PREFIX${entry.id}",
+                richLines = rows.takeIf { it.isNotEmpty() },
                 handlesBack = true,
             ),
             show = show,
         )
     }
 
-    private fun reviewLines(): List<String> = buildList {
-        threadStatus?.let {
-            add(it.take(MAX_CARD_LINE_CHARS))
-            add("")
+    /** The thread as rows: speaker in the label column, message beside it. */
+    private fun messageRows(rendered: String): List<NexusCardLine> =
+        RelayInboxCatalog.threadMessages(rendered).map { message ->
+            NexusCardLine(
+                text = message.text.take(MAX_CARD_LINE_CHARS),
+                badge = message.speaker.takeIf(String::isNotBlank),
+                tone = NexusRowTone.BODY,
+            )
         }
-        addAll(choiceLines(visibleChoices().map(ReplyChoice::label)))
-        add("")
-        addAll(RelayInboxCatalog.cardLines(transcript.orEmpty()))
-    }
 
-    private fun choiceLines(labels: List<String>): List<String> {
-        var choiceIndex = 0
-        return labels.map { label ->
-            if (label.isBlank() || label !in ALL_CHOICE_LABELS) {
-                label.take(MAX_CARD_LINE_CHARS)
-            } else {
-                val prefix = if (choiceIndex == selectedChoice) "> " else "  "
-                choiceIndex += 1
-                prefix + label
-            }
+    /** A line about the conversation rather than in it: dim, and unlabelled. */
+    private fun noteRow(text: String): NexusCardLine =
+        NexusCardLine(text = text.take(MAX_CARD_LINE_CHARS), tone = NexusRowTone.DIM)
+
+    /**
+     * The answers, as rows the HUD draws its own selection rail against.
+     *
+     * They used to be plain lines with a "> " typed into them, which put the
+     * caret in a different place from the one the list uses and left the wearer
+     * two selection languages to learn on the same screen.
+     */
+    private fun choiceRows(): List<NexusCardLine> =
+        visibleChoices().mapIndexed { index, choice ->
+            NexusCardLine(
+                text = choice.label,
+                selected = index == selectedChoice,
+                tone = if (index == selectedChoice) NexusRowTone.ALERT else NexusRowTone.NORMAL,
+            )
         }
-    }
 
     private fun startListening() {
         val entry = currentEntry() ?: return
@@ -301,7 +344,7 @@ class RelayPluginService : NexusPluginService() {
                 if (!acceptSpeechCallback(generation)) return
                 val finalText = fitTranscript(text)
                 if (finalText.isBlank()) {
-                    showVoiceFailure("No speech")
+                    showVoiceFailure("Didn't catch that.")
                     return
                 }
                 speechFinalReceived = true
@@ -320,10 +363,12 @@ class RelayPluginService : NexusPluginService() {
                 if (generation != speechGeneration) return
                 speech = null
                 if (speechFinalReceived && reason == NexusSpeechStopReason.COMPLETED) return
-                showVoiceFailure(error?.kind?.takeIf(String::isNotBlank) ?: speechReasonLabel(reason))
+                // speechReasonLabel, never error.kind: the kind is an enum name
+                // for a bug report ("NO_SPEECH"), and the band is not a bug report.
+                showVoiceFailure(speechReasonLabel(reason))
             }
         }) ?: run {
-            showVoiceFailure("Speech unavailable")
+            showVoiceFailure("Speech is unavailable.")
             return
         }
         speech = newSpeech
@@ -351,7 +396,7 @@ class RelayPluginService : NexusPluginService() {
         val entry = currentEntry() ?: return
         val replyText = transcript
         if (replyText.isNullOrBlank()) {
-            showVoiceFailure("Empty transcript")
+            showVoiceFailure("Didn't catch that.")
             return
         }
         when (val result = ReplyRepository.sendReply(applicationContext, entry.id, replyText)) {
@@ -359,6 +404,11 @@ class RelayPluginService : NexusPluginService() {
                 transcript = null
                 threadStatus = null
                 threadMode = ThreadMode.SENT
+                // Confirm it, then hand the wearer back their list. The
+                // conversation is finished and the repository has already
+                // dropped it, so staying in a thread that no longer exists only
+                // makes them press Back to be told the same thing.
+                main.postDelayed(::leaveSentThread, SENT_LINGER_MS)
             }
             ReplySendResult.Missing -> {
                 transcript = null
@@ -375,7 +425,7 @@ class RelayPluginService : NexusPluginService() {
     private fun showVoiceFailure(reason: String) {
         transcript = null
         speechPreview = ""
-        threadStatus = "Voice failed: ${reason.trim()}".take(MAX_CARD_LINE_CHARS)
+        threadStatus = reason.trim().take(MAX_CARD_LINE_CHARS)
         threadMode = ThreadMode.VOICE_FAILURE
         selectedChoice = 0
         renderThread(show = false)
@@ -438,15 +488,15 @@ class RelayPluginService : NexusPluginService() {
     }
 
     private fun speechReasonLabel(reason: NexusSpeechStopReason): String = when (reason) {
-        NexusSpeechStopReason.COMPLETED -> "No transcript"
-        NexusSpeechStopReason.CANCELLED -> "Cancelled"
-        NexusSpeechStopReason.NO_SPEECH -> "No speech"
-        NexusSpeechStopReason.ERROR -> "Recognition error"
-        NexusSpeechStopReason.LINK_LOST -> "Link lost"
-        NexusSpeechStopReason.REVOKED -> "Permission revoked"
-        NexusSpeechStopReason.DENIED_BUSY -> "Speech busy"
-        NexusSpeechStopReason.DENIED_NO_LINK -> "No glasses link"
-        NexusSpeechStopReason.DENIED_NOT_READY -> "Set up speech in Nexus"
+        NexusSpeechStopReason.COMPLETED -> "Didn't catch that."
+        NexusSpeechStopReason.CANCELLED -> "Cancelled."
+        NexusSpeechStopReason.NO_SPEECH -> "Didn't catch that."
+        NexusSpeechStopReason.ERROR -> "Speech failed."
+        NexusSpeechStopReason.LINK_LOST -> "Glasses disconnected."
+        NexusSpeechStopReason.REVOKED -> "Speech access was revoked."
+        NexusSpeechStopReason.DENIED_BUSY -> "Speech is busy elsewhere."
+        NexusSpeechStopReason.DENIED_NO_LINK -> "Glasses not connected."
+        NexusSpeechStopReason.DENIED_NOT_READY -> "Set up speech in Nexus."
         NexusSpeechStopReason.DENIED_START_FAILED -> "Start failed"
         NexusSpeechStopReason.DENIED_INVALID -> "Invalid request"
     }
@@ -458,6 +508,18 @@ class RelayPluginService : NexusPluginService() {
         const val MAX_CARD_TITLE_CHARS = 120
         const val MAX_CARD_LINE_CHARS = 240
         const val MAX_FOOTER_SOURCE_CHARS = 80
+
+        /**
+         * How much of the conversation stays on screen while the wearer speaks.
+         *
+         * Enough to remember what is being answered, few enough that their own
+         * words are where the eye lands — the whole thread above a live
+         * transcript buries the one line that is moving.
+         */
+        const val LISTENING_CONTEXT_MESSAGES = 2
+
+        /** Long enough to read "Sent", short enough not to hold the wearer there. */
+        const val SENT_LINGER_MS = 1_200L
 
         val REVIEW_CHOICES = listOf(ReplyChoice.SEND, ReplyChoice.RETRY, ReplyChoice.CANCEL)
         val FAILURE_CHOICES = listOf(ReplyChoice.RETRY, ReplyChoice.CANCEL)
