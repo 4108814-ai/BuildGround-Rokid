@@ -245,10 +245,22 @@ class RokidBusAccessibilityService : AccessibilityService() {
         DpadPairDedupe.KEYCODE_DPAD_RIGHT,
     )
 
+    /**
+     * The firmware's verdict, never the raw contact.
+     *
+     * Every touch opens with a NOTIFICATION contact and is only classified
+     * 300-500 ms later — tap into ENTER, swipe into a DPAD pair, back gesture
+     * into BACK. Accepting the contact as a confirm makes the *beginning of a
+     * swipe* answer the band: measured on hardware, swiping toward Cancel fired
+     * Reply instead, because the triple-tap window (600 ms) can expire before a
+     * classification that is allowed to take 500.
+     *
+     * Waiting for the verdict costs a few hundred milliseconds the wearer was
+     * already spending, and buys certainty about which gesture they made.
+     */
     private val NOTICE_CONFIRM_KEYS = setOf(
         KeyEvent.KEYCODE_ENTER,
         KeyEvent.KEYCODE_DPAD_CENTER,
-        TripleTapDetector.KEYCODE_NOTIFICATION,
     )
 
     private fun handleRingKeyEvent(event: KeyEvent): Boolean {
@@ -332,14 +344,13 @@ class RokidBusAccessibilityService : AccessibilityService() {
     private fun flushPendingTaps() {
         val tapCount = tripleTapDetector.consumeExpiredTapCount(SystemClock.uptimeMillis())
         if (tapCount <= 0) return
-        // A notice sits above the surface, so taps that were waiting on the
-        // triple-tap window belong to it while it is up.
-        if (NoticeController.claimsInput()) {
-            repeat(tapCount) {
-                NoticeController.handleConfirm(TripleTapDetector.KEYCODE_NOTIFICATION)
-            }
-            return
-        }
+        // Deliberately no notice branch. A band is answered once and cannot take
+        // it back, so it must never be answered by a contact that the firmware
+        // had not finished classifying — this path fires when the triple-tap
+        // window expires, which races a classification allowed to take 500 ms
+        // and loses often enough to send a reply the wearer did not ask for.
+        // The band hears the ENTER instead, a few hundred milliseconds later and
+        // only when the touch really was a tap.
         if (SurfaceController.activeSurface() != null) {
             repeat(tapCount) {
                 SurfaceController.forwardSurfaceInput(
