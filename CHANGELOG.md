@@ -1,16 +1,19 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
+
+The release Relay arrived in: messages on your glasses, answered out loud,
+without touching the phone. Plus a first run that no longer needs a computer,
+and the platform work both of those needed.
 
 ### Messages on your glasses
 
 - A message you can reply to now reaches the glasses as it arrives, lights the
-  display if it was dark, and is answered out loud without touching the phone.
-  Each message keeps its sender beside it rather than being flattened into one
-  paragraph, and a long conversation turns pages instead of stopping at eight
-  lines.
-- Speak your reply and it sends itself after a few seconds — visibly counted
-  down on the chip you are looking at, and cancellable for its whole length.
+  display if it was dark, and is answered out loud. Each message keeps its
+  sender beside it rather than being flattened into one paragraph, and a long
+  conversation turns pages instead of stopping at eight lines.
+- Speak your reply and it sends itself after a few seconds - visibly counted
+  down on the chip you are looking at, cancellable for its whole length.
   Nothing is sent that you were not shown: if the glasses went dark or lost the
   link before the transcript appeared, the clock stops and waits for you.
 - Miss one, or let it expire, and it is in **Messages** in the Nexus menu:
@@ -20,75 +23,61 @@
   nothing is stored: revoke notification access and what it captured goes with
   it.
 
-### Surfaces can be lists
+### First run without a computer
 
-- A card can carry rows with a second line, a weight that says how much each
-  one matters, and a selection the glasses draw themselves. Plugins say what a
-  row is worth; the HUD decides what that looks like.
-- A row can also be prose, wrapping under a fixed label — which is what makes a
-  conversation read like one.
+- Setting up a new pair no longer needs a PC or a cable. The phone drives the
+  glasses through pairing, turns their Wi-Fi on rather than sending you to
+  another app, and hands the six-digit code to the phone instead of leaving it
+  in your eyes to type blind.
+- Setup asks for one switch at a time and gets out of the way. A single bad
+  hand-off no longer closes the door on the whole flow, the manual route gives
+  up quickly instead of retrying the slow one, and finishing hands you back to
+  Nexus rather than to the ROM launcher.
+- Wireless Debugging navigation reads the firmware's own localized labels, so
+  it works in every language that firmware ships - no Nexus translation needed.
+- Setup keeps a log you can read and send when something still goes wrong.
+- The product speaks one language throughout. The half-French screens are gone.
 
-### Notice bands, again
+### Glasses that stay in sync
 
-- A band pages unless its answers need the swipes. One answer or none, and the
-  directions turn pages while a tap still replies, so a message worth exactly
-  one reply can be both read and answered.
+- Captures taken while nothing was listening now arrive. A photo still being
+  written left the run eligible while its own bytes were settling, and never
+  came back for it; scanning and settling are separate decisions now.
+- The hub comes back on its own after a reboot or an app update, instead of
+  waiting to be opened by hand while captures pile up on the glasses.
+
+### The HUD
+
+- **Bands can carry a real message.** Up to sixteen structured lines, broken
+  where the sender broke them, measured and paged on the glasses themselves.
+- **Bands can light a dark display** for an event worth it - at most one wake
+  every five seconds across every plugin, always a short pulse, never held on.
+- **A band pages unless its answers need the swipes.** One answer or none, and
+  the directions turn pages while a tap still replies.
+- **Surfaces can be lists**: rows with a second line, a weight that says how
+  much each matters, and a selection the glasses draw themselves. A row can
+  also be prose under a fixed label, which is what makes a conversation read
+  like one.
 - A band is answered on the firmware's verdict about a touch, never on the
-  contact that opens one. Starting a swipe used to count as a tap, which meant
-  swiping toward Cancel could fire Reply instead.
+  contact that opens one - starting a swipe used to count as a tap.
+- Five new marks in the shared glyph set: reply, send, retry, cancel, mic.
 
-### Plugin SDK 0.9.0
+### For plugin authors — SDK 0.9.0
 
-- `NexusRowTone`, plus `sub`, `tone`, and `selected` on `NexusCardLine` and
-  `subtitle` on `NexusCard`: list rows for any plugin that shows a list.
-- `approvedCapabilities` on the bus, so a plugin's grants are true by the time
-  it is told it is approved. Pushing a pin or a notice the instant approval
-  lands no longer reads an empty grant set.
-- `notice surface v3` — structured `lines` — and a visual reference for the new
-  rows at `docs/surface-list-rows.html`.
+- `NexusRowTone`, plus `sub`, `tone` and `selected` on `NexusCardLine` and
+  `subtitle` on `NexusCard`. Reference: `docs/surface-list-rows.html`.
+- `lines` on `NexusNotice` and `NexusNoticeUpdate`; notice surface contract v3.
+- `wakeDisplay` on `NexusNotice` and `NexusActivity`, off by default.
+- `approvedCapabilities` on the bus: your grants are true by the time you are
+  told you are approved, so a plugin that pushes the instant approval lands no
+  longer reads an empty grant set.
+- Everything above reuses the `surfaces` grant and plugin API version 3. No
+  existing plugin needs a change.
 
-### Self-arm Settings navigation
+### New plugins
 
-- Wireless Debugging setup now verifies every scroll, starts gestures inside
-  the measured Settings RecyclerView, returns to the beginning before searching,
-  and ignores stale overlays or hidden duplicate controls.
-- Settings labels are loaded from the firmware's own localized resources, so
-  Developer options, Wireless Debugging, pairing, and Build number navigation
-  follow every locale shipped by that firmware without a Nexus translation
-  update.
-- Direct Wireless Debugging launch is capability-probed first; inaccessible
-  YodaOS fragments fall back to the hardened Settings traversal.
-
-### Notices keep their message boundaries
-
-- A notice can now carry up to sixteen structured text lines. The platform
-  breaks between them, wraps long entries without bullets or indentation, and
-  still measures every page from the real glasses layout.
-- Body notices are untouched. Structured lines share their 1024-character
-  budget, collapse embedded newlines, drop empty entries, and cannot be sent
-  alongside `body`.
-
-### Plugin SDK 0.9.0
-
-- `lines` lands on `NexusNotice` and `NexusNoticeUpdate`, absent from the wire
-  when empty, so a conversation can remain one notice without becoming one
-  paragraph.
-
-### Waking the display
-
-- A notice can now ask to light a dark display for a new event, and an activity
-  can make the same choice at start for its later significant transitions.
-  Quiet activity updates and every notice update remain quiet.
-- One screen has one budget: surfaces, notices, activities, and every plugin
-  share at most one wake every five seconds. An already-lit display spends
-  nothing, and every admitted wake remains the same short three-second pulse;
-  nothing holds the display on.
-
-### Plugin SDK 0.8.0
-
-- `wakeDisplay` lands on `NexusNotice` and `NexusActivity`, off by default and
-  absent from the wire unless requested. It reuses the existing `surfaces`
-  grant and plugin API version 3.
+- **Relay 1.0.0** - phone notifications on the glasses, answered by voice.
+- **Photo Sync 1.0.1** - the auto-sync fixes above.
 
 ## 1.0.48
 
