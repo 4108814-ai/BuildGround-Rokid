@@ -316,9 +316,10 @@ Timed-line anchor:
 ```
 
 The phone sends a full timed-lines surface for the current track, then only re-sends
-an anchor on play, pause, seek or track change. The glasses hub advances highlighting
-locally from the last accepted anchor using its own monotonic clock, so lyric line
-progress does not depend on repeated phone updates or bus latency.
+an anchor on play, pause, seek, track change, or active-line change. The glasses hub
+advances highlighting locally from the last accepted anchor using its own monotonic
+clock, while line-boundary anchors correct residual transport delay without
+retransmitting the full script.
 
 Media surface v1:
 

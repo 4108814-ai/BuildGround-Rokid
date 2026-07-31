@@ -12,12 +12,25 @@ import com.anezium.rokidbus.shared.plugin.NexusInputEvent
 import java.security.MessageDigest
 import kotlin.math.abs
 
+private const val SEEK_RESYNC_MS = 1_500L
+
 internal interface LyricsRuntimeHost {
     fun sendCard(card: NexusCard, show: Boolean)
     fun sendTimedLines(lines: NexusTimedLines, show: Boolean)
     fun updateTimedLinesAnchor(contentKey: String, anchor: NexusPlaybackAnchor)
     fun hideSurface()
 }
+
+internal fun needsPlaybackAnchorUpdate(
+    previousLineIndex: Int,
+    currentLineIndex: Int,
+    previousPlaying: Boolean,
+    playing: Boolean,
+    positionDriftMs: Long,
+): Boolean =
+    previousPlaying != playing ||
+        previousLineIndex != currentLineIndex ||
+        abs(positionDriftMs) >= SEEK_RESYNC_MS
 
 internal class LyricsRuntime(
     private val host: LyricsRuntimeHost,
@@ -89,10 +102,16 @@ internal class LyricsRuntime(
         val playing = lyrics.sessionState == LyricsSessionState.PLAYING
         val previous = lastSent
         val contentChanged = previous == null || previous.contentKey != contentKey
-        val shouldSend = force ||
-            contentChanged ||
-            previous.playing != playing ||
-            abs(lyrics.progressMs - previous.predictedPosition(now)) >= SEEK_RESYNC_MS
+        val anchorChanged = previous?.let {
+            needsPlaybackAnchorUpdate(
+                previousLineIndex = it.currentLineIndex,
+                currentLineIndex = lyrics.currentLineIndex,
+                previousPlaying = it.playing,
+                playing = playing,
+                positionDriftMs = lyrics.progressMs - it.predictedPosition(now),
+            )
+        } ?: true
+        val shouldSend = force || contentChanged || anchorChanged
         if (!shouldSend) return
 
         val show = previous == null || force
@@ -110,6 +129,7 @@ internal class LyricsRuntime(
             contentKey = contentKey,
             positionMs = lyrics.progressMs,
             playing = playing,
+            currentLineIndex = lyrics.currentLineIndex,
             sentAtElapsedRealtime = now,
         )
     }
@@ -239,6 +259,7 @@ internal class LyricsRuntime(
         val contentKey: String,
         val positionMs: Long,
         val playing: Boolean,
+        val currentLineIndex: Int,
         val sentAtElapsedRealtime: Long,
     ) {
         fun predictedPosition(now: Long): Long {
@@ -249,7 +270,6 @@ internal class LyricsRuntime(
     }
 
     private companion object {
-        private const val SEEK_RESYNC_MS = 1_500L
         private const val MAX_TITLE_CHARS = 120
         private const val MAX_LINE_CHARS = 240
         private const val MAX_TIMED_LINES = 2_000

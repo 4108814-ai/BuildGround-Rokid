@@ -1,5 +1,10 @@
 # Changelog — Lyrics
 
+## 1.0.3
+
+- Refresh the lightweight playback anchor at each timed-lyrics line boundary
+  so transport latency cannot leave the glasses highlighting one line behind.
+
 ## 1.0.2
 
 - Android 11 support: the plugin now installs on Android 11 (API 30) phones.
