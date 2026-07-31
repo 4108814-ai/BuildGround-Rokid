@@ -1238,15 +1238,27 @@ internal class SelfArmWirelessDebuggingAutomator(
         }
         directWirelessProbePending = false
         directWirelessFallbackUsed = true
-        // The ROM took the direct fragment intent and put us somewhere else. Worth recording:
-        // from here on the run depends on scrolling the developer options list, which is the part
-        // that does not always work.
+        // The ROM took the direct fragment intent and put us somewhere else. From here the run
+        // depends on scrolling the developer options list, which is the part that does not always
+        // work -- so it is worth writing down either way.
         SelfArmOnboardingStore.note(
             service.applicationContext,
             sessionId,
             SetupNote.DIRECT_ROUTE_REDIRECTED,
-            "wireless debugging: falling back to the developer options traversal",
+            if (operationMode == OperationMode.MANUAL_NAVIGATION) {
+                "wireless debugging: direct route redirected, handing back to the wearer"
+            } else {
+                "wireless debugging: falling back to the developer options traversal"
+            },
         )
+        // Someone who pressed this button is already in the manual flow: they have accepted doing
+        // it by hand. Replaying the traversal that the automatic run just failed at would hold
+        // them on "Waiting for the glasses…" for up to the five-minute manual window to arrive at
+        // the same place. Give up now so the screen can tell them how to open it themselves.
+        if (operationMode == OperationMode.MANUAL_NAVIGATION) {
+            finish("wireless_debugging_direct_route_failed", false)
+            return true
+        }
         report("opening_developer_options")
         noteDeveloperOpenAttempt()
         settingsScroller.reset(ScrollSurface.DEVELOPER_OPTIONS)
