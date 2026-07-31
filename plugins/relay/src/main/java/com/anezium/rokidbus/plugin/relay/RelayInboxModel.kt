@@ -40,6 +40,9 @@ internal object RelayInboxCatalog {
      */
     const val LIST_LINE_CHARS = 26
 
+    /** The sub line is drawn smaller, so it holds more than the title above it. */
+    const val PREVIEW_CHARS = 40
+
     fun entries(
         snapshots: Collection<RelayInboxSnapshot>,
         liveReplyIds: Set<String>,
@@ -66,17 +69,16 @@ internal object RelayInboxCatalog {
     }
 
     /**
-     * One conversation, one plain line: who it is from, then what they last said.
+     * The row's title: who the conversation is with.
      *
-     * Deliberately *not* a structured row. The renderer turns those into the
-     * departure board they were built for — a solid phosphor chip, a marquee and
-     * a column of times — which reads as a bus timetable when the screen is
-     * showing a list of people. A plain card is left-aligned monospace, which is
-     * what a list of conversations wants to be.
+     * The preview lives in [previewFor] and travels as the row's `sub`, which
+     * the HUD draws smaller and dimmer on its own line. Before the list rows
+     * existed, both had to share one 26-column line and the result ellipsized
+     * each into uselessness — "> Relay tes... Mika: Reply from the..." says
+     * nothing twice.
      *
-     * A caret marks the selection. It costs two columns, needs no colour, no
-     * inversion and no second view, and it stays legible on green optics where
-     * a highlight floods the whole row.
+     * A trailing dot marks a thread whose live reply objects died with an
+     * earlier process: still readable, no longer answerable.
      */
     fun lineFor(
         entry: RelayInboxEntry,
@@ -87,15 +89,20 @@ internal object RelayInboxCatalog {
         val sender = compact(snapshot.sender)
             .ifBlank { compact(snapshot.appLabel) }
             .ifBlank { "Unknown" }
-        val prefix = if (selected) "> " else "  "
-        // The name, and only the name. Twenty-six columns cannot hold a name and
-        // a preview without ellipsizing both into uselessness — the first draw
-        // read "> Relay tes... Mika: Reply from the...", which tells the wearer
-        // nothing twice. The name is what they are choosing between; the thread
-        // is one tap away and holds every word.
         val unreachable = entry.availability != RelayReplyAvailability.REPLIABLE
         val mark = if (unreachable) " ·" else ""
-        return prefix + fitWithEllipsis(sender, width - prefix.length - mark.length) + mark
+        return fitWithEllipsis(sender, width - mark.length) + mark
+    }
+
+    /** The newest thing said, for the row's second line. Empty if there is none. */
+    fun previewFor(entry: RelayInboxEntry, width: Int = PREVIEW_CHARS): String {
+        val newest = entry.snapshot.renderedText
+            .lineSequence()
+            .map(::compact)
+            .filter(String::isNotBlank)
+            .lastOrNull()
+            .orEmpty()
+        return if (newest.isBlank()) "" else fitWithEllipsis(newest, width)
     }
 
     /**

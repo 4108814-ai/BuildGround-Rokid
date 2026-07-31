@@ -53,8 +53,10 @@ class RelayInboxModelTest {
 
         val line = RelayInboxCatalog.lineFor(entry, selected = true)
 
-        // Caret marks the selection; the row is the name and nothing else.
-        assertTrue(line.startsWith("> Alice"))
+        // The row is the name; the HUD draws the selection, not a caret we
+        // spell out, and the newest message travels as the row's sub line.
+        assertTrue(line.startsWith("Alice"))
+        assertEquals("Alice: newest message", RelayInboxCatalog.previewFor(entry))
         assertFalse(line.endsWith(" ·"))
         assertTrue(line.length <= RelayInboxCatalog.LIST_LINE_CHARS)
     }
@@ -68,9 +70,8 @@ class RelayInboxModelTest {
 
         val line = RelayInboxCatalog.lineFor(entry, selected = false)
 
-        // Unselected rows keep the caret's two columns so names stay aligned,
-        // and a thread that can no longer be answered is marked, not hidden.
-        assertTrue(line.startsWith("  Bob"))
+        // A thread that can no longer be answered is marked, not hidden.
+        assertTrue(line.startsWith("Bob"))
         assertTrue(line.endsWith(" ·"))
     }
 

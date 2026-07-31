@@ -239,14 +239,29 @@ class RelaySettingsActivity : Activity() {
         ))
         addView(BusTheme.gap(this@RelaySettingsActivity, 8))
         addView(buttonRow(
+            // A second conversation, from someone else: the inbox is a list, and
+            // a list of one cannot show selection moving or two rows being told
+            // apart.
+            "Second thread" to {
+                ensureCanPost() && FakeNotificationHarness.postSecondThread(this@RelaySettingsActivity)
+            },
             "Attach image" to {
                 settings.setImagePreviewsEnabled(true)
                 ensureCanPost() && FakeNotificationHarness.attachImageAndPost(this@RelaySettingsActivity)
             },
-            "Open access" to {
-                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-            },
         ))
+        addView(BusTheme.gap(this@RelaySettingsActivity, 8))
+        addView(
+            harnessButton(
+                "Open access" to {
+                    startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                },
+            ),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
         addView(BusTheme.gap(this@RelaySettingsActivity, 10))
         addView(NexusUi.rowSub(
             this@RelaySettingsActivity,

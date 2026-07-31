@@ -25,6 +25,7 @@ internal object FakeNotificationHarness {
 
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
     private val messages = mutableListOf<Message>()
+    private val secondMessages = mutableListOf<Message>()
     private var imageAttached = false
     private var deliveredReply: String? = null
 
@@ -56,6 +57,40 @@ internal object FakeNotificationHarness {
         if (messages.isEmpty()) resetAndPost(context)
         imageAttached = true
         return post(context)
+    }
+
+    /**
+     * A second conversation, from someone else, under its own notification id.
+     *
+     * The inbox is a list, and a list of one proves nothing: it cannot show
+     * whether selection moves, whether the newest thread sorts first, or whether
+     * two rows are told apart at a glance. Relay's own harness kept a second
+     * test thread for the same reason.
+     */
+    @Synchronized
+    fun postSecondThread(context: Context): Boolean {
+        val now = System.currentTimeMillis()
+        secondMessages.clear()
+        secondMessages += Message("Nina", "Are we still on for tonight?", now - 1_000L)
+        secondMessages += Message("Nina", "Say yes from the glasses.", now)
+        val appContext = context.applicationContext
+        val manager = appContext.getSystemService(NotificationManager::class.java) ?: return false
+        manager.createNotificationChannel(
+            NotificationChannel(
+                FAKE_CHANNEL_ID,
+                "Relay test thread",
+                NotificationManager.IMPORTANCE_HIGH,
+            ),
+        )
+        val posted = runCatching {
+            manager.notify(
+                SECOND_NOTIFICATION_TAG,
+                SECOND_NOTIFICATION_ID,
+                buildNotification(appContext, secondMessages, "Nina", SECOND_NOTIFICATION_ID),
+            )
+        }.isSuccess
+        notifyChanged()
+        return posted
     }
 
     @Synchronized
@@ -101,18 +136,27 @@ internal object FakeNotificationHarness {
             ),
         )
         val posted = runCatching {
-            manager.notify(FAKE_NOTIFICATION_TAG, FAKE_NOTIFICATION_ID, buildNotification(appContext))
+            manager.notify(
+                FAKE_NOTIFICATION_TAG,
+                FAKE_NOTIFICATION_ID,
+                buildNotification(appContext, messages, "Mika", FAKE_NOTIFICATION_ID),
+            )
         }.isSuccess
         notifyChanged()
         return posted
     }
 
-    private fun buildNotification(context: Context): Notification {
+    private fun buildNotification(
+        context: Context,
+        thread: List<Message>,
+        title: String,
+        requestCode: Int,
+    ): Notification {
         val user = Person.Builder().setName("You").build()
         val style = Notification.MessagingStyle(user)
-            .setConversationTitle("Relay test thread")
+            .setConversationTitle(title)
             .setGroupConversation(true)
-        messages.forEach { message ->
+        thread.forEach { message ->
             style.addMessage(
                 Notification.MessagingStyle.Message(
                     message.text,
@@ -123,13 +167,13 @@ internal object FakeNotificationHarness {
         }
         val notification = Notification.Builder(context, FAKE_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
-            .setContentTitle("Relay test thread")
-            .setContentText(messages.lastOrNull()?.text.orEmpty())
-            .setWhen(messages.lastOrNull()?.timestamp ?: System.currentTimeMillis())
+            .setContentTitle(title)
+            .setContentText(thread.lastOrNull()?.text.orEmpty())
+            .setWhen(thread.lastOrNull()?.timestamp ?: System.currentTimeMillis())
             .setStyle(style)
             .setCategory(Notification.CATEGORY_MESSAGE)
             .setAutoCancel(false)
-            .addAction(replyAction(context))
+            .addAction(replyAction(context, requestCode))
             .build()
         if (imageAttached) {
             notification.extras.putParcelable(Notification.EXTRA_PICTURE, testImage())
@@ -137,10 +181,10 @@ internal object FakeNotificationHarness {
         return notification
     }
 
-    private fun replyAction(context: Context): Notification.Action {
+    private fun replyAction(context: Context, requestCode: Int): Notification.Action {
         val pendingIntent = PendingIntent.getBroadcast(
             context,
-            FAKE_NOTIFICATION_ID,
+            requestCode,
             Intent(context, FakeReplyReceiver::class.java).setAction(ACTION_FAKE_REPLY),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
         )
@@ -184,4 +228,6 @@ internal object FakeNotificationHarness {
     private const val FAKE_CHANNEL_ID = "relay_fake_model"
     private const val FAKE_NOTIFICATION_ID = 17_001
     private const val FAKE_NOTIFICATION_TAG = "relay_fake_thread"
+    private const val SECOND_NOTIFICATION_ID = 17_002
+    private const val SECOND_NOTIFICATION_TAG = "relay_fake_thread_2"
 }

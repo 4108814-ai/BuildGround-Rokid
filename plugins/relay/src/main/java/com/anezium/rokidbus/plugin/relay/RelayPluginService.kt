@@ -4,6 +4,7 @@ import android.view.KeyEvent
 import com.anezium.rokidbus.client.plugin.NexusCard
 import com.anezium.rokidbus.client.plugin.NexusCardLine
 import com.anezium.rokidbus.client.plugin.NexusPluginService
+import com.anezium.rokidbus.client.plugin.NexusRowTone
 import com.anezium.rokidbus.client.plugin.NexusSdkResult
 import com.anezium.rokidbus.client.plugin.NexusSpeechCallbacks
 import com.anezium.rokidbus.client.plugin.NexusSpeechError
@@ -131,12 +132,20 @@ class RelayPluginService : NexusPluginService() {
 
     private fun renderList(show: Boolean) {
         refreshEntries()
-        val lines = if (entries.isEmpty()) {
-            listOf("Nothing yet.", "Messages you can answer land here.")
-        } else {
-            entries.mapIndexed { index, entry ->
-                RelayInboxCatalog.lineFor(entry, selected = index == selection.selectedIndex)
-            }
+        val rows = entries.mapIndexed { index, entry ->
+            val selected = index == selection.selectedIndex
+            NexusCardLine(
+                text = RelayInboxCatalog.lineFor(entry, selected),
+                sub = RelayInboxCatalog.previewFor(entry).takeIf(String::isNotBlank),
+                // A thread that can no longer be answered is present but is not
+                // competing for the wearer's attention.
+                tone = if (entry.availability == RelayReplyAvailability.REPLIABLE) {
+                    NexusRowTone.NORMAL
+                } else {
+                    NexusRowTone.DIM
+                },
+                selected = selected,
+            )
         }
         val footer = if (entries.isEmpty()) {
             "back to close"
@@ -146,9 +155,11 @@ class RelayPluginService : NexusPluginService() {
         sendCard(
             NexusCard(
                 title = "Messages",
-                lines = lines,
+                lines = if (entries.isEmpty()) listOf("Nothing yet.") else emptyList(),
+                subtitle = if (entries.isEmpty()) null else "${entries.size} waiting",
                 footer = footer,
                 contentKey = LIST_CONTENT_KEY,
+                richLines = rows.takeIf { it.isNotEmpty() },
                 handlesBack = false,
             ),
             show = show,

@@ -21,14 +21,36 @@ data class TimedLine(
  * One card body row. Plain rows carry only [text]; board rows add a route
  * [badge] and a [trail] of wait times so the HUD can lay them out with
  * real visual hierarchy instead of pre-formatted monospace strings.
+ *
+ * List rows add a [sub] line, a [tone] and a [selected] flag: they render as
+ * an attention-ordered list (rail, weights, secondary line) rather than as a
+ * departure board. A row is a list row as soon as any of those is set, so
+ * board senders keep the board renderer untouched.
  */
 data class SurfaceRow(
     val text: String,
     val badge: String = "",
     val trail: List<String> = emptyList(),
+    val sub: String = "",
+    val tone: String = TONE_NORMAL,
+    val selected: Boolean = false,
 ) {
     val isStructured: Boolean
-        get() = badge.isNotBlank() || trail.isNotEmpty()
+        get() = badge.isNotBlank() || trail.isNotEmpty() || isListRow
+
+    val isListRow: Boolean
+        get() = sub.isNotBlank() || tone != TONE_NORMAL || selected
+
+    /** Rows that must read first: what needs the wearer, and where they are. */
+    val isEmphasised: Boolean
+        get() = tone == TONE_ALERT || selected
+
+    companion object {
+        const val TONE_ALERT = "alert"
+        const val TONE_NORMAL = "normal"
+        const val TONE_DIM = "dim"
+        const val TONE_BODY = "body"
+    }
 }
 
 /** Compact one-bit artwork. Set bits are rendered in phosphor; unset bits stay transparent. */
@@ -237,6 +259,10 @@ data class NexusSurface(
                                                 }
                                             }
                                         }.orEmpty(),
+                                        sub = value.optString("sub"),
+                                        tone = value.optString("tone")
+                                            .ifBlank { SurfaceRow.TONE_NORMAL },
+                                        selected = value.optBoolean("selected", false),
                                     ),
                                 )
                                 else -> add(SurfaceRow(text = value?.toString().orEmpty()))

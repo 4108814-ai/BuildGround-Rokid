@@ -178,11 +178,154 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         previousView.visibility = GONE
         nextView.visibility = GONE
         val rows = surface.rows.filter { it.text.isNotBlank() || it.isStructured }
-        if (rows.any { it.isStructured }) {
-            renderBoard(rows)
-        } else {
-            renderPlainCard(rows)
+        when {
+            rows.any { it.isListRow } -> renderList(rows)
+            rows.any { it.isStructured } -> renderBoard(rows)
+            else -> renderPlainCard(rows)
         }
+    }
+
+    /**
+     * Attention-ordered list: a selection rail, per-row weight, and an optional
+     * secondary line. Unlike the departure board there is no chip column — the
+     * hierarchy is carried by weight and position, which is what a list of live
+     * things (agent sessions, conversations) actually needs.
+     */
+    private fun renderList(rows: List<SurfaceRow>) {
+        currentView.visibility = GONE
+        boardView.visibility = VISIBLE
+        boardView.gravity = Gravity.TOP
+        boardView.removeAllViews()
+        rows.forEachIndexed { index, row ->
+            boardView.addView(
+                if (row.tone == SurfaceRow.TONE_BODY) bodyRow(row) else listRow(row),
+                LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                    if (index > 0) {
+                        topMargin = px(
+                            if (row.tone == SurfaceRow.TONE_BODY) LIST_BODY_GAP_DP else LIST_ROW_GAP_DP,
+                        )
+                    }
+                },
+            )
+        }
+    }
+
+    private fun listRow(row: SurfaceRow): LinearLayout =
+        LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            addView(
+                selectionRail(row.selected),
+                LayoutParams(px(3), LayoutParams.MATCH_PARENT),
+            )
+            addView(
+                LinearLayout(context).apply {
+                    orientation = VERTICAL
+                    addView(
+                        LinearLayout(context).apply {
+                            orientation = HORIZONTAL
+                            gravity = Gravity.BOTTOM
+                            addView(
+                                monoText(LIST_TITLE_SP, toneColor(row), bold = row.isEmphasised)
+                                    .apply {
+                                        text = row.text
+                                        maxLines = 1
+                                        // Never marquee a list title: a scrolling row is
+                                        // unreadable at a glance, which is the whole point.
+                                        ellipsize = TextUtils.TruncateAt.END
+                                    },
+                                LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f),
+                            )
+                            if (row.trail.isNotEmpty()) {
+                                addView(
+                                    listMetaView(row),
+                                    LayoutParams(
+                                        LayoutParams.WRAP_CONTENT,
+                                        LayoutParams.WRAP_CONTENT,
+                                    ).apply { marginStart = px(8) },
+                                )
+                            }
+                        },
+                        LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT),
+                    )
+                    if (row.sub.isNotBlank()) {
+                        addView(
+                            monoText(LIST_SUB_SP, BusTheme.muted).apply {
+                                text = row.sub
+                                maxLines = 1
+                                ellipsize = TextUtils.TruncateAt.END
+                            },
+                            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+                                .apply { topMargin = px(2) },
+                        )
+                    }
+                },
+                LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = px(9) },
+            )
+        }
+
+    /** Prose row: a fixed dim label, then wrapped text — a conversation, not a table. */
+    private fun bodyRow(row: SurfaceRow): LinearLayout =
+        LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            if (row.badge.isNotBlank()) {
+                addView(
+                    monoText(LIST_LABEL_SP, BusTheme.muted, bold = true).apply {
+                        text = row.badge
+                        maxLines = 1
+                    },
+                    LayoutParams(px(LIST_LABEL_WIDTH_DP), LayoutParams.WRAP_CONTENT),
+                )
+            }
+            addView(
+                monoText(LIST_BODY_SP, if (row.selected) BusTheme.phosphor else BusTheme.text).apply {
+                    text = row.text
+                    maxLines = LIST_BODY_MAX_LINES
+                    ellipsize = TextUtils.TruncateAt.END
+                },
+                LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f),
+            )
+        }
+
+    private fun selectionRail(selected: Boolean): View =
+        View(context).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(if (selected) BusTheme.phosphor else BusTheme.glassesBg)
+                cornerRadius = px(2).toFloat()
+            }
+        }
+
+    /** Status token bright, the rest (age, counters) muted and smaller. */
+    private fun listMetaView(row: SurfaceRow): TextView =
+        monoText(LIST_META_SP, toneColor(row), bold = row.isEmphasised).apply {
+            maxLines = 1
+            text = SpannableStringBuilder().apply {
+                append(row.trail.first())
+                row.trail.drop(1).forEach { token ->
+                    val start = length
+                    append("  ")
+                    append(token)
+                    setSpan(
+                        ForegroundColorSpan(BusTheme.muted),
+                        start,
+                        length,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+                    )
+                    setSpan(
+                        RelativeSizeSpan(0.82f),
+                        start,
+                        length,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+                    )
+                }
+            }
+        }
+
+    private fun toneColor(row: SurfaceRow): Int = when {
+        row.tone == SurfaceRow.TONE_ALERT -> BusTheme.phosphor
+        row.tone == SurfaceRow.TONE_DIM -> BusTheme.muted
+        row.selected -> BusTheme.phosphor
+        else -> BusTheme.text
     }
 
     private fun renderMedia(surface: NexusSurface) {
@@ -223,6 +366,9 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
     private fun renderBoard(rows: List<SurfaceRow>) {
         currentView.visibility = GONE
         boardView.visibility = VISIBLE
+        // Both renderers share this container, so each states its own alignment
+        // rather than inheriting whatever the last surface left behind.
+        boardView.gravity = Gravity.CENTER_VERTICAL
         boardView.removeAllViews()
         rows.forEachIndexed { index, row ->
             boardView.addView(
@@ -389,5 +535,17 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         private const val BOARD_TEXT_SP = 16f
         private const val BOARD_TRAIL_SP = 18f
         private const val BOARD_ROW_GAP_DP = 12
+
+        // List rows: selection rail, title + meta, optional secondary line.
+        private const val LIST_TITLE_SP = 16f
+        private const val LIST_SUB_SP = 12.5f
+        private const val LIST_META_SP = 14f
+        private const val LIST_ROW_GAP_DP = 11
+        // Conversation rows: fixed speaker label, wrapped prose.
+        private const val LIST_BODY_SP = 14.5f
+        private const val LIST_LABEL_SP = 11.5f
+        private const val LIST_LABEL_WIDTH_DP = 38
+        private const val LIST_BODY_MAX_LINES = 3
+        private const val LIST_BODY_GAP_DP = 9
     }
 }

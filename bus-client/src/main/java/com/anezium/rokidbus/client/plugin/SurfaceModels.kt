@@ -24,25 +24,57 @@ import org.json.JSONObject
 import java.util.Base64
 import java.util.UUID
 
+/**
+ * Weight of a row in a list surface. The HUD maps these to real typographic
+ * hierarchy; plugins never pick sizes or colours themselves.
+ */
+enum class NexusRowTone(val wireValue: String) {
+    /** Needs the wearer's attention: brightest treatment on the surface. */
+    ALERT("alert"),
+
+    /** Ordinary entry. */
+    NORMAL("normal"),
+
+    /** Present but not competing for attention (finished, stale, muted). */
+    DIM("dim"),
+
+    /** Prose that must wrap over several lines — a chat message, a log excerpt. */
+    BODY("body"),
+}
+
 data class NexusCardLine(
     val text: String,
     val badge: String? = null,
     val trail: List<String> = emptyList(),
+    /** Secondary line rendered under [text], dimmer and smaller. */
+    val sub: String? = null,
+    val tone: NexusRowTone = NexusRowTone.NORMAL,
+    /** Marks the row the wearer is on; the HUD draws the selection affordance. */
+    val selected: Boolean = false,
 ) {
     init {
         require(text.length <= MAX_LINE_CHARS)
         require(badge == null || badge.length <= MAX_BADGE_CHARS)
         require(trail.size <= MAX_TRAIL_ITEMS)
         require(trail.all { it.length <= MAX_TRAIL_ITEM_CHARS })
+        require(sub == null || sub.length <= MAX_LINE_CHARS)
     }
 
-    internal fun toJsonValue(): Any = if (badge.isNullOrBlank() && trail.isEmpty()) {
+    private val isListRow: Boolean
+        get() = !sub.isNullOrBlank() || tone != NexusRowTone.NORMAL || selected
+
+    internal fun toJsonValue(): Any = if (badge.isNullOrBlank() && trail.isEmpty() && !isListRow) {
         text
     } else {
         JSONObject()
             .put("text", text)
             .put("badge", badge.orEmpty())
             .put("trail", JSONArray(trail))
+            .apply {
+                if (!sub.isNullOrBlank()) put("sub", sub)
+                if (tone != NexusRowTone.NORMAL) put("tone", tone.wireValue)
+                if (selected) put("selected", true)
+            }
     }
 }
 
@@ -53,6 +85,8 @@ data class NexusCard(
     val contentKey: String? = null,
     val richLines: List<NexusCardLine>? = null,
     val handlesBack: Boolean = false,
+    /** One dim line under the title: counts, state, context. */
+    val subtitle: String? = null,
 ) {
     init {
         require(title.isNotBlank() && title.length <= MAX_TITLE_CHARS)
@@ -61,6 +95,7 @@ data class NexusCard(
         require(richLines == null || lines.isEmpty())
         require(richLines == null || richLines.size <= MAX_LINES)
         require(footer == null || footer.length <= MAX_LINE_CHARS)
+        require(subtitle == null || subtitle.length <= MAX_LINE_CHARS)
         require(contentKey == null || contentKey.length <= MAX_CONTENT_KEY_CHARS)
     }
 
@@ -80,6 +115,7 @@ data class NexusCard(
         )
         .apply {
             footer?.let { put("footer", it) }
+            subtitle?.takeIf(String::isNotBlank)?.let { put("subtitle", it) }
             contentKey?.let { put("contentKey", it) }
             if (handlesBack) put("handlesBack", true)
         }
