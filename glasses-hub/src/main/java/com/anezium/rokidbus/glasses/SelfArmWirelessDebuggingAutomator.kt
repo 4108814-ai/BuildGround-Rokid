@@ -1324,6 +1324,26 @@ internal class SelfArmWirelessDebuggingAutomator(
         }
     }
 
+    /**
+     * Leave Settings behind before handing the lens back to the wearer.
+     *
+     * A run walks through Wi-Fi settings, developer options and wireless debugging, and every one
+     * of those pages stays on the Settings task. returnToOnboarding then brings Nexus forward in
+     * its own task and draws over them, so the wearer sees the right screen and has no idea what
+     * is underneath -- until they press back and fall into the pile one page at a time, never
+     * reaching the launcher. Which is exactly what a first run left behind: Wi-Fi settings,
+     * developer options twice, and the wireless debugging page on top.
+     *
+     * Home is the one action that gets out whatever depth we reached, without having to count the
+     * pages we opened or guess how many the firmware added.
+     */
+    private fun leaveSettings() {
+        wifiSettingsOpened = false
+        runCatching {
+            service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+        }
+    }
+
     private fun returnFromWifiSettings() {
         if (!isLiveRun()) return
         if (!wifiSettingsOpened) return
@@ -1627,6 +1647,7 @@ internal class SelfArmWirelessDebuggingAutomator(
             return
         }
         if (!SelfArmOnboardingStore.isCurrentSession(service.applicationContext, finishingSessionId)) return
+        leaveSettings()
         service.returnToOnboarding(finishingSessionId)
         service.onWirelessBootstrapFinished(finishingSessionId)
         if (!SelfArmOnboardingStore.isCurrentSession(service.applicationContext, finishingSessionId)) return
