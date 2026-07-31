@@ -69,14 +69,12 @@ badges when a newer release is published.
 ### Plugins on the HUD
 
 <p align="center">
-  <img src="docs/assets/shot-relay-notice.png" width="420" alt="Relay notice band on the glasses HUD showing a two-message thread with the sender kept on every line and a Reply action" />
-</p>
-
-<p align="center">
+  <img src="docs/assets/shot-relay-notice.png" width="270" alt="Relay notice band arriving over the glasses home screen, showing a two-message thread with the sender kept on every line and a Reply action" />
+  &nbsp;
   <img src="docs/assets/shot-relay-inbox.png" width="270" alt="Relay inbox on the glasses HUD listing the conversations still waiting for a reply, newest first" />
 </p>
 
-<p align="center"><i>Relay — a message you can answer arrives as a band over whatever you were doing, sender kept on every line. Anything you let go waits in Messages, newest first.</i></p>
+<p align="center"><i>Relay — a message you can answer arrives as a band over whatever you were already looking at, sender kept on every line. &nbsp;·&nbsp; Anything you let go waits in Messages, newest first.</i></p>
 
 <p align="center">
   <img src="docs/assets/shot-lens-live.png" width="270" alt="Lens live mode translating a screen of English text into French in real time" />
