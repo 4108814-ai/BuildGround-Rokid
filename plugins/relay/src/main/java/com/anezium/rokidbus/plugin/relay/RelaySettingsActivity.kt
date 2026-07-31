@@ -24,6 +24,7 @@ class RelaySettingsActivity : Activity() {
     private lateinit var content: LinearLayout
     private var unobserveData: (() -> Unit)? = null
     private var unobserveHarness: (() -> Unit)? = null
+    private var harnessExpanded = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -124,9 +125,22 @@ class RelaySettingsActivity : Activity() {
         )
 
         content.addView(BusTheme.gap(this, 24))
-        content.addView(NexusUi.sectionRow(this, "Fake notification harness"), NexusUi.block())
-        content.addView(BusTheme.gap(this, 10))
-        content.addView(harnessCard(), NexusUi.block())
+        // Folded by default, and folded again every time this screen opens. It
+        // is a development tool living in a shipped app: useful to whoever knows
+        // it is there, and no invitation for anyone else to post themselves
+        // messages they never received.
+        content.addView(
+            NexusUi.sectionRow(
+                this,
+                "Test harness",
+                if (harnessExpanded) "hide" else "show",
+            ).apply { setOnClickListener { harnessExpanded = !harnessExpanded; render() } },
+            NexusUi.block(),
+        )
+        if (harnessExpanded) {
+            content.addView(BusTheme.gap(this, 10))
+            content.addView(harnessCard(), NexusUi.block())
+        }
 
         content.addView(BusTheme.gap(this, 24))
         content.addView(NexusUi.sectionRow(this, "Plugin"), NexusUi.block())
