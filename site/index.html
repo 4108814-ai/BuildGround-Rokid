@@ -20,7 +20,7 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Newsreader:ital,opsz,wght@0,6..72,200..500;1,6..72,200..400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Newsreader:ital,opsz,wght@0,6..72,200..500;1,6..72,200..400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -33,11 +33,11 @@
     <span>Rokid&nbsp;Nexus</span>
   </a>
   <nav class="nav__links" aria-label="Sections">
-    <a href="#platform">Platform</a>
+    <a href="#display">The display</a>
     <a href="#plugins">Plugins</a>
     <a href="#setup">Setup</a>
     <a href="#roadmap">Roadmap</a>
-    <a href="#build">Build</a>
+    <a href="docs.html">Docs</a>
   </nav>
   <a class="nav__cta" href="https://github.com/Anezium/Rokid-Nexus/releases">Get the app</a>
 </header>
@@ -111,175 +111,202 @@
   </div>
 </section>
 
-<!-- ─────────────────────  WHY IT FEELS NATIVE  ───────────────────── -->
-<section class="section" id="platform">
+<!-- ────────────────────  THE DISPLAY (live demo)  ──────────────────── -->
+<section class="section section--display" id="display">
   <div class="section__head">
     <span class="tick" aria-hidden="true"></span>
-    <h2>Three properties, and everything else follows</h2>
+    <h2>Five ways to be on the display</h2>
     <p class="section__sub">
-      All three were validated on real hardware before a single plugin was
-      written. They are the reason you never touch the glasses.
+      A plugin never picks how loudly it speaks. It declares <em>what kind of
+      thing</em> it has, and the platform decides the form, the motion, and
+      whether it may interrupt at all. Below is that renderer, reproduced —
+      same phosphor, same 480×640 optic, same durations.
     </p>
   </div>
 
-  <div class="props">
-    <article class="prop reveal">
-      <span class="prop__num">01</span>
-      <h3>Wake-on-message</h3>
-      <p>
-        A plugin does not need to be running to receive traffic. The hub binds
-        it awake when something arrives for it — a message, a track change, a
-        departure — and it goes quiet again after.
-      </p>
-    </article>
-    <article class="prop reveal" style="--i:1">
-      <span class="prop__num">02</span>
-      <h3>One hub-owned link</h3>
-      <p>
-        A single hub-owned session over the Rokid link, with a binary fallback
-        underneath it. No more apps fighting over the connection, and no plugin
-        ever has to know which path its bytes took.
-      </p>
-    </article>
-    <article class="prop reveal" style="--i:2">
-      <span class="prop__num">03</span>
-      <h3>Declarative surfaces</h3>
-      <p>
-        Plugins push descriptions of content — a card, a band, a list, an
-        image. The glasses hub renders them locally, in the HUD's one green.
-        Zero glasses-side deployment, forever.
-      </p>
-    </article>
+  <div class="stage reveal">
+    <!-- the simulated optic -->
+    <div class="stage__optic">
+      <div class="hud" id="hud" data-scene="ambient" data-step="0" role="img"
+           aria-label="A simulation of the glasses HUD cycling through the five content tiers">
+        <div class="hud__home">
+          <p class="hud__hint">Hold the touchpad to talk to the assistant</p>
+          <div class="hud__dock"><span>▤</span><span class="on">⌂</span><span>⌗</span></div>
+          <div class="hud__status">
+            <span>23:00 &nbsp;☼ 25° &nbsp;▯86+</span>
+            <span>◷ 17 &nbsp;≋ &nbsp;▮100</span>
+          </div>
+        </div>
+
+        <!-- ambient -->
+        <p class="hud__ambient"><span id="hudLyric">Everything in its right place</span></p>
+
+        <!-- pin -->
+        <div class="hud__pin">AB-123-CD · grey Prius</div>
+
+        <!-- activity: one element, two forms -->
+        <div class="hud__act">
+          <div class="hud__act-chip"><span class="g">◈</span> 4 min · 1.2 km</div>
+          <div class="hud__act-panel">
+            <div class="hud__act-top"><span class="g">◈</span><b>Arriving in 4 min</b></div>
+            <div class="hud__act-bar"><i></i></div>
+            <p class="hud__act-sub">Grey Prius · AB-123-CD · Rue de Rivoli</p>
+            <div class="hud__row">
+              <span class="hud__chip sel">◷ Wait</span>
+              <span class="hud__chip">✆ Call</span>
+              <span class="hud__chip">■ Cancel</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- notice -->
+        <div class="hud__notice">
+          <p class="t">Nina</p>
+          <p class="b">Nina: Are we still on for tonight?<br />Nina: Say yes from the glasses.</p>
+          <p class="f"><span id="hudNoticeFoot">Scroll to choose · Back to dismiss</span></p>
+          <div class="hud__row" id="hudNoticeRow">
+            <span class="hud__chip sel">↩ Reply</span>
+            <span class="hud__chip">◷ Later</span>
+            <span class="hud__chip">■ Ignore</span>
+          </div>
+        </div>
+
+        <!-- surface -->
+        <div class="hud__surface">
+          <p class="hud__surface-title">Opéra</p>
+          <ul>
+            <li><span class="ln">3</span><span class="dest">Gallieni</span><span class="eta now">now</span></li>
+            <li><span class="ln">21</span><span class="dest">Hôpital Bichat</span><span class="eta">1m</span></li>
+            <li><span class="ln">3</span><span class="dest">Pont de Levallois</span><span class="eta">1m</span></li>
+            <li><span class="ln">7</span><span class="dest">La Courneuve</span><span class="eta">2m</span></li>
+            <li><span class="ln">68</span><span class="dest">Châtillon</span><span class="eta">3m</span></li>
+          </ul>
+          <p class="hud__surface-foot">upd 22:52</p>
+        </div>
+      </div>
+
+      <div class="stage__meta">
+        <span id="hudMotion">enter 280 ms · fast-out-slow-in</span>
+        <button class="stage__toggle" id="hudToggle" type="button" aria-pressed="true">Pause</button>
+      </div>
+    </div>
+
+    <!-- the tiers -->
+    <ol class="stage__tiers" id="tierList">
+      <li data-scene="ambient">
+        <button type="button">
+          <b>Ambient</b>
+          <span>Nothing is asked of you. A lyric advances, a glanceable refreshes — the value changes in place over <code>180 ms</code> and never moves the layout. If you were not looking, you missed nothing.</span>
+        </button>
+      </li>
+      <li data-scene="pin">
+        <button type="button">
+          <b>Pin</b>
+          <span>One global slot, text only, hard caps. A car plate, a gate number, a door code — a fact that has to stay put across surfaces, the launcher, and native Rokid screens until it is replaced or expires.</span>
+        </button>
+      </li>
+      <li data-scene="activity">
+        <button type="button">
+          <b>Activity</b>
+          <span>An ongoing process you follow for minutes: a ride, a delivery, a workout. It idles as a chip and <em>morphs in place</em> into a panel when something significant happens — one progress value drives the bounds and the crossfade, so a retarget mid-flight stays coherent. Never wakes or holds the display.</span>
+        </button>
+      </li>
+      <li data-scene="notice">
+        <button type="button">
+          <b>Notice</b>
+          <span>A discrete event that wants an answer. Up to sixteen structured lines paged on the glasses, up to three glyph answers — and <em>exactly one answer is taken</em>: the moment you give it, the row leaves and the phone refuses a duplicate. Two temple taps 188 ms apart used to mean two replies sent.</span>
+        </button>
+      </li>
+      <li data-scene="surface">
+        <button type="button">
+          <b>Surface</b>
+          <span>The engaged case: you opened it, you are driving it. Cards, time-synced lines, media decks, list rows with a weight per row, and real photographs. Back hands the display straight back to whatever was underneath.</span>
+        </button>
+      </li>
+    </ol>
   </div>
 
-  <div class="tiers reveal">
-    <div class="tiers__label">
-      <h3>Every tier of the display, shipped</h3>
-      <p>
-        Nothing on the HUD is improvised. Each piece of content declares which
-        tier it belongs to, and the platform — not the plugin — decides how
-        loudly it may speak.
-      </p>
-    </div>
-    <ul class="tiers__list">
-      <li><b>Ambient</b><span>Silent updates. Lyrics advancing, a glanceable refreshing.</span></li>
-      <li><b>Pin</b><span>A persistent corner that survives across native screens.</span></li>
-      <li><b>Activity</b><span>An ongoing process holding a stable corner, expandable into a panel with real actions.</span></li>
-      <li><b>Notice</b><span>A band over whatever is underneath. Sixteen structured lines, paged on the glasses, one answer taken.</span></li>
-      <li><b>Surface</b><span>The full thing: cards, timed lines, media decks, list rows, real photographs.</span></li>
-    </ul>
-  </div>
+  <p class="stage__foot reveal">
+    Timings are the platform's, not the plugin's: <code>180 ms</code> for a value
+    refreshing in place, <code>280 ms</code> for anything arriving or changing
+    shape, <code>240 ms</code> for anything leaving — exits are quicker than
+    entrances. It runs on native Views because the WebView that rendered the same
+    motion cost <b>~1.2 cores</b>, <b>+88 MB</b> and <b>2.2 s</b> to first paint,
+    against <b>7.7 %</b> CPU here.
+    <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/docs/notice-band-states.html">The notice band's six states →</a>
+  </p>
 </section>
 
 <!-- ─────────────────────────  PLUGINS  ───────────────────────── -->
 <section class="section section--plugins" id="plugins">
-  <div class="section__head">
-    <span class="tick" aria-hidden="true"></span>
-    <h2>Eight plugins, none of them built in</h2>
-    <p class="section__sub">
-      Every one is an ordinary phone APK installed from the in-app Store, backed
-      by a public registry with SHA-256 and signer pinning checked before the
-      install runs. The hub itself ships empty.
-    </p>
+  <div class="section__head section__head--rail">
+    <div>
+      <span class="tick" aria-hidden="true"></span>
+      <h2>Eight plugins, none of them built in</h2>
+      <p class="section__sub">
+        Every one is an ordinary phone APK installed from the in-app Store,
+        pinned by hash and signer before it installs. The hub itself ships
+        empty. These are real captures off the optic, uncropped.
+      </p>
+    </div>
+    <div class="rail__nav">
+      <button type="button" id="railPrev" aria-label="Previous plugins">←</button>
+      <button type="button" id="railNext" aria-label="Next plugins">→</button>
+    </div>
   </div>
 
-  <div class="grid">
-    <article class="card card--wide reveal">
-      <div class="card__shots">
-        <img src="assets/shot-relay-notice.png" alt="A Relay notice band over the glasses home screen showing a two-message thread with a Reply action" loading="lazy" />
-        <img src="assets/shot-relay-inbox.png" alt="The Relay inbox listing conversations still waiting for a reply" loading="lazy" />
+  <div class="rail" id="rail" tabindex="0" aria-label="Plugin screenshots">
+    <figure class="slide">
+      <img src="assets/shot-relay-notice.png" alt="A Relay notice band over the glasses home screen showing a two-message thread with a Reply action" loading="lazy" />
+      <figcaption><b>Relay</b><span>A message arrives as a band over whatever you were looking at, and is answered out loud.</span></figcaption>
+    </figure>
+    <figure class="slide">
+      <img src="assets/shot-relay-inbox.png" alt="The Relay inbox listing conversations still waiting for a reply" loading="lazy" />
+      <figcaption><b>Relay · Messages</b><span>Everything you let go, newest first, answered the same way.</span></figcaption>
+    </figure>
+    <figure class="slide">
+      <img src="assets/shot-lens-live.png" alt="Lens translating a screen of English text into French live on the HUD" loading="lazy" />
+      <figcaption><b>Lens · live</b><span>The camera streams to the phone; OCR and translation run there, offline, and the overlays come back.</span></figcaption>
+    </figure>
+    <figure class="slide">
+      <img src="assets/shot-lens-freeze.png" alt="Lens freeze mode showing a full-resolution still with the translated result" loading="lazy" />
+      <figcaption><b>Lens · freeze</b><span>A full-FOV still through the same link, for text you want to hold on to.</span></figcaption>
+    </figure>
+    <figure class="slide">
+      <img src="assets/shot-transit.png" alt="The Transit plugin showing nearby stops and live departure countdowns" loading="lazy" />
+      <figcaption><b>Transit</b><span>Nearby stops and live departures, with the ones you actually take kept on top.</span></figcaption>
+    </figure>
+    <figure class="slide">
+      <img src="assets/shot-feeds.png" alt="The Feeds plugin showing a timeline post on the glasses HUD" loading="lazy" />
+      <figcaption><b>Feeds</b><span>Bluesky and X timelines — posts, threads, and the actual photos full-screen.</span></figcaption>
+    </figure>
+    <figure class="slide">
+      <img src="assets/shot-media.png" alt="The Media Deck plugin showing album art, track title, and transport controls" loading="lazy" />
+      <figcaption><b>Media Deck</b><span>Now playing with album art and transport, from whatever app is playing.</span></figcaption>
+    </figure>
+    <figure class="slide">
+      <img src="assets/shot-lyrics.png" alt="The Lyrics plugin showing the current line time-synced to the playing track" loading="lazy" />
+      <figcaption><b>Lyrics</b><span>Time-synced lines for whatever is playing, from four sources.</span></figcaption>
+    </figure>
+    <figure class="slide slide--text">
+      <div>
+        <b>Photos Sync</b>
+        <span>Not a HUD plugin at all. It copies the photos and videos you shoot on the glasses into your phone gallery by itself, and hands you the switches for it.</span>
       </div>
-      <div class="card__body">
-        <h3>Relay</h3>
-        <p>
-          A message you can answer arrives as a band over whatever you were
-          already looking at, lights the display if it was dark, and is answered
-          out loud. Let one go and it waits in Messages, newest first.
-        </p>
+    </figure>
+    <figure class="slide slide--text">
+      <div>
+        <b>Sample</b>
+        <span>The minimal copyable plugin. Clone it, change the id, and you have a working glasses app that never runs on the glasses.</span>
       </div>
-    </article>
-
-    <article class="card card--wide reveal" style="--i:1">
-      <div class="card__shots">
-        <img src="assets/shot-lens-live.png" alt="Lens translating a screen of English text into French live on the HUD" loading="lazy" />
-        <img src="assets/shot-lens-freeze.png" alt="Lens freeze mode showing a full-resolution still with the translated result" loading="lazy" />
-      </div>
-      <div class="card__body">
-        <h3>Lens</h3>
-        <p>
-          The glasses camera streams to the phone, where OCR and translation run
-          offline; the overlays come back in real time. Freeze mode captures a
-          full-resolution still through the same link.
-        </p>
-      </div>
-    </article>
-
-    <article class="card reveal">
-      <div class="card__shots card__shots--one">
-        <img src="assets/shot-feeds.png" alt="The Feeds plugin showing a timeline post on the glasses HUD" loading="lazy" />
-      </div>
-      <div class="card__body">
-        <h3>Feeds</h3>
-        <p>Bluesky and X timelines — posts, threads, and the actual photos full-screen.</p>
-      </div>
-    </article>
-
-    <article class="card reveal" style="--i:1">
-      <div class="card__shots card__shots--one">
-        <img src="assets/shot-transit.png" alt="The Transit plugin showing nearby stops and live departure countdowns" loading="lazy" />
-      </div>
-      <div class="card__body">
-        <h3>Transit</h3>
-        <p>Nearby stops and live departures, with the ones you actually take kept on top.</p>
-      </div>
-    </article>
-
-    <article class="card reveal" style="--i:2">
-      <div class="card__shots card__shots--one">
-        <img src="assets/shot-media.png" alt="The Media Deck plugin showing album art, track title, and transport controls" loading="lazy" />
-      </div>
-      <div class="card__body">
-        <h3>Media Deck</h3>
-        <p>Now playing with album art and transport, from whatever app is playing.</p>
-      </div>
-    </article>
-
-    <article class="card reveal" style="--i:3">
-      <div class="card__shots card__shots--one">
-        <img src="assets/shot-lyrics.png" alt="The Lyrics plugin showing the current line time-synced to the playing track" loading="lazy" />
-      </div>
-      <div class="card__body">
-        <h3>Lyrics</h3>
-        <p>Time-synced lines for whatever is playing, pulled from four sources.</p>
-      </div>
-    </article>
-
-    <article class="card card--text reveal">
-      <div class="card__body">
-        <h3>Photos Sync</h3>
-        <p>
-          Not a HUD plugin. It copies the photos and videos you shoot on the
-          glasses into your phone gallery by itself, and hands you the switches
-          for it.
-        </p>
-      </div>
-    </article>
-
-    <article class="card card--text reveal" style="--i:1">
-      <div class="card__body">
-        <h3>Sample</h3>
-        <p>
-          The minimal copyable plugin. Clone it, change the id, and you have a
-          working glasses app that never runs on the glasses.
-        </p>
-      </div>
-    </article>
+    </figure>
   </div>
 
   <p class="grid__foot reveal">
     Installation alone grants nothing. <b>Surfaces</b>, <b>microphone</b>,
     <b>camera</b>, and <b>HTTP proxy</b> are approved one by one, per plugin,
-    keyed to its package, its plugin id, and its signing certificate.
+    keyed to its package, its plugin id, and its signing certificate — and
+    checked at the hub on every message, not at install time.
   </p>
 </section>
 
@@ -320,8 +347,9 @@
     <span class="tick" aria-hidden="true"></span>
     <h2>Roadmap</h2>
     <p class="section__sub">
-      No dates. Items are ordered by the problem they solve, and nothing is
-      listed as shipped until it has run on real hardware.
+      No dates and no marketing. What is done, what is being written now, what
+      is committed, and the problem each one actually solves — including the
+      ones that turned out to be harder than they looked.
     </p>
   </div>
 
@@ -330,90 +358,250 @@
     <div class="road__group reveal" data-state="shipped">
       <div class="road__meta">
         <span class="chip chip--shipped">Shipped</span>
-        <p>The beta gate is behind us: a stranger sets up Nexus with nothing but a phone.</p>
+        <p>Running on hardware, in a public release.</p>
       </div>
       <ul class="road__items">
-        <li><h3>The bus and its trust boundary</h3><p>Per-plugin capabilities keyed to package, plugin id, and signing certificate, enforced at the hub.</p></li>
-        <li><h3>Setup without a computer</h3><p>Seven steps on the phone, then a two-card self-arm on the glasses. No ADB, no cable.</p></li>
-        <li><h3>The distribution loop, closed</h3><p>SDK on JitPack, plugins ingested by a public registry, installs verified by hash and signer, everything self-updating.</p></li>
-        <li><h3>The whole display model</h3><p>Ambient, pin, activity, notice, surface — plus HUD motion, a shared glyph set, and plugin marks that travel to the glasses.</p></li>
-        <li><h3>The camera capability</h3><p>Live H.264 over Wi-Fi Direct, decoded on the phone — and the roles invert when the phone's Wi-Fi is off, so it works anyway.</p></li>
-        <li><h3>Bands that can wake a dark display</h3><p>At most one pulse every five seconds across every plugin, always brief, never held on.</p></li>
+        <li>
+          <h3>The bus, and the identity it enforces</h3>
+          <p>
+            Any APK may bind to the hub; installing one grants it nothing. A
+            plugin is identified by <b>package + plugin id + signing
+            certificate</b>, and each capability — <code>surfaces</code>,
+            <code>microphone</code>, <code>camera</code>,
+            <code>http_proxy</code> — is a separate user grant, checked at the
+            hub on every message rather than once at install.
+          </p>
+          <p class="road__tech">
+            Wake-on-message: a plugin does not have to be running. The hub binds
+            it awake when traffic arrives — measured at ~1.6 s including cold
+            start — and it goes back to nothing.
+          </p>
+        </li>
+        <li>
+          <h3>One link, two paths, and the hub picks</h3>
+          <p>
+            Control messages ride CXR-L; anything binary — images, photo sync —
+            goes over SPP. A plugin never chooses, and never learns which path
+            its bytes took.
+          </p>
+          <p class="road__tech">
+            1.1.1 flipped that order to route around a link that reported sends
+            it had not delivered, and 1.1.2 flipped it back: SPP is a single
+            RFCOMM channel with one write lock, so a control message queued
+            behind a photo chunk waits for the whole chunk. The real fix is an
+            acknowledgement, not a different running order.
+          </p>
+        </li>
+        <li>
+          <h3>Setup without a computer</h3>
+          <p>
+            Seven steps on the phone, the glasses app pushed over the Rokid link
+            straight from GitHub releases, then a two-card self-arm on the
+            glasses: accessibility on, then the hub bootstraps its own
+            privileged shell.
+          </p>
+          <p class="road__tech">
+            Wireless Debugging self-pairing with an app-private KADB TLS
+            identity and a detached watchdog — it never touches the classic ADB
+            key, so nothing on a PC is ever enrolled. Navigation reads the
+            firmware's own localized labels, so it works in every language the
+            ROM ships.
+          </p>
+        </li>
+        <li>
+          <h3>The distribution loop, closed</h3>
+          <p>
+            The SDK publishes to JitPack from <code>sdk-v*</code> tags. A plugin
+            releases under its own namespaced tag, a manifest PR lands it in the
+            public registry, and the in-app Store verifies SHA-256 and signer
+            <em>before</em> the install runs.
+          </p>
+          <p class="road__tech">
+            Provenance is checked in a fixed order — commit, tag, build, publish
+            — because the registry refuses a manifest whose artifact it cannot
+            tie back to the tag. Everything self-updates afterwards: phone from
+            releases, glasses over CXR, plugins from the Store.
+          </p>
+        </li>
+        <li>
+          <h3>All five display tiers, and the motion under them</h3>
+          <p>
+            Ambient, pin, activity, notice, surface — plus the shared glyph set,
+            plugin marks that travel to the glasses as bare geometry, and the
+            phone's own battery in the ROM status row.
+          </p>
+          <p class="road__tech">
+            One motion layer with three duration tokens and two interpolators,
+            and nothing a plugin can dial. Native Views, not a WebView: the
+            WebView spike rendered the same motion for ~1.2 cores, +88 MB PSS
+            and 2.2 s to first paint, against 7.7 % CPU — and its one real
+            advantage, plugin-authored layout, is something the activity tier
+            refuses by design.
+          </p>
+        </li>
+        <li>
+          <h3>The camera capability</h3>
+          <p>
+            The glasses stream live H.264 over a Wi-Fi Direct link and the
+            consumer plugin decodes on the phone, where ML Kit runs OCR and
+            translation offline. No glasses-side plugin code exists: the glasses
+            half is a platform capability.
+          </p>
+          <p class="road__tech">
+            A phone app cannot switch its own Wi-Fi on, which used to be a dead
+            end. Now the roles invert — the phone hosts a
+            <code>LocalOnlyHotspot</code> and the glasses join it — and the wire
+            protocol, the decode, the overlays and freeze are unchanged.
+          </p>
+        </li>
+        <li>
+          <h3>Waking a dark display, without owning it</h3>
+          <p>
+            A notice worth it can pulse the display awake. At most one wake
+            every five seconds <em>across every plugin</em>, always a short
+            pulse, never held on — and no other tier may do it at all, including
+            activities.
+          </p>
+        </li>
       </ul>
     </div>
 
     <div class="road__group reveal" data-state="building">
       <div class="road__meta">
         <span class="chip chip--building">Building</span>
-        <p>Specified and underway.</p>
+        <p>Specified, decided, and being written.</p>
       </div>
       <ul class="road__items">
-        <li><h3>Display arbitration</h3><p>The protocol has carried an <code>actionable</code> class since v1, and v1 still renders it as a toast. This is the first problem two chatty plugins will create.</p></li>
-        <li><h3>Continuous speech</h3><p>Speech-to-text ships in short takes. The remaining slice is the continuous mode that live captions and a voice assistant are both blocked behind.</p></li>
+        <li>
+          <h3>Display arbitration</h3>
+          <p>
+            The protocol has carried an <code>actionable</code> class since v1
+            and v1 still renders it as a toast. Right now the entire policy is
+            "the newest replaces the oldest, no queue" — which holds exactly
+            until two chatty plugins are installed at once.
+          </p>
+          <p class="road__tech">
+            What it needs: an arbiter that ranks a request against what is
+            already on the display, plus surface ownership epochs so a late
+            frame from a superseded owner cannot repaint someone else's surface.
+            The per-plugin mute and demote switches in the phone hub are the
+            user-facing half, and they already exist.
+          </p>
+        </li>
+        <li>
+          <h3>Continuous speech</h3>
+          <p>
+            Speech-to-text ships, in short takes: the audio lease is specified,
+            hardware-validated, and has a real consumer. What it cannot do yet
+            is run for minutes.
+          </p>
+          <p class="road__tech">
+            The remaining slice is a held lease with partial results streaming
+            to the HUD, and a caption presentation that survives the surface
+            underneath it changing. Live captions, translation-in-your-ear, and
+            any voice assistant are all blocked behind this one — which is why
+            it is the only other thing being written.
+          </p>
+        </li>
       </ul>
     </div>
 
     <div class="road__group reveal" data-state="next">
       <div class="road__meta">
         <span class="chip chip--next">Next</span>
-        <p>Committed, not started.</p>
+        <p>Committed, not started. In this order.</p>
       </div>
       <ul class="road__items">
-        <li><h3>Native apps in the menu</h3><p>List and launch real glasses APKs from the same triple-tap menu. Nexus does not port them; it stops you having to leave.</p></li>
-        <li><h3>A <code>nav</code> surface kind</h3><p>Turn-by-turn deserves a real surface. Navigation degrades to a text card until it exists.</p></li>
-        <li><h3>Maven Central</h3><p>JitPack carries the SDK today. Central once the AIDL surface is stable — a published coordinate is what makes a platform safe to bet on.</p></li>
+        <li>
+          <h3>Native apps in the Nexus menu</h3>
+          <p>
+            Phase two of the menu: list and launch real glasses APKs — Scouter,
+            RokidPipe, whatever you installed — from the same triple-tap that
+            lists plugins. Nexus does not port them and does not wrap them; it
+            stops you having to leave to reach them.
+          </p>
+          <p class="road__tech">
+            The work is a launch path that does not fight the ROM launcher, and
+            a back that lands you where you started instead of on the Rokid
+            home.
+          </p>
+        </li>
+        <li>
+          <h3>A <code>nav</code> surface kind</h3>
+          <p>
+            Turn-by-turn deserves a real surface — a maneuver glyph, the
+            distance, the street, the ETA, all drawn by the platform — instead
+            of a navigation app degrading into a text card, which is what
+            happens today.
+          </p>
+        </li>
+        <li>
+          <h3>Maven Central</h3>
+          <p>
+            JitPack builds the SDK from tags and is fine for early adopters, but
+            it is not something a serious app should depend on. Central goes out
+            once the AIDL surface is stable enough that a published coordinate
+            is a promise rather than a snapshot.
+          </p>
+        </li>
       </ul>
     </div>
 
     <div class="road__group reveal" data-state="exploring">
       <div class="road__meta">
         <span class="chip chip--exploring">Exploring</span>
-        <p>Not committed. Each one is an ordinary phone APK against a capability that already exists.</p>
+        <p>Not committed. Each one is an ordinary phone APK against a capability that already exists — which is the point.</p>
       </div>
       <ul class="road__items road__items--compact">
-        <li><h3>Live captions and translation</h3></li>
-        <li><h3>A voice assistant</h3></li>
-        <li><h3>Teleprompter and glanceables</h3></li>
-        <li><h3>A visual assistant, FoodFacts</h3></li>
-        <li><h3>Sport HUD, CGM glucose</h3></li>
+        <li><h3>Live captions and translation</h3><p>audio lease · blocked on continuous speech</p></li>
+        <li><h3>A voice assistant</h3><p>audio lease · blocked on continuous speech</p></li>
+        <li><h3>Teleprompter, glanceables</h3><p>today's surface kinds, no protocol work</p></li>
+        <li><h3>A visual assistant, FoodFacts</h3><p>camera capability, shipped</p></li>
+        <li><h3>Sport HUD, CGM glucose</h3><p>activity tier + a small protocol addition</p></li>
       </ul>
     </div>
 
   </div>
 
   <div class="nogo reveal">
-    <h3>And what stays off it</h3>
+    <h3>And what will not be on it</h3>
     <p>
-      Native glasses apps are launched from the menu, never absorbed into it.
-      Plugin code stays on the phone — the glasses half of any capability lives
-      in the hub, which is exactly what makes zero glasses-side deployment
-      possible. And there is no signature-only plugin permission, because no
-      third-party developer can be signed with our key.
+      <b>Native glasses apps are launched, never absorbed.</b> Porting them into
+      Nexus would make the platform responsible for software it did not write.
+      <b>Plugin code stays on the phone.</b> The glasses half of any capability
+      lives in the hub — that is exactly what makes zero glasses-side deployment
+      possible, and it is not negotiable. <b>No signature-only permission.</b>
+      It would be the strongest trust model available and it would also make
+      third-party plugins impossible, because no external developer can be
+      signed with our key.
     </p>
   </div>
 </section>
 
 <!-- ──────────────────────────  BUILD  ────────────────────────── -->
 <section class="section section--build" id="build">
+  <div class="section__head">
+    <span class="tick" aria-hidden="true"></span>
+    <h2>Write one yourself</h2>
+    <p class="section__sub">
+      A plugin is a headless phone APK against the published SDK. No glasses
+      code, no emulator, no flashing: you declare what should appear and the
+      glasses draw it. Four steps, and the fourth is optional.
+    </p>
+  </div>
+
   <div class="build">
-    <div class="build__copy">
-      <span class="tick" aria-hidden="true"></span>
-      <h2>Write one yourself</h2>
-      <p>
-        A plugin is a headless phone APK against the published SDK. No glasses
-        code, no emulator, no device flashing — you describe what should appear,
-        and the glasses draw it.
-      </p>
-      <ul class="build__links">
-        <li><a href="https://github.com/Anezium/Rokid-Nexus/blob/main/plugins/AGENTS.md">The plugin contract <span>complete and self-contained</span></a></li>
-        <li><a href="https://github.com/Anezium/Rokid-Nexus/blob/main/docs/PLUGIN_SDK.md">SDK reference <span>surfaces, lifecycle, design kit</span></a></li>
-        <li><a href="https://github.com/Anezium/Rokid-Nexus/tree/main/plugins/sample">The sample plugin <span>the canonical template</span></a></li>
-        <li><a href="https://github.com/Anezium/RokidBrew-Registry">Publish to the registry <span>F-Droid-like: you host, we index</span></a></li>
-      </ul>
-    </div>
-    <div class="build__code">
-      <div class="code">
-        <div class="code__bar"><span>build.gradle.kts</span></div>
+    <ol class="build__steps">
+      <li class="reveal">
+        <span class="build__n">01</span>
+        <h3>Depend on the SDK</h3>
+        <p>
+          One coordinate from JitPack. <code>:bus-client</code> brings the
+          service base class, the typed surfaces, the lifecycle callbacks and
+          the NexusUi design kit your settings screen renders with.
+        </p>
+        <div class="code">
+          <div class="code__bar"><span>build.gradle.kts</span></div>
 <pre><code><span class="k">repositories</span> { <span class="f">maven</span>(<span class="s">"https://jitpack.io"</span>) }
 
 <span class="k">dependencies</span> {
@@ -421,12 +609,57 @@
         <span class="s">"com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.9.0"</span>
     )
 }</code></pre>
-      </div>
-      <p class="code__note">
-        Your plugin declares an id, a mark, and the capabilities it needs. The
-        user grants them. The hub enforces them.
+        </div>
+      </li>
+
+      <li class="reveal" style="--i:1">
+        <span class="build__n">02</span>
+        <h3>Declare who you are</h3>
+        <p>
+          A headless service, a plugin id, a 24×24 stroked mark in one green,
+          and the capabilities you need. No launcher icon: your plugin has no
+          identity outside Nexus. The user approves the capabilities once, in
+          the phone hub, and the hub enforces them on every message afterwards.
+        </p>
+      </li>
+
+      <li class="reveal" style="--i:2">
+        <span class="build__n">03</span>
+        <h3>Push a surface</h3>
+        <p>
+          Describe content, never pixels: a card, a band, list rows, timed
+          lines, an image under 64 KiB. Your process does not need to be
+          running when something arrives for it — the hub binds you awake, you
+          answer, you go quiet. That is the whole runtime model.
+        </p>
+      </li>
+
+      <li class="reveal" style="--i:3">
+        <span class="build__n">04</span>
+        <h3>Publish, if you want to</h3>
+        <p>
+          F-Droid-like, and entirely optional: you host the APK on your own
+          releases and PR a manifest to the registry. The Store pins your hash
+          and your signer, so an update signed by anyone else is refused rather
+          than installed.
+        </p>
+      </li>
+    </ol>
+
+    <aside class="build__aside reveal">
+      <h3>Read first</h3>
+      <ul class="build__links">
+        <li><a href="https://github.com/Anezium/Rokid-Nexus/blob/main/plugins/AGENTS.md">The plugin contract <span>complete, self-contained, agent-readable</span></a></li>
+        <li><a href="https://github.com/Anezium/Rokid-Nexus/blob/main/docs/PLUGIN_SDK.md">SDK reference <span>coordinates, service contract, approval flow</span></a></li>
+        <li><a href="https://github.com/Anezium/Rokid-Nexus/tree/main/plugins/sample">The sample plugin <span>the canonical template</span></a></li>
+      </ul>
+      <p>
+        Every limit in those documents is enforced in code. Breaking one does
+        not degrade gracefully — your traffic is rejected, or your process is
+        killed.
       </p>
-    </div>
+      <a class="btn btn--ghost" href="docs.html">All documentation →</a>
+    </aside>
   </div>
 </section>
 
@@ -443,6 +676,7 @@
   <nav class="foot__links" aria-label="Elsewhere">
     <a href="https://github.com/Anezium/Rokid-Nexus">GitHub</a>
     <a href="https://github.com/Anezium/Rokid-Nexus/releases">Releases</a>
+    <a href="docs.html">Docs</a>
     <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/ROADMAP.md">Roadmap source</a>
     <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/CHANGELOG.md">Changelog</a>
     <a href="https://github.com/Anezium/awesome-rokid">Awesome Rokid</a>

@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Documentation — Rokid Nexus</title>
+<meta name="description" content="Every document that governs the Rokid Nexus platform: the plugin contract, the SDK reference, the wire specification, the HUD design system, and the plans behind each tier." />
+<meta name="theme-color" content="#05070a" />
+<link rel="canonical" href="https://rokid-nexus.anezium.me/docs.html" />
+<link rel="icon" href="assets/logo.png" type="image/png" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Rokid Nexus" />
+<meta property="og:title" content="Documentation — Rokid Nexus" />
+<meta property="og:description" content="The plugin contract, the SDK reference, the wire specification, and the HUD design system." />
+<meta property="og:url" content="https://rokid-nexus.anezium.me/docs.html" />
+<meta property="og:image" content="https://rokid-nexus.anezium.me/assets/logo.png" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Newsreader:ital,opsz,wght@0,6..72,200..500;1,6..72,200..400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div class="grain" aria-hidden="true"></div>
+
+<header class="nav" id="nav">
+  <a class="nav__brand" href="index.html">
+    <img src="assets/logo.png" alt="" width="30" height="30" />
+    <span>Rokid&nbsp;Nexus</span>
+  </a>
+  <nav class="nav__links" aria-label="Sections">
+    <a href="index.html#display">The display</a>
+    <a href="index.html#plugins">Plugins</a>
+    <a href="index.html#setup">Setup</a>
+    <a href="index.html#roadmap">Roadmap</a>
+    <a href="docs.html">Docs</a>
+  </nav>
+  <a class="nav__cta" href="https://github.com/Anezium/Rokid-Nexus">Repository</a>
+</header>
+
+<main class="docs">
+
+  <div class="docs__intro">
+    <span class="tick" aria-hidden="true"></span>
+    <h1>Documentation</h1>
+    <p>
+      Everything that governs the platform lives in the repository, in plain
+      Markdown, next to the code it describes. This page is the map: what each
+      document is for, and which one to open first.
+    </p>
+    <p>
+      Where a document states a limit or a rule, the hub or the SDK enforces it
+      in code. Violating one does not degrade gracefully — the traffic is
+      rejected, or the process is killed.
+    </p>
+  </div>
+
+  <section class="docs__group">
+    <h2>Start here — writing a plugin</h2>
+
+    <div class="doc">
+      <div class="doc__name">
+        <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/plugins/AGENTS.md">The plugin contract</a>
+        <span class="doc__path">plugins/AGENTS.md</span>
+      </div>
+      <p class="doc__what">
+        The complete, self-contained contract: endpoints, payload limits,
+        lifecycle, capabilities, surface kinds, input routing. Written to be
+        read by a developer <b>or handed verbatim to a coding agent</b> — if you
+        only open one document, open this one.
+      </p>
+    </div>
+
+    <div class="doc">
+      <div class="doc__name">
+        <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/docs/PLUGIN_SDK.md">SDK reference</a>
+        <span class="doc__path">docs/PLUGIN_SDK.md</span>
+      </div>
+      <p class="doc__what">
+        Artifact coordinates, the service contract, and the approval flow —
+        <code>NexusPluginService</code>, the lifecycle callbacks, the typed
+        card, timed-lines, media and image surfaces, and how a grant reaches
+        you.
+      </p>
+    </div>
+
+    <div class="doc">
+      <div class="doc__name">
+        <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/docs/PLUGINS.md">Structure and design kit</a>
+        <span class="doc__path">docs/PLUGINS.md</span>
+      </div>
+      <p class="doc__what">
+        The full build guide: module structure, the headless-manifest rules
+        (no launcher icon, no identity outside Nexus), and the NexusUi kit your
+        settings screen renders with so it looks like part of the host app.
+      </p>
+    </div>
+
+    <div class="doc">
+      <div class="doc__name">
+        <a href="https://github.com/Anezium/Rokid-Nexus/tree/main/plugins/sample">The sample plugin</a>
+        <span class="doc__path">plugins/sample/</span>
+      </div>
+      <p class="doc__what">
+        The canonical template, kept building against the published SDK
+        coordinate rather than the monorepo. Clone it, change the id, ship
+        something.
+      </p>
+    </div>
+
+    <div class="doc">
+      <div class="doc__name">
+        <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/plugins/README.md">Publishing to the registry</a>
+        <span class="doc__path">plugins/README.md</span>
+      </div>
+      <p class="doc__what">
+        F-Droid-like distribution: you host the APK on your own releases and PR
+        a manifest to <a href="https://github.com/Anezium/RokidBrew-Registry">RokidBrew-Registry</a>.
+        The Store pins the hash and the signer, so an update signed by anyone
+        else is refused rather than installed.
+      </p>
+    </div>
+  </section>
+
+  <section class="docs__group">
+    <h2>The platform itself</h2>
+
+    <div class="doc">
+      <div class="doc__name">
+        <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/BUSSPEC.md">Wire specification</a>
+        <span class="doc__path">BUSSPEC.md · API v3</span>
+      </div>
+      <p class="doc__what">
+        The authoritative contract for the wire, identity, lifecycle,
+        capabilities, surfaces, input, and transport — including the
+        constraints validated on hardware that are not to be re-derived
+        (CXR-L only on the phone side, and why). Superseded API v1/v2 detail is
+        kept in a historical appendix.
+      </p>
+    </div>
+
+    <div class="doc">
+      <div class="doc__name">
+        <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/docs/PROTOCOL.md">Protocol entry point</a>
+        <span class="doc__path">docs/PROTOCOL.md</span>
+      </div>
+      <p class="doc__what">
+        A stable doorway into the specification that deliberately does not
+        duplicate it. External developers should be using the typed
+        <code>bus-client</code> API rather than constructing reserved paths by
+        hand — this page says so, and points where to go instead.
+      </p>
+    </div>
+
+    <div class="doc">
+      <div class="doc__name">
+        <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/docs/GLYPHS.md">The HUD design system</a>
+        <span class="doc__path">docs/GLYPHS.md</span>
+      </div>
+      <p class="doc__what">
+        Every mark that reaches the glasses is a 24×24 stroked vector in one
+        green. This is the recipe, and <code>NexusGlyphArtTest</code> is what
+        stops it drifting: <b>a design system that lives only in prose is one
+        our own mark already escaped.</b>
+      </p>
+    </div>
+
+    <div class="doc">
+      <div class="doc__name">
+        <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/docs/notice-band-states.html">The notice band, six states</a>
+        <span class="doc__path">docs/notice-band-states.html</span>
+      </div>
+      <p class="doc__what">
+        A rendered reference of every state a band can be in — plain,
+        interactive, with actions, answered, paged, with an image — plus an
+        interactive demo of the one-answer rule, running the same state machine
+        the glasses do.
+      </p>
+    </div>
+
+    <div class="doc">
+      <div class="doc__name">
+        <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/docs/surface-list-rows.html">List rows</a>
+        <span class="doc__path">docs/surface-list-rows.html</span>
+      </div>
+      <p class="doc__what">
+        The visual reference for the list surface: a row with a second line, a
+        tone that says how much it matters, and a selection the glasses draw
+        themselves.
+      </p>
+    </div>
+
+    <div class="doc">
+      <div class="doc__name">
+        <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/docs/SELF_ARM_ONBOARDING.md">Glasses self-arm</a>
+        <span class="doc__path">docs/SELF_ARM_ONBOARDING.md</span>
+      </div>
+      <p class="doc__what">
+        How the glasses enable their own accessibility service and privileged
+        shell on first launch without a PC: Wireless Debugging with one
+        app-private KADB TLS identity, which never touches the classic ADB key.
+      </p>
+    </div>
+  </section>
+
+  <section class="docs__group">
+    <h2>Direction, history, and verification</h2>
+
+    <div class="doc">
+      <div class="doc__name">
+        <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/VISION.md">Product vision</a>
+        <span class="doc__path">VISION.md</span>
+      </div>
+      <p class="doc__what">
+        Why the platform is shaped the way it is: the layer model, the
+        interaction model, and the trust model — the founding sections still
+        govern every design decision, including the ones that were rejected.
+      </p>
+    </div>
+
+    <div class="doc">
+      <div class="doc__name">
+        <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/ROADMAP.md">Roadmap</a>
+        <span class="doc__path">ROADMAP.md</span>
+      </div>
+      <p class="doc__what">
+        The source this site's <a href="index.html#roadmap">roadmap section</a>
+        renders. Shipped, building, next, exploring — and what will never be on
+        it.
+      </p>
+    </div>
+
+    <div class="doc">
+      <div class="doc__name">
+        <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/CHANGELOG.md">Changelog</a>
+        <span class="doc__path">CHANGELOG.md</span>
+      </div>
+      <p class="doc__what">
+        Every release, written for the person using it rather than the person
+        who wrote it — including the reversals, and why the second decision was
+        better than the first.
+      </p>
+    </div>
+
+    <div class="doc">
+      <div class="doc__name">
+        <a href="https://github.com/Anezium/Rokid-Nexus/tree/main/plans">Implementation plans</a>
+        <span class="doc__path">plans/</span>
+      </div>
+      <p class="doc__what">
+        One document per tier and per platform slice — pin, notice, activities,
+        HUD motion, camera, speech — each with its goal, its protocol
+        additions, its decision record, and the approaches that were rejected.
+        This is where a tier's behaviour is argued before it is coded.
+      </p>
+    </div>
+
+    <div class="doc">
+      <div class="doc__name">
+        <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/TESTPLAN.md">Verification matrix</a>
+        <span class="doc__path">TESTPLAN.md</span>
+      </div>
+      <p class="doc__what">
+        What was measured on real hardware and what the numbers were —
+        bind-wake of a dead process at ~1.6 s including cold start, 64 KB
+        payloads routing to the binary path automatically, an HTTP proxy call
+        completing with the glasses' own Wi-Fi off.
+      </p>
+    </div>
+  </section>
+
+  <p class="grid__foot">
+    Missing something, or found a document that lies about the code?
+    <a href="https://github.com/Anezium/Rokid-Nexus/issues">Open an issue</a> —
+    a contract that has drifted from its implementation is a bug in the same
+    way a crash is.
+  </p>
+
+</main>
+
+<footer class="foot">
+  <div class="foot__brand">
+    <img src="assets/logo.png" alt="" width="34" height="34" />
+    <div>
+      <b>Rokid Nexus</b>
+      <span>Apache-2.0 · built by Anezium</span>
+    </div>
+  </div>
+  <nav class="foot__links" aria-label="Elsewhere">
+    <a href="index.html">Home</a>
+    <a href="https://github.com/Anezium/Rokid-Nexus">GitHub</a>
+    <a href="https://github.com/Anezium/Rokid-Nexus/releases">Releases</a>
+    <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/ROADMAP.md">Roadmap source</a>
+    <a href="https://github.com/Anezium/awesome-rokid">Awesome Rokid</a>
+    <a href="https://ko-fi.com/M8R61ZTXMI">Ko-fi</a>
+  </nav>
+  <p class="foot__legal">
+    Not affiliated with or endorsed by Rokid. Built for Rokid Glasses on Hi Rokid Global.
+  </p>
+</footer>
+
+<script src="main.js" defer></script>
+</body>
+</html>
