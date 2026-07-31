@@ -47,6 +47,8 @@ data class ActivitySurfaceContent(
     val detail: List<String>,
     val actions: List<ActivityAction>,
     val maxDurationMs: Long?,
+    /** Start-time opt-in; only a later significant update may use it. */
+    val wakeDisplay: Boolean = false,
 )
 
 /**
@@ -173,6 +175,11 @@ object ActivitySurfaceContract {
             is ReadResult.Invalid -> return invalid(result.reason)
             ReadResult.Absent -> null
         }
+        val wakeDisplay = when (val value = payload.opt("wakeDisplay")) {
+            null -> false
+            is Boolean -> value
+            else -> return invalid("wakeDisplay must be a boolean")
+        }
         if (payload.has("significant")) return invalid("significant is update-only")
 
         return ActivitySurfaceValidationResult.Valid(
@@ -185,6 +192,7 @@ object ActivitySurfaceContract {
                 detail = detail,
                 actions = actions,
                 maxDurationMs = maxDurationMs,
+                wakeDisplay = wakeDisplay,
             ),
         )
     }
@@ -270,6 +278,7 @@ object ActivitySurfaceContract {
             content.maxDurationMs?.let {
                 put("maxDurationMs", it.coerceIn(MIN_MAX_DURATION_MS, MAX_MAX_DURATION_MS))
             }
+            if (content.wakeDisplay) put("wakeDisplay", true)
         }
 
     /**

@@ -1,5 +1,6 @@
 package com.anezium.rokidbus.glasses
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
@@ -384,9 +385,9 @@ internal object NoticeController {
         return { listeners.remove(listener) }
     }
 
-    fun handleNoticeEnvelope(envelope: BusEnvelope): Boolean = when (envelope.path) {
+    fun handleNoticeEnvelope(context: Context, envelope: BusEnvelope): Boolean = when (envelope.path) {
         BusPaths.NOTICE_SHOW -> {
-            runOnMain { show(envelope) }
+            runOnMain { show(context.applicationContext, envelope) }
             true
         }
         BusPaths.NOTICE_UPDATE -> {
@@ -538,7 +539,7 @@ internal object NoticeController {
         }
     }
 
-    private fun show(envelope: BusEnvelope) {
+    private fun show(context: Context, envelope: BusEnvelope) {
         val validation = NoticeSurfaceContract.validateShow(envelope.payload, envelope.binary)
         if (validation !is NoticeSurfaceValidationResult.Valid) {
             log("notice rejected code=${NoticeSurfaceContract.ERROR_INVALID_NOTICE}")
@@ -577,6 +578,7 @@ internal object NoticeController {
                         is ImageDecodeCompletion.Accepted -> {
                             completion.replaced?.takeUnless { it === decoded }?.recycleSafely()
                             showValidated(
+                                context = context,
                                 surfaceId = surfaceId,
                                 seq = seq,
                                 content = validation.content,
@@ -594,10 +596,11 @@ internal object NoticeController {
         imageDecodeCoordinator.invalidate()?.let { pending ->
             if (pending !== state.activeNotice()?.imageBitmap) pending.recycleSafely()
         }
-        showValidated(surfaceId, seq, validation.content)
+        showValidated(context, surfaceId, seq, validation.content)
     }
 
     private fun showValidated(
+        context: Context,
         surfaceId: String,
         seq: Long,
         content: NoticeSurfaceContent,
@@ -621,6 +624,11 @@ internal object NoticeController {
         }
         applyDecision(decision)
         if (decision is NoticeStateDecision.Shown) {
+            DisplayWakePolicy.requestWake(
+                context,
+                DisplayWakeKind.NOTICE,
+                requested = decision.notice.content.wakeDisplay,
+            )
             previous?.imageBitmap
                 ?.takeUnless { it === decision.notice.imageBitmap }
                 ?.recycleSafely()

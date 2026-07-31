@@ -19,7 +19,7 @@ resolved transitively.
 repositories { maven("https://jitpack.io") }
 
 dependencies {
-    implementation("com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.7.0")
+    implementation("com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.8.0")
 }
 ```
 
@@ -166,6 +166,7 @@ data class NexusActivity(
     val detail: List<String> = emptyList(),
     val actions: List<NexusActivityAction> = emptyList(),
     val maxDurationMs: Long? = null,
+    val wakeDisplay: Boolean = false,
 )
 
 val supportsActivitySurface: Boolean
@@ -211,7 +212,8 @@ on action IDs or labels beyond that requirement and the three-action limit.
 explicitly cleared when null and both lists are sent even when empty.
 `maxDurationMs` is start-only and is omitted from updates, so an update cannot
 restart or change the safety deadline. `significant` is a transient hint and is
-sent only when true.
+sent only when true. `wakeDisplay` is also start-only: when true, a later
+`significant` update may wake a dark display. Ordinary updates never wake it.
 
 A Maps-shaped route can publish the next maneuver as one object:
 
@@ -313,8 +315,15 @@ never claimed. `onNexusActivityClosed(reason)` reports `owner`, `replaced`,
 The phone hub owns canonical activity state and resends it after a glasses
 reconnect, after first clearing possible ghosts. You should still call
 `endActivity()` when the underlying process ends. Do not end it merely because
-an engaged surface received `onNexusClose`. Activity v1 neither wakes nor keeps
-the display on, and it does not include plan 014's glance layer.
+an engaged surface received `onNexusClose`.
+
+An activity never keeps the display on. Set `wakeDisplay = true` at start only
+when a later significant transition must not be missed; the flag is remembered
+for that activity, and is omitted from every update payload. The glasses hub
+allows at most one actual wake per five seconds globally across activities,
+notices, surfaces, and plugins. A significant update arriving while the display
+is already interactive spends no budget. Activity v1 does not include plan
+014's glance layer.
 
 ### Notice bands
 
@@ -361,6 +370,7 @@ data class NexusNotice(
     val actions: List<NexusNoticeAction> = emptyList(),
     val ttlMs: Long? = null,
     val image: NexusNoticeImage? = null,
+    val wakeDisplay: Boolean = false,
 )
 
 data class NexusNoticeUpdate(
@@ -518,6 +528,15 @@ plain one-page notice claims no direction at all.
 Check the live `supportsNoticeSurface` value immediately before use. Unlike
 pins it accounts for the link: a notice is a moment, so the hub never holds one
 for glasses it cannot reach and tells you instead.
+
+Set `wakeDisplay = true` on `NexusNotice` only for a new event the wearer must
+not miss. It is serialized only when true and is honored only by `showNotice`;
+`updateNotice` has no wake field, and a raw `/notice/update` that supplies one
+is rejected as `INVALID_NOTICE`. A dark display may be woken for at most three
+seconds, never held on. The same global five-second budget is shared with every
+plugin, notice, activity, and surface. If the display is already interactive,
+no lock is needed and the budget remains available for the next dark-screen
+event.
 
 ### Real image surfaces
 

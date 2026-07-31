@@ -14,6 +14,22 @@
 - Direct Wireless Debugging launch is capability-probed first; inaccessible
   YodaOS fragments fall back to the hardened Settings traversal.
 
+### Waking the display
+
+- A notice can now ask to light a dark display for a new event, and an activity
+  can make the same choice at start for its later significant transitions.
+  Quiet activity updates and every notice update remain quiet.
+- One screen has one budget: surfaces, notices, activities, and every plugin
+  share at most one wake every five seconds. An already-lit display spends
+  nothing, and every admitted wake remains the same short three-second pulse;
+  nothing holds the display on.
+
+### Plugin SDK 0.8.0
+
+- `wakeDisplay` lands on `NexusNotice` and `NexusActivity`, off by default and
+  absent from the wire unless requested. It reuses the existing `surfaces`
+  grant and plugin API version 3.
+
 ## 1.0.48
 
 ### Activities

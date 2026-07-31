@@ -51,6 +51,8 @@ data class NoticeSurfaceContent(
     val actions: List<NoticeAction> = emptyList(),
     val ttlMs: Long = NoticeSurfaceContract.DEFAULT_TTL_MS,
     val image: ImageSurfaceMetadata? = null,
+    /** Whether this new event may ask the glasses hub to wake a dark display. */
+    val wakeDisplay: Boolean = false,
 ) {
     /**
      * Whether the band expects a gesture at all. Actions are an interaction by
@@ -196,6 +198,12 @@ object NoticeSurfaceContract {
             else -> return invalid("interactive must be a boolean")
         }
 
+        val wakeDisplay = when (val value = payload.opt("wakeDisplay")) {
+            null -> false
+            is Boolean -> value
+            else -> return invalid("wakeDisplay must be a boolean")
+        }
+
         val actions = when (val result = readActions(payload, "actions")) {
             is ActionsResult.Invalid -> return invalid(result.reason)
             is ActionsResult.Absent -> emptyList()
@@ -230,6 +238,7 @@ object NoticeSurfaceContract {
                 actions = actions,
                 ttlMs = ttlMs,
                 image = image,
+                wakeDisplay = wakeDisplay,
             ),
         )
     }
@@ -247,6 +256,9 @@ object NoticeSurfaceContract {
     fun validateUpdate(payload: JSONObject): NoticeSurfacePatchResult {
         if (payload.has("kind") && payload.opt("kind") != KIND) {
             return patchInvalid("kind must be notice")
+        }
+        if (payload.has("wakeDisplay")) {
+            return patchInvalid("wakeDisplay is show-only")
         }
 
         val title = when (val result = readText(payload, "title", MAX_TITLE_CHARS)) {
@@ -313,6 +325,8 @@ object NoticeSurfaceContract {
             content.footer?.let { put("footer", it) }
             // Omitted when false so a non-interactive payload stays minimal.
             if (content.interactive) put("interactive", true)
+            // Waking is opt-in and show-only; old payloads stay byte-for-byte minimal.
+            if (content.wakeDisplay) put("wakeDisplay", true)
             // Omitted when empty for the same reason, and for one more: a notice
             // that offers no choice must put nothing new on the wire, so every
             // banner written before this feature existed still serialises byte

@@ -210,8 +210,8 @@ object GlassesHub {
         if (PhoneBatteryController.handleEnvelope(envelope)) return
         appContext?.let { context ->
             if (PinController.handlePinEnvelope(envelope)) return
-            if (NoticeController.handleNoticeEnvelope(envelope)) return
-            if (ActivityController.handleActivityEnvelope(envelope)) return
+            if (NoticeController.handleNoticeEnvelope(context, envelope)) return
+            if (ActivityController.handleActivityEnvelope(context, envelope)) return
             if (SurfaceController.handleSurfaceEnvelope(context, envelope)) return
         }
         if (envelope.path == BusPaths.LAUNCHER_LIST) {

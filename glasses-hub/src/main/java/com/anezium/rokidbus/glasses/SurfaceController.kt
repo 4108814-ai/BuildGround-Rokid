@@ -5,7 +5,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
-import android.os.PowerManager
 import android.os.SystemClock
 import android.view.KeyEvent
 import com.anezium.rokidbus.shared.BusEnvelope
@@ -255,7 +254,7 @@ object SurfaceController {
             coordinated?.recycleSafely()
             recycleActiveImageUnless(surface.imageBitmap ?: coordinated)
             cancelBackFailsafeOnMain(surface.surfaceId)
-            wakeScreen(context)
+            DisplayWakePolicy.requestWake(context, DisplayWakeKind.SURFACE, requested = true)
             deactivateReplacedSurface(surface.surfaceId)
             prepareRingInputForSurface(surface.surfaceId)
             active = surface
@@ -288,7 +287,7 @@ object SurfaceController {
             if (surface.isMedia) {
                 recycleActiveImageUnless(surface.imageBitmap)
                 cancelBackFailsafeOnMain(surface.surfaceId)
-                wakeScreen(context)
+                DisplayWakePolicy.requestWake(context, DisplayWakeKind.SURFACE, requested = true)
                 deactivateReplacedSurface(surface.surfaceId)
                 prepareRingInputForSurface(surface.surfaceId)
                 active = surface
@@ -329,7 +328,11 @@ object SurfaceController {
                             recycleActiveImageUnless(decoded)
                             val published = target.copy(imageBitmap = decoded)
                             cancelBackFailsafeOnMain(target.surfaceId)
-                            wakeScreen(context)
+                            DisplayWakePolicy.requestWake(
+                                context,
+                                DisplayWakeKind.SURFACE,
+                                requested = true,
+                            )
                             prepareRingInputForSurface(target.surfaceId)
                             active = published
                             RingFocusBroadcastCoordinator.setSurfaceActive(
@@ -536,20 +539,6 @@ object SurfaceController {
             SurfaceOverlayRenderer.show(context, surface)
         }
     }
-
-    @Suppress("DEPRECATION")
-    private fun wakeScreen(context: Context) {
-        val power = context.getSystemService(PowerManager::class.java) ?: return
-        if (power.isInteractive) return
-        runCatching {
-            power.newWakeLock(
-                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-                "rokidbus:surface-wake",
-            ).acquire(WAKE_MS)
-        }.onFailure { logError("Surface screen wake failed", it) }
-    }
-
-    private const val WAKE_MS = 3_000L
 
     private fun notifyListeners(surface: NexusSurface?) {
         listeners.forEach { listener ->

@@ -82,6 +82,7 @@ class ActivitySurfaceContractTest {
         assertEquals(listOf("then right", "continue straight"), content.detail)
         assertEquals(listOf(ActivityAction("mute", "pause", "Mute")), content.actions)
         assertEquals(ActivitySurfaceContract.MIN_MAX_DURATION_MS, content.maxDurationMs)
+        assertFalse(content.wakeDisplay)
 
         val canonical = ActivitySurfaceContract.toPayload("maps:activity", content)
         assertEquals("maps:activity", canonical.getString("surfaceId"))
@@ -363,6 +364,29 @@ class ActivitySurfaceContractTest {
             ActivitySurfaceContract.validateUpdate(
                 JSONObject().put("primary", JSONObject.NULL),
             ) is ActivitySurfacePatchResult.Invalid,
+        )
+    }
+
+    @Test
+    fun `wake display is an optional start boolean serialized only when true`() {
+        val requested = ActivitySurfaceContract.validateStart(
+            startPayload().put("wakeDisplay", true),
+        ) as ActivitySurfaceValidationResult.Valid
+        assertTrue(requested.content.wakeDisplay)
+        assertTrue(
+            ActivitySurfaceContract.toPayload("maps:activity", requested.content)
+                .getBoolean("wakeDisplay"),
+        )
+        assertFalse(
+            ActivitySurfaceContract.toUpdatePayload(
+                "maps:activity",
+                requested.content,
+                significant = true,
+            ).has("wakeDisplay"),
+        )
+        assertTrue(
+            ActivitySurfaceContract.validateStart(startPayload().put("wakeDisplay", 1))
+                is ActivitySurfaceValidationResult.Invalid,
         )
     }
 

@@ -107,8 +107,18 @@ two caps end up disagreeing.
 
 ## MUST NOT
 
-- MUST NOT keep the screen on, for any kind, ever. No `FLAG_KEEP_SCREEN_ON`, no
-  lock held past the fixed short duration. Waking is permitted; holding is not.
+- MUST NOT let a **plugin** keep the screen on. No `FLAG_KEEP_SCREEN_ON` granted
+  through a tier, no lock held past the fixed short duration. Waking is
+  permitted; holding is not.
+
+  This governs what a plugin can ask the platform for. It says nothing about the
+  states where the wearer is *already looking at the screen* and the hub keeps it
+  lit on their behalf — an engaged surface, the camera viewfinder, the launcher,
+  the manual pairing flow. Those hold the screen through their own window flags
+  today, correctly, and are outside this plan: a wearer reading a pairing code is
+  not an event interrupting them. **Do not route them through the policy and do
+  not strip their flags.** The pairing hold in particular exists because the
+  screen going dark dismisses the dialog and cancels the pairing mid-flow.
 - MUST NOT wake on `/notice/update`, `/notice/hide`, any `/pin/*`, or a
   non-significant activity update.
 - MUST NOT let a plugin raise, reset, or read the budget. The throttle is logged
@@ -118,7 +128,10 @@ two caps end up disagreeing.
 - MUST NOT change what the wearer sees when a surface is pushed while the screen
   is already on — the surface path keeps its current behaviour and only gains
   the shared counter.
-- MUST NOT acquire the lock anywhere outside `DisplayWakePolicy` once it exists.
+- MUST NOT acquire a **tier** wake lock anywhere outside `DisplayWakePolicy`
+  once it exists. The manual-pairing hold in `GlassesHub` stays where it is and
+  keeps its own lock; it is the one legitimate exception and the reason this
+  bullet says "tier".
 
 ## Acceptance
 

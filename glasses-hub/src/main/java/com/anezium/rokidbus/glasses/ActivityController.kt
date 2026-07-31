@@ -327,6 +327,9 @@ internal class ActivityStateMachine {
 
     fun ownerPluginId(surfaceId: String): String? = residents[surfaceId]?.ownerPluginId
 
+    fun wakeDisplayRequested(surfaceId: String): Boolean =
+        residents[surfaceId]?.content?.wakeDisplay == true
+
     private fun isStale(surfaceId: String, seq: Long): Boolean =
         seq <= globalClearSeq || seq <= (latestSeqBySurface[surfaceId] ?: Long.MIN_VALUE)
 
@@ -422,13 +425,13 @@ internal object ActivityController {
         return { listeners.remove(listener) }
     }
 
-    fun handleActivityEnvelope(envelope: BusEnvelope): Boolean = when (envelope.path) {
+    fun handleActivityEnvelope(context: Context, envelope: BusEnvelope): Boolean = when (envelope.path) {
         BusPaths.ACTIVITY_START -> {
             runOnMain { start(envelope) }
             true
         }
         BusPaths.ACTIVITY_UPDATE -> {
-            runOnMain { update(envelope) }
+            runOnMain { update(context.applicationContext, envelope) }
             true
         }
         BusPaths.ACTIVITY_END -> {
@@ -562,7 +565,7 @@ internal object ActivityController {
         }
     }
 
-    private fun update(envelope: BusEnvelope) {
+    private fun update(context: Context, envelope: BusEnvelope) {
         val payload = envelope.payload
         val validation = ActivitySurfaceContract.validateUpdate(payload)
         if (validation !is ActivitySurfacePatchResult.Valid) {
@@ -582,7 +585,14 @@ internal object ActivityController {
                 nowMs = now,
             )
         ) {
-            is ActivityMutation.Applied -> publishEvent(result, now)
+            is ActivityMutation.Applied -> {
+                DisplayWakePolicy.requestWake(
+                    context,
+                    DisplayWakeKind.ACTIVITY,
+                    requested = result.significant && state.wakeDisplayRequested(result.surfaceId),
+                )
+                publishEvent(result, now)
+            }
             ActivityMutation.DroppedStale ->
                 log("activity update dropped stale id=${identity.first}")
             else -> Unit

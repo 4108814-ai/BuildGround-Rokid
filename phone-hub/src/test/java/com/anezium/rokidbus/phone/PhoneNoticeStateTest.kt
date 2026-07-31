@@ -23,6 +23,23 @@ class PhoneNoticeStateTest {
         assertEquals("relay", notice.ownerPluginId)
         assertEquals(1L, notice.payload.optLong("seq"))
         assertNull(result.replacedOwnerPluginId)
+        assertFalse(notice.content.wakeDisplay)
+        assertFalse(notice.payload.has("wakeDisplay"))
+    }
+
+    @Test
+    fun `relays a requested wake on show and rejects it on update`() {
+        val shown = state.show("relay", showPayload("relay").put("wakeDisplay", true))
+            as PhoneNoticeShowResult.Accepted
+        assertTrue(shown.notice.content.wakeDisplay)
+        assertTrue(shown.notice.payload.getBoolean("wakeDisplay"))
+
+        val rejected = state.update("relay", JSONObject().put("wakeDisplay", false))
+        assertEquals(
+            NoticeSurfaceContract.ERROR_INVALID_NOTICE,
+            (rejected as PhoneNoticeUpdateResult.Rejected).code,
+        )
+        assertTrue(shown.notice.content.wakeDisplay)
     }
 
     @Test

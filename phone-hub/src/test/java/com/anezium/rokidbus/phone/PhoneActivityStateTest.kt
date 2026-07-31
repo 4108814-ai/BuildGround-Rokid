@@ -63,7 +63,32 @@ class PhoneActivityStateTest {
         assertEquals("300 m", accepted.payload.getString("primary"))
         assertEquals("Rue de la Paix", accepted.payload.getString("secondary"))
         assertFalse(accepted.payload.has("significant"))
+        assertFalse(accepted.activity.content.wakeDisplay)
+        assertFalse(accepted.payload.has("wakeDisplay"))
         assertNull(accepted.replaced)
+    }
+
+    @Test
+    fun `start wake request survives canonical updates and reconnect`() {
+        val started = state.start(
+            "maps",
+            startPayload("maps").put("wakeDisplay", true),
+        ) as PhoneActivityStartResult.Accepted
+        assertTrue(started.activity.content.wakeDisplay)
+        assertTrue(started.payload.getBoolean("wakeDisplay"))
+
+        val updated = state.update(
+            "maps",
+            updatePayload("maps").put("significant", true),
+        ) as PhoneActivityUpdateResult.Accepted
+        assertTrue(updated.activity.content.wakeDisplay)
+        assertFalse(updated.payload.has("wakeDisplay"))
+        assertTrue(state.payloadsForResend().single().getBoolean("wakeDisplay"))
+
+        assertRejected(
+            state.start("other", startPayload("other").put("wakeDisplay", "yes")),
+            ActivitySurfaceContract.ERROR_INVALID_ACTIVITY,
+        )
     }
 
     @Test

@@ -626,6 +626,8 @@ data class NexusNoticeImage(
  * answered on [NexusPluginCallbacks.onNoticeAction]. A fourth is refused, not
  * dropped. They do not extend the band's life: a notice with a choice on it
  * still leaves on its own deadline, and Back still dismisses it.
+ * @property wakeDisplay Ask the hub to wake a dark display for this new event.
+ * Subject to one platform-wide wake per five seconds; never keeps it on.
  */
 data class NexusNotice(
     val title: String? = null,
@@ -635,6 +637,7 @@ data class NexusNotice(
     val actions: List<NexusNoticeAction> = emptyList(),
     val ttlMs: Long? = null,
     val image: NexusNoticeImage? = null,
+    val wakeDisplay: Boolean = false,
 ) {
     init {
         require(title == null || title.trim().length <= NoticeSurfaceContract.MAX_TITLE_CHARS)
@@ -656,6 +659,7 @@ data class NexusNotice(
             // banner written before this existed still goes out unchanged.
             if (actions.isNotEmpty()) putActions(actions)
             ttlMs?.let { put("ttlMs", it) }
+            if (wakeDisplay) put("wakeDisplay", true)
             image?.let { metadata ->
                 if (imageBytes != null) putNoticeImage(metadata, imageBytes)
             }
@@ -796,6 +800,9 @@ data class NexusActivityAction(
  * @property maxDurationMs Optional safety deadline, clamped on start to one
  * minute through twelve hours. Null means the activity lasts until ended,
  * evicted, or disconnected.
+ * @property wakeDisplay Allow significant updates in this activity to ask the
+ * hub to wake a dark display. Quiet updates never wake it, and the platform
+ * applies one global wake per five seconds.
  */
 data class NexusActivity(
     val glyph: String,
@@ -806,6 +813,7 @@ data class NexusActivity(
     val detail: List<String> = emptyList(),
     val actions: List<NexusActivityAction> = emptyList(),
     val maxDurationMs: Long? = null,
+    val wakeDisplay: Boolean = false,
 ) {
     init {
         require(GlyphContract.isWellFormedName(glyph))
@@ -846,5 +854,6 @@ data class NexusActivity(
         detail = detail.map(String::trim),
         actions = actions.map(NexusActivityAction::toContract),
         maxDurationMs = maxDurationMs,
+        wakeDisplay = wakeDisplay,
     )
 }

@@ -894,6 +894,12 @@ class BusHubService : Service() {
         if (isNoticePath(envelope.path)) {
             val invalidNotice = !isValidLocalNoticeEnvelope(envelope)
             if (invalidNotice) {
+                if (
+                    envelope.path == BusPaths.NOTICE_UPDATE &&
+                    envelope.payload.has("wakeDisplay")
+                ) {
+                    log("notice update rejected field=wakeDisplay reason=show_only")
+                }
                 recordLocalRoute(
                     envelope,
                     senderUid,

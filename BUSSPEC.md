@@ -443,7 +443,8 @@ Phone to glasses:
   the plugin that owns the slot and only while a band is actually visible,
   otherwise ignored with a log rather than an error — an update racing a
   deadline that fired a frame earlier is ordinary. Updates are always
-  text-only; a binary frame is `INVALID_NOTICE`.
+  text-only; a binary frame is `INVALID_NOTICE`. `wakeDisplay` is show-only;
+  supplying it on an update is also `INVALID_NOTICE` and is logged by the hub.
 
   **The phone relays the owner's validated patch**, stamped with the hub's own
   fields — the wire `surfaceId` `<pluginId>:notice`, `localSurfaceId`,
@@ -502,7 +503,8 @@ for pins.
     {"id": "reply", "glyph": "phone", "label": "Reply"},
     {"id": "later", "glyph": "timer", "label": "Later"}
   ],
-  "ttlMs": 8000
+  "ttlMs": 8000,
+  "wakeDisplay": true
 }
 ```
 
@@ -533,6 +535,8 @@ run long enough to page.
 - Newlines in the body collapse to spaces. The renderer wraps; a plugin does
   not lay the band out by hand.
 - `interactive` optional, default false.
+- `wakeDisplay` optional boolean, default false. It is honored only on
+  `/notice/show` and omitted from normalized payloads when false.
 - `actions` optional and **omitted entirely when empty**. At most three, and a
   fourth is rejected rather than dropped. Every action has nonblank `id`,
   `glyph`, and `label`, with the same rules as an activity's: the glyph name is
@@ -648,8 +652,8 @@ The band arrives and leaves through the shared motion layer (plan 013) rather
 than blinking into place.
 
 The window is never focusable and never touchable, and it never keeps the
-screen on or wakes the display. A notice that arrives on a dark screen is
-missed; that is correct for v1 and matches the pin rule.
+screen on. A show with `wakeDisplay: true` may wake a dark display through the
+global policy below. Updates and hides never wake it.
 
 ### Input claim
 
@@ -780,7 +784,8 @@ A normalized start payload on the phone-to-glasses wire is:
   "detail": ["then right on Av. de l'Opera"],
   "actions": [
     {"id": "mute", "glyph": "pause", "label": "Mute"}
-  ]
+  ],
+  "wakeDisplay": true
 }
 ```
 
@@ -807,6 +812,8 @@ truncated:
   ID or label beyond the nonblank requirement and the three-action limit.
 - `maxDurationMs` is optional on `/activity/start` and is clamped to
   `[60_000, 43_200_000]`. Absence means the activity has no deadline.
+- `wakeDisplay` is an optional boolean on `/activity/start`, default false. It
+  is stored with the activity and omitted when false.
 
 `/activity/update` has patch semantics: a present field replaces its value, an
 absent field keeps the current value, and JSON `null` clears an optional scalar.
@@ -819,7 +826,9 @@ deadline belongs to the start.
 `significant` is an update-only transient boolean and defaults to false. It
 requests attention from the platform policy, not a particular presentation. It
 is not stored as activity state and is not replayed after a camera overlay or a
-reconnect.
+reconnect. When the activity was started with `wakeDisplay: true`, and only
+then, a significant update may also ask the global policy to wake a dark
+display. A non-significant update never wakes it.
 
 The glasses hub drops a stale or duplicate `seq`. The phone hub accepts at most
 four `/activity/update` messages per second per plugin. Start and end are not
@@ -865,7 +874,29 @@ The renderer owns one fixed full-screen transparent,
 `FLAG_NOT_TOUCHABLE | FLAG_NOT_FOCUSABLE` window. Child views move, resize,
 scale, fade, clip, and crossfade inside it. It never animates window layout
 parameters, requests focus, claims touch, keeps the screen on, or wakes the
-display. Activity v1 has no `wakeDisplay` field and no plan-014 glance layer.
+display outside the global wake policy. Activity v1 has no plan-014 glance
+layer.
+
+### Display wake policy
+
+The glasses hub owns one display-wake budget across all plugins and all kinds.
+At most one lock may be acquired in any 5,000 ms window. Surfaces always
+request a wake when published; notice shows and significant activity updates
+request one only through their start/show-time `wakeDisplay` opt-in. Pins,
+notice updates and hides, activity starts and non-significant updates never do.
+
+If the display is already interactive, the request is unnecessary rather than
+throttled: no lock is acquired and the budget is unchanged. An admitted wake
+uses the existing three-second `SCREEN_BRIGHT_WAKE_LOCK` with
+`ACQUIRE_CAUSES_WAKEUP`. The budget is neither visible nor controllable by
+plugins.
+
+Waking is not holding. No plugin can ask the platform to keep the display lit
+through any tier, and no wake outlives its three-second lock. That is a separate
+matter from the screen the hub holds while the wearer is actively looking at it
+— an engaged surface, the camera viewfinder, the launcher, the manual pairing
+flow — which keep their own `FLAG_KEEP_SCREEN_ON` for as long as the wearer is
+there and are not governed by this budget.
 
 ### Capacity, corners, and primary selection
 

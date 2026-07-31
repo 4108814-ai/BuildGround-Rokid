@@ -24,6 +24,7 @@ class NoticeSurfaceContractTest {
         assertEquals("On my way, ten minutes out.", content.body)
         assertEquals("tap to reply", content.footer)
         assertFalse(content.interactive)
+        assertFalse(content.wakeDisplay)
         assertEquals(
             NoticeSurfaceContract.derivedTtlMs(
                 "Marie".length + "On my way, ten minutes out.".length + "tap to reply".length,
@@ -120,6 +121,30 @@ class NoticeSurfaceContractTest {
     }
 
     @Test
+    fun `wake display is optional boolean on show and forbidden on update`() {
+        val requested = NoticeSurfaceContract.validateShow(showPayload().put("wakeDisplay", true))
+            as NoticeSurfaceValidationResult.Valid
+        assertTrue(requested.content.wakeDisplay)
+        assertTrue(
+            NoticeSurfaceContract.toPayload("relay:notice", requested.content)
+                .getBoolean("wakeDisplay"),
+        )
+
+        assertTrue(
+            NoticeSurfaceContract.validateShow(showPayload().put("wakeDisplay", "yes"))
+                is NoticeSurfaceValidationResult.Invalid,
+        )
+        val rejected = NoticeSurfaceContract.validateUpdate(
+            JSONObject().put("wakeDisplay", false),
+        )
+        assertTrue(rejected is NoticeSurfacePatchResult.Invalid)
+        assertEquals(
+            "wakeDisplay is show-only",
+            (rejected as NoticeSurfacePatchResult.Invalid).reason,
+        )
+    }
+
+    @Test
     fun `an update leaves absent fields alone`() {
         val current = NoticeSurfaceContent(
             title = "Marie",
@@ -165,6 +190,7 @@ class NoticeSurfaceContractTest {
         val payload = NoticeSurfaceContract.toPayload("relay:notice", content)
 
         assertFalse(payload.has("interactive"))
+        assertFalse(payload.has("wakeDisplay"))
         assertFalse(payload.has("footer"))
         assertEquals("relay:notice", payload.optString("surfaceId"))
 

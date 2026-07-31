@@ -156,6 +156,22 @@ class NexusActivityTest {
     }
 
     @Test
+    fun `activity serializes wake display on start but never on update`() {
+        val fixture = approvedFixture()
+        val activity = NexusActivity(
+            glyph = "timer",
+            primary = "4 min",
+            wakeDisplay = true,
+        )
+
+        fixture.client.startActivity(activity)
+        fixture.client.updateActivity(activity, significant = true)
+
+        assertTrue(fixture.transport.sends[0].second.getBoolean("wakeDisplay"))
+        assertFalse(fixture.transport.sends[1].second.has("wakeDisplay"))
+    }
+
+    @Test
     fun `indeterminate progress uses its stable string wire value`() {
         val fixture = approvedFixture()
 

@@ -3,6 +3,7 @@ package com.anezium.rokidbus.phone
 import com.anezium.rokidbus.shared.BusEnvelope
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.NoticeSurfaceContract
+import com.anezium.rokidbus.shared.NoticeSurfacePatchResult
 import com.anezium.rokidbus.shared.NoticeSurfaceValidationResult
 
 /**
@@ -17,9 +18,11 @@ internal fun isValidLocalNoticeEnvelope(envelope: BusEnvelope): Boolean {
         BusPaths.NOTICE_SHOW ->
             NoticeSurfaceContract.validateShow(envelope.payload, envelope.binary) is
                 NoticeSurfaceValidationResult.Valid
-        BusPaths.NOTICE_UPDATE,
-        BusPaths.NOTICE_HIDE,
-        -> envelope.binary == null
+        BusPaths.NOTICE_UPDATE ->
+            envelope.binary == null &&
+                NoticeSurfaceContract.validateUpdate(envelope.payload) is
+                NoticeSurfacePatchResult.Valid
+        BusPaths.NOTICE_HIDE -> envelope.binary == null
         else -> false
     }
 }

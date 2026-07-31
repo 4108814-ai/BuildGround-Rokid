@@ -95,6 +95,7 @@ class NexusNoticeActionTest {
             payload.keys().asSequence().toSet(),
         )
         assertFalse(payload.has("actions"))
+        assertFalse(payload.has("wakeDisplay"))
         assertEquals("notice", payload.getString("surfaceId"))
         assertEquals("notice", payload.getString("kind"))
         assertEquals("Marie", payload.getString("title"))
@@ -102,6 +103,17 @@ class NexusNoticeActionTest {
         assertEquals("tap to reply", payload.getString("footer"))
         assertTrue(payload.getBoolean("interactive"))
         assertEquals(8_000L, payload.getLong("ttlMs"))
+    }
+
+    @Test
+    fun `notice serializes wake display only when requested`() {
+        val fixture = approvedFixture()
+
+        fixture.client.showNotice(NexusNotice(title = "Quiet"))
+        fixture.client.showNotice(NexusNotice(title = "Wake", wakeDisplay = true))
+
+        assertFalse(fixture.transport.sends[0].second.has("wakeDisplay"))
+        assertTrue(fixture.transport.sends[1].second.getBoolean("wakeDisplay"))
     }
 
     @Test

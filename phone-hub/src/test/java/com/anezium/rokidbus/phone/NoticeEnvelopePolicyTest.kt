@@ -44,6 +44,16 @@ class NoticeEnvelopePolicyTest {
                 ),
             ),
         )
+        assertFalse(
+            isValidLocalNoticeEnvelope(
+                BusEnvelope(
+                    BusPaths.NOTICE_UPDATE,
+                    payload = JSONObject()
+                        .put("surfaceId", NoticeSurfaceContract.LOCAL_SURFACE_ID)
+                        .put("wakeDisplay", true),
+                ),
+            ),
+        )
     }
 
     private fun jpeg(width: Int, height: Int): ByteArray =
