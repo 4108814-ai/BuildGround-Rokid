@@ -30,6 +30,7 @@ import com.anezium.rokidbus.shared.PhoneHubCapabilities
 import com.anezium.rokidbus.shared.PhoneHubCapabilitiesContract
 import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import com.anezium.rokidbus.shared.PinSurfaceContract
+import com.anezium.rokidbus.shared.SetupStage
 import com.anezium.rokidbus.shared.plugin.PathRules
 import org.json.JSONArray
 import org.json.JSONObject
@@ -75,7 +76,12 @@ object GlassesHub {
     private val wifiRequestExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "RokidNexusWifi").apply { isDaemon = true }
     }
+    private val setupCapabilitiesExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "RokidNexusSetupCapabilities").apply { isDaemon = true }
+    }
+    private val setupCapabilitiesLock = Any()
     private var wifiDisableFuture: ScheduledFuture<*>? = null
+    private var setupCapabilitiesFuture: ScheduledFuture<*>? = null
     private var manualSetupScreenLock: PowerManager.WakeLock? = null
     @Volatile private var launcherEntries: List<LauncherEntry> = emptyList()
     @Volatile private var appContext: Context? = null
@@ -297,13 +303,50 @@ object GlassesHub {
         sendRemote(BusEnvelope(path = BusPaths.SURFACE_INPUT, payload = payload))
 
     fun resendCapabilitiesNow() {
+        synchronized(setupCapabilitiesLock) {
+            setupCapabilitiesFuture?.cancel(false)
+            setupCapabilitiesFuture = null
+        }
         val transportBits = LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP
         if (linkState() and transportBits != 0) announceRendererCapabilities()
+    }
+
+    internal fun onSetupProgressChanged(reportedStage: String?) {
+        val stage = SetupStage.normalize(reportedStage).ifBlank {
+            appContext?.let { context -> SelfArmOnboardingStore.snapshot(context).stage }.orEmpty()
+        }
+        if (SetupStage.isTerminal(stage)) {
+            resendCapabilitiesNow()
+            return
+        }
+        synchronized(setupCapabilitiesLock) {
+            setupCapabilitiesFuture?.cancel(false)
+            setupCapabilitiesFuture = setupCapabilitiesExecutor.schedule(
+                {
+                    synchronized(setupCapabilitiesLock) {
+                        setupCapabilitiesFuture = null
+                    }
+                    val transportBits = LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP
+                    if (linkState() and transportBits != 0) announceRendererCapabilities()
+                },
+                SETUP_CAPABILITIES_DEBOUNCE_MS,
+                TimeUnit.MILLISECONDS,
+            )
+        }
     }
 
     private fun announceRendererCapabilities() {
         val context = appContext ?: return
         val onboarding = SelfArmOnboardingStore.snapshot(context)
+        val onboardingState = SelfArmOnboardingStateMachine.evaluate(onboarding)
+        val setupStage = when (onboardingState.stage) {
+            SelfArmOnboardingState.Stage.COMPLETE -> SetupStage.COMPLETE
+            SelfArmOnboardingState.Stage.FAILED -> SetupStage.FAILED
+            SelfArmOnboardingState.Stage.MANUAL_REQUIRED -> SetupStage.MANUAL_REQUIRED
+            SelfArmOnboardingState.Stage.WAITING_FOR_WIFI -> SetupStage.WAITING_FOR_WIFI
+            SelfArmOnboardingState.Stage.ENABLE_ACCESSIBILITY -> SetupStage.WAITING_FOR_ACCESSIBILITY
+            else -> SetupStage.normalize(onboarding.stage)
+        }
         val capabilities = GlassesHubCapabilitiesContract.create(
             features = BusCapabilityBits.IMAGE_SURFACE or
                 BusCapabilityBits.PIN_SURFACE or
@@ -315,11 +358,19 @@ object GlassesHub {
             activitySurfaceVersion = ActivitySurfaceContract.VERSION,
             maxImageBytes = ImageSurfaceContract.MAX_IMAGE_BYTES,
             versionName = BuildConfig.VERSION_NAME,
-            setupComplete = SelfArmOnboardingStateMachine.evaluate(
-                onboarding,
-            ).stage == SelfArmOnboardingState.Stage.COMPLETE,
+            setupComplete = onboardingState.stage == SelfArmOnboardingState.Stage.COMPLETE,
             setupFailureState = onboarding.failureState,
             setupFailureDiagnostic = onboarding.failureDiagnostic,
+            setupSessionId = onboarding.sessionId,
+            setupStage = setupStage,
+            setupRunning = onboarding.setupRunning,
+            setupRequiresUserAction = SetupStage.requiresUserAction(setupStage),
+            setupSupportCode = GlassesHubCapabilitiesContract.deriveSetupSupportCode(
+                onboarding.sessionId,
+            ),
+            setupCompletionMode = onboarding.completionMode,
+            coreReady = onboarding.coreReady,
+            maintenanceReady = onboarding.maintenanceReady,
         )
         val error = sendRemote(
             BusEnvelope(
@@ -918,6 +969,7 @@ object GlassesHub {
     }
 
     private const val WIFI_DISABLE_GRACE_MS = 40_000L
+    private const val SETUP_CAPABILITIES_DEBOUNCE_MS = 250L
     /** Long enough to read a code and type it on the phone; short enough to never strand the screen. */
     private const val MANUAL_SETUP_SCREEN_TIMEOUT_MS = 5 * 60_000L
     private const val CAMERA_LAUNCHER_ID = "camera"

@@ -259,6 +259,14 @@ class BusHubService : Service() {
     @Volatile private var remoteGlassesSetupComplete = false
     @Volatile private var remoteGlassesSetupFailureState = ""
     @Volatile private var remoteGlassesSetupFailureDiagnostic = ""
+    @Volatile private var remoteGlassesSetupSessionId = ""
+    @Volatile private var remoteGlassesSetupStage = ""
+    @Volatile private var remoteGlassesSetupRunning = false
+    @Volatile private var remoteGlassesSetupRequiresUserAction = false
+    @Volatile private var remoteGlassesSetupSupportCode = ""
+    @Volatile private var remoteGlassesSetupCompletionMode = ""
+    @Volatile private var remoteGlassesCoreReady = false
+    @Volatile private var remoteGlassesMaintenanceReady = false
     @Volatile private var latestGlassesAppRelease: NexusReleaseAsset? = null
     @Volatile private var glassesAppUpdateState: GlassesAppUpdateState = GlassesAppUpdateState.Unknown
     @Volatile private var glassesReleaseCheckedAtMillis = 0L
@@ -514,6 +522,38 @@ class BusHubService : Service() {
                 NexusPhoneState.PREF_GLASSES_SETUP_FAILURE_DIAGNOSTIC,
                 "",
             ).orEmpty()
+            remoteGlassesSetupSessionId = stored.getString(
+                NexusPhoneState.PREF_GLASSES_SETUP_SESSION_ID,
+                "",
+            ).orEmpty()
+            remoteGlassesSetupStage = stored.getString(
+                NexusPhoneState.PREF_GLASSES_SETUP_STAGE,
+                "",
+            ).orEmpty()
+            remoteGlassesSetupRunning = stored.getBoolean(
+                NexusPhoneState.PREF_GLASSES_SETUP_RUNNING,
+                false,
+            )
+            remoteGlassesSetupRequiresUserAction = stored.getBoolean(
+                NexusPhoneState.PREF_GLASSES_SETUP_REQUIRES_USER_ACTION,
+                false,
+            )
+            remoteGlassesSetupSupportCode = stored.getString(
+                NexusPhoneState.PREF_GLASSES_SETUP_SUPPORT_CODE,
+                "",
+            ).orEmpty()
+            remoteGlassesSetupCompletionMode = stored.getString(
+                NexusPhoneState.PREF_GLASSES_SETUP_COMPLETION_MODE,
+                "",
+            ).orEmpty()
+            remoteGlassesCoreReady = stored.getBoolean(
+                NexusPhoneState.PREF_GLASSES_CORE_READY,
+                false,
+            )
+            remoteGlassesMaintenanceReady = stored.getBoolean(
+                NexusPhoneState.PREF_GLASSES_MAINTENANCE_READY,
+                false,
+            )
         }
         developerModeStore = DeveloperModeStore(applicationContext)
         developerModeJournalSubscription = bindDeveloperModeToJournal(developerModeStore, pluginBusJournal)
@@ -3641,18 +3681,42 @@ class BusHubService : Service() {
         setupComplete: Boolean,
         setupFailureState: String = remoteGlassesSetupFailureState,
         setupFailureDiagnostic: String = remoteGlassesSetupFailureDiagnostic,
+        setupSessionId: String = remoteGlassesSetupSessionId,
+        setupStage: String = remoteGlassesSetupStage,
+        setupRunning: Boolean = remoteGlassesSetupRunning,
+        setupRequiresUserAction: Boolean = remoteGlassesSetupRequiresUserAction,
+        setupSupportCode: String = remoteGlassesSetupSupportCode,
+        setupCompletionMode: String = remoteGlassesSetupCompletionMode,
+        coreReady: Boolean = remoteGlassesCoreReady,
+        maintenanceReady: Boolean = remoteGlassesMaintenanceReady,
     ) {
         val stateChanged = synchronized(glassesAppReleaseLock) {
             val versionChanged = remoteGlassesVersionName != versionName
             val setupChanged = remoteGlassesSetupComplete != setupComplete
             val failureChanged = remoteGlassesSetupFailureState != setupFailureState ||
                 remoteGlassesSetupFailureDiagnostic != setupFailureDiagnostic
+            val progressChanged = remoteGlassesSetupSessionId != setupSessionId ||
+                remoteGlassesSetupStage != setupStage ||
+                remoteGlassesSetupRunning != setupRunning ||
+                remoteGlassesSetupRequiresUserAction != setupRequiresUserAction ||
+                remoteGlassesSetupSupportCode != setupSupportCode ||
+                remoteGlassesSetupCompletionMode != setupCompletionMode ||
+                remoteGlassesCoreReady != coreReady ||
+                remoteGlassesMaintenanceReady != maintenanceReady
             remoteGlassesVersionName = versionName
             remoteGlassesSetupComplete = setupComplete
             remoteGlassesSetupFailureState = setupFailureState
             remoteGlassesSetupFailureDiagnostic = setupFailureDiagnostic
+            remoteGlassesSetupSessionId = setupSessionId
+            remoteGlassesSetupStage = setupStage
+            remoteGlassesSetupRunning = setupRunning
+            remoteGlassesSetupRequiresUserAction = setupRequiresUserAction
+            remoteGlassesSetupSupportCode = setupSupportCode
+            remoteGlassesSetupCompletionMode = setupCompletionMode
+            remoteGlassesCoreReady = coreReady
+            remoteGlassesMaintenanceReady = maintenanceReady
             val updateStateChanged = recomputeGlassesAppUpdateStateLocked()
-            versionChanged || setupChanged || failureChanged || updateStateChanged
+            versionChanged || setupChanged || failureChanged || progressChanged || updateStateChanged
         }
         if (stateChanged) {
             broadcastGlassesAppState(glassesAppInstallState)
@@ -3778,6 +3842,29 @@ class BusHubService : Service() {
             .putExtra(
                 NexusPhoneState.EXTRA_GLASSES_SETUP_FAILURE_DIAGNOSTIC,
                 remoteGlassesSetupFailureDiagnostic,
+            )
+            .putExtra(
+                NexusPhoneState.EXTRA_GLASSES_SETUP_SESSION_ID,
+                remoteGlassesSetupSessionId,
+            )
+            .putExtra(NexusPhoneState.EXTRA_GLASSES_SETUP_STAGE, remoteGlassesSetupStage)
+            .putExtra(NexusPhoneState.EXTRA_GLASSES_SETUP_RUNNING, remoteGlassesSetupRunning)
+            .putExtra(
+                NexusPhoneState.EXTRA_GLASSES_SETUP_REQUIRES_USER_ACTION,
+                remoteGlassesSetupRequiresUserAction,
+            )
+            .putExtra(
+                NexusPhoneState.EXTRA_GLASSES_SETUP_SUPPORT_CODE,
+                remoteGlassesSetupSupportCode,
+            )
+            .putExtra(
+                NexusPhoneState.EXTRA_GLASSES_SETUP_COMPLETION_MODE,
+                remoteGlassesSetupCompletionMode,
+            )
+            .putExtra(NexusPhoneState.EXTRA_GLASSES_CORE_READY, remoteGlassesCoreReady)
+            .putExtra(
+                NexusPhoneState.EXTRA_GLASSES_MAINTENANCE_READY,
+                remoteGlassesMaintenanceReady,
             )
             .putExtra(
                 NexusPhoneState.EXTRA_GLASSES_APP_UPDATE_STATE,
@@ -4274,6 +4361,14 @@ class BusHubService : Service() {
             advertised.setupComplete,
             advertised.setupFailureState,
             advertised.setupFailureDiagnostic,
+            advertised.setupSessionId,
+            GlassesHubCapabilitiesContract.effectiveStage(advertised),
+            advertised.setupRunning,
+            advertised.setupRequiresUserAction,
+            advertised.setupSupportCode,
+            advertised.setupCompletionMode,
+            advertised.coreReady,
+            advertised.maintenanceReady,
         )
         if (::manualPairingEngine.isInitialized) {
             manualPairingEngine.onGlassesSetupReported(advertised.setupComplete)

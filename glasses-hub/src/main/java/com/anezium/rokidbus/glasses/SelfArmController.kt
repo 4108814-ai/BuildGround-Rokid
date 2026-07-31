@@ -22,31 +22,48 @@ internal object SelfArmController {
         context: Context,
         reason: String,
         onComplete: ((SelfArmWatchdogEnsureResult) -> Unit)? = null,
-    ): Boolean = runAsync(context, reason) { appContext ->
+    ): Boolean = runAsync(context, reason) { appContext, sessionId ->
         val result = runCatching {
-            runSelfArm(appContext, reason, restartWatchdog = true)
+            runSelfArm(appContext, reason, restartWatchdog = true, sessionId = sessionId)
         }.onFailure {
             logError("Self-arm failed reason=$reason", it)
         }.getOrDefault(SelfArmWatchdogEnsureResult.FAILED)
-        onComplete?.invoke(result)
+        if (sessionId == null ||
+            SelfArmOnboardingStore.isCurrentSession(appContext, sessionId)
+        ) {
+            onComplete?.invoke(result)
+        }
     }
 
     internal fun runWhenIdle(callback: () -> Unit) {
+        val context = SelfArmControllerContext.context
+        val sessionId = context?.let(SelfArmOnboardingStore::currentActiveSessionId).orEmpty()
+        val guardedCallback = {
+            if (sessionId.isBlank() ||
+                context == null ||
+                SelfArmOnboardingStore.isCurrentSession(context, sessionId)
+            ) {
+                callback()
+            }
+        }
         val runNow = synchronized(idleCallbacksLock) {
             if (operationRunning.get()) {
-                idleCallbacks += callback
+                idleCallbacks += guardedCallback
                 false
             } else {
                 true
             }
         }
-        if (runNow) callback()
+        if (runNow) guardedCallback()
     }
 
     fun repairNow(context: Context, reason: String) {
         val appContext = context.applicationContext
+        SelfArmControllerContext.context = appContext
         if (!accessibilityRepairNeeded(appContext)) return
-        runAsync(appContext, reason) { runSelfArm(it, reason, restartWatchdog = false) }
+        runAsync(appContext, reason) { runContext, sessionId ->
+            runSelfArm(runContext, reason, restartWatchdog = false, sessionId = sessionId)
+        }
     }
 
     fun setWifiEnabled(context: Context, enabled: Boolean): Boolean {
@@ -101,17 +118,25 @@ internal object SelfArmController {
     }
 
     internal fun stopWatchdog(context: Context, reason: String, onComplete: ((Boolean) -> Unit)? = null) {
-        runAsync(context, reason, onComplete = null) { appContext ->
+        runAsync(context, reason, onComplete = null) { appContext, sessionId ->
             val key = AdbKeyStore.loadExisting(appContext)
             if (key == null || !adbLoopbackListening()) {
                 log("Self-arm stop no-op reason=$reason: ADB key or loopback unavailable")
-                onComplete?.invoke(false)
+                if (sessionId == null ||
+                    SelfArmOnboardingStore.isCurrentSession(appContext, sessionId)
+                ) {
+                    onComplete?.invoke(false)
+                }
                 return@runAsync
             }
             val result = AdbLoopbackClient(port = ADB_PORT).runShell(buildStopCommand(), key)
             val stopped = result.authenticated && result.commandSent && stopCommandSucceeded(result.output)
             log("Self-arm stop reason=$reason connected=${result.connected} auth=${result.authenticated} stopped=$stopped")
-            onComplete?.invoke(stopped)
+            if (sessionId == null ||
+                SelfArmOnboardingStore.isCurrentSession(appContext, sessionId)
+            ) {
+                onComplete?.invoke(stopped)
+            }
         }
     }
 
@@ -162,9 +187,12 @@ internal object SelfArmController {
         context: Context,
         reason: String,
         onComplete: (() -> Unit)? = null,
-        operation: (Context) -> Unit,
+        operation: (Context, String?) -> Unit,
     ): Boolean {
         val appContext = context.applicationContext
+        SelfArmControllerContext.context = appContext
+        val sessionId = SelfArmOnboardingStore.currentActiveSessionId(appContext)
+            .takeIf(String::isNotBlank)
         val accepted = synchronized(idleCallbacksLock) {
             operationRunning.compareAndSet(false, true)
         }
@@ -175,17 +203,21 @@ internal object SelfArmController {
         }
         Thread {
             try {
-                runCatching { operation(appContext) }
+                runCatching { operation(appContext, sessionId) }
                     .onFailure { logError("Self-arm failed reason=$reason", it) }
             } finally {
                 val callbacks = synchronized(idleCallbacksLock) {
                     operationRunning.set(false)
                     idleCallbacks.toList().also { idleCallbacks.clear() }
                 }
-                onComplete?.invoke()
-                callbacks.forEach { callback ->
-                    runCatching { callback() }
-                        .onFailure { logError("Self-arm idle callback failed", it) }
+                if (sessionId == null ||
+                    SelfArmOnboardingStore.isCurrentSession(appContext, sessionId)
+                ) {
+                    onComplete?.invoke()
+                    callbacks.forEach { callback ->
+                        runCatching { callback() }
+                            .onFailure { logError("Self-arm idle callback failed", it) }
+                    }
                 }
             }
         }.apply {
@@ -200,6 +232,7 @@ internal object SelfArmController {
         context: Context,
         reason: String,
         restartWatchdog: Boolean,
+        sessionId: String?,
     ): SelfArmWatchdogEnsureResult {
         val scriptFile = ensureInternalWatchdog(context)
         val bridgeFile = ensureInternalCommandBridge(context)
@@ -230,6 +263,7 @@ internal object SelfArmController {
                     watchdogScript = watchdogScript,
                     bridgeScript = bridgeScript,
                     restartWatchdog = restartWatchdog,
+                    sessionId = sessionId,
                 )
             }
         }
@@ -244,7 +278,11 @@ internal object SelfArmController {
             // never will until it pairs: those are shell processes that a privileged session has to
             // start, and every reboot takes them with it. Ask for that pairing instead of logging
             // the same no-op forever.
-            if (!bootstrapComplete) SelfArmLocalAdbBootstrapper.requestSelfPairing(context)
+            if (!bootstrapComplete &&
+                (sessionId == null || SelfArmOnboardingStore.isCurrentSession(context, sessionId))
+            ) {
+                SelfArmLocalAdbBootstrapper.requestSelfPairing(context)
+            }
             return if (tlsSessionUnreachable) {
                 SelfArmWatchdogEnsureResult.SESSION_UNREACHABLE
             } else {
@@ -261,6 +299,7 @@ internal object SelfArmController {
             watchdogScript = watchdogScript,
             bridgeScript = bridgeScript,
             restartWatchdog = restartWatchdog,
+            sessionId = sessionId,
         )
     }
 
@@ -272,6 +311,7 @@ internal object SelfArmController {
         watchdogScript: String,
         bridgeScript: String,
         restartWatchdog: Boolean,
+        sessionId: String?,
     ): SelfArmWatchdogEnsureResult = runCatching {
         val result = SelfArmLocalAdbBootstrapper.runSequence(
             context = context,
@@ -280,7 +320,7 @@ internal object SelfArmController {
             bridgeScript = bridgeScript,
             restartWatchdog = restartWatchdog,
         )
-        SelfArmOnboardingStore.recordNetworkPosture(context, result.posture)
+        SelfArmOnboardingStore.recordNetworkPosture(context, result.posture, sessionId)
         log(
             "Self-arm ready reason=$reason directRepair=$repairedDirectly " +
                 "port=${result.port} restartedAdbd=${result.restartedAdbd}",
@@ -420,6 +460,10 @@ internal object SelfArmController {
             }
             .toMap()
     }
+}
+
+private object SelfArmControllerContext {
+    @Volatile var context: Context? = null
 }
 
 internal data class WifiControlSeam(

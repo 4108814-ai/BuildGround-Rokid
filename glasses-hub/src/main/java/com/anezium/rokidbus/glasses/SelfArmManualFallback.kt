@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
+import com.anezium.rokidbus.shared.SetupCompletionMode
 import java.io.File
 import java.io.IOException
 import java.util.UUID
@@ -141,34 +142,63 @@ internal object SelfArmManualArmAssets {
 
 /** Converts a trusted phone arm result into a locally verified setup-complete announcement. */
 internal object SelfArmPhoneArmConfirmation {
-    fun confirm(context: Context) {
+    private val workerLock = Any()
+    private var worker: Thread? = null
+
+    fun confirm(
+        context: Context,
+        sessionId: String = SelfArmOnboardingStore.currentSessionId(context),
+    ) {
         val appContext = context.applicationContext
-        Thread {
+        if (!SelfArmOnboardingStore.isCurrentSession(appContext, sessionId)) return
+        cancel()
+        val confirmationWorker = Thread {
             val result = runCatching {
+                if (!SelfArmOnboardingStore.isCurrentSession(appContext, sessionId)) return@runCatching
+                SelfArmOnboardingStore.heartbeat(appContext, sessionId)
                 val before = SelfArmOnboardingStore.snapshot(appContext)
                 if (!before.secureSettingsGranted || !before.accessibilityEnabled) {
                     throw IOException("Manual arm grant or accessibility verification failed")
                 }
                 val posture = SelfArmNetworkPostureVerifier.awaitSafe(appContext)
-                SelfArmLocalAdbBootstrapper.recordBootstrapComplete(appContext)
-                SelfArmOnboardingStore.recordNetworkPosture(appContext, posture)
+                if (!SelfArmOnboardingStore.isCurrentSession(appContext, sessionId)) return@runCatching
+                SelfArmOnboardingStore.heartbeat(appContext, sessionId)
+                SelfArmLocalAdbBootstrapper.recordBootstrapComplete(appContext, sessionId)
+                SelfArmOnboardingStore.recordNetworkPosture(appContext, posture, sessionId)
+                if (!SelfArmOnboardingStore.isCurrentSession(appContext, sessionId)) return@runCatching
                 SelfArmOnboardingStore.finish(
                     appContext,
+                    sessionId = sessionId,
                     setupState = "wireless_bootstrap_complete",
                     success = true,
+                    completionMode = SetupCompletionMode.PHONE_MANUAL,
                 )
-                GlassesHub.resendCapabilitiesNow()
             }
             result.onFailure { failure ->
+                if (!SelfArmOnboardingStore.isCurrentSession(appContext, sessionId)) return@onFailure
                 val detail = sanitizeSupportDiagnostic(causeChain(failure))
                 log("Phone-driven self-arm confirmation failed: $detail")
-                SelfArmOnboardingStore.reportProgress(appContext, "manual_pairing_verification_failed")
-                GlassesHub.resendCapabilitiesNow()
+                SelfArmOnboardingStore.reportProgress(
+                    appContext,
+                    sessionId,
+                    "manual_pairing_verification_failed",
+                )
+            }
+            synchronized(workerLock) {
+                if (worker === Thread.currentThread()) worker = null
             }
         }.apply {
             name = "RokidNexusManualArmConfirmation"
             isDaemon = true
-            start()
+        }
+        synchronized(workerLock) { worker = confirmationWorker }
+        confirmationWorker.start()
+    }
+
+    fun cancel() {
+        synchronized(workerLock) {
+            worker?.takeIf { it !== Thread.currentThread() }?.interrupt()
+            worker = null
         }
     }
 

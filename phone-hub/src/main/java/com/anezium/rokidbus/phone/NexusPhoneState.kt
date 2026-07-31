@@ -13,6 +13,14 @@ internal object NexusPhoneState {
     const val PREF_GLASSES_SETUP_COMPLETE = "glasses_setup_complete"
     const val PREF_GLASSES_SETUP_FAILURE_STATE = "glasses_setup_failure_state"
     const val PREF_GLASSES_SETUP_FAILURE_DIAGNOSTIC = "glasses_setup_failure_diagnostic"
+    const val PREF_GLASSES_SETUP_SESSION_ID = "glasses_setup_session_id"
+    const val PREF_GLASSES_SETUP_STAGE = "glasses_setup_stage"
+    const val PREF_GLASSES_SETUP_RUNNING = "glasses_setup_running"
+    const val PREF_GLASSES_SETUP_REQUIRES_USER_ACTION = "glasses_setup_requires_user_action"
+    const val PREF_GLASSES_SETUP_SUPPORT_CODE = "glasses_setup_support_code"
+    const val PREF_GLASSES_SETUP_COMPLETION_MODE = "glasses_setup_completion_mode"
+    const val PREF_GLASSES_CORE_READY = "glasses_core_ready"
+    const val PREF_GLASSES_MAINTENANCE_READY = "glasses_maintenance_ready"
     const val PREF_INSTALLED_GLASSES_VERSION_NAME = "installed_glasses_version_name"
     const val EXTRA_GLASSES_APP_STATE = "glasses_app_state"
     const val EXTRA_GLASSES_APP_DOWNLOADED = "glasses_app_downloaded"
@@ -25,6 +33,14 @@ internal object NexusPhoneState {
     const val EXTRA_GLASSES_SETUP_COMPLETE = "glasses_setup_complete"
     const val EXTRA_GLASSES_SETUP_FAILURE_STATE = "glasses_setup_failure_state"
     const val EXTRA_GLASSES_SETUP_FAILURE_DIAGNOSTIC = "glasses_setup_failure_diagnostic"
+    const val EXTRA_GLASSES_SETUP_SESSION_ID = "glasses_setup_session_id"
+    const val EXTRA_GLASSES_SETUP_STAGE = "glasses_setup_stage"
+    const val EXTRA_GLASSES_SETUP_RUNNING = "glasses_setup_running"
+    const val EXTRA_GLASSES_SETUP_REQUIRES_USER_ACTION = "glasses_setup_requires_user_action"
+    const val EXTRA_GLASSES_SETUP_SUPPORT_CODE = "glasses_setup_support_code"
+    const val EXTRA_GLASSES_SETUP_COMPLETION_MODE = "glasses_setup_completion_mode"
+    const val EXTRA_GLASSES_CORE_READY = "glasses_core_ready"
+    const val EXTRA_GLASSES_MAINTENANCE_READY = "glasses_maintenance_ready"
 
     @Volatile var updateAvailable: Boolean = false
         private set
@@ -50,6 +66,22 @@ internal object NexusPhoneState {
         private set
     @Volatile var glassesSetupFailureDiagnostic: String = ""
         private set
+    @Volatile var glassesSetupSessionId: String = ""
+        private set
+    @Volatile var glassesSetupStage: String = ""
+        private set
+    @Volatile var glassesSetupRunning: Boolean = false
+        private set
+    @Volatile var glassesSetupRequiresUserAction: Boolean = false
+        private set
+    @Volatile var glassesSetupSupportCode: String = ""
+        private set
+    @Volatile var glassesSetupCompletionMode: String = ""
+        private set
+    @Volatile var glassesCoreReady: Boolean = false
+        private set
+    @Volatile var glassesMaintenanceReady: Boolean = false
+        private set
 
     @Volatile private var appContext: Context? = null
     private val listeners = CopyOnWriteArraySet<() -> Unit>()
@@ -68,6 +100,23 @@ internal object NexusPhoneState {
             ).orEmpty()
             glassesSetupFailureDiagnostic = ManualPairingSupportDiagnostic.sanitize(
                 preferences.getString(PREF_GLASSES_SETUP_FAILURE_DIAGNOSTIC, "").orEmpty(),
+            )
+            glassesSetupSessionId = preferences.getString(PREF_GLASSES_SETUP_SESSION_ID, "").orEmpty()
+            glassesSetupStage = preferences.getString(PREF_GLASSES_SETUP_STAGE, "").orEmpty()
+            glassesSetupRunning = preferences.getBoolean(PREF_GLASSES_SETUP_RUNNING, false)
+            glassesSetupRequiresUserAction = preferences.getBoolean(
+                PREF_GLASSES_SETUP_REQUIRES_USER_ACTION,
+                false,
+            )
+            glassesSetupSupportCode = preferences.getString(PREF_GLASSES_SETUP_SUPPORT_CODE, "").orEmpty()
+            glassesSetupCompletionMode = preferences.getString(
+                PREF_GLASSES_SETUP_COMPLETION_MODE,
+                "",
+            ).orEmpty()
+            glassesCoreReady = preferences.getBoolean(PREF_GLASSES_CORE_READY, false)
+            glassesMaintenanceReady = preferences.getBoolean(
+                PREF_GLASSES_MAINTENANCE_READY,
+                false,
             )
             installedGlassesVersionName = preferences.getString(PREF_INSTALLED_GLASSES_VERSION_NAME, null)
             appContext = applicationContext
@@ -148,6 +197,49 @@ internal object NexusPhoneState {
         notifyListeners()
     }
 
+    fun setGlassesSetupProgress(
+        sessionId: String,
+        stage: String,
+        running: Boolean,
+        requiresUserAction: Boolean,
+        supportCode: String,
+        completionMode: String,
+        coreReady: Boolean,
+        maintenanceReady: Boolean,
+    ) {
+        if (glassesSetupSessionId == sessionId &&
+            glassesSetupStage == stage &&
+            glassesSetupRunning == running &&
+            glassesSetupRequiresUserAction == requiresUserAction &&
+            glassesSetupSupportCode == supportCode &&
+            glassesSetupCompletionMode == completionMode &&
+            glassesCoreReady == coreReady &&
+            glassesMaintenanceReady == maintenanceReady
+        ) {
+            return
+        }
+        glassesSetupSessionId = sessionId
+        glassesSetupStage = stage
+        glassesSetupRunning = running
+        glassesSetupRequiresUserAction = requiresUserAction
+        glassesSetupSupportCode = supportCode
+        glassesSetupCompletionMode = completionMode
+        glassesCoreReady = coreReady
+        glassesMaintenanceReady = maintenanceReady
+        appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            ?.edit()
+            ?.putString(PREF_GLASSES_SETUP_SESSION_ID, sessionId)
+            ?.putString(PREF_GLASSES_SETUP_STAGE, stage)
+            ?.putBoolean(PREF_GLASSES_SETUP_RUNNING, running)
+            ?.putBoolean(PREF_GLASSES_SETUP_REQUIRES_USER_ACTION, requiresUserAction)
+            ?.putString(PREF_GLASSES_SETUP_SUPPORT_CODE, supportCode)
+            ?.putString(PREF_GLASSES_SETUP_COMPLETION_MODE, completionMode)
+            ?.putBoolean(PREF_GLASSES_CORE_READY, coreReady)
+            ?.putBoolean(PREF_GLASSES_MAINTENANCE_READY, maintenanceReady)
+            ?.apply()
+        notifyListeners()
+    }
+
     fun updateGlassesAppInstallState(intent: Intent): Boolean {
         var updated = false
         if (intent.hasExtra(EXTRA_GLASSES_APP_VERSION_NAME)) {
@@ -164,6 +256,35 @@ internal object NexusPhoneState {
             setGlassesSetupFailure(
                 intent.getStringExtra(EXTRA_GLASSES_SETUP_FAILURE_STATE).orEmpty(),
                 intent.getStringExtra(EXTRA_GLASSES_SETUP_FAILURE_DIAGNOSTIC).orEmpty(),
+            )
+            updated = true
+        }
+        if (intent.hasExtra(EXTRA_GLASSES_SETUP_SESSION_ID) ||
+            intent.hasExtra(EXTRA_GLASSES_SETUP_STAGE) ||
+            intent.hasExtra(EXTRA_GLASSES_SETUP_RUNNING) ||
+            intent.hasExtra(EXTRA_GLASSES_SETUP_REQUIRES_USER_ACTION) ||
+            intent.hasExtra(EXTRA_GLASSES_SETUP_SUPPORT_CODE) ||
+            intent.hasExtra(EXTRA_GLASSES_SETUP_COMPLETION_MODE) ||
+            intent.hasExtra(EXTRA_GLASSES_CORE_READY) ||
+            intent.hasExtra(EXTRA_GLASSES_MAINTENANCE_READY)
+        ) {
+            setGlassesSetupProgress(
+                sessionId = intent.getStringExtra(EXTRA_GLASSES_SETUP_SESSION_ID).orEmpty(),
+                stage = intent.getStringExtra(EXTRA_GLASSES_SETUP_STAGE).orEmpty(),
+                running = intent.getBooleanExtra(EXTRA_GLASSES_SETUP_RUNNING, false),
+                requiresUserAction = intent.getBooleanExtra(
+                    EXTRA_GLASSES_SETUP_REQUIRES_USER_ACTION,
+                    false,
+                ),
+                supportCode = intent.getStringExtra(EXTRA_GLASSES_SETUP_SUPPORT_CODE).orEmpty(),
+                completionMode = intent.getStringExtra(
+                    EXTRA_GLASSES_SETUP_COMPLETION_MODE,
+                ).orEmpty(),
+                coreReady = intent.getBooleanExtra(EXTRA_GLASSES_CORE_READY, false),
+                maintenanceReady = intent.getBooleanExtra(
+                    EXTRA_GLASSES_MAINTENANCE_READY,
+                    false,
+                ),
             )
             updated = true
         }

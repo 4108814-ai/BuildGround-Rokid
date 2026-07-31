@@ -1,6 +1,9 @@
 package com.anezium.rokidbus.glasses
 
+import com.anezium.rokidbus.shared.SetupStage
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SelfArmOnboardingStateMachineTest {
@@ -99,6 +102,53 @@ class SelfArmOnboardingStateMachineTest {
     }
 
     @Test
+    fun waitingForWifiAndManualFallbackAreFirstClassOutcomes() {
+        val waitingForWifi = evaluate(
+            accessibilityEnabled = true,
+            stage = SetupStage.WAITING_FOR_WIFI,
+            progressState = "waiting_for_wifi_network",
+        )
+        val manualRequired = evaluate(
+            accessibilityEnabled = true,
+            stage = SetupStage.MANUAL_REQUIRED,
+            failureState = "",
+            progressState = "wireless_debugging_manual_step_needed",
+        )
+
+        assertEquals(SelfArmOnboardingState.Stage.WAITING_FOR_WIFI, waitingForWifi.stage)
+        assertEquals(SelfArmOnboardingState.Action.OPEN_WIFI_PANEL, waitingForWifi.action)
+        assertEquals(SelfArmOnboardingState.Stage.MANUAL_REQUIRED, manualRequired.stage)
+        assertEquals(SelfArmOnboardingState.Action.OPEN_MANUAL_FALLBACK, manualRequired.action)
+    }
+
+    @Test
+    fun expiredLeaseProducesRetryableFailure() {
+        val state = evaluate(
+            accessibilityEnabled = true,
+            setupRunning = false,
+            leaseValid = false,
+            failureState = SelfArmOnboardingStore.LEASE_EXPIRED_FAILURE,
+        )
+
+        assertEquals(SelfArmOnboardingState.Stage.FAILED, state.stage)
+        assertEquals(SelfArmOnboardingState.Action.RETRY_WIRELESS, state.action)
+        assertEquals(SelfArmOnboardingStore.LEASE_EXPIRED_FAILURE, state.detail)
+    }
+
+    @Test
+    fun leasePolicyExpiresAtTimeoutBoundary() {
+        assertTrue(SelfArmSessionPolicy.leaseValid(44_999L, 1L, 45_000L))
+        assertFalse(SelfArmSessionPolicy.leaseValid(45_001L, 1L, 45_000L))
+    }
+
+    @Test
+    fun staleSessionPolicyRejectsLateGenerationCallbacks() {
+        assertTrue(SelfArmSessionPolicy.accepts("generation-n", true, "generation-n"))
+        assertFalse(SelfArmSessionPolicy.accepts("generation-n-plus-one", true, "generation-n"))
+        assertFalse(SelfArmSessionPolicy.accepts("generation-n", false, "generation-n"))
+    }
+
+    @Test
     fun partialGrantCannotHideRunningOrFailedSecureBootstrap() {
         val running = evaluate(
             accessibilityEnabled = true,
@@ -182,6 +232,8 @@ class SelfArmOnboardingStateMachineTest {
         failureState: String = "",
         failureDiagnostic: String = "",
         progressState: String = "",
+        stage: String = SetupStage.UNKNOWN,
+        leaseValid: Boolean = true,
     ): SelfArmOnboardingState = SelfArmOnboardingStateMachine.evaluate(
         SelfArmOnboardingSnapshot(
             wirelessDebuggingSupported = wirelessDebuggingSupported,
@@ -193,6 +245,8 @@ class SelfArmOnboardingStateMachineTest {
             failureState = failureState,
             failureDiagnostic = failureDiagnostic,
             progressState = progressState,
+            stage = stage,
+            leaseValid = leaseValid,
         ),
     )
 }

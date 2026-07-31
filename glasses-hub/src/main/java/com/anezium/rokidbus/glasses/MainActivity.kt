@@ -87,6 +87,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         SelfArmOnboardingStore.refreshNetworkPosture(applicationContext)
+        RokidBusAccessibilityService.resumeSetupSessionIfNeeded(applicationContext)
         renderScreen()
     }
 
@@ -300,7 +301,10 @@ class MainActivity : Activity() {
                     humanSetupState(onboardingState.detail)
                 onboardingActionView.text = "WORKING…"
             }
-            SelfArmOnboardingState.Stage.FAILED -> {
+            SelfArmOnboardingState.Stage.WAITING_FOR_WIFI,
+            SelfArmOnboardingState.Stage.MANUAL_REQUIRED,
+            SelfArmOnboardingState.Stage.FAILED,
+            -> {
                 onboardingStepView.text = "SETUP HIT A SNAG"
                 onboardingTitleView.text = "Let’s try again"
                 onboardingBodyView.text =
@@ -412,6 +416,7 @@ class MainActivity : Activity() {
     private fun performOnboardingAction() {
         when (onboardingState.action) {
             SelfArmOnboardingState.Action.OPEN_ACCESSIBILITY -> {
+                val sessionId = SelfArmOnboardingStore.beginSession(applicationContext)
                 SelfArmOnboardingStore.markAwaitingAccessibility(applicationContext)
                 val settings = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                     .setPackage("com.android.settings")
@@ -419,19 +424,21 @@ class MainActivity : Activity() {
                     runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }.isSuccess
                 if (!opened) {
                     SelfArmOnboardingStore.finish(
-                        applicationContext,
-                        "accessibility_settings_unavailable",
-                        false,
+                        context = applicationContext,
+                        sessionId = sessionId,
+                        setupState = "accessibility_settings_unavailable",
+                        success = false,
                     )
                 }
             }
             SelfArmOnboardingState.Action.START_WIRELESS,
             SelfArmOnboardingState.Action.RETRY_WIRELESS,
             -> {
-                SelfArmOnboardingStore.requestSetup(applicationContext)
+                val sessionId = SelfArmOnboardingStore.beginSession(applicationContext)
                 if (!RokidBusAccessibilityService.requestWirelessBootstrap(applicationContext)) {
                     SelfArmOnboardingStore.reportProgress(
                         applicationContext,
+                        sessionId,
                         "waiting_for_nexus_accessibility",
                     )
                     runCatching {
@@ -441,6 +448,21 @@ class MainActivity : Activity() {
                         )
                     }
                 }
+            }
+            SelfArmOnboardingState.Action.OPEN_WIFI_PANEL -> {
+                runCatching {
+                    startActivity(
+                        Intent(Settings.ACTION_WIFI_SETTINGS)
+                            .setPackage("com.android.settings"),
+                    )
+                }
+            }
+            SelfArmOnboardingState.Action.OPEN_MANUAL_FALLBACK -> {
+                SelfArmOnboardingStore.beginSession(applicationContext)
+                RokidBusAccessibilityService.requestManualAction(
+                    applicationContext,
+                    SelfArmManualAction.OPEN_PAIRING_DIALOG,
+                )
             }
             SelfArmOnboardingState.Action.NONE -> Unit
         }

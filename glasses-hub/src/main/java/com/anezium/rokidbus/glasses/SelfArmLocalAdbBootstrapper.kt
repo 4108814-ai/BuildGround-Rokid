@@ -12,6 +12,7 @@ import okio.FileSystem
 import okio.Path
 import java.io.File
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -34,7 +35,13 @@ internal class SelfArmLocalAdbBootstrapper(
         val output: String,
     )
 
-    fun bootstrap(pairPort: Int, pairingCode: String, connectPort: Int): BootstrapResult {
+    fun bootstrap(
+        pairPort: Int,
+        pairingCode: String,
+        connectPort: Int,
+        sessionId: String? = null,
+    ): BootstrapResult {
+        requireCurrentSession(sessionId)
         val cleanCode = pairingCode.trim()
         if (cleanCode.isBlank()) throw IOException("Wireless Debugging pairing code is missing")
         if (pairPort <= 0) throw IOException("Wireless Debugging pairing port is missing")
@@ -61,8 +68,9 @@ internal class SelfArmLocalAdbBootstrapper(
                 bridgeScript = bridgeScript,
                 restartWatchdog = true,
             )
-            recordBootstrapComplete(appContext)
-            SelfArmOnboardingStore.recordNetworkPosture(appContext, result.posture)
+            requireCurrentSession(sessionId)
+            recordBootstrapComplete(appContext, sessionId)
+            SelfArmOnboardingStore.recordNetworkPosture(appContext, result.posture, sessionId)
             Log.i(
                 TAG,
                 "self-pair bootstrap success port=${result.port} restartedAdbd=${result.restartedAdbd}",
@@ -82,6 +90,14 @@ internal class SelfArmLocalAdbBootstrapper(
                     exception.message.orEmpty().ifBlank { exception::class.java.simpleName },
                 exception,
             )
+        }
+    }
+
+    private fun requireCurrentSession(sessionId: String?) {
+        if (sessionId != null &&
+            !SelfArmOnboardingStore.isCurrentSession(appContext, sessionId)
+        ) {
+            throw InterruptedIOException("Wireless Debugging setup session was superseded")
         }
     }
 
@@ -390,7 +406,12 @@ internal class SelfArmLocalAdbBootstrapper(
             }
         }
 
-        internal fun recordBootstrapComplete(context: Context) {
+        internal fun recordBootstrapComplete(context: Context, sessionId: String? = null) {
+            if (sessionId != null &&
+                !SelfArmOnboardingStore.isCurrentSession(context, sessionId)
+            ) {
+                throw InterruptedIOException("Wireless Debugging setup session was superseded")
+            }
             if (!context.applicationContext
                     .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                     .edit()

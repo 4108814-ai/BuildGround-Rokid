@@ -1,6 +1,8 @@
 package com.anezium.rokidbus.shared
 
 import org.json.JSONObject
+import java.security.MessageDigest
+import java.util.Locale
 
 data class GlassesHubCapabilities(
     val protocolVersion: Int,
@@ -14,6 +16,14 @@ data class GlassesHubCapabilities(
     val setupComplete: Boolean = false,
     val setupFailureState: String = "",
     val setupFailureDiagnostic: String = "",
+    val setupSessionId: String = "",
+    val setupStage: String = "",
+    val setupRunning: Boolean = false,
+    val setupRequiresUserAction: Boolean = false,
+    val setupSupportCode: String = "",
+    val setupCompletionMode: String = "",
+    val coreReady: Boolean = false,
+    val maintenanceReady: Boolean = false,
 )
 
 /** Additive glasses-to-phone hub capabilities payload. Unknown fields remain ignorable. */
@@ -22,6 +32,8 @@ object GlassesHubCapabilitiesContract {
     const val MAX_VERSION_NAME_CHARS = 80
     const val MAX_SETUP_FAILURE_STATE_CHARS = 96
     const val MAX_SETUP_FAILURE_DIAGNOSTIC_CHARS = 96
+    const val MAX_SETUP_SESSION_ID_CHARS = 32
+    const val MAX_SETUP_SUPPORT_CODE_CHARS = 12
 
     fun create(
         features: Int,
@@ -34,6 +46,14 @@ object GlassesHubCapabilitiesContract {
         setupComplete: Boolean = false,
         setupFailureState: String = "",
         setupFailureDiagnostic: String = "",
+        setupSessionId: String = "",
+        setupStage: String = "",
+        setupRunning: Boolean = false,
+        setupRequiresUserAction: Boolean = false,
+        setupSupportCode: String = "",
+        setupCompletionMode: String = "",
+        coreReady: Boolean = false,
+        maintenanceReady: Boolean = false,
     ): GlassesHubCapabilities = GlassesHubCapabilities(
         protocolVersion = VERSION,
         features = features,
@@ -46,6 +66,14 @@ object GlassesHubCapabilitiesContract {
         setupComplete = setupComplete,
         setupFailureState = normalizeFailureState(setupFailureState),
         setupFailureDiagnostic = normalizeFailureDiagnostic(setupFailureDiagnostic),
+        setupSessionId = normalizeSessionId(setupSessionId),
+        setupStage = SetupStage.normalize(setupStage),
+        setupRunning = setupRunning,
+        setupRequiresUserAction = setupRequiresUserAction,
+        setupSupportCode = normalizeSupportCode(setupSupportCode),
+        setupCompletionMode = SetupCompletionMode.normalize(setupCompletionMode),
+        coreReady = coreReady,
+        maintenanceReady = maintenanceReady,
     )
 
     fun toJson(capabilities: GlassesHubCapabilities): JSONObject = JSONObject()
@@ -59,6 +87,17 @@ object GlassesHubCapabilitiesContract {
         .put("setupComplete", capabilities.setupComplete)
         .put("setupFailureState", capabilities.setupFailureState)
         .put("setupFailureDiagnostic", capabilities.setupFailureDiagnostic)
+        .put("setupSessionId", normalizeSessionId(capabilities.setupSessionId))
+        .put("setupStage", SetupStage.normalize(capabilities.setupStage))
+        .put("setupRunning", capabilities.setupRunning)
+        .put("setupRequiresUserAction", capabilities.setupRequiresUserAction)
+        .put("setupSupportCode", normalizeSupportCode(capabilities.setupSupportCode))
+        .put(
+            "setupCompletionMode",
+            SetupCompletionMode.normalize(capabilities.setupCompletionMode),
+        )
+        .put("coreReady", capabilities.coreReady)
+        .put("maintenanceReady", capabilities.maintenanceReady)
         .also { payload ->
             capabilities.versionName?.let { payload.put("versionName", it) }
         }
@@ -77,7 +116,35 @@ object GlassesHubCapabilitiesContract {
         setupFailureDiagnostic = normalizeFailureDiagnostic(
             payload.optString("setupFailureDiagnostic", ""),
         ),
+        setupSessionId = normalizeSessionId(payload.optString("setupSessionId", "")),
+        setupStage = SetupStage.normalize(payload.optString("setupStage", "")),
+        setupRunning = payload.optBoolean("setupRunning", false),
+        setupRequiresUserAction = payload.optBoolean("setupRequiresUserAction", false),
+        setupSupportCode = normalizeSupportCode(payload.optString("setupSupportCode", "")),
+        setupCompletionMode = SetupCompletionMode.normalize(
+            payload.optString("setupCompletionMode", ""),
+        ),
+        coreReady = payload.optBoolean("coreReady", false),
+        maintenanceReady = payload.optBoolean("maintenanceReady", false),
     )
+
+    fun effectiveStage(capabilities: GlassesHubCapabilities): String =
+        SetupStage.normalize(capabilities.setupStage).ifBlank {
+            when {
+                capabilities.setupComplete -> SetupStage.COMPLETE
+                capabilities.setupFailureState.isNotBlank() -> SetupStage.FAILED
+                else -> SetupStage.UNKNOWN
+            }
+        }
+
+    fun deriveSetupSupportCode(sessionId: String?): String {
+        val normalizedSessionId = normalizeSessionId(sessionId)
+        if (normalizedSessionId.isBlank()) return ""
+        return MessageDigest.getInstance("SHA-256")
+            .digest(normalizedSessionId.toByteArray(Charsets.UTF_8))
+            .take(4)
+            .joinToString("") { byte -> "%02X".format(Locale.ROOT, byte.toInt() and 0xff) }
+    }
 
     private fun normalizeVersionName(value: String?): String? = value
         ?.trim()
@@ -89,15 +156,31 @@ object GlassesHubCapabilitiesContract {
         .take(MAX_SETUP_FAILURE_STATE_CHARS)
 
     /** Defense in depth for data that a phone UI may display or persist later. */
-    private fun normalizeFailureDiagnostic(value: String?): String = value
-        .orEmpty()
-        .replace(STANDALONE_PAIRING_CODE, "......")
-        .replace(IPV4_LITERAL, "")
+    private fun normalizeFailureDiagnostic(value: String?): String = redactSensitiveSetupText(value)
         .replace(DIAGNOSTIC_WHITESPACE, " ")
         .trim()
         .take(MAX_SETUP_FAILURE_DIAGNOSTIC_CHARS)
 
+    private fun normalizeSessionId(value: String?): String = value
+        .orEmpty()
+        .trim()
+        .takeIf { SESSION_ID.matches(it) }
+        .orEmpty()
+
+    private fun normalizeSupportCode(value: String?): String = redactSensitiveSetupText(value)
+        .trim()
+        .uppercase(Locale.ROOT)
+        .takeIf { it.length <= MAX_SETUP_SUPPORT_CODE_CHARS && SUPPORT_CODE.matches(it) }
+        .orEmpty()
+
+    private fun redactSensitiveSetupText(value: String?): String = value
+        .orEmpty()
+        .replace(STANDALONE_PAIRING_CODE, "......")
+        .replace(IPV4_LITERAL, "")
+
     private val STANDALONE_PAIRING_CODE = Regex("""\b\d{6}\b""")
     private val IPV4_LITERAL = Regex("""\d+\.\d+\.\d+\.\d+""")
     private val DIAGNOSTIC_WHITESPACE = Regex("""\s+""")
+    private val SESSION_ID = Regex("""[0-9a-f]{1,$MAX_SETUP_SESSION_ID_CHARS}""")
+    private val SUPPORT_CODE = Regex("""[A-Z0-9-]+""")
 }

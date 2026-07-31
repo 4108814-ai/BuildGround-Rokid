@@ -16,6 +16,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.anezium.rokidbus.glasses.SelfArmVerifiedSettingsScroller.Outcome as ScrollSearchOutcome
 import com.anezium.rokidbus.glasses.SelfArmVerifiedSettingsScroller.Surface as ScrollSurface
+import com.anezium.rokidbus.shared.SetupCompletionMode
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.Locale
@@ -61,6 +62,7 @@ internal class SelfArmWirelessDebuggingAutomator(
     private var lastPairingConnectPort = 0
     private var localSelfPairingToken = ""
     private var localSelfPairingRunning = false
+    private var localSelfPairingStartedAt = 0L
     private var localSelfPairingComplete = false
     private var localSelfPairingFailedToken = ""
     private var localSelfPairingLastError = ""
@@ -83,18 +85,25 @@ internal class SelfArmWirelessDebuggingAutomator(
     private var directWirelessProbeStartedAt = 0L
     private var directWirelessFallbackUsed = false
     private var scheduledStepAt = SelfArmTickSchedulePolicy.NONE
-
-    private val stepRunnable = Runnable {
-        scheduledStepAt = SelfArmTickSchedulePolicy.NONE
-        step()
-    }
+    private var scheduledStepRunnable: Runnable? = null
+    private val callbackToken = Any()
+    private var runToken = 0L
+    private var sessionId = ""
+    private var lastHeartbeatAt = 0L
 
     fun start(
         mode: OperationMode = OperationMode.FULL_BOOTSTRAP,
         target: SelfArmManualTarget = SelfArmManualTarget.PAIRING_DIALOG,
+        sessionId: String = "",
     ) {
-        handler.removeCallbacks(stepRunnable)
-        scheduledStepAt = SelfArmTickSchedulePolicy.NONE
+        cancelLiveWork()
+        if (mode != OperationMode.WIFI_ONLY &&
+            !SelfArmOnboardingStore.isCurrentSession(service.applicationContext, sessionId)
+        ) {
+            return
+        }
+        runToken++
+        this.sessionId = sessionId
         active = true
         operationMode = mode
         manualTarget = target
@@ -128,10 +137,9 @@ internal class SelfArmWirelessDebuggingAutomator(
         localSelfPairingComplete = false
         localSelfPairingFailedToken = ""
         localSelfPairingLastError = ""
-        localSelfPairingThread?.interrupt()
-        localSelfPairingThread = null
         lastLocalSelfPairingStatusAt = 0L
         lastReportedProgressState = ""
+        lastHeartbeatAt = 0L
         awaitingWirelessDebugConfirmation = false
         wirelessToggleRequestedAt = 0L
         deviceInfoFallback = false
@@ -145,6 +153,7 @@ internal class SelfArmWirelessDebuggingAutomator(
         lastConnectHost = lastPairingHost
         lastConnectPort = SelfArmWirelessAdbController.readWirelessPort()
         settingsScroller.resetAll()
+        beatLeaseIfDue(force = true)
         if (operationMode == OperationMode.FULL_BOOTSTRAP) {
             Log.d(TAG, "start: wireless debugging setup automator started")
             android.util.Log.i(TAG, "Wireless Debugging setup")
@@ -155,6 +164,12 @@ internal class SelfArmWirelessDebuggingAutomator(
         } else {
             Log.d(TAG, "start: manual navigation automator started target=$manualTarget")
             report("opening_developer_options")
+        }
+        if (operationMode == OperationMode.FULL_BOOTSTRAP &&
+            !SelfArmOnboardingStore.isWifiReady(service.applicationContext)
+        ) {
+            service.onSetupWaitingForWifi(sessionId)
+            return
         }
         if (!wifiEnabled()) {
             report("enabling_wifi")
@@ -167,13 +182,7 @@ internal class SelfArmWirelessDebuggingAutomator(
 
     fun stop() {
         val wasManual = operationMode == OperationMode.MANUAL_NAVIGATION
-        active = false
-        handler.removeCallbacks(stepRunnable)
-        scheduledStepAt = SelfArmTickSchedulePolicy.NONE
-        settingsScroller.clearPending()
-        directWirelessProbePending = false
-        localSelfPairingThread?.interrupt()
-        localSelfPairingThread = null
+        cancelLiveWork()
         // Don't wipe the staged assets on a transient stop (the ROM churns the AccessibilityService
         // during the Wireless Debugging toggle); the phone still needs them. Terminal paths clear
         // the in-progress flag first so this cleanup runs then.
@@ -182,11 +191,15 @@ internal class SelfArmWirelessDebuggingAutomator(
         }
     }
 
-    fun updateManualTarget(target: SelfArmManualTarget) {
-        if (!active || operationMode != OperationMode.MANUAL_NAVIGATION) {
-            start(OperationMode.MANUAL_NAVIGATION, target)
+    fun updateManualTarget(target: SelfArmManualTarget, sessionId: String) {
+        if (!active ||
+            operationMode != OperationMode.MANUAL_NAVIGATION ||
+            this.sessionId != sessionId
+        ) {
+            start(OperationMode.MANUAL_NAVIGATION, target, sessionId)
             return
         }
+        if (!isLiveRun()) return
         manualTarget = target
         // Each wizard button press deserves a fresh manual window; without this the 5-minute
         // budget runs from the first step and can expire while the wearer is still typing.
@@ -203,6 +216,7 @@ internal class SelfArmWirelessDebuggingAutomator(
     }
 
     fun closeManual() {
+        if (!isLiveRun()) return
         if (!active || operationMode != OperationMode.MANUAL_NAVIGATION) {
             SelfArmManualArmAssets.cleanup(service.applicationContext)
             service.returnToOnboarding()
@@ -212,7 +226,7 @@ internal class SelfArmWirelessDebuggingAutomator(
     }
 
     fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (!active) return
+        if (!isLiveRun()) return
         if (!wifiConfirmed && wifiClickIssued) {
             schedule(WIFI_POLL_INTERVAL_MS)
             return
@@ -234,9 +248,12 @@ internal class SelfArmWirelessDebuggingAutomator(
         }
     }
 
-    private fun step() {
-        if (!active) return
-        if (SystemClock.uptimeMillis() > deadlineAt) {
+    private fun step(expectedRunToken: Long, expectedSessionId: String) {
+        if (!isLiveRun(expectedRunToken, expectedSessionId)) return
+        beatLeaseIfDue()
+        // Neither deadline may cut a pairing that is actually running; see SelfArmPairingGracePolicy.
+        val pairingInFlight = selfPairingSuspendsExpiry(SystemClock.uptimeMillis())
+        if (!pairingInFlight && SystemClock.uptimeMillis() > deadlineAt) {
             if (operationMode == OperationMode.WIFI_ONLY) {
                 finish("wifi_enable_timeout", false)
             } else if (operationMode == OperationMode.MANUAL_NAVIGATION) {
@@ -251,6 +268,7 @@ internal class SelfArmWirelessDebuggingAutomator(
             return
         }
         if (
+            !pairingInFlight &&
             pairingReadyReported &&
             pairingReadyReportedAt > 0L &&
             SystemClock.uptimeMillis() - pairingReadyReportedAt > pairingDialogHoldMs()
@@ -433,6 +451,7 @@ internal class SelfArmWirelessDebuggingAutomator(
     }
 
     private fun onWifiEnabled() {
+        if (!isLiveRun()) return
         if (wifiConfirmed) return
         if (operationMode == OperationMode.WIFI_ONLY) {
             wifiConfirmed = true
@@ -440,31 +459,24 @@ internal class SelfArmWirelessDebuggingAutomator(
             finish("wifi_on", true)
             return
         }
-        val now = SystemClock.uptimeMillis()
-        if (wifiIpv4().isBlank()) {
-            if (wifiNetworkWaitStartedAt == 0L) wifiNetworkWaitStartedAt = now
-            if (now - wifiNetworkWaitStartedAt >= WIFI_NETWORK_WAIT_MS) {
-                finish("wifi_network_required", false)
-                return
-            }
-            report("waiting_for_wifi_network")
-            schedule(WIFI_NETWORK_POLL_INTERVAL_MS)
+        if (!SelfArmOnboardingStore.isWifiReady(service.applicationContext)) {
+            service.onSetupWaitingForWifi(sessionId)
             return
         }
         wifiConfirmed = true
         report("wifi_on")
+        if (!isLiveRun()) return
         runCatching {
             service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
         }
-        handler.postDelayed({
-            if (!active) return@postDelayed
+        postForRun(800L) {
             if (!SelfArmWirelessAdbController.areDeveloperOptionsUsable(service)) {
                 startDeveloperOptionsEnableFlow()
             } else {
                 openPreferredSettingsTarget()
                 schedule(900L)
             }
-        }, 800L)
+        }
     }
 
     private fun handleDeveloperOptionsPage(root: AccessibilityNodeInfo) {
@@ -571,7 +583,7 @@ internal class SelfArmWirelessDebuggingAutomator(
                     lastDeveloperOpenAt = 0L
                     developerEnableFlow = false
                     deviceInfoFallback = false
-                    handler.postDelayed({ openPreferredSettingsTarget() }, 1200L)
+                    postForRun(1200L) { openPreferredSettingsTarget() }
                 }
                 return
             }
@@ -786,42 +798,49 @@ internal class SelfArmWirelessDebuggingAutomator(
 
         localSelfPairingToken = token
         localSelfPairingRunning = true
+        localSelfPairingStartedAt = SystemClock.uptimeMillis()
         localSelfPairingLastError = ""
         reportLocalSelfPairingStarted(host, pairPort, connectPort)
+        val workerSessionId = sessionId
+        val workerRunToken = runToken
         val worker = Thread {
             val result = runCatching {
                 SelfArmLocalAdbBootstrapper(service.applicationContext).bootstrap(
                     pairPort = pairPort,
                     pairingCode = code,
                     connectPort = connectPort,
+                    sessionId = workerSessionId,
                 )
             }
-            handler.post {
-                if (localSelfPairingToken != token) return@post
-                localSelfPairingRunning = false
-                localSelfPairingThread = null
-                result.onSuccess { bootstrap ->
-                    localSelfPairingComplete = true
-                    lastConnectHost = bootstrap.connectHost
-                    lastConnectPort = bootstrap.connectPort
-                    Log.i(
-                        TAG,
-                        "local self-pair bootstrap complete",
-                    )
-                    finish("wireless_bootstrap_complete", true)
-                }.onFailure { throwable ->
-                    localSelfPairingFailedToken = token
-                    localSelfPairingLastError = causeChainMessage(throwable)
-                    val diagnostic = pairingFailureDiagnostic(localSelfPairingLastError)
-                    Log.w(TAG, "local self-pair bootstrap failed: $diagnostic")
-                    if (!active) return@post
-                    android.util.Log.i(TAG, "Phone fallback pairing")
-                    android.util.Log.i(
-                        TAG,
-                        "selfarm-wireless self_pairing_failed error=$diagnostic",
-                    )
-                    sendPairingReadyStatus(token, code, host, pairPort, connectPort)
-                    schedule(PAIRING_DIALOG_POLL_MS)
+            postForRun(workerRunToken, workerSessionId, 0L) {
+                if (localSelfPairingToken == token) {
+                    localSelfPairingRunning = false
+                    localSelfPairingStartedAt = 0L
+                    localSelfPairingThread = null
+                    result.onSuccess { bootstrap ->
+                        localSelfPairingComplete = true
+                        lastConnectHost = bootstrap.connectHost
+                        lastConnectPort = bootstrap.connectPort
+                        Log.i(
+                            TAG,
+                            "local self-pair bootstrap complete",
+                        )
+                        finish("wireless_bootstrap_complete", true)
+                    }.onFailure { throwable ->
+                        localSelfPairingFailedToken = token
+                        localSelfPairingLastError = causeChainMessage(throwable)
+                        val diagnostic = pairingFailureDiagnostic(localSelfPairingLastError)
+                        Log.w(TAG, "local self-pair bootstrap failed: $diagnostic")
+                        if (isLiveRun(workerRunToken, workerSessionId)) {
+                            android.util.Log.i(TAG, "Phone fallback pairing")
+                            android.util.Log.i(
+                                TAG,
+                                "selfarm-wireless self_pairing_failed error=$diagnostic",
+                            )
+                            sendPairingReadyStatus(token, code, host, pairPort, connectPort)
+                            schedule(PAIRING_DIALOG_POLL_MS)
+                        }
+                    }
                 }
             }
         }.apply {
@@ -1023,6 +1042,7 @@ internal class SelfArmWirelessDebuggingAutomator(
     }
 
     private fun clickNode(node: AccessibilityNodeInfo): Boolean {
+        if (!isLiveRun()) return false
         var current: AccessibilityNodeInfo? = node
         while (current != null) {
             val candidate = current ?: return false
@@ -1188,6 +1208,7 @@ internal class SelfArmWirelessDebuggingAutomator(
     }
 
     private fun returnFromWifiSettings() {
+        if (!isLiveRun()) return
         if (!wifiSettingsOpened) return
         wifiSettingsOpened = false
         runCatching {
@@ -1230,8 +1251,9 @@ internal class SelfArmWirelessDebuggingAutomator(
             developerOpenStartedAt > 0L &&
             SystemClock.uptimeMillis() - developerOpenStartedAt >= DEVELOPER_OPEN_TIMEOUT_MS
 
-    private fun tryStart(intent: Intent): Boolean =
-        try {
+    private fun tryStart(intent: Intent): Boolean {
+        if (!isLiveRun()) return false
+        return try {
             service.startActivity(intent)
             true
         } catch (_: ActivityNotFoundException) {
@@ -1241,6 +1263,7 @@ internal class SelfArmWirelessDebuggingAutomator(
             Log.w(TAG, "settings launch failed: $intent", exception)
             false
         }
+    }
 
     private fun firstVisibleByViewId(
         root: AccessibilityNodeInfo,
@@ -1436,9 +1459,15 @@ internal class SelfArmWirelessDebuggingAutomator(
     }
 
     private fun report(setupState: String) {
+        if (!isLiveRun()) return
         lastReportedProgressState = setupState
         if (operationMode != OperationMode.WIFI_ONLY) {
-            SelfArmOnboardingStore.reportProgress(service.applicationContext, setupState)
+            if (!SelfArmOnboardingStore.isCurrentSession(service.applicationContext, sessionId)) return
+            SelfArmOnboardingStore.reportProgress(
+                service.applicationContext,
+                sessionId,
+                setupState,
+            )
         }
         val wifiReady = wifiIpv4().isNotBlank() ||
             lastPairingHost.isNotBlank() ||
@@ -1453,45 +1482,155 @@ internal class SelfArmWirelessDebuggingAutomator(
     }
 
     private fun finish(setupState: String, success: Boolean, diagnostic: String = "") {
-        active = false
-        handler.removeCallbacks(stepRunnable)
-        scheduledStepAt = SelfArmTickSchedulePolicy.NONE
-        settingsScroller.clearPending()
+        if (!isLiveRun()) return
+        val finishingMode = operationMode
+        val finishingSessionId = sessionId
+        report(setupState)
         if (operationMode == OperationMode.WIFI_ONLY) {
             returnFromWifiSettings()
-            report(setupState)
+            cancelLiveWork()
             android.util.Log.i(TAG, if (success) "Wi-Fi enabled" else "Wi-Fi enable needs a tap")
-            service.onWifiEnableFinished(success)
+            service.onWifiEnableFinished(success, finishingSessionId)
             return
         }
         if (operationMode == OperationMode.MANUAL_NAVIGATION) {
-            report(setupState)
-            SelfArmOnboardingStore.pause(service.applicationContext, setupState)
+            if (!SelfArmOnboardingStore.isCurrentSession(service.applicationContext, finishingSessionId)) return
+            SelfArmOnboardingStore.pause(
+                service.applicationContext,
+                finishingSessionId,
+                setupState,
+            )
             // Terminal for the manual flow (timeout or explicit close): release the assets.
             SelfArmOnboardingStore.clearManualArmInProgress(service.applicationContext)
             SelfArmManualArmAssets.cleanup(service.applicationContext)
-            service.onManualNavigationFinished()
-            handler.postDelayed({ service.returnToOnboarding() }, 300L)
+            if (!SelfArmOnboardingStore.isCurrentSession(service.applicationContext, finishingSessionId)) return
+            service.returnToOnboarding(finishingSessionId)
+            cancelLiveWork()
+            service.onManualNavigationFinished(finishingSessionId)
             return
         }
-        service.onWirelessBootstrapFinished()
-        report(setupState)
-        SelfArmOnboardingStore.finish(service.applicationContext, setupState, success, diagnostic)
+        if (!SelfArmOnboardingStore.isCurrentSession(service.applicationContext, finishingSessionId)) return
+        service.returnToOnboarding(finishingSessionId)
+        service.onWirelessBootstrapFinished(finishingSessionId)
+        if (!SelfArmOnboardingStore.isCurrentSession(service.applicationContext, finishingSessionId)) return
+        SelfArmOnboardingStore.finish(
+            context = service.applicationContext,
+            sessionId = finishingSessionId,
+            setupState = setupState,
+            success = success,
+            diagnostic = diagnostic,
+            completionMode = if (success) {
+                SetupCompletionMode.AUTOMATIC
+            } else {
+                SetupCompletionMode.UNKNOWN
+            },
+        )
+        if (finishingMode == OperationMode.FULL_BOOTSTRAP) cancelLiveWork()
         android.util.Log.i(TAG, if (success) "Wireless Debugging ready" else "Wireless setup needs a tap")
-        handler.postDelayed({ service.returnToOnboarding() }, 300L)
     }
 
     private fun canClickNow(): Boolean =
         SystemClock.uptimeMillis() - lastClickAt >= CLICK_COOLDOWN_MS
 
     private fun schedule(delayMs: Long) {
+        if (!isLiveRun()) return
         val requestedAt = SystemClock.uptimeMillis() + delayMs.coerceAtLeast(0L)
         val nextAt = SelfArmTickSchedulePolicy.nextScheduledAt(scheduledStepAt, requestedAt)
         if (nextAt == scheduledStepAt) return
-        handler.removeCallbacks(stepRunnable)
+        scheduledStepRunnable?.let(handler::removeCallbacks)
         scheduledStepAt = nextAt
-        handler.postAtTime(stepRunnable, nextAt)
+        val expectedRunToken = runToken
+        val expectedSessionId = sessionId
+        val runnable = Runnable {
+            if (!isLiveRun(expectedRunToken, expectedSessionId)) return@Runnable
+            scheduledStepAt = SelfArmTickSchedulePolicy.NONE
+            scheduledStepRunnable = null
+            step(expectedRunToken, expectedSessionId)
+        }
+        scheduledStepRunnable = runnable
+        handler.postAtTime(runnable, callbackToken, nextAt)
     }
+
+    private fun postForRun(
+        delayMs: Long,
+        action: () -> Unit,
+    ) {
+        postForRun(runToken, sessionId, delayMs, action)
+    }
+
+    private fun postForRun(
+        expectedRunToken: Long,
+        expectedSessionId: String,
+        delayMs: Long,
+        action: () -> Unit,
+    ) {
+        val runnable = Runnable {
+            if (isLiveRun(expectedRunToken, expectedSessionId)) action()
+        }
+        handler.postAtTime(
+            runnable,
+            callbackToken,
+            SystemClock.uptimeMillis() + delayMs.coerceAtLeast(0L),
+        )
+    }
+
+    private fun beatLeaseIfDue(force: Boolean = false) {
+        val now = SystemClock.uptimeMillis()
+        val sessionCurrent = sessionId.isNotBlank() &&
+            SelfArmOnboardingStore.isCurrentSession(service.applicationContext, sessionId)
+        if (!SelfArmHeartbeatPolicy.shouldHeartbeat(
+                sessionCurrent = sessionCurrent,
+                automatonActive = active,
+                workerAlive = localSelfPairingThread?.isAlive == true,
+                nowMillis = now,
+                lastHeartbeatMillis = lastHeartbeatAt,
+                cadenceMillis = SelfArmOnboardingStore.HEARTBEAT_CADENCE_MS,
+                force = force,
+            )
+        ) {
+            return
+        }
+        SelfArmOnboardingStore.heartbeat(service.applicationContext, sessionId)
+        lastHeartbeatAt = now
+    }
+
+    private fun isLiveRun(
+        expectedRunToken: Long = runToken,
+        expectedSessionId: String = sessionId,
+    ): Boolean {
+        if (!active || expectedRunToken != runToken || expectedSessionId != sessionId) return false
+        if (expectedSessionId.isBlank()) return operationMode == OperationMode.WIFI_ONLY
+        return SelfArmOnboardingStore.isCurrentSession(
+            service.applicationContext,
+            expectedSessionId,
+        )
+    }
+
+    private fun cancelLiveWork() {
+        active = false
+        runToken++
+        handler.removeCallbacksAndMessages(callbackToken)
+        scheduledStepRunnable = null
+        scheduledStepAt = SelfArmTickSchedulePolicy.NONE
+        settingsScroller.clearPending()
+        directWirelessProbePending = false
+        localSelfPairingThread
+            ?.takeIf { it !== Thread.currentThread() }
+            ?.interrupt()
+        localSelfPairingThread = null
+        localSelfPairingRunning = false
+        localSelfPairingStartedAt = 0L
+        sessionId = ""
+        lastHeartbeatAt = 0L
+    }
+
+    private fun selfPairingSuspendsExpiry(nowMillis: Long): Boolean =
+        SelfArmPairingGracePolicy.suspendsExpiry(
+            workerAlive = localSelfPairingThread?.isAlive == true,
+            nowMillis = nowMillis,
+            pairingStartedAtMillis = localSelfPairingStartedAt,
+            maxGraceMillis = SELF_PAIRING_GRACE_MS,
+        )
 
     private fun pairingDialogHoldMs(): Long =
         if (operationMode == OperationMode.MANUAL_NAVIGATION) MANUAL_TIMEOUT_MS else PAIRING_DIALOG_HOLD_MS
@@ -1515,6 +1654,8 @@ internal class SelfArmWirelessDebuggingAutomator(
         private const val PAIRING_DIALOG_POLL_MS = 600L
         private const val PAIRING_DIALOG_MAX_WAIT_MS = 9_000L
         private const val PAIRING_DIALOG_HOLD_MS = 60_000L
+        /** Hard bound on a suspended run: comfortably past the 60–110 s a real bootstrap takes. */
+        private const val SELF_PAIRING_GRACE_MS = 150_000L
         private const val MANUAL_TIMEOUT_MS = 5 * 60_000L
         private const val MANUAL_HOLD_POLL_MS = 1_000L
         private const val PAIRING_PORT_GRACE_MS = 1_800L
