@@ -354,6 +354,20 @@ class BusHubService : Service() {
 
         override fun capabilities(): Int = this@BusHubService.capabilities()
 
+        /**
+         * Answered from the registration this UID already holds, so it can only ever
+         * describe the caller: an unknown plugin id, another app's id, or a caller with
+         * no live registration all get "" rather than somebody else's grants.
+         */
+        override fun approvedCapabilities(pluginId: String): String {
+            val callingUid = Binder.getCallingUid()
+            val registration = registrations.firstOrNull { registration ->
+                registration.uid == callingUid &&
+                    registration.principal?.descriptor?.id == pluginId
+            } ?: return ""
+            return PluginCapability.serialize(registration.grantedCapabilities)
+        }
+
         override fun registerPlugin(packageName: String, pluginId: String, cb: IBusCallback): Int {
             val callingUid = Binder.getCallingUid()
             val packages = packageManager.getPackagesForUid(callingUid).orEmpty()

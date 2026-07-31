@@ -45,6 +45,8 @@ internal class AndroidNexusPluginTransport(
 
     override fun capabilities(): Int = client.capabilities()
 
+    override fun approvedCapabilities(): String? = client.approvedCapabilities()
+
     override fun close() {
         client.close()
         listener = null

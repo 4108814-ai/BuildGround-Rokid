@@ -287,6 +287,16 @@ class BusClient(
             .getOrDefault(0)
             .also { hubCapabilities = it }
 
+    /**
+     * This plugin's approved capabilities as the hub sees them, or null when the hub
+     * predates the call and the caller must fall back to the registration message.
+     * A hub with genuinely nothing approved for us answers "", which is not null.
+     */
+    fun approvedCapabilities(): String? {
+        val id = pluginId ?: return null
+        return runCatching { service?.approvedCapabilities(id) }.getOrNull()
+    }
+
     fun supportsImageSurface(): Boolean =
         capabilities() and BusCapabilityBits.IMAGE_SURFACE != 0 &&
             linkState() and com.anezium.rokidbus.shared.LinkStateBits.SPP_DATA_UP != 0

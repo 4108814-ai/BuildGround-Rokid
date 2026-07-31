@@ -7,6 +7,7 @@ import com.anezium.rokidbus.shared.LinkStateBits
 import com.anezium.rokidbus.shared.PinSurfaceContract
 import com.anezium.rokidbus.shared.PinSurfaceSize
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
+import com.anezium.rokidbus.shared.plugin.PluginCapability
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -31,6 +32,14 @@ class NexusPluginClientTest {
         }
         override fun sendBinary(path: String, id: String, payload: JSONObject, data: ByteArray) = true
         override fun capabilities(): Int = featureBits
+
+        /**
+         * Null by default, so every other test keeps exercising the
+         * registration-message path: the direct call is a fast path, not the only
+         * one. Set it to make the hub answer grants synchronously.
+         */
+        var directCapabilities: String? = null
+        override fun approvedCapabilities(): String? = directCapabilities
         override fun close() { closeCount += 1 }
     }
 
@@ -76,6 +85,39 @@ class NexusPluginClientTest {
             listOf("registration:1", "registration:0", "registration:2"),
             callbacks.events,
         )
+    }
+
+    @Test
+    fun `approval carries its grants, so a plugin can act on it immediately`() {
+        // The hub answers registerPlugin synchronously and sends the grant list
+        // behind it, 16 ms later on hardware. A plugin that pushes the instant it
+        // is approved used to land in that gap and be refused a capability the
+        // wearer had approved, so approval now fetches the grants outright.
+        val (client, transport, _) = fixture()
+        transport.directCapabilities = "surfaces,stt"
+
+        transport.listener.onRegistrationState(PluginRegistrationResult.APPROVED)
+
+        assertTrue(client.hasCapability(PluginCapability.SURFACES))
+        assertTrue(client.hasCapability(PluginCapability.STT))
+    }
+
+    @Test
+    fun `an older hub that cannot answer leaves the registration message in charge`() {
+        val (client, transport, _) = fixture()
+        transport.directCapabilities = null
+
+        transport.listener.onRegistrationState(PluginRegistrationResult.APPROVED)
+        assertFalse(client.hasCapability(PluginCapability.SURFACES))
+
+        transport.listener.onMessage(
+            BusPaths.PLUGIN_REGISTRATION,
+            "1",
+            payload()
+                .put("result", PluginRegistrationResult.APPROVED)
+                .put("capabilities", "surfaces"),
+        )
+        assertTrue(client.hasCapability(PluginCapability.SURFACES))
     }
 
     @Test

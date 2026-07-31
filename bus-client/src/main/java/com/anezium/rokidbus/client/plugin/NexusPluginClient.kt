@@ -340,12 +340,20 @@ class NexusPluginClient internal constructor(
         // onLinkState is a race, and the loser reads every capability as absent.
         if (result == PluginRegistrationResult.APPROVED) {
             hubCapabilities = transport.capabilities()
-            // The plugin's *own* grants are not here yet, and cannot be: `registerPlugin`
-            // answers APPROVED synchronously while the capability list follows behind it
-            // as a `/plugin/registration` message — measured on hardware at 16 ms apart.
-            // So APPROVED is delivered twice, and only the second carries the grants.
-            // A plugin that acts on approval must treat CAPABILITY_NOT_GRANTED on the
-            // first as "not yet" and wait for the second, not as a refusal.
+            // The plugin's *own* grants travel behind this on a different wire:
+            // `registerPlugin` answers APPROVED synchronously while the capability list
+            // follows as a `/plugin/registration` message, measured on hardware at 16 ms
+            // apart. A plugin that pushes the instant it is approved — the shape the SDK
+            // recommends for pins and notices — would read an empty grant set and be
+            // refused a capability the wearer did approve. So ask the hub outright and
+            // make approval and grants one moment again.
+            //
+            // Null means the hub predates the call: fall back to what we already have,
+            // and the registration message fills it in a few milliseconds later.
+            transport.approvedCapabilities()?.let { serialized ->
+                val parsed = PluginCapability.parseList(serialized)
+                if (parsed is CapabilityParseResult.Valid) approvedCapabilities = parsed.capabilities
+            }
         }
         if (result != PluginRegistrationResult.APPROVED) {
             approvedCapabilities = emptySet()

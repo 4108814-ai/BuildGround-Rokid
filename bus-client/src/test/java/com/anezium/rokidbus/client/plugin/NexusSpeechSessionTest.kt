@@ -39,6 +39,13 @@ class NexusSpeechSessionTest {
 
         override fun capabilities(): Int = 0
 
+
+        // Null, so these keep exercising the registration-message path: the direct
+
+        // call is the fast path, not the only one.
+
+        override fun approvedCapabilities(): String? = null
+
         override fun close() {
             closed = true
         }

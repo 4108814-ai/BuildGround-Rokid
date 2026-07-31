@@ -16,5 +16,14 @@ interface NexusPluginTransport {
     fun send(path: String, id: String, payload: JSONObject): Boolean
     fun sendBinary(path: String, id: String, payload: JSONObject, data: ByteArray): Boolean
     fun capabilities(): Int
+
+    /**
+     * This plugin's own approved capabilities as the hub sees them right now, or null
+     * when the hub is too old to answer. It exists so approval and grants can be read
+     * as one moment instead of two; the message path remains the source of truth for
+     * every later change.
+     */
+    fun approvedCapabilities(): String?
+
     fun close()
 }

@@ -38,6 +38,13 @@ class NexusActivityTest {
         ): Boolean = true
 
         override fun capabilities(): Int = featureBits
+
+
+        // Null, so these keep exercising the registration-message path: the direct
+
+        // call is the fast path, not the only one.
+
+        override fun approvedCapabilities(): String? = null
         override fun close() = Unit
     }
 

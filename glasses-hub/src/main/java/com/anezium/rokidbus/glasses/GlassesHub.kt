@@ -130,6 +130,9 @@ object GlassesHub {
 
         override fun registerPlugin(packageName: String, pluginId: String, cb: IBusCallback): Int =
             PluginRegistrationResult.DENIED
+
+        /** Nothing is ever approved here, since [registerPlugin] denies everything. */
+        override fun approvedCapabilities(pluginId: String): String = ""
     }
 
     fun start(context: Context) {
