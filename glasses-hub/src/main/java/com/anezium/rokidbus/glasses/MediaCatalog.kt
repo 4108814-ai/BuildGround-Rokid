@@ -38,7 +38,10 @@ class MediaCatalog(
         return CatalogScan(
             items = items,
             truncated = eligible.size > items.size,
-            settling = items.isEmpty() && samples.isNotEmpty(),
+            // A new capture can be settling beside older, already-eligible files. Treating the
+            // whole catalog as settled merely because one old file is eligible loses the only
+            // follow-up scan for the new capture.
+            settling = eligible.size < samples.size,
         )
     }
 
@@ -59,9 +62,9 @@ class MediaCatalog(
         val items: List<MediaSyncItem>,
         val truncated: Boolean,
         /**
-         * Captures exist but none has cleared the stability gate yet. The very first scan after
-         * boot always lands here, so the engine re-checks once the settling window has passed
-         * instead of waiting for another trigger.
+         * At least one capture has not cleared the stability gate yet. This remains true when a
+         * fresh capture sits beside older eligible files, so the engine re-checks once the
+         * settling window has passed instead of waiting for another external trigger.
          */
         val settling: Boolean = false,
     ) {

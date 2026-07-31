@@ -4955,6 +4955,12 @@ class BusHubService : Service() {
         fun isEnabled(context: android.content.Context): Boolean =
             context.getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_ENABLED, true)
 
+        fun hasSavedAuthorization(context: android.content.Context): Boolean =
+            context.getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getString(PREF_TOKEN, "")
+                .orEmpty()
+                .isNotBlank()
+
         fun canRunHub(context: android.content.Context): Boolean =
             Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
                 context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) ==

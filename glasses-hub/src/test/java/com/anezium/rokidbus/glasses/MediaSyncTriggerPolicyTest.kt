@@ -1,7 +1,10 @@
 package com.anezium.rokidbus.glasses
 
+import com.anezium.rokidbus.shared.LinkStateBits
 import com.anezium.rokidbus.shared.MediaSyncMode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MediaSyncTriggerPolicyTest {
@@ -150,6 +153,92 @@ class MediaSyncTriggerPolicyTest {
             skipReason(
                 MediaSyncTrigger.CHARGING_EDGE,
                 conditions(storageReadable = false, linkUp = false, hasEligibleFiles = false),
+            ),
+        )
+    }
+
+    @Test
+    fun `a settling capture schedules a follow-up even when old files can start a session`() {
+        val plan = MediaSyncAttemptPolicy.plan(
+            trigger = MediaSyncTrigger.NEW_CAPTURE,
+            conditions = conditions(hasEligibleFiles = true),
+            hasSettlingFiles = true,
+        )
+
+        assertEquals(
+            MediaSyncTriggerDecision.Start(MediaSyncTrigger.NEW_CAPTURE),
+            plan.decision,
+        )
+        assertTrue(plan.scheduleSettlingRecheck)
+    }
+
+    @Test
+    fun `capture and settling recheck wait for the current session to finish`() {
+        assertTrue(
+            MediaSyncDeferredRetryPolicy.shouldDefer(
+                trigger = MediaSyncTrigger.NEW_CAPTURE,
+                reason = MediaSyncSkipReason.ALREADY_RUNNING,
+                fromSettlingRecheck = false,
+            ),
+        )
+        assertTrue(
+            MediaSyncDeferredRetryPolicy.shouldDefer(
+                trigger = MediaSyncTrigger.BUS_CONNECT,
+                reason = MediaSyncSkipReason.ALREADY_RUNNING,
+                fromSettlingRecheck = true,
+            ),
+        )
+        assertFalse(
+            MediaSyncDeferredRetryPolicy.shouldDefer(
+                trigger = MediaSyncTrigger.BUS_CONNECT,
+                reason = MediaSyncSkipReason.ALREADY_RUNNING,
+                fromSettlingRecheck = false,
+            ),
+        )
+        assertFalse(
+            MediaSyncDeferredRetryPolicy.shouldDefer(
+                trigger = MediaSyncTrigger.NEW_CAPTURE,
+                reason = MediaSyncSkipReason.CAMERA_ACTIVE,
+                fromSettlingRecheck = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `safety scan covers every currently eligible automatic mode`() {
+        fun shouldScan(
+            mode: MediaSyncMode,
+            charging: Boolean,
+            consented: Boolean = true,
+            dataLinkUp: Boolean = true,
+            sessionActive: Boolean = false,
+            cameraSessionActive: Boolean = false,
+        ) = MediaSyncSafetyScanPolicy.shouldScan(
+            mode = mode,
+            charging = charging,
+            consented = consented,
+            dataLinkUp = dataLinkUp,
+            sessionActive = sessionActive,
+            cameraSessionActive = cameraSessionActive,
+        )
+
+        assertTrue(shouldScan(MediaSyncMode.ALWAYS, charging = false))
+        assertTrue(shouldScan(MediaSyncMode.CHARGING, charging = true))
+        assertFalse(shouldScan(MediaSyncMode.CHARGING, charging = false))
+        assertFalse(shouldScan(MediaSyncMode.MANUAL, charging = true))
+        assertFalse(shouldScan(MediaSyncMode.ALWAYS, charging = true, consented = false))
+        assertFalse(shouldScan(MediaSyncMode.ALWAYS, charging = true, dataLinkUp = false))
+        assertFalse(shouldScan(MediaSyncMode.ALWAYS, charging = true, sessionActive = true))
+        assertFalse(shouldScan(MediaSyncMode.ALWAYS, charging = true, cameraSessionActive = true))
+    }
+
+    @Test
+    fun `photo sync link follows the SPP data plane rather than CXR control`() {
+        assertFalse(MediaSyncLinkPolicy.isDataPlaneUp(LinkStateBits.CXR_CONTROL_UP))
+        assertTrue(MediaSyncLinkPolicy.isDataPlaneUp(LinkStateBits.SPP_DATA_UP))
+        assertTrue(
+            MediaSyncLinkPolicy.isDataPlaneUp(
+                LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP,
             ),
         )
     }

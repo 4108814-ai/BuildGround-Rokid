@@ -54,6 +54,7 @@ internal object MediaSyncEngine {
 
     private var session: Session? = null
     private var settlingFuture: ScheduledFuture<*>? = null
+    private var deferredTrigger: MediaSyncTrigger? = null
     private var captureFuture: ScheduledFuture<*>? = null
     private var watchdogFuture: ScheduledFuture<*>? = null
     private var captureObserver: FileObserver? = null
@@ -92,6 +93,9 @@ internal object MediaSyncEngine {
             }
         }.onFailure { logError("mediaSync power receiver registration failed", it) }
         startCaptureObserver()
+        // The fallback is independent from inotify and must still exist if the observer cannot
+        // attach to shared storage during early boot.
+        startAutoSafetyScan()
         // A glasses hub restart wipes consent, and the CXR transport does not bounce, so the phone
         // sees no edge on which to push it. Ask instead of waiting to be told.
         requestConfig()
@@ -99,10 +103,10 @@ internal object MediaSyncEngine {
     }
 
     /**
-     * Watches the capture directory so ALWAYS mode reacts to a photo the moment it is taken rather
-     * than waiting for the next reconnect. The observer only ever nudges an attempt — the stability
-     * gate decides whether a file is actually ready, so a half-written video is simply not eligible
-     * yet and the settling re-check picks it up shortly after.
+     * Watches the capture directory so automatic modes react to a photo the moment it is taken
+     * rather than waiting for the next reconnect. The observer only ever nudges an attempt — the
+     * stability gate decides whether a file is actually ready, so a half-written video is simply
+     * not eligible yet and the settling re-check picks it up shortly after.
      */
     private fun startCaptureObserver() {
         val directory = File(MediaCatalog.DEFAULT_DIRECTORY)
@@ -119,22 +123,42 @@ internal object MediaSyncEngine {
             .onFailure { logError("mediaSync capture observer start failed", it) }
         captureObserver = observer
         logSync("capture observer watching ${directory.absolutePath}")
-        startAlwaysSafetyScan()
     }
 
     /**
      * The observer is the fast path, not a guarantee: inotify on this shared-storage mount misses
      * events written by other apps often enough to matter — measured here, a small capture fired
-     * and a large one did not. ALWAYS mode promises "syncs as soon as you capture", so a slow scan
-     * backs the observer up; a missed event then costs a minute rather than lasting until the next
-     * reconnect. Other modes need nothing: they already have their own trigger.
+     * and a large one did not. A slow scan backs the observer up in every automatic mode while its
+     * power condition is satisfied. This matters especially in CHARGING mode: if the glasses were
+     * already plugged in, there will be no new power edge to recover a missed capture.
      */
-    private fun startAlwaysSafetyScan() {
+    private fun startAutoSafetyScan() {
         captureFingerprint = readCaptureFingerprint()
         runCatching {
             executor.scheduleWithFixedDelay(
                 {
-                    if (mode != MediaSyncMode.ALWAYS || !consented || !linkUp || session != null) {
+                    val context = appContext ?: return@scheduleWithFixedDelay
+                    if (cameraSessionActive &&
+                        CameraSessionLivenessPolicy.shouldResetTracker(
+                            MediaSyncSkipReason.CAMERA_ACTIVE,
+                            isCameraProcessAlive(context),
+                        )
+                    ) {
+                        // A crashed :camera process cannot send its closing edge. Repair the stale
+                        // tracker before the camera guard below, without consuming the directory
+                        // fingerprint while a real camera session is still alive.
+                        logSync("camera session stale during safety scan; releasing")
+                        GlassesHub.resetCameraSession()
+                    }
+                    if (!MediaSyncSafetyScanPolicy.shouldScan(
+                            mode = mode,
+                            charging = isCharging(context),
+                            consented = consented,
+                            dataLinkUp = linkUp,
+                            sessionActive = session != null,
+                            cameraSessionActive = cameraSessionActive,
+                        )
+                    ) {
                         return@scheduleWithFixedDelay
                     }
                     // Only a directory that actually changed is worth a session. The glasses
@@ -148,8 +172,8 @@ internal object MediaSyncEngine {
                     logSync("safety scan noticed a capture change")
                     attempt(MediaSyncTrigger.NEW_CAPTURE, quiet = true)
                 },
-                ALWAYS_SCAN_INTERVAL_MS,
-                ALWAYS_SCAN_INTERVAL_MS,
+                AUTO_SCAN_INTERVAL_MS,
+                AUTO_SCAN_INTERVAL_MS,
                 TimeUnit.MILLISECONDS,
             )
         }.onFailure { logError("mediaSync safety scan unavailable", it) }
@@ -212,13 +236,14 @@ internal object MediaSyncEngine {
     }
 
     /**
-     * [quiet] is for the periodic ALWAYS scan: it runs whether or not anything happened, so its
+     * [quiet] is for the periodic safety scan: it runs whether or not anything happened, so its
      * "nothing to do" answer is the normal case and must not fill the log with it.
      */
     private fun attempt(
         trigger: MediaSyncTrigger,
         reconciled: Boolean = false,
         quiet: Boolean = false,
+        fromSettlingRecheck: Boolean = false,
     ) {
         val context = appContext ?: return
         val catalog = catalog ?: return
@@ -228,9 +253,9 @@ internal object MediaSyncEngine {
         }
         val storageReadable = hasStoragePermission(context)
         val scan = if (storageReadable) catalog.scan() else MediaCatalog.CatalogScan(emptyList(), false)
-        val decision = MediaSyncTriggerPolicy.decide(
-            trigger,
-            MediaSyncConditions(
+        val plan = MediaSyncAttemptPolicy.plan(
+            trigger = trigger,
+            conditions = MediaSyncConditions(
                 linkUp = linkUp,
                 charging = isCharging(context),
                 hasEligibleFiles = !scan.isEmpty,
@@ -239,9 +264,19 @@ internal object MediaSyncEngine {
                 syncInProgress = session != null,
                 storageReadable = storageReadable,
             ),
+            hasSettlingFiles = scan.settling,
         )
-        when (decision) {
+        if (plan.scheduleSettlingRecheck) scheduleSettlingRecheck(trigger)
+        when (val decision = plan.decision) {
             is MediaSyncTriggerDecision.Skip -> {
+                if (MediaSyncDeferredRetryPolicy.shouldDefer(
+                        trigger = trigger,
+                        reason = decision.reason,
+                        fromSettlingRecheck = fromSettlingRecheck,
+                    )
+                ) {
+                    deferredTrigger = trigger
+                }
                 if (!reconciled &&
                     CameraSessionLivenessPolicy.shouldResetTracker(
                         decision.reason,
@@ -259,9 +294,6 @@ internal object MediaSyncEngine {
                     logSync("skip trigger=$trigger reason=${decision.reason}")
                     reportState("idle", reason = decision.reason.name.lowercase())
                 }
-                if (decision.reason == MediaSyncSkipReason.NOTHING_PENDING && scan.settling) {
-                    scheduleSettlingRecheck(trigger)
-                }
             }
             is MediaSyncTriggerDecision.Start -> begin(context, decision.trigger)
         }
@@ -274,7 +306,13 @@ internal object MediaSyncEngine {
     private fun scheduleSettlingRecheck(trigger: MediaSyncTrigger) {
         if (settlingFuture?.isDone == false) return
         settlingFuture = executor.schedule(
-            { attempt(trigger) },
+            {
+                try {
+                    attempt(trigger, fromSettlingRecheck = true)
+                } finally {
+                    settlingFuture = null
+                }
+            },
             MediaSyncStabilityGate.MIN_SAMPLE_GAP_MS + SETTLING_MARGIN_MS,
             TimeUnit.MILLISECONDS,
         )
@@ -353,11 +391,17 @@ internal object MediaSyncEngine {
     private fun finish(reason: String, alreadyReported: Boolean = false) {
         val current = session ?: return
         session = null
+        val retryTrigger = deferredTrigger
+        deferredTrigger = null
         watchdogFuture?.cancel(false)
         watchdogFuture = null
         runCatching { current.sender.close() }
         logSync("session end id=${current.id} reason=$reason")
         if (!alreadyReported) reportState("idle", reason)
+        if (retryTrigger != null) {
+            logSync("retrying deferred trigger=$retryTrigger after session")
+            attempt(retryTrigger, quiet = true)
+        }
     }
 
     private fun reportState(
@@ -427,6 +471,6 @@ internal object MediaSyncEngine {
     @Suppress("DEPRECATION")
     private const val CAPTURE_EVENTS = FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO
 
-    /** Backs up the capture observer in ALWAYS mode; a missed event costs a minute, not a session. */
-    private const val ALWAYS_SCAN_INTERVAL_MS = 60_000L
+    /** Backs up the capture observer in automatic modes; a missed event costs at most one minute. */
+    private const val AUTO_SCAN_INTERVAL_MS = 60_000L
 }

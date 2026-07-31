@@ -807,7 +807,9 @@ object GlassesHub {
 
     private fun notifyLinkState() {
         val state = linkState()
-        MediaSyncEngine.onLinkStateChanged(phoneConnected)
+        // CXR is enough for control JSON, but every photo session needs the SPP data plane. Using
+        // the aggregate CXR-or-SPP state loses the rising edge when SPP returns while CXR stayed up.
+        MediaSyncEngine.onLinkStateChanged(MediaSyncLinkPolicy.isDataPlaneUp(state))
         registrations.forEach { registration ->
             runCatching { registration.callback.onLinkState(state) }
                 .onFailure { removeRegistration(registration) }
