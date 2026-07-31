@@ -812,8 +812,6 @@ class MainActivity : Activity() {
         val handoff = NexusPhoneState.glassesSetupHandoff
         val setupUnfinished = NexusPhoneState.glassesAppInstalled &&
             !NexusPhoneState.glassesSetupComplete
-        val handoffFailed = handoff == NexusPhoneState.SetupHandoff.FAILED
-
         val steps = listOf(
             OnboardingStep(
                 title = getString(R.string.onb_authorize_title),
@@ -850,21 +848,15 @@ class MainActivity : Activity() {
                 title = getString(R.string.onb_glasses_title),
                 body = getString(R.string.onb_glasses_body),
                 done = NexusPhoneState.glassesSetupComplete,
-                // If the remote start could not be delivered, say so and offer the honest
-                // alternative rather than leaving a button that already failed once.
-                actionLabel = if (handoffFailed) {
-                    getString(R.string.onb_glasses_action_open_app)
-                } else {
-                    getString(R.string.onb_glasses_action)
-                },
+                // The retry always stays. This used to swap itself for "Open glasses app" once a
+                // hand-off looked like it failed, which locked the step: only a successful start
+                // cleared that flag, and the button that could produce one was the one being
+                // hidden. The signal is not even reliable -- the entry point on the lens draws
+                // nothing and finishes at once, so CXR often reports failure for a start that
+                // worked. Say what happened in the status line, keep the way forward.
+                actionLabel = getString(R.string.onb_glasses_action),
                 actionEnabled = cxrReady && handoff != NexusPhoneState.SetupHandoff.SENDING,
-                onAction = {
-                    if (handoffFailed) {
-                        BusHubService.openGlassesApp(this)
-                    } else {
-                        BusHubService.startGlassesSetup(this)
-                    }
-                },
+                onAction = { BusHubService.startGlassesSetup(this) },
                 statusLine = glassesSetupStatusLine(handoff, setupUnfinished),
                 // Never gate recovery on a diagnostic from the failing transport. If the app is
                 // installed but setup is incomplete, the fallback must already be reachable.

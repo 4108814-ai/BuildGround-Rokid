@@ -234,6 +234,12 @@ internal object NexusPhoneState {
         ) {
             return
         }
+        // The lens just spoke, so whatever we concluded from a hand-off that looked like it failed
+        // is stale. Leaving FAILED latched here is what stranded owners: nothing else ever cleared
+        // it, and the screen it produced had no way back to the button that would.
+        if (glassesSetupHandoff == SetupHandoff.FAILED) {
+            glassesSetupHandoff = SetupHandoff.IDLE
+        }
         glassesSetupSessionId = sessionId
         glassesSetupStage = stage
         glassesSetupRunning = running
