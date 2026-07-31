@@ -32,10 +32,14 @@ internal class CameraLinkReverseOfferFallbackPolicy(
         startupMode == CameraLinkStartupMode.WAIT_FOR_LOHS_REVERSE && !reverseOfferAccepted
 }
 
-internal const val SUPPORTED_PHONE_CAMERA_CAPABILITIES =
+internal const val SUPPORTED_PHONE_CAPABILITIES =
     BusCapabilityBits.CAMERA_CONSUMER_READY or
         BusCapabilityBits.CAMERA_FROZEN_SPP or
-        BusCapabilityBits.CAMERA_LOHS_REVERSE_REQUIRED
+        BusCapabilityBits.CAMERA_LOHS_REVERSE_REQUIRED or
+        BusCapabilityBits.PHONE_ASSISTED_SETUP
 
-internal fun supportedPhoneCameraCapabilities(features: Int): Int =
-    features and SUPPORTED_PHONE_CAMERA_CAPABILITIES
+internal fun supportedPhoneCapabilities(features: Int): Int =
+    features and SUPPORTED_PHONE_CAPABILITIES
+
+internal fun supportsPhoneAssistedSetup(features: Int): Boolean =
+    features and BusCapabilityBits.PHONE_ASSISTED_SETUP != 0

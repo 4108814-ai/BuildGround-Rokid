@@ -47,6 +47,7 @@ class GlassesManualSetupActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        BusHubService.noteGlassesSetupUserIntent()
         window.statusBarColor = NexusUi.BG
         window.navigationBarColor = NexusUi.BG
         title = "Manual glasses setup"

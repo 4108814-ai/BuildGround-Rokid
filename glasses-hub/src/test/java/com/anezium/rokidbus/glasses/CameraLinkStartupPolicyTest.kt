@@ -18,19 +18,31 @@ class CameraLinkStartupPolicyTest {
             CameraLinkStartupMode.P2P_FIRST,
             CameraLinkStartupModePolicy.select(BusCapabilityBits.CAMERA_CONSUMER_READY),
         )
+        assertEquals(
+            CameraLinkStartupMode.P2P_FIRST,
+            CameraLinkStartupModePolicy.select(BusCapabilityBits.PHONE_ASSISTED_SETUP),
+        )
     }
 
     @Test
-    fun `glasses capability filter retains the LOHS signal and drops unknown bits`() {
+    fun `new glasses retain assisted setup and supported camera signals only`() {
         val advertised = BusCapabilityBits.CAMERA_CONSUMER_READY or
             BusCapabilityBits.CAMERA_LOHS_REVERSE_REQUIRED or
+            BusCapabilityBits.PHONE_ASSISTED_SETUP or
             (1 shl 30)
 
         assertEquals(
             BusCapabilityBits.CAMERA_CONSUMER_READY or
-                BusCapabilityBits.CAMERA_LOHS_REVERSE_REQUIRED,
-            supportedPhoneCameraCapabilities(advertised),
+                BusCapabilityBits.CAMERA_LOHS_REVERSE_REQUIRED or
+                BusCapabilityBits.PHONE_ASSISTED_SETUP,
+            supportedPhoneCapabilities(advertised),
         )
+    }
+
+    @Test
+    fun `old phone without assisted bit keeps new glasses on manual fallback`() {
+        assertFalse(supportsPhoneAssistedSetup(0))
+        assertTrue(supportsPhoneAssistedSetup(BusCapabilityBits.PHONE_ASSISTED_SETUP))
     }
 
     @Test

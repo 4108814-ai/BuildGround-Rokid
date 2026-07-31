@@ -39,6 +39,18 @@ class GlassesManualPairingEngineTest {
     }
 
     @Test
+    fun assistedPathFinishesAfterArmWithoutOpeningOrClosingManualUi() {
+        val fixture = fixture()
+
+        assertTrue(fixture.engine.start(awaitGlassesConfirmation = false))
+        fixture.engine.onGlassesConnectPort(CONNECT_PORT)
+        assertTrue(fixture.engine.submit(HOST, PAIR_PORT, CODE))
+
+        assertEquals(GlassesManualPairingState.DONE, fixture.engine.state)
+        assertTrue(fixture.control.actions.isEmpty())
+    }
+
+    @Test
     fun pairingFailureBecomesSanitizedError() {
         val backend = FakeBackend(pairFailure = IOException("bad code $CODE at $HOST"))
         val fixture = fixture(backend)

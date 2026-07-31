@@ -16,7 +16,11 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.anezium.rokidbus.glasses.SelfArmVerifiedSettingsScroller.Outcome as ScrollSearchOutcome
 import com.anezium.rokidbus.glasses.SelfArmVerifiedSettingsScroller.Surface as ScrollSurface
+import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.SetupCompletionMode
+import com.anezium.rokidbus.shared.SetupPairingOfferContract
+import com.anezium.rokidbus.shared.SetupPairingResult
+import com.anezium.rokidbus.shared.SetupStage
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.Locale
@@ -69,6 +73,7 @@ internal class SelfArmWirelessDebuggingAutomator(
     private var localSelfPairingThread: Thread? = null
     private var lastLocalSelfPairingStatusAt = 0L
     private var lastReportedProgressState = ""
+    private val phonePairingOffer = SelfArmPhonePairingOfferTracker()
 
     private var awaitingWirelessDebugConfirmation = false
     private var wirelessToggleRequestedAt = 0L
@@ -251,9 +256,19 @@ internal class SelfArmWirelessDebuggingAutomator(
     private fun step(expectedRunToken: Long, expectedSessionId: String) {
         if (!isLiveRun(expectedRunToken, expectedSessionId)) return
         beatLeaseIfDue()
+        val now = SystemClock.uptimeMillis()
+        if (phonePairingOffer.expire(now)) {
+            Log.i(TAG, "phone-assisted pairing offer expired")
+            finish(
+                "phone_assisted_pairing_manual_step_needed",
+                false,
+                "PHONE-OFFER-EXPIRED",
+            )
+            return
+        }
         // Neither deadline may cut a pairing that is actually running; see SelfArmPairingGracePolicy.
-        val pairingInFlight = selfPairingSuspendsExpiry(SystemClock.uptimeMillis())
-        if (!pairingInFlight && SystemClock.uptimeMillis() > deadlineAt) {
+        val pairingInFlight = selfPairingSuspendsExpiry(now)
+        if (!pairingInFlight && now > deadlineAt) {
             if (operationMode == OperationMode.WIFI_ONLY) {
                 finish("wifi_enable_timeout", false)
             } else if (operationMode == OperationMode.MANUAL_NAVIGATION) {
@@ -271,7 +286,7 @@ internal class SelfArmWirelessDebuggingAutomator(
             !pairingInFlight &&
             pairingReadyReported &&
             pairingReadyReportedAt > 0L &&
-            SystemClock.uptimeMillis() - pairingReadyReportedAt > pairingDialogHoldMs()
+            now - pairingReadyReportedAt > pairingDialogHoldMs()
         ) {
             val diagnostic = when {
                 localSelfPairingLastError.isNotBlank() ->
@@ -832,13 +847,7 @@ internal class SelfArmWirelessDebuggingAutomator(
                         val diagnostic = pairingFailureDiagnostic(localSelfPairingLastError)
                         Log.w(TAG, "local self-pair bootstrap failed: $diagnostic")
                         if (isLiveRun(workerRunToken, workerSessionId)) {
-                            android.util.Log.i(TAG, "Phone fallback pairing")
-                            android.util.Log.i(
-                                TAG,
-                                "selfarm-wireless self_pairing_failed error=$diagnostic",
-                            )
-                            sendPairingReadyStatus(token, code, host, pairPort, connectPort)
-                            schedule(PAIRING_DIALOG_POLL_MS)
+                            offerPairingViaPhone(code, host, pairPort, connectPort)
                         }
                     }
                 }
@@ -850,6 +859,122 @@ internal class SelfArmWirelessDebuggingAutomator(
         localSelfPairingThread = worker
         worker.start()
         report("self_pairing_in_progress")
+        return true
+    }
+
+    private fun offerPairingViaPhone(
+        code: String,
+        host: String,
+        pairPort: Int,
+        connectPort: Int,
+    ) {
+        if (!isLiveRun() || phonePairingOffer.hasOutstanding()) {
+            schedule(PAIRING_DIALOG_POLL_MS)
+            return
+        }
+        val currentSessionId =
+            SelfArmOnboardingStore.currentActiveSessionId(service.applicationContext)
+        if (currentSessionId.isBlank() || currentSessionId != sessionId) return
+        if (!GlassesHub.supportsPhoneAssistedSetup()) {
+            Log.i(TAG, "phone-assisted pairing unavailable reason=UNSUPPORTED")
+            finish(
+                "phone_assisted_pairing_manual_step_needed",
+                false,
+                "PHONE-UNSUPPORTED",
+            )
+            return
+        }
+
+        val issuedAt = System.currentTimeMillis()
+        val offer = SetupPairingOfferContract.createOffer(
+            sessionId = currentSessionId,
+            issuedAt = issuedAt,
+            expiresAt = issuedAt + SetupPairingOfferContract.MAX_TTL_MS,
+            host = host,
+            pairingPort = pairPort,
+            connectPort = connectPort,
+            pairingCode = code,
+        )
+        val ttlMillis = offer?.let(SetupPairingOfferContract::ttlMillis)
+        val startedAt = SystemClock.uptimeMillis()
+        if (offer == null || ttlMillis == null ||
+            !phonePairingOffer.begin(
+                currentSessionId,
+                offer.offerId,
+                startedAt,
+                ttlMillis,
+            )
+        ) {
+            Log.i(TAG, "phone-assisted pairing unavailable reason=INVALID_OFFER")
+            finish(
+                "phone_assisted_pairing_manual_step_needed",
+                false,
+                "PHONE-INVALID-OFFER",
+            )
+            return
+        }
+
+        report(SetupStage.PAIRING_VIA_PHONE)
+        val sent = GlassesHub.sendToPhone(
+            BusPaths.GLASSES_SETUP_PAIRING_OFFER,
+            SetupPairingOfferContract.offerToJson(offer),
+        )
+        if (!sent) {
+            phonePairingOffer.clear()
+            Log.i(TAG, "phone-assisted pairing offer rejected reason=NO_LINK")
+            finish(
+                "phone_assisted_pairing_manual_step_needed",
+                false,
+                "PHONE-NO-LINK",
+            )
+            return
+        }
+        Log.i(TAG, "phone-assisted pairing offer sent")
+        schedule(PAIRING_DIALOG_POLL_MS)
+    }
+
+    internal fun onPhoneAssistedPairingResult(result: SetupPairingResult): Boolean {
+        if (!isLiveRun() || !phonePairingOffer.resolve(result)) return false
+        val resultSessionId = sessionId
+        if (!SelfArmOnboardingStore.isCurrentSession(
+                service.applicationContext,
+                resultSessionId,
+            )
+        ) {
+            return false
+        }
+        if (!result.ok) {
+            finish(
+                "phone_assisted_pairing_manual_step_needed",
+                false,
+                "PHONE-${result.reason}",
+            )
+            return true
+        }
+
+        service.returnToOnboarding(resultSessionId)
+        service.onWirelessBootstrapFinished(resultSessionId)
+        cancelLiveWork()
+        SelfArmPhoneArmConfirmation.confirm(
+            context = service.applicationContext,
+            sessionId = resultSessionId,
+            completionMode = SetupCompletionMode.PHONE_ASSISTED,
+            onFailure = {
+                if (SelfArmOnboardingStore.isCurrentSession(
+                        service.applicationContext,
+                        resultSessionId,
+                    )
+                ) {
+                    SelfArmOnboardingStore.finish(
+                        context = service.applicationContext,
+                        sessionId = resultSessionId,
+                        setupState = "phone_assisted_verification_manual_step_needed",
+                        success = false,
+                        diagnostic = "PHONE-VERIFY",
+                    )
+                }
+            },
+        )
         return true
     }
 
@@ -1581,7 +1706,8 @@ internal class SelfArmWirelessDebuggingAutomator(
         if (!SelfArmHeartbeatPolicy.shouldHeartbeat(
                 sessionCurrent = sessionCurrent,
                 automatonActive = active,
-                workerAlive = localSelfPairingThread?.isAlive == true,
+                workerAlive = localSelfPairingThread?.isAlive == true ||
+                    phonePairingOffer.hasOutstanding(),
                 nowMillis = now,
                 lastHeartbeatMillis = lastHeartbeatAt,
                 cadenceMillis = SelfArmOnboardingStore.HEARTBEAT_CADENCE_MS,
@@ -1620,6 +1746,7 @@ internal class SelfArmWirelessDebuggingAutomator(
         localSelfPairingThread = null
         localSelfPairingRunning = false
         localSelfPairingStartedAt = 0L
+        phonePairingOffer.clear()
         sessionId = ""
         lastHeartbeatAt = 0L
     }
@@ -1630,7 +1757,7 @@ internal class SelfArmWirelessDebuggingAutomator(
             nowMillis = nowMillis,
             pairingStartedAtMillis = localSelfPairingStartedAt,
             maxGraceMillis = SELF_PAIRING_GRACE_MS,
-        )
+        ) || phonePairingOffer.suspendsExpiry(nowMillis, SELF_PAIRING_GRACE_MS)
 
     private fun pairingDialogHoldMs(): Long =
         if (operationMode == OperationMode.MANUAL_NAVIGATION) MANUAL_TIMEOUT_MS else PAIRING_DIALOG_HOLD_MS

@@ -14,6 +14,7 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import com.anezium.rokidbus.shared.SetupCompletionMode
+import com.anezium.rokidbus.shared.SetupPairingResult
 
 class RokidBusAccessibilityService : AccessibilityService() {
     private val tripleTapDetector = TripleTapDetector()
@@ -954,6 +955,29 @@ class RokidBusAccessibilityService : AccessibilityService() {
             service.main.post {
                 if (!SelfArmOnboardingStore.isCurrentSession(appContext, sessionId)) return@post
                 service.resumeSetupSessionFromObservedState()
+            }
+            return true
+        }
+
+        internal fun onPhoneAssistedPairingResult(
+            context: Context,
+            result: SetupPairingResult,
+        ): Boolean {
+            val appContext = context.applicationContext
+            if (!SelfArmOnboardingStore.isCurrentSession(appContext, result.sessionId)) {
+                return false
+            }
+            val service = liveInstance ?: return false
+            service.main.post {
+                val handled =
+                    service.wirelessDebuggingAutomator?.onPhoneAssistedPairingResult(result) == true
+                log(
+                    if (handled) {
+                        "phone-assisted pairing result accepted"
+                    } else {
+                        "phone-assisted pairing result ignored reason=NO_MATCH"
+                    },
+                )
             }
             return true
         }

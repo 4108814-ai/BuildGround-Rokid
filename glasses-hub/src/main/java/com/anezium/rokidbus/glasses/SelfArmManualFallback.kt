@@ -148,6 +148,8 @@ internal object SelfArmPhoneArmConfirmation {
     fun confirm(
         context: Context,
         sessionId: String = SelfArmOnboardingStore.currentSessionId(context),
+        completionMode: String = SetupCompletionMode.PHONE_MANUAL,
+        onFailure: (() -> Unit)? = null,
     ) {
         val appContext = context.applicationContext
         if (!SelfArmOnboardingStore.isCurrentSession(appContext, sessionId)) return
@@ -171,18 +173,22 @@ internal object SelfArmPhoneArmConfirmation {
                     sessionId = sessionId,
                     setupState = "wireless_bootstrap_complete",
                     success = true,
-                    completionMode = SetupCompletionMode.PHONE_MANUAL,
+                    completionMode = completionMode,
                 )
             }
             result.onFailure { failure ->
                 if (!SelfArmOnboardingStore.isCurrentSession(appContext, sessionId)) return@onFailure
                 val detail = sanitizeSupportDiagnostic(causeChain(failure))
                 log("Phone-driven self-arm confirmation failed: $detail")
-                SelfArmOnboardingStore.reportProgress(
-                    appContext,
-                    sessionId,
-                    "manual_pairing_verification_failed",
-                )
+                if (onFailure != null) {
+                    onFailure()
+                } else {
+                    SelfArmOnboardingStore.reportProgress(
+                        appContext,
+                        sessionId,
+                        "manual_pairing_verification_failed",
+                    )
+                }
             }
             synchronized(workerLock) {
                 if (worker === Thread.currentThread()) worker = null

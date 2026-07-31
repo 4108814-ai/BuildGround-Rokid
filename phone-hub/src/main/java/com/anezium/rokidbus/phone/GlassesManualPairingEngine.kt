@@ -77,6 +77,7 @@ internal class GlassesManualPairingEngine(
     private var pendingControl: PendingControl? = null
     private var confirmationTimeout: ManualPairingCancellation? = null
     private var awaitingGlassesConfirmation = false
+    private var awaitGlassesConfirmationForAttempt = true
 
     @Volatile
     var state: GlassesManualPairingState = GlassesManualPairingState.IDLE
@@ -88,7 +89,7 @@ internal class GlassesManualPairingEngine(
         return Closeable { observers -= observer }
     }
 
-    fun start(): Boolean {
+    fun start(awaitGlassesConfirmation: Boolean = true): Boolean {
         val attempt = synchronized(lock) {
             generation += 1L
             activeWork?.cancel()
@@ -99,6 +100,8 @@ internal class GlassesManualPairingEngine(
             confirmationTimeout?.cancel()
             confirmationTimeout = null
             awaitingGlassesConfirmation = false
+            awaitGlassesConfirmationForAttempt = awaitGlassesConfirmation
+            reportedConnectPort = 0
             generation
         }
         transition(attempt, GlassesManualPairingState.WAITING_FOR_CODE)
@@ -206,7 +209,11 @@ internal class GlassesManualPairingEngine(
                 session = null // The arm runner owns transport cleanup, including reconnects.
                 backend.arm(armSession, cleanHost)
                 if (!isCurrent(attempt)) return@submit
-                awaitGlassesConfirmation(attempt)
+                if (shouldAwaitGlassesConfirmation(attempt)) {
+                    awaitGlassesConfirmation(attempt)
+                } else {
+                    completeWithoutGlassesConfirmation(attempt)
+                }
             } catch (failure: Throwable) {
                 ephemeralCode = ""
                 runCatching { session?.close() }
@@ -230,6 +237,7 @@ internal class GlassesManualPairingEngine(
             confirmationTimeout?.cancel()
             confirmationTimeout = null
             awaitingGlassesConfirmation = false
+            reportedConnectPort = 0
             state != GlassesManualPairingState.IDLE
         }
         sendClose(armed = false)
@@ -246,6 +254,7 @@ internal class GlassesManualPairingEngine(
                 confirmationTimeout?.cancel()
                 confirmationTimeout = null
                 activeWork = null
+                reportedConnectPort = 0
                 true
             }
         }
@@ -289,6 +298,24 @@ internal class GlassesManualPairingEngine(
         }
     }
 
+    private fun shouldAwaitGlassesConfirmation(attempt: Long): Boolean =
+        synchronized(lock) {
+            attempt == generation && awaitGlassesConfirmationForAttempt
+        }
+
+    private fun completeWithoutGlassesConfirmation(attempt: Long) {
+        val completed = synchronized(lock) {
+            if (attempt != generation) {
+                false
+            } else {
+                activeWork = null
+                reportedConnectPort = 0
+                true
+            }
+        }
+        if (completed) transition(attempt, GlassesManualPairingState.DONE)
+    }
+
     private fun fail(attempt: Long, userMessage: String, failure: Throwable) {
         val detail = ManualPairingSupportDiagnostic.causeChain(failure)
         val accepted = synchronized(lock) {
@@ -302,6 +329,7 @@ internal class GlassesManualPairingEngine(
                 awaitingGlassesConfirmation = false
                 confirmationTimeout?.cancel()
                 confirmationTimeout = null
+                reportedConnectPort = 0
                 true
             }
         }

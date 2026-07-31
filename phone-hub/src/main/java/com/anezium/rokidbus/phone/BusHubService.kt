@@ -51,6 +51,8 @@ import com.anezium.rokidbus.shared.NoticeSurfaceValidationResult
 import com.anezium.rokidbus.shared.PhoneHubCapabilitiesContract
 import com.anezium.rokidbus.shared.PinSurfaceContract
 import com.anezium.rokidbus.shared.PinSurfaceValidationResult
+import com.anezium.rokidbus.shared.SetupPairingFailureReason
+import com.anezium.rokidbus.shared.SetupPairingOfferContract
 import com.anezium.rokidbus.shared.plugin.PathRules
 import com.anezium.rokidbus.shared.plugin.PluginCapability
 import com.anezium.rokidbus.shared.plugin.PluginCapability.Companion.serialize
@@ -78,6 +80,7 @@ import com.example.cxrglobal.callbacks.IGlassAppCbk
 import com.rokid.cxr.Caps
 import com.anezium.rokidbus.phone.mediasync.MediaSyncCoordinator
 import org.json.JSONObject
+import java.io.Closeable
 import java.io.File
 import java.io.IOException
 import java.io.OutputStream
@@ -235,6 +238,10 @@ class BusHubService : Service() {
     private lateinit var cameraCompanionController: CameraCompanionController
     private lateinit var mediaSyncCoordinator: MediaSyncCoordinator
     private lateinit var manualPairingEngine: GlassesManualPairingEngine
+    private var manualPairingEngineSubscription: Closeable? = null
+    private val phoneAssistedSetupOfferPolicy = PhoneAssistedSetupOfferPolicy()
+    private val phoneAssistedPairingLock = Any()
+    private var activePhoneAssistedPairing: ActivePhoneAssistedPairing? = null
     private lateinit var transitLegacyStateExporter: TransitLegacyStateExporter
     private lateinit var speechSettingsStore: SpeechSettingsStore
     private lateinit var speechSessionManager: SpeechSessionManager
@@ -276,6 +283,12 @@ class BusHubService : Service() {
     private var pluginPackageReceiverRegistered = false
     private var wifiStateReceiverRegistered = false
     private val notifiedDeveloperPackages = ConcurrentHashMap.newKeySet<String>()
+
+    private data class ActivePhoneAssistedPairing(
+        val sessionId: String,
+        val offerId: String,
+        var lastState: GlassesManualPairingState = GlassesManualPairingState.IDLE,
+    )
 
     private val pluginPackageReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -495,12 +508,15 @@ class BusHubService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        NexusPhoneState.restore(applicationContext)
         activeInstance = this
         manualPairingEngine = GlassesManualPairingEngine.create(
             context = applicationContext,
             control = GlassesManualControlSender(::sendManualSelfArmControl),
             logger = ::log,
         )
+        manualPairingEngineSubscription =
+            manualPairingEngine.observe(::onPhoneAssistedPairingStateChanged)
         // The glasses only re-advertise their setup state once CXR is back up. Without seeding
         // these from the last persisted values, a hub restart (e.g. after an app update kills the
         // process) would broadcast setupComplete=false and versionName="" before the glasses
@@ -812,6 +828,9 @@ class BusHubService : Service() {
         if (::pluginRegistry.isInitialized) pluginRegistry.close()
         if (::cameraCompanionController.isInitialized) cameraCompanionController.close()
         if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.close()
+        synchronized(phoneAssistedPairingLock) { activePhoneAssistedPairing = null }
+        manualPairingEngineSubscription?.close()
+        manualPairingEngineSubscription = null
         if (::manualPairingEngine.isInitialized) manualPairingEngine.close()
         registrations.clear()
         if (activeInstance === this) activeInstance = null
@@ -824,7 +843,7 @@ class BusHubService : Service() {
     private fun routeLocal(envelope: BusEnvelope, senderUid: Int) {
         val sender = resolveSender(senderUid)
         if (isGlassesControlRequest(envelope.path)) {
-            val strictlyHubOwned = envelope.path == BusPaths.GLASSES_SELFARM_MANUAL
+            val strictlyHubOwned = isStrictlyHubOwnedGlassesPath(envelope.path)
             if (senderUid != Process.myUid() && (strictlyHubOwned || !isDebuggableBuild())) {
                 recordLocalRoute(envelope, senderUid, sender, PluginBusJournal.Verdict.REJECTED, "TRUSTED_LOCAL_ONLY")
                 deliverError(sender.replyBinder, envelope.id, "TRUSTED_LOCAL_ONLY")
@@ -1084,6 +1103,11 @@ class BusHubService : Service() {
             if (::mediaSyncCoordinator.isInitialized) {
                 executor.execute { mediaSyncCoordinator.onLinkUp() }
             }
+            return
+        }
+        if (envelope.path == BusPaths.GLASSES_SETUP_PAIRING_OFFER) {
+            val arrivedAtMillis = SystemClock.elapsedRealtime()
+            executor.execute { handlePhoneAssistedSetupOffer(envelope, arrivedAtMillis) }
             return
         }
         if (handleManualSelfArmResponse(envelope)) return
@@ -1901,7 +1925,12 @@ class BusHubService : Service() {
     private fun isGlassesControlRequest(path: String): Boolean =
         path == BusPaths.GLASSES_BRIGHTNESS_REQUEST ||
             path == BusPaths.GLASSES_VOLUME_REQUEST ||
-            path == BusPaths.GLASSES_SELFARM_MANUAL
+            isStrictlyHubOwnedGlassesPath(path)
+
+    private fun isStrictlyHubOwnedGlassesPath(path: String): Boolean =
+        path == BusPaths.GLASSES_SELFARM_MANUAL ||
+            path == BusPaths.GLASSES_SETUP_PAIRING_OFFER ||
+            path == BusPaths.GLASSES_SETUP_PAIRING_RESULT
 
     private fun handleGlassesControlRequest(envelope: BusEnvelope, replyBinder: IBinder?) {
         if (envelope.path == BusPaths.GLASSES_SELFARM_MANUAL) {
@@ -3570,6 +3599,159 @@ class BusHubService : Service() {
         ),
     )
 
+    private fun handlePhoneAssistedSetupOffer(
+        envelope: BusEnvelope,
+        arrivedAtMillis: Long,
+    ) {
+        val validation = SetupPairingOfferContract.validateOffer(envelope.payload)
+        if (validation !is SetupPairingOfferContract.OfferValidationResult.Valid) {
+            log("phone-assisted pairing offer rejected reason=UNSUPPORTED")
+            sendInvalidPhoneAssistedSetupResult(envelope)
+            return
+        }
+        val offer = validation.offer
+        val decision = phoneAssistedSetupOfferPolicy.evaluate(
+            offer = offer,
+            currentSessionId = NexusPhoneState.glassesSetupSessionId,
+            lastUserIntentAtMillis = lastGlassesSetupUserIntentAtMillis.get(),
+            arrivedAtMillis = arrivedAtMillis,
+            nowMillis = SystemClock.elapsedRealtime(),
+        )
+        if (decision is PhoneAssistedSetupOfferPolicy.Decision.Rejected) {
+            log("phone-assisted pairing offer rejected reason=${decision.reason}")
+            sendPhoneAssistedSetupResult(
+                sessionId = offer.sessionId,
+                offerId = offer.offerId,
+                ok = false,
+                reason = decision.reason,
+            )
+            return
+        }
+
+        val accepted = synchronized(phoneAssistedPairingLock) {
+            if (activePhoneAssistedPairing != null) {
+                false
+            } else {
+                activePhoneAssistedPairing = ActivePhoneAssistedPairing(
+                    sessionId = offer.sessionId,
+                    offerId = offer.offerId,
+                )
+                true
+            }
+        }
+        if (!accepted) {
+            log("phone-assisted pairing offer rejected reason=PAIR_REFUSED")
+            sendPhoneAssistedSetupResult(
+                sessionId = offer.sessionId,
+                offerId = offer.offerId,
+                ok = false,
+                reason = SetupPairingFailureReason.PAIR_REFUSED,
+            )
+            return
+        }
+
+        log("phone-assisted pairing offer accepted")
+        manualPairingEngine.start(awaitGlassesConfirmation = false)
+        manualPairingEngine.onGlassesConnectPort(offer.connectPort)
+        if (!manualPairingEngine.submit(offer.host, offer.pairingPort, offer.pairingCode)) {
+            synchronized(phoneAssistedPairingLock) {
+                activePhoneAssistedPairing
+                    ?.takeIf { it.sessionId == offer.sessionId && it.offerId == offer.offerId }
+                    ?.let { activePhoneAssistedPairing = null }
+            }
+            sendPhoneAssistedSetupResult(
+                sessionId = offer.sessionId,
+                offerId = offer.offerId,
+                ok = false,
+                reason = SetupPairingFailureReason.PAIR_REFUSED,
+            )
+        }
+    }
+
+    private fun sendInvalidPhoneAssistedSetupResult(envelope: BusEnvelope) {
+        val sessionId = envelope.payload.optString("sessionId")
+        val offerId = envelope.payload.optString("offerId")
+        if (!SetupPairingOfferContract.validSessionId(sessionId) ||
+            !SetupPairingOfferContract.validOfferId(offerId)
+        ) {
+            return
+        }
+        sendPhoneAssistedSetupResult(
+            sessionId = sessionId,
+            offerId = offerId,
+            ok = false,
+            reason = SetupPairingFailureReason.UNSUPPORTED,
+        )
+    }
+
+    private fun onPhoneAssistedPairingStateChanged(state: GlassesManualPairingState) {
+        val completion = synchronized(phoneAssistedPairingLock) {
+            val active = activePhoneAssistedPairing ?: return@synchronized null
+            when (state) {
+                GlassesManualPairingState.DONE -> {
+                    activePhoneAssistedPairing = null
+                    Triple(active, true, "")
+                }
+                is GlassesManualPairingState.ERROR -> {
+                    val reason =
+                        if (active.lastState == GlassesManualPairingState.PAIRING) {
+                            SetupPairingFailureReason.PAIR_REFUSED
+                        } else {
+                            SetupPairingFailureReason.ARM_FAILED
+                        }
+                    activePhoneAssistedPairing = null
+                    Triple(active, false, reason)
+                }
+                GlassesManualPairingState.IDLE -> {
+                    if (active.lastState == GlassesManualPairingState.IDLE) {
+                        null
+                    } else {
+                        activePhoneAssistedPairing = null
+                        Triple(active, false, SetupPairingFailureReason.PAIR_REFUSED)
+                    }
+                }
+                else -> {
+                    active.lastState = state
+                    null
+                }
+            }
+        } ?: return
+
+        sendPhoneAssistedSetupResult(
+            sessionId = completion.first.sessionId,
+            offerId = completion.first.offerId,
+            ok = completion.second,
+            reason = completion.third,
+        )
+    }
+
+    private fun sendPhoneAssistedSetupResult(
+        sessionId: String,
+        offerId: String,
+        ok: Boolean,
+        reason: String,
+    ) {
+        val result = SetupPairingOfferContract.createResult(
+            sessionId = sessionId,
+            offerId = offerId,
+            ok = ok,
+            reason = reason,
+        ) ?: return
+        val error = sendRemote(
+            BusEnvelope(
+                path = BusPaths.GLASSES_SETUP_PAIRING_RESULT,
+                payload = SetupPairingOfferContract.resultToJson(result),
+            ),
+        )
+        log(
+            if (error == null) {
+                "phone-assisted pairing result sent ok=$ok"
+            } else {
+                "phone-assisted pairing result send failed reason=$error"
+            },
+        )
+    }
+
     private fun handleManualSelfArmResponse(envelope: BusEnvelope): Boolean {
         if (!::manualPairingEngine.isInitialized) return false
         manualPairingEngine.onGlassesConnectPort(envelope.payload.optInt("connectPort"))
@@ -4295,7 +4477,7 @@ class BusHubService : Service() {
     /** The glasses learn phone-side feature bits (camera readiness) only through this. */
     private fun announcePhoneCapabilities() {
         val announced = PhoneHubCapabilitiesContract.create(
-            features = phoneCameraCapabilities(),
+            features = PhoneAssistedSetupCapabilityPolicy.advertised(phoneCameraCapabilities()),
             cameraConsumerName = cameraConsumerReadiness.resolveApproved()?.descriptor?.displayName,
             activityAlwaysExpanded =
                 PhoneActivityPresentationSettings(this).isAlwaysExpanded(),
@@ -4320,7 +4502,8 @@ class BusHubService : Service() {
         )
 
     private fun capabilities(): Int {
-        var capabilities = baseCameraCapabilities()
+        var capabilities =
+            PhoneAssistedSetupCapabilityPolicy.advertised(baseCameraCapabilities())
         if (remoteImageSurfaceVersion == ImageSurfaceContract.VERSION &&
             remoteMaxImageBytes >= ImageSurfaceContract.MAX_IMAGE_BYTES &&
             linkState() and LinkStateBits.SPP_DATA_UP != 0
@@ -4350,7 +4533,10 @@ class BusHubService : Service() {
         if (remoteActivitySurfaceVersion == ActivitySurfaceContract.VERSION) {
             capabilities = capabilities or BusCapabilityBits.ACTIVITY_SURFACE
         }
-        return capabilities
+        // Unconditional: this build can always take a pairing offer off the glasses. Gating it on
+        // link or session state would make the glasses read "no phone help available" during the
+        // exact window where the offer is about to be sent.
+        return PhoneAssistedSetupCapabilityPolicy.advertised(capabilities)
     }
 
     private fun baseCameraCapabilities(): Int {
@@ -4407,6 +4593,16 @@ class BusHubService : Service() {
             advertised.setupCompletionMode,
             advertised.coreReady,
             advertised.maintenanceReady,
+        )
+        NexusPhoneState.setGlassesSetupProgress(
+            sessionId = advertised.setupSessionId,
+            stage = GlassesHubCapabilitiesContract.effectiveStage(advertised),
+            running = advertised.setupRunning,
+            requiresUserAction = advertised.setupRequiresUserAction,
+            supportCode = advertised.setupSupportCode,
+            completionMode = advertised.setupCompletionMode,
+            coreReady = advertised.coreReady,
+            maintenanceReady = advertised.maintenanceReady,
         )
         if (::manualPairingEngine.isInitialized) {
             manualPairingEngine.onGlassesSetupReported(advertised.setupComplete)
@@ -4558,6 +4754,7 @@ class BusHubService : Service() {
 
     companion object {
         @Volatile private var activeInstance: BusHubService? = null
+        private val lastGlassesSetupUserIntentAtMillis = AtomicLong(0L)
 
         // Process-wide so the inspector can read events across service restarts.
         val busJournal = PluginBusJournal()
@@ -4587,6 +4784,12 @@ class BusHubService : Service() {
 
         internal fun manualPairingEngine(): GlassesManualPairingEngine? =
             activeInstance?.manualPairingEngine
+
+        internal fun noteGlassesSetupUserIntent(
+            nowMillis: Long = SystemClock.elapsedRealtime(),
+        ) {
+            if (nowMillis > 0L) lastGlassesSetupUserIntentAtMillis.set(nowMillis)
+        }
 
         /**
          * Same-process hook for the future non-exported Speech settings activity. Transcript
@@ -4688,6 +4891,7 @@ class BusHubService : Service() {
         }
 
         fun startGlassesSetup(context: android.content.Context) {
+            noteGlassesSetupUserIntent()
             context.startService(
                 Intent(context, BusHubService::class.java).setAction(ACTION_START_GLASSES_SETUP),
             )

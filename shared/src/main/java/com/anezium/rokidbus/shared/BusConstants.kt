@@ -94,6 +94,8 @@ object BusPaths {
     const val GLASSES_WIFI_REQUEST = "/glasses/wifi/request"
     const val GLASSES_SELFARM_MANUAL = "/glasses/selfarm/manual"
     const val GLASSES_SELFARM_MANUAL_REPLY = "/glasses/selfarm/manual/reply"
+    const val GLASSES_SETUP_PAIRING_OFFER = "/glasses/setup/pairing/offer"
+    const val GLASSES_SETUP_PAIRING_RESULT = "/glasses/setup/pairing/result"
     const val GLASSES_BRIGHTNESS_REQUEST = "/glasses/brightness/request"
     const val GLASSES_VOLUME_REQUEST = "/glasses/volume/request"
     const val GLASSES_DEVICE_INFO = "/glasses/device-info"
@@ -144,6 +146,7 @@ object BusCapabilityBits {
     const val PIN_SURFACE = 1 shl 5
     const val NOTICE_SURFACE = 1 shl 6
     const val ACTIVITY_SURFACE = 1 shl 7
+    const val PHONE_ASSISTED_SETUP = 1 shl 8
 }
 
 object LinkStateBits {

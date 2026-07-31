@@ -30,6 +30,7 @@ import com.anezium.rokidbus.shared.PhoneHubCapabilities
 import com.anezium.rokidbus.shared.PhoneHubCapabilitiesContract
 import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import com.anezium.rokidbus.shared.PinSurfaceContract
+import com.anezium.rokidbus.shared.SetupPairingOfferContract
 import com.anezium.rokidbus.shared.SetupStage
 import com.anezium.rokidbus.shared.plugin.PathRules
 import org.json.JSONArray
@@ -123,7 +124,7 @@ object GlassesHub {
         override fun linkState(): Int = this@GlassesHub.linkState()
 
         override fun capabilities(): Int =
-            supportedPhoneCameraCapabilities(remotePhoneCapabilities.features)
+            supportedPhoneCapabilities(remotePhoneCapabilities.features)
 
         override fun registerPlugin(packageName: String, pluginId: String, cb: IBusCallback): Int =
             PluginRegistrationResult.DENIED
@@ -172,6 +173,23 @@ object GlassesHub {
         }
         if (envelope.path == BusPaths.GLASSES_SELFARM_MANUAL) {
             handleManualSelfArmRequest(envelope)
+            return
+        }
+        if (envelope.path == BusPaths.GLASSES_SETUP_PAIRING_RESULT) {
+            val validation = SetupPairingOfferContract.validateResult(envelope.payload)
+            if (validation !is SetupPairingOfferContract.ResultValidationResult.Valid) {
+                log("phone-assisted pairing result ignored reason=INVALID_RESULT")
+                return
+            }
+            val dispatched = appContext?.let { context ->
+                RokidBusAccessibilityService.onPhoneAssistedPairingResult(
+                    context,
+                    validation.result,
+                )
+            } == true
+            if (!dispatched) {
+                log("phone-assisted pairing result ignored reason=NO_LIVE_SERVICE")
+            }
             return
         }
         MediaSyncEngine.trafficMonitor.note(envelope.path)
@@ -786,6 +804,9 @@ object GlassesHub {
 
     internal fun isCameraSessionActive(): Boolean = cameraSessionTracker.isActive()
 
+    internal fun supportsPhoneAssistedSetup(): Boolean =
+        supportsPhoneAssistedSetup(remotePhoneCapabilities.features)
+
     /**
      * Keeps the glasses display awake for the manual setup flow. Bounded by a timeout as well as by
      * the closing action, so a flow abandoned halfway can never leave the screen on for good.
@@ -821,7 +842,7 @@ object GlassesHub {
     private fun updateRemotePhoneCapabilities(payload: JSONObject) {
         val advertised = PhoneHubCapabilitiesContract.parse(payload)
         val next = PhoneHubCapabilitiesContract.create(
-            features = supportedPhoneCameraCapabilities(advertised.features),
+            features = supportedPhoneCapabilities(advertised.features),
             cameraConsumerName = advertised.cameraConsumerName,
             activityAlwaysExpanded = advertised.activityAlwaysExpanded,
         )
@@ -831,7 +852,11 @@ object GlassesHub {
         val previous = remotePhoneCapabilities
         if (next == previous) return
         remotePhoneCapabilities = next
-        log("phone capabilities cameraConsumerReady=${next.features != 0}")
+        log(
+            "phone capabilities cameraConsumerReady=" +
+                (next.features and BusCapabilityBits.CAMERA_CONSUMER_READY != 0) +
+                " phoneAssistedSetup=${supportsPhoneAssistedSetup(next.features)}",
+        )
         if (next.features != previous.features) notifyLinkState()
         if (cameraLauncherEntry(next) != cameraLauncherEntry(previous)) notifyLauncherEntries()
     }
