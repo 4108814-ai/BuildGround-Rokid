@@ -17,6 +17,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
 import com.anezium.rokidbus.client.ui.NexusUi
+import com.anezium.rokidbus.shared.SetupStage
 import java.io.Closeable
 
 /**
@@ -45,16 +46,32 @@ class GlassesManualSetupActivity : Activity() {
     // rebuild the form when we *enter* WAITING_FOR_CODE, not on every re-emit of it.
     private var renderedStateKey: String = ""
 
+    // Survives rotation and process recreation. Retyping an endpoint because the screen turned is
+    // exactly the kind of insult this fallback is supposed to spare people.
+    private var advancedExpanded = false
+    private var advancedEndpoint = ""
+    private var advancedCode = ""
+    private var inlineStatus: String? = null
+    private var inlineIsError = false
+    private var commandPending = false
+    private var lastState: GlassesManualPairingState = GlassesManualPairingState.IDLE
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         BusHubService.noteGlassesSetupUserIntent()
+        savedInstanceState?.let { saved ->
+            advancedExpanded = saved.getBoolean(STATE_ADVANCED_EXPANDED, false)
+            advancedEndpoint = saved.getString(STATE_ADVANCED_ENDPOINT).orEmpty()
+            inlineStatus = saved.getString(STATE_INLINE_STATUS)
+            inlineIsError = saved.getBoolean(STATE_INLINE_IS_ERROR, false)
+        }
         window.statusBarColor = NexusUi.BG
         window.navigationBarColor = NexusUi.BG
-        title = "Manual glasses setup"
+        title = getString(R.string.guided_title)
 
         root = NexusUi.fixedRoot(this)
         val content = NexusUi.contentColumn(this)
-        content.addView(NexusUi.wordmark(this, "MANUAL SETUP"))
+        content.addView(NexusUi.wordmark(this, getString(R.string.guided_wordmark)))
         content.addView(BusTheme.gap(this, 16))
         stepper = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -106,6 +123,16 @@ class GlassesManualSetupActivity : Activity() {
         mainHandler.postDelayed({ attachEngineWhenReady(attempts + 1) }, ENGINE_ATTACH_RETRY_MS)
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_ADVANCED_EXPANDED, advancedExpanded)
+        outState.putString(STATE_ADVANCED_ENDPOINT, advancedEndpoint)
+        // The pairing code is deliberately absent: it is short-lived, it rotates, and it has no
+        // business surviving in a saved bundle.
+        outState.putString(STATE_INLINE_STATUS, inlineStatus)
+        outState.putBoolean(STATE_INLINE_IS_ERROR, inlineIsError)
+    }
+
     override fun onDestroy() {
         engineSubscription?.let { runCatching { it.close() } }
         engineSubscription = null
@@ -121,218 +148,175 @@ class GlassesManualSetupActivity : Activity() {
 
     // ---- Rendering -----------------------------------------------------------------------------
 
+    /** Re-draws the state we are already in, after a local UI change rather than an engine event. */
+    private fun rerenderCurrent() {
+        renderedStateKey = ""
+        render(lastState)
+    }
+
     private fun render(state: GlassesManualPairingState) {
+        lastState = state
         val key = stateKey(state)
         // WAITING_FOR_CODE can re-emit; don't rebuild the form under the user's fingers.
         if (key == renderedStateKey && state is GlassesManualPairingState.WAITING_FOR_CODE) return
         renderedStateKey = key
+        // Any engine transition answers whatever we last asked for, so the screen stops claiming
+        // to be waiting on it.
+        if (state !is GlassesManualPairingState.WAITING_FOR_CODE) commandPending = false
 
         renderStepper(activeStepFor(state))
         body.removeAllViews()
         when (state) {
-            GlassesManualPairingState.IDLE -> renderIntro()
+            GlassesManualPairingState.IDLE -> renderPreflight()
             GlassesManualPairingState.WAITING_FOR_CODE -> renderCodeForm()
             GlassesManualPairingState.PAIRING ->
-                renderWorking("Pairing…", "Connecting to your glasses. Keep them on.")
+                renderWorking(R.string.guided_working_pairing_title, R.string.guided_working_pairing_body)
             GlassesManualPairingState.CONNECTING ->
-                renderWorking("Almost there…", "Securing the connection to your glasses.")
+                renderWorking(R.string.guided_working_connecting_title, R.string.guided_working_connecting_body)
             GlassesManualPairingState.ARMING ->
-                renderWorking("Finishing setup…", "Arming Nexus on your glasses. Don't take them off yet.")
+                renderWorking(R.string.guided_working_arming_title, R.string.guided_working_arming_body)
             GlassesManualPairingState.DONE -> renderDone()
             is GlassesManualPairingState.ERROR -> renderError(state)
         }
     }
 
-    private fun renderIntro() {
-        body.addView(NexusUi.hero(this, 30f).apply { text = "Set up by hand" }, NexusUi.block())
-        body.addView(BusTheme.gap(this, 12))
+    /**
+     * What guided setup shows before asking for anything: what it inspected, and the single thing
+     * that is actually missing. The old screen opened with a static checklist the owner had to
+     * audit themselves, then re-ran the whole automaton from the top regardless of how far it had
+     * already got.
+     */
+    private fun renderPreflight() {
+        val preflight = currentPreflight()
         body.addView(
-            NexusUi.cardBody(
-                this,
-                "Your glasses' automatic setup didn't take, so we'll do it together — it takes " +
-                    "about two minutes. Put the glasses on, keep this phone in front of you, and " +
-                    "tap Start. Nexus will give you direct Settings buttons instead of trying to " +
-                    "drive the glasses menus automatically.",
-            ),
+            NexusUi.hero(this, 30f).apply { text = getString(R.string.guided_title) },
             NexusUi.block(),
         )
+        body.addView(BusTheme.gap(this, 12))
+        body.addView(NexusUi.cardBody(this, getString(R.string.guided_intro)), NexusUi.block())
         body.addView(BusTheme.gap(this, 14))
-        body.addView(checklistCard(), NexusUi.block())
-        body.addView(BusTheme.gap(this, 24))
-        body.addView(primary("Start") { engine?.start() }, NexusUi.block())
-    }
+        body.addView(preflightCard(preflight), NexusUi.block())
 
-    private fun checklistCard(): View = NexusUi.card(this).apply {
-        addView(NexusUi.metaLabel(this@GlassesManualSetupActivity, "BEFORE YOU START", NexusUi.INK3))
-        addView(BusTheme.gap(this@GlassesManualSetupActivity, 10))
-        addView(bullet("The glasses are on your face and turned on"))
-        addView(BusTheme.gap(this@GlassesManualSetupActivity, 6))
-        addView(bullet("A known Wi-Fi network is available; step 4 turns glasses Wi-Fi on"))
-        addView(BusTheme.gap(this@GlassesManualSetupActivity, 6))
-        addView(bullet("This phone is on the same Wi-Fi as the glasses"))
-    }
-
-    private fun renderCodeForm() {
-        body.addView(NexusUi.hero(this, 26f).apply { text = "Open the pairing screen" }, NexusUi.block())
-        body.addView(BusTheme.gap(this, 10))
-        body.addView(
-            NexusUi.cardBody(
-                this,
-                "Button 1 lets Nexus move through the glasses menus for you. Button 2 performs " +
-                    "only the six fast Build number taps. Step 4 turns on glasses Wi-Fi, then " +
-                    "walks to Wireless debugging.",
-            ),
-            NexusUi.block(),
-        )
-        body.addView(BusTheme.gap(this, 14))
-        body.addView(
-            NexusUi.outlinePillButton(this, "1. Allow Nexus to move through menus").apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                )
-                setOnClickListener {
-                    engine?.openAccessibilitySettings()
-                    android.widget.Toast.makeText(
-                        this@GlassesManualSetupActivity,
-                        "Opening Accessibility settings on the glasses...",
-                        android.widget.Toast.LENGTH_SHORT,
-                    ).show()
-                }
-            },
-            NexusUi.block(),
-        )
-        body.addView(BusTheme.gap(this, 6))
-        body.addView(
-            NexusUi.cardBody(
-                this,
-                "On the glasses screen, pick Rokid Nexus and switch it on. Skip this step if " +
-                    "Nexus already drives the glasses menus.",
-            ).apply { textSize = 12f },
-            NexusUi.block(),
-        )
-        body.addView(BusTheme.gap(this, 12))
-        body.addView(
-            NexusUi.outlinePillButton(this, "2. Enable Developer options (6 taps)").apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                )
-                setOnClickListener {
-                    engine?.enableDeveloperOptions()
-                    android.widget.Toast.makeText(
-                        this@GlassesManualSetupActivity,
-                        "Enabling Developer options on the glasses. Wait for it to finish.",
-                        android.widget.Toast.LENGTH_SHORT,
-                    ).show()
-                }
-            },
-            NexusUi.block(),
-        )
-        body.addView(BusTheme.gap(this, 6))
-        body.addView(
-            NexusUi.cardBody(
-                this,
-                "Skip this step if Developer options are already enabled.",
-            ).apply { textSize = 12f },
-            NexusUi.block(),
-        )
-        body.addView(BusTheme.gap(this, 12))
-        body.addView(
-            NexusUi.outlinePillButton(this, "3. Open Developer options").apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                )
-                setOnClickListener {
-                    engine?.openDeveloperOptions()
-                    android.widget.Toast.makeText(
-                        this@GlassesManualSetupActivity,
-                        "Opening Developer options on the glasses...",
-                        android.widget.Toast.LENGTH_SHORT,
-                    ).show()
-                }
-            },
-            NexusUi.block(),
-        )
-        body.addView(BusTheme.gap(this, 6))
-        body.addView(
-            NexusUi.cardBody(
-                this,
-                "If Android says they are disabled, run step 2 once, then tap this button again.",
-            ).apply { textSize = 12f },
-            NexusUi.block(),
-        )
-        body.addView(BusTheme.gap(this, 12))
-        body.addView(
-            NexusUi.outlinePillButton(this, "4. Enable Wi-Fi & open Wireless debugging").apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                )
-                setOnClickListener {
-                    engine?.showWirelessDebugging()
-                    android.widget.Toast.makeText(
-                        this@GlassesManualSetupActivity,
-                        "Turning on glasses Wi-Fi and opening Wireless debugging...",
-                        android.widget.Toast.LENGTH_SHORT,
-                    ).show()
-                }
-            },
-            NexusUi.block(),
-        )
-        body.addView(BusTheme.gap(this, 6))
-        body.addView(
-            NexusUi.cardBody(
-                this,
-                "Nexus opens Wireless debugging directly. Turn it on, then tap “Pair device with " +
-                    "pairing code”.",
-            ).apply { textSize = 12f },
-            NexusUi.block(),
-        )
-        body.addView(BusTheme.gap(this, 18))
-        body.addView(NexusUi.hero(this, 24f).apply { text = "Type what you see" }, NexusUi.block())
-        body.addView(BusTheme.gap(this, 10))
-        body.addView(pairingDialogMock(), NexusUi.block())
-        body.addView(BusTheme.gap(this, 20))
-
-        val ipField = labelledField("Wi-Fi IP address", "192.168.1.84", numeric = false)
-        val portField = labelledField("Pairing port (after the “:”)", "37103", numeric = true)
-        val codeField = labelledField("6-digit code", "123456", numeric = true)
-        body.addView(ipField.container, NexusUi.block())
-        body.addView(BusTheme.gap(this, 12))
-        body.addView(portField.container, NexusUi.block())
-        body.addView(BusTheme.gap(this, 12))
-        body.addView(codeField.container, NexusUi.block())
-
-        val error = NexusUi.statusLine(this).apply {
-            setTextColor(NexusUi.DANGER)
-            visibility = View.GONE
+        if (preflight.alreadyComplete) {
+            body.addView(BusTheme.gap(this, 20))
+            body.addView(
+                NexusUi.statusLine(this).apply { text = getString(R.string.guided_status_success) },
+                NexusUi.block(),
+            )
+            body.addView(BusTheme.gap(this, 12))
+            body.addView(primary(getString(R.string.guided_action_cancel)) { finish() }, NexusUi.block())
+            return
         }
-        body.addView(BusTheme.gap(this, 10))
-        body.addView(error, NexusUi.block())
 
-        body.addView(BusTheme.gap(this, 16))
+        body.addView(BusTheme.gap(this, 20))
+        val blocking = preflight.blocking
+        if (blocking != null) {
+            // Do not offer to prepare a pairing that cannot possibly work yet: say what is in the
+            // way, and let the owner re-check once they have fixed it.
+            body.addView(
+                NexusUi.cardBody(this, getString(blockingMessage(blocking))),
+                NexusUi.block(),
+            )
+            body.addView(BusTheme.gap(this, 14))
+            body.addView(
+                primary(getString(R.string.guided_action_recheck)) { rerenderCurrent() },
+                NexusUi.block(),
+            )
+        } else {
+            body.addView(
+                primary(getString(R.string.guided_action_prepare)) {
+                    dispatch(R.string.guided_status_waiting) { it.showWirelessDebugging() }
+                },
+                NexusUi.block(),
+            )
+        }
+        addInlineStatus()
+        body.addView(BusTheme.gap(this, 8))
+        body.addView(advancedDisclosure(), NexusUi.block())
+    }
+
+    /** Derived only from what the glasses actually report, so it never claims to know more. */
+    private fun currentPreflight(): GuidedPreflight {
+        val stage = NexusPhoneState.glassesSetupStage
+        return GuidedSetupPreflightPolicy.evaluate(
+            linkReady = engine != null,
+            accessibilityEnabled = stage != SetupStage.WAITING_FOR_ACCESSIBILITY,
+            wifiReady = stage != SetupStage.WAITING_FOR_WIFI,
+            // The glasses do not advertise this, and Nexus unlocks it during the run anyway.
+            developerOptionsReady = true,
+            coreReady = NexusPhoneState.glassesCoreReady,
+        )
+    }
+
+    private fun preflightCard(preflight: GuidedPreflight): View = NexusUi.card(this).apply {
+        val host = this@GlassesManualSetupActivity
+        addView(NexusUi.metaLabel(host, getString(R.string.guided_preflight_title), NexusUi.INK3))
+        addView(BusTheme.gap(host, 10))
+        preflight.checks.forEachIndexed { index, check ->
+            if (index > 0) addView(BusTheme.gap(host, 6))
+            val label = getString(checkLabel(check.id))
+            addView(
+                bullet(if (check.satisfied) "✓  $label" else "•  $label").apply {
+                    contentDescription = getString(
+                        if (check.satisfied) R.string.a11y_check_pass else R.string.a11y_check_fail,
+                        label,
+                    )
+                    alpha = if (check.satisfied) 1f else 0.7f
+                },
+            )
+        }
+    }
+
+    private fun checkLabel(id: GuidedCheckId): Int = when (id) {
+        GuidedCheckId.LINK -> R.string.guided_check_link
+        GuidedCheckId.ACCESSIBILITY -> R.string.guided_check_accessibility
+        GuidedCheckId.WIFI -> R.string.guided_check_wifi
+        GuidedCheckId.DEVELOPER -> R.string.guided_check_developer
+    }
+
+    private fun blockingMessage(id: GuidedCheckId): Int = when (id) {
+        GuidedCheckId.LINK -> R.string.guided_check_link_fail
+        GuidedCheckId.ACCESSIBILITY -> R.string.guided_check_accessibility_fail
+        GuidedCheckId.WIFI -> R.string.guided_check_wifi_fail
+        GuidedCheckId.DEVELOPER -> R.string.guided_check_developer_fail
+    }
+
+    /**
+     * One instruction at a time. Nexus tries to open the screen itself; only when that does not
+     * land does it ask the wearer to do it, and it never stacks four buttons the owner has to
+     * sequence themselves.
+     */
+    private fun renderCodeForm() {
         body.addView(
-            primary("Pair") {
-                val host = ipField.edit.text.toString().trim()
-                val port = portField.edit.text.toString().trim().toIntOrNull() ?: 0
-                val code = codeField.edit.text.toString().trim()
-                val problem = validate(host, port, code)
-                if (problem != null) {
-                    error.text = problem
-                    error.visibility = View.VISIBLE
-                    return@primary
-                }
-                error.visibility = View.GONE
-                hideKeyboard()
-                engine?.submit(host, port, code)
+            NexusUi.hero(this, 26f).apply { text = getString(R.string.guided_title) },
+            NexusUi.block(),
+        )
+        body.addView(BusTheme.gap(this, 10))
+        // Described by what the screen does, never by an English Settings label: the phone and the
+        // lens can be running in different languages, and the glasses do not report back the
+        // wording they resolved.
+        body.addView(
+            NexusUi.cardBody(this, getString(R.string.guided_step_wireless_generic)),
+            NexusUi.block(),
+        )
+        body.addView(BusTheme.gap(this, 14))
+        body.addView(
+            primary(getString(R.string.guided_action_continue)) {
+                dispatch(R.string.guided_status_waiting) { it.showWirelessDebugging() }
             },
             NexusUi.block(),
         )
         body.addView(BusTheme.gap(this, 8))
         body.addView(
-            NexusUi.textButton(this, "Cancel").apply {
+            NexusUi.cardBody(this, getString(R.string.guided_step_confirm)).apply { textSize = 12f },
+            NexusUi.block(),
+        )
+        addInlineStatus()
+        body.addView(BusTheme.gap(this, 16))
+        body.addView(advancedDisclosure(), NexusUi.block())
+        body.addView(BusTheme.gap(this, 8))
+        body.addView(
+            NexusUi.textButton(this, getString(R.string.guided_action_cancel)).apply {
                 gravity = Gravity.CENTER
                 setOnClickListener { finish() }
             },
@@ -340,14 +324,133 @@ class GlassesManualSetupActivity : Activity() {
         )
     }
 
+    /**
+     * Sends a settings command and reports what really happened. The old screen popped an
+     * "Opening…" toast unconditionally, including when the request had already returned false and
+     * nothing was ever sent.
+     */
+    private fun dispatch(waitingMessage: Int, request: (GlassesManualPairingEngine) -> Boolean) {
+        val live = engine
+        if (live == null || !request(live)) {
+            commandPending = false
+            inlineStatus = getString(R.string.guided_error_link_down)
+            inlineIsError = true
+        } else {
+            commandPending = true
+            inlineStatus = getString(waitingMessage)
+            inlineIsError = false
+        }
+        rerenderCurrent()
+    }
+
+    private fun addInlineStatus() {
+        val message = inlineStatus ?: return
+        body.addView(BusTheme.gap(this, 10))
+        body.addView(
+            NexusUi.statusLine(this).apply {
+                text = message
+                if (inlineIsError) setTextColor(NexusUi.DANGER)
+            },
+            NexusUi.block(),
+        )
+    }
+
+    /** The typed form is a last resort, so it starts folded away instead of leading the screen. */
+    private fun advancedDisclosure(): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        val host = this@GlassesManualSetupActivity
+        addView(
+            NexusUi.textButton(host, getString(R.string.guided_advanced_title)).apply {
+                setOnClickListener {
+                    advancedExpanded = !advancedExpanded
+                    rerenderCurrent()
+                }
+            },
+        )
+        if (!advancedExpanded) return@apply
+        addView(BusTheme.gap(host, 10))
+        addView(NexusUi.cardBody(host, getString(R.string.guided_advanced_body)))
+        addView(BusTheme.gap(host, 14))
+        // Anyone who gets this far is copying numbers off a lens; show them which is which.
+        addView(pairingDialogMock())
+        addView(BusTheme.gap(host, 18))
+
+        val endpointField = labelledField(
+            getString(R.string.guided_advanced_endpoint_label),
+            getString(R.string.guided_advanced_endpoint_hint),
+            numeric = false,
+        )
+        val codeField = labelledField(
+            getString(R.string.guided_advanced_code_label),
+            getString(R.string.guided_advanced_code_hint),
+            numeric = true,
+        )
+        endpointField.edit.setText(advancedEndpoint)
+        codeField.edit.setText(advancedCode)
+        addView(endpointField.container)
+        addView(BusTheme.gap(host, 12))
+        addView(codeField.container)
+
+        val endpointError = fieldError()
+        val codeError = fieldError()
+        addView(endpointError)
+        addView(codeError)
+
+        addView(BusTheme.gap(host, 16))
+        addView(
+            primary(getString(R.string.guided_advanced_submit)) {
+                advancedEndpoint = endpointField.edit.text.toString()
+                advancedCode = codeField.edit.text.toString()
+                endpointError.visibility = View.GONE
+                codeError.visibility = View.GONE
+                val endpoint = ManualEndpointInput.parseEndpoint(advancedEndpoint)
+                val code = ManualEndpointInput.parseCode(advancedCode)
+                // Report every bad field at once: fixing one at a time to discover the next is
+                // exactly the loop this screen exists to end.
+                if (endpoint is ManualEndpointInput.Endpoint.Invalid) {
+                    endpointError.text = getString(endpointErrorMessage(endpoint.error))
+                    endpointError.visibility = View.VISIBLE
+                }
+                if (code is ManualEndpointInput.Code.Invalid) {
+                    codeError.text = getString(codeErrorMessage(code.error))
+                    codeError.visibility = View.VISIBLE
+                }
+                if (endpoint !is ManualEndpointInput.Endpoint.Valid ||
+                    code !is ManualEndpointInput.Code.Valid
+                ) {
+                    return@primary
+                }
+                hideKeyboard()
+                engine?.submit(endpoint.host, endpoint.port, code.code)
+            },
+        )
+    }
+
+    private fun fieldError(): TextView = NexusUi.statusLine(this).apply {
+        setTextColor(NexusUi.DANGER)
+        visibility = View.GONE
+    }
+
+    private fun endpointErrorMessage(error: ManualEndpointInput.EndpointError): Int = when (error) {
+        ManualEndpointInput.EndpointError.EMPTY -> R.string.guided_error_endpoint_empty
+        ManualEndpointInput.EndpointError.FORMAT -> R.string.guided_error_endpoint_format
+        ManualEndpointInput.EndpointError.IP -> R.string.guided_error_endpoint_ip
+        ManualEndpointInput.EndpointError.PORT -> R.string.guided_error_endpoint_port
+    }
+
+    private fun codeErrorMessage(error: ManualEndpointInput.CodeError): Int = when (error) {
+        ManualEndpointInput.CodeError.EMPTY -> R.string.guided_error_code_empty
+        ManualEndpointInput.CodeError.FORMAT -> R.string.guided_error_code_format
+    }
+
     /** A faithful, in-app copy of the glasses' Android "Pair with device" dialog, with pointers. */
     private fun pairingDialogMock(): View = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         background = NexusUi.bordered(this@GlassesManualSetupActivity, NexusUi.PANEL, NexusUi.LINE, 15)
         setPadding(dp(18), dp(16), dp(18), dp(16))
-        addView(mockLabel("Pair with device", NexusUi.INK3, 12f))
+        addView(mockLabel(getString(R.string.guided_mock_dialog_title), NexusUi.INK3, 12f))
         addView(BusTheme.gap(this@GlassesManualSetupActivity, 12))
-        addView(mockLabel("Wi-Fi pairing code", NexusUi.INK2, 12f))
+        addView(mockLabel(getString(R.string.guided_mock_code_label), NexusUi.INK2, 12f))
         addView(BusTheme.gap(this@GlassesManualSetupActivity, 2))
         addView(
             TextView(this@GlassesManualSetupActivity).apply {
@@ -359,9 +462,9 @@ class GlassesManualSetupActivity : Activity() {
             },
         )
         addView(BusTheme.gap(this@GlassesManualSetupActivity, 4))
-        addView(mockLabel("→ the 6-digit code box", NexusUi.INK3, 11f))
+        addView(mockLabel(getString(R.string.guided_mock_code_pointer), NexusUi.INK3, 11f))
         addView(BusTheme.gap(this@GlassesManualSetupActivity, 14))
-        addView(mockLabel("IP address & Port", NexusUi.INK2, 12f))
+        addView(mockLabel(getString(R.string.guided_mock_endpoint_label), NexusUi.INK2, 12f))
         addView(BusTheme.gap(this@GlassesManualSetupActivity, 2))
         addView(
             TextView(this@GlassesManualSetupActivity).apply {
@@ -374,14 +477,16 @@ class GlassesManualSetupActivity : Activity() {
         addView(BusTheme.gap(this@GlassesManualSetupActivity, 4))
         addView(
             mockLabel(
-                "→ before the “:” is the IP address · after it is the pairing port",
+                getString(R.string.guided_mock_endpoint_pointer),
                 NexusUi.INK3,
                 11f,
             ),
         )
     }
 
-    private fun renderWorking(headline: String, detail: String) {
+    private fun renderWorking(headlineRes: Int, detailRes: Int) {
+        val headline = getString(headlineRes)
+        val detail = getString(detailRes)
         body.addView(BusTheme.gap(this, 24))
         body.addView(
             TextView(this).apply {
@@ -422,7 +527,7 @@ class GlassesManualSetupActivity : Activity() {
         body.addView(BusTheme.gap(this, 8))
         body.addView(
             NexusUi.hero(this, 28f).apply {
-                text = "You're all set"
+                text = getString(R.string.guided_done_title)
                 gravity = Gravity.CENTER
             },
             NexusUi.block(),
@@ -431,8 +536,7 @@ class GlassesManualSetupActivity : Activity() {
         body.addView(
             NexusUi.cardBody(
                 this,
-                "Your glasses are armed and the plugin launcher is ready. You won't have to do " +
-                    "this again — it sticks across reboots.",
+                getString(R.string.guided_done_body),
             ).apply { gravity = Gravity.CENTER },
             NexusUi.block(),
         )
@@ -441,33 +545,33 @@ class GlassesManualSetupActivity : Activity() {
     }
 
     private fun renderError(state: GlassesManualPairingState.ERROR) {
-        body.addView(NexusUi.hero(this, 26f).apply { text = "That didn't work" }, NexusUi.block())
+        body.addView(NexusUi.hero(this, 26f).apply { text = getString(R.string.guided_failed_title) }, NexusUi.block())
         body.addView(BusTheme.gap(this, 12))
         body.addView(NexusUi.cardBody(this, state.userMessage), NexusUi.block())
         body.addView(BusTheme.gap(this, 14))
         body.addView(
             NexusUi.card(this).apply {
-                addView(NexusUi.metaLabel(this@GlassesManualSetupActivity, "WHAT TO CHECK", NexusUi.INK3))
+                addView(NexusUi.metaLabel(this@GlassesManualSetupActivity, getString(R.string.guided_failed_check_label), NexusUi.INK3))
                 addView(BusTheme.gap(this@GlassesManualSetupActivity, 10))
-                addView(bullet("The glasses and this phone are on the same Wi-Fi"))
+                addView(bullet(getString(R.string.guided_failed_check_wifi)))
                 addView(BusTheme.gap(this@GlassesManualSetupActivity, 6))
-                addView(bullet("You typed the code before it expired (it rotates every few minutes)"))
+                addView(bullet(getString(R.string.guided_failed_check_code)))
                 addView(BusTheme.gap(this@GlassesManualSetupActivity, 6))
-                addView(bullet("Restarting the glasses once, then trying again"))
+                addView(bullet(getString(R.string.guided_failed_check_retry)))
             },
             NexusUi.block(),
         )
         if (state.supportDetail.isNotBlank()) {
             body.addView(BusTheme.gap(this, 12))
             body.addView(
-                NexusUi.metaLabel(this, "Support code: ${state.supportDetail}", NexusUi.INK3).apply {
+                NexusUi.metaLabel(this, getString(R.string.guided_support_code, state.supportDetail), NexusUi.INK3).apply {
                     textSize = 11f
                 },
                 NexusUi.block(),
             )
         }
         body.addView(BusTheme.gap(this, 22))
-        body.addView(primary("Try again") { engine?.start() }, NexusUi.block())
+        body.addView(primary(getString(R.string.guided_failed_action)) { engine?.start() }, NexusUi.block())
         body.addView(BusTheme.gap(this, 8))
         body.addView(
             NexusUi.textButton(this, "Close").apply {
@@ -481,13 +585,12 @@ class GlassesManualSetupActivity : Activity() {
     private fun renderServiceUnavailable() {
         renderStepper(0)
         body.removeAllViews()
-        body.addView(NexusUi.hero(this, 26f).apply { text = "Not connected" }, NexusUi.block())
+        body.addView(NexusUi.hero(this, 26f).apply { text = getString(R.string.guided_unavailable_title) }, NexusUi.block())
         body.addView(BusTheme.gap(this, 12))
         body.addView(
             NexusUi.cardBody(
                 this,
-                "Nexus isn't linked to your glasses right now. Go back, make sure the glasses are " +
-                    "connected, and open manual setup again.",
+                getString(R.string.guided_unavailable_body),
             ),
             NexusUi.block(),
         )
@@ -607,16 +710,16 @@ class GlassesManualSetupActivity : Activity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             )
+            // While a command is in flight, tapping again would stack requests the glasses answer
+            // out of order. Say we are busy instead of pretending to be idle.
+            if (commandPending) {
+                isEnabled = false
+                alpha = 0.5f
+                contentDescription = getString(R.string.a11y_busy)
+            }
             setOnClickListener { onClick() }
         }
 
-    private fun validate(host: String, port: Int, code: String): String? = when {
-        host.isBlank() -> "Enter the Wi-Fi IP address shown on the glasses."
-        !IPV4.matches(host) -> "That IP address doesn't look right — check it on the glasses."
-        port !in 1..65535 -> "Enter the pairing port (the number after the “:”)."
-        !CODE.matches(code) -> "The code is exactly 6 digits."
-        else -> null
-    }
 
     private fun hideKeyboard() {
         val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
@@ -636,7 +739,9 @@ class GlassesManualSetupActivity : Activity() {
         const val STEP_COUNT = 4
         const val MAX_ENGINE_ATTACH_ATTEMPTS = 20
         const val ENGINE_ATTACH_RETRY_MS = 150L
-        val IPV4 = Regex("""^\d{1,3}(\.\d{1,3}){3}$""")
-        val CODE = Regex("""^\d{6}$""")
+        const val STATE_ADVANCED_EXPANDED = "advanced_expanded"
+        const val STATE_ADVANCED_ENDPOINT = "advanced_endpoint"
+        const val STATE_INLINE_STATUS = "inline_status"
+        const val STATE_INLINE_IS_ERROR = "inline_is_error"
     }
 }

@@ -124,6 +124,31 @@
     <string name="guided_error_generic">Cette étape n’est pas passée.</string>
     <string name="guided_support_code">Code support : %1$s</string>
 
+    <string name="guided_wordmark">CONFIGURATION GUIDÉE</string>
+    <string name="guided_working_pairing_title">Appairage…</string>
+    <string name="guided_working_pairing_body">Connexion à vos lunettes. Gardez-les sur vous.</string>
+    <string name="guided_working_connecting_title">Presque fini…</string>
+    <string name="guided_working_connecting_body">Sécurisation de la connexion à vos lunettes.</string>
+    <string name="guided_working_arming_title">Finalisation…</string>
+    <string name="guided_working_arming_body">Armement de Nexus sur vos lunettes. Ne les retirez pas encore.</string>
+    <string name="guided_done_title">Tout est prêt</string>
+    <string name="guided_done_body">Vos lunettes sont armées et le lanceur de plugins est disponible. Vous n’aurez pas à recommencer — ça tient au redémarrage.</string>
+    <string name="guided_failed_title">Ça n’a pas marché</string>
+    <string name="guided_failed_check_label">À VÉRIFIER</string>
+    <string name="guided_failed_check_wifi">Les lunettes et ce téléphone sont sur le même Wi-Fi</string>
+    <string name="guided_failed_check_code">Le code était encore valide — il change toutes les quelques minutes</string>
+    <string name="guided_failed_check_retry">Relancer les vérifications depuis le début</string>
+    <string name="guided_failed_action">Réessayer</string>
+    <string name="guided_unavailable_title">Non connecté</string>
+    <string name="guided_unavailable_body">Nexus n’est pas relié à vos lunettes pour le moment. Revenez en arrière, vérifiez qu’elles sont connectées, puis rouvrez la configuration guidée.</string>
+
+    <!-- Illustration du dialogue d’appairage affiché par les lunettes, pour situer chaque nombre. -->
+    <string name="guided_mock_dialog_title">Associer l’appareil</string>
+    <string name="guided_mock_code_label">Code d’association Wi-Fi</string>
+    <string name="guided_mock_code_pointer">→ le code à 6 chiffres</string>
+    <string name="guided_mock_endpoint_label">Adresse IP et port</string>
+    <string name="guided_mock_endpoint_pointer">→ avant le « : » l’adresse IP · après, le port d’appairage</string>
+
     <!-- TalkBack -->
     <string name="a11y_step_done">Étape %1$d, terminée : %2$s</string>
     <string name="a11y_step_active">Étape %1$d, en cours : %2$s</string>

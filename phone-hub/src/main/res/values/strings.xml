@@ -126,6 +126,31 @@
     <string name="guided_error_generic">That step did not go through.</string>
     <string name="guided_support_code">Support code: %1$s</string>
 
+    <string name="guided_wordmark">GUIDED SETUP</string>
+    <string name="guided_working_pairing_title">Pairing…</string>
+    <string name="guided_working_pairing_body">Connecting to your glasses. Keep them on.</string>
+    <string name="guided_working_connecting_title">Almost there…</string>
+    <string name="guided_working_connecting_body">Securing the connection to your glasses.</string>
+    <string name="guided_working_arming_title">Finishing setup…</string>
+    <string name="guided_working_arming_body">Arming Nexus on your glasses. Don’t take them off yet.</string>
+    <string name="guided_done_title">You’re all set</string>
+    <string name="guided_done_body">Your glasses are armed and the plugin launcher is ready. You won’t have to do this again — it sticks across reboots.</string>
+    <string name="guided_failed_title">That didn’t work</string>
+    <string name="guided_failed_check_label">WHAT TO CHECK</string>
+    <string name="guided_failed_check_wifi">The glasses and this phone are on the same Wi-Fi</string>
+    <string name="guided_failed_check_code">The code was still valid — it rotates every few minutes</string>
+    <string name="guided_failed_check_retry">Running the checks again from the top</string>
+    <string name="guided_failed_action">Try again</string>
+    <string name="guided_unavailable_title">Not connected</string>
+    <string name="guided_unavailable_body">Nexus isn’t linked to your glasses right now. Go back, make sure the glasses are connected, and open guided setup again.</string>
+
+    <!-- Illustration of the pairing dialog the glasses show, so the owner knows which number is which. -->
+    <string name="guided_mock_dialog_title">Pair with device</string>
+    <string name="guided_mock_code_label">Wi-Fi pairing code</string>
+    <string name="guided_mock_code_pointer">→ the 6-digit code box</string>
+    <string name="guided_mock_endpoint_label">IP address &amp; Port</string>
+    <string name="guided_mock_endpoint_pointer">→ before the “:” is the IP address · after it is the pairing port</string>
+
     <!-- TalkBack -->
     <string name="a11y_step_done">Step %1$d, done: %2$s</string>
     <string name="a11y_step_active">Step %1$d, in progress: %2$s</string>
