@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Say it again. Three quarters of a circle with the gap at the top left, so
+  the break and the head sit where the eye lands first and the ring never
+  reads as a closed O next to mic's capsule.
+  One arrowhead, not two: the two-headed refresh mark is a sync icon, and
+  this is not a sync - it is one more attempt at the same sentence.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M12,4.5 A7.5,7.5 0 1 1 4.5,12"
+        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M2.2,14.7 L4.5,11.9 L7.0,14.6"
+        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

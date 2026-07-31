@@ -72,6 +72,15 @@ object NexusGlyphs {
         "walk" to R.drawable.ic_glyph_walk,
         "timer" to R.drawable.ic_glyph_timer,
         "phone" to R.drawable.ic_glyph_phone,
+        // Answering someone. These are conversation marks, not one plugin's
+        // marks: the first relay needed them, but a reply is a reply in every
+        // plugin that ever asks a question, and left as per-plugin custom paths
+        // they would become five slightly different arrows.
+        "reply" to R.drawable.ic_glyph_reply,
+        "send" to R.drawable.ic_glyph_send,
+        "retry" to R.drawable.ic_glyph_retry,
+        "cancel" to R.drawable.ic_glyph_cancel,
+        "mic" to R.drawable.ic_glyph_mic,
         FALLBACK to R.drawable.ic_glyph_dot,
     )
 }

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Answer this. The arrow turns back on itself: a hook left, then a stem that
+  runs along under the message it is answering. Drawn against send, which
+  leaves in a straight line - on a row where both appear, the wearer reads
+  "comes back" against "goes away" before reading either shape.
+  The head is a plain chevron rather than a filled tip; at 18dp on the optics
+  a filled head closes up into a blob.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M9.5,6.5 L4,12 L9.5,17.5"
+        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M4,12 L14.5,12 A5,5 0 0 1 19.5,17 L19.5,19.5"
+        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

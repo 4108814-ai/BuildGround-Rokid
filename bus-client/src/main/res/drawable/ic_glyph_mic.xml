@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Speak now. Capsule, cradle, stem - the mark everyone already knows, so it
+  gets no reinvention. The cradle is a half circle rather than a full ring:
+  a ring here would read as retry with something stuck in it.
+  The capsule is narrow (5 of 24 units) because the wearer sees this one most
+  often, mid-utterance, while the footer beside it is changing.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M12,2.8 A2.5,2.5 0 0 1 14.5,5.3 L14.5,11.4 A2.5,2.5 0 0 1 9.5,11.4 L9.5,5.3 A2.5,2.5 0 0 1 12,2.8 Z"
+        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M5.6,11.4 A6.4,6.4 0 0 0 18.4,11.4"
+        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M12,17.8 L12,21.2"
+        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

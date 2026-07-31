@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  It leaves now. The paper plane, kept as one open outline with the near wing
+  folded in - the fold is what stops it reading as a plain triangle next to
+  cancel's X. Tilted along the diagonal so its direction is legible even when
+  the chip row is scanned rather than read.
+  Not shared with the Feeds plugin mark: that one is a filled silhouette in
+  the phone's plugin list, this one is a stroke at 18dp on green optics.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M20.5,3.5 L3.5,10.2 L10.6,13.4 L13.8,20.5 Z"
+        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M20.5,3.5 L10.6,13.4"
+        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

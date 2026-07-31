@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Never mind. Two strokes and nothing else - the one mark in this set that
+  must never be mistaken for another, because it is the only one that throws
+  work away.
+  Deliberately not a circled X: the ring would pair it visually with retry,
+  and the two chips sit next to each other on the review band. Drawn slightly
+  inside the others' bounds so the bare X does not shout over the row - the
+  restraint is in the extent, not the weight, which stays on the family's 1.7.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M7.2,7.2 L16.8,16.8"
+        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M16.8,7.2 L7.2,16.8"
+        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>
