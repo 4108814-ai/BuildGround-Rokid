@@ -727,13 +727,14 @@ code {
 .slide__tag {
   display: inline-block !important;
   font-family: var(--mono);
-  font-size: .6rem;
-  letter-spacing: .16em;
+  font-size: .58rem;
+  letter-spacing: .12em;
   text-transform: uppercase;
+  white-space: nowrap;
   color: var(--glow) !important;
   border: 1px solid rgba(60, 240, 123, .3);
   border-radius: 999px;
-  padding: .22rem .6rem;
+  padding: .2rem .55rem;
   margin-bottom: .7rem;
 }
 .slide--card figcaption { border-top: 1px solid var(--line-soft); position: relative; }
