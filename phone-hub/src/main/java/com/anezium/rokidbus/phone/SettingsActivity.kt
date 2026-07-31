@@ -11,6 +11,7 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Looper
 import android.util.Log
 import android.view.Gravity
 import android.view.View
@@ -43,7 +44,17 @@ class SettingsActivity : Activity() {
     private var speechValue: TextView? = null
     private var hubUiClient: BusClient? = null
     private var lastLinkState = 0
-    private val updateStateListener: () -> Unit = { renderUpdateUi() }
+    // State updates can land on a Binder thread, and touching the hierarchy from there leaves the
+    // screen half-torn-down with the exception swallowed by the binder stub. Same reason the home
+    // screen renders through a dispatcher.
+    private val renderDispatcher by lazy {
+        PhoneHomeRenderDispatcher(
+            isMainThread = { Looper.myLooper() == Looper.getMainLooper() },
+            postToMain = { action -> runOnUiThread { action() } },
+            render = { if (!isDestroyed && !isFinishing) renderUpdateUi() },
+        )
+    }
+    private val updateStateListener: () -> Unit = renderDispatcher::requestRender
 
     private val logReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {

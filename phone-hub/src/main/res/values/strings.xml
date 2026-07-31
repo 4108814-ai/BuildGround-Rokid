@@ -44,6 +44,13 @@
     <string name="onb_glasses_status_open_failed">Could not reach the glasses. Open the Nexus app on the lens instead.</string>
     <string name="onb_glasses_status_duration">Usually 1–2 minutes.</string>
     <string name="onb_glasses_status_support">Support code: %1$s</string>
+    <string name="onb_progress_section_title">Glasses setup</string>
+    <string name="onb_progress_running">IN PROGRESS</string>
+    <string name="onb_progress_attention">NEEDS ATTENTION</string>
+    <string name="onb_progress_no_action">No action needed right now. Keep the glasses on while Nexus finishes.</string>
+    <string name="onb_progress_accessibility_action">On the glasses, switch on Rokid Nexus Glasses. This is the only switch Nexus asks you to change.</string>
+    <string name="onb_progress_wifi_action">If this does not resume automatically, connect the glasses to Wi-Fi from the Hi Rokid app.</string>
+    <string name="onb_progress_guided_action">Open Guided setup on this phone to finish the remaining step.</string>
 
     <string name="onb_notifications_title">Allow notifications</string>
     <string name="onb_notifications_body">Nexus keeps a quiet status notification while it holds the glasses link.</string>

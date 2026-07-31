@@ -18,6 +18,7 @@ import android.graphics.drawable.GradientDrawable
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Looper
 import android.util.Log
 import android.view.Gravity
 import android.view.View
@@ -46,6 +47,7 @@ class MainActivity : Activity() {
     private val developerModeStore by lazy { DeveloperModeStore(this) }
     private var renderedPluginUpdateIds: Set<String> = emptySet()
     private lateinit var updateSection: LinearLayout
+    private lateinit var setupProgressSection: LinearLayout
     private lateinit var setupSection: LinearLayout
     private lateinit var pluginSection: LinearLayout
     private lateinit var toggleButton: Button
@@ -53,10 +55,14 @@ class MainActivity : Activity() {
     private lateinit var gearPip: View
     private var hubUiClient: BusClient? = null
     private var lastLinkState = 0
-    private val updateStateListener: () -> Unit = {
-        renderUpdateSection()
-        renderLinkState()
+    private val homeRenderDispatcher by lazy {
+        PhoneHomeRenderDispatcher(
+            isMainThread = { Looper.myLooper() == Looper.getMainLooper() },
+            postToMain = { action -> runOnUiThread { action() } },
+            render = ::renderPhoneState,
+        )
     }
+    private val updateStateListener: () -> Unit = homeRenderDispatcher::requestRender
     private val glassesAppStatusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (NexusPhoneState.updateGlassesAppInstallState(intent)) rebuildSetupSection()
@@ -83,6 +89,7 @@ class MainActivity : Activity() {
         resumeRecoveredNexusUpdateInstall()
         resumeRecoveredPluginInstall()
         rebuildSetupSection()
+        renderSetupProgressSection()
         rebuildPluginSection()
         refreshToggle()
         renderLinkState()
@@ -178,8 +185,10 @@ class MainActivity : Activity() {
 
         pluginSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         updateSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        setupProgressSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val content = NexusUi.contentColumn(this).apply {
             addView(updateSection, NexusUi.block())
+            addView(setupProgressSection, NexusUi.block())
             addView(setupSection, NexusUi.block())
             addView(pluginSection, NexusUi.block())
         }
@@ -213,9 +222,104 @@ class MainActivity : Activity() {
         renderLinkState()
         refreshToggle()
         rebuildSetupSection()
+        renderSetupProgressSection()
         rebuildPluginSection()
         renderUpdateSection()
         setContentView(root)
+    }
+
+    private fun renderPhoneState() {
+        if (isDestroyed || isFinishing) return
+        renderUpdateSection()
+        renderSetupProgressSection()
+        rebuildSetupSection()
+        renderLinkState()
+    }
+
+    private fun renderSetupProgressSection() {
+        if (!::setupProgressSection.isInitialized) return
+        setupProgressSection.removeAllViews()
+        val handoff = NexusPhoneState.glassesSetupHandoff
+        val handoffActive = handoff != NexusPhoneState.SetupHandoff.IDLE
+        if (!SetupProgressUiPolicy.isVisible(
+                setupComplete = NexusPhoneState.glassesSetupComplete,
+                glassesAppInstalled = NexusPhoneState.glassesAppInstalled,
+                sessionId = NexusPhoneState.glassesSetupSessionId,
+                stage = NexusPhoneState.glassesSetupStage,
+                running = NexusPhoneState.glassesSetupRunning,
+                handoffActive = handoffActive,
+            )
+        ) {
+            return
+        }
+
+        val stage = SetupStage.normalize(NexusPhoneState.glassesSetupStage)
+        val needsAttention = SetupProgressUiPolicy.needsAttention(
+            stage = stage,
+            requiresUserAction = NexusPhoneState.glassesSetupRequiresUserAction,
+            handoffFailed = handoff == NexusPhoneState.SetupHandoff.FAILED,
+        )
+        val status = glassesSetupStatusLine(handoff, setupUnfinished = true)
+            ?: getString(R.string.onb_phase_unknown)
+        val instruction = getString(
+            when {
+                handoff == NexusPhoneState.SetupHandoff.FAILED ||
+                    stage == SetupStage.MANUAL_REQUIRED || stage == SetupStage.FAILED ->
+                    R.string.onb_progress_guided_action
+                stage == SetupStage.WAITING_FOR_ACCESSIBILITY ->
+                    R.string.onb_progress_accessibility_action
+                stage == SetupStage.WAITING_FOR_WIFI -> R.string.onb_progress_wifi_action
+                else -> R.string.onb_progress_no_action
+            },
+        )
+        setupProgressSection.addView(
+            NexusUi.sectionRow(
+                this,
+                getString(R.string.onb_progress_section_title),
+                getString(
+                    if (needsAttention) {
+                        R.string.onb_progress_attention
+                    } else {
+                        R.string.onb_progress_running
+                    },
+                ),
+            ),
+            NexusUi.block(),
+        )
+        setupProgressSection.addView(BusTheme.gap(this, 12))
+        setupProgressSection.addView(
+            NexusUi.card(this).apply {
+                addView(NexusUi.cardTitle(this@MainActivity, status))
+                addView(BusTheme.gap(this@MainActivity, 6))
+                addView(NexusUi.cardBody(this@MainActivity, instruction))
+                if (handoff == NexusPhoneState.SetupHandoff.FAILED ||
+                    stage == SetupStage.MANUAL_REQUIRED || stage == SetupStage.FAILED
+                ) {
+                    addView(BusTheme.gap(this@MainActivity, 8))
+                    addView(
+                        NexusUi.textButton(
+                            this@MainActivity,
+                            getString(R.string.onb_glasses_action_guided),
+                        ).apply {
+                            setOnClickListener {
+                                startActivity(
+                                    Intent(
+                                        this@MainActivity,
+                                        GlassesManualSetupActivity::class.java,
+                                    ),
+                                )
+                            }
+                        },
+                        LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ).apply { gravity = Gravity.END },
+                    )
+                }
+            },
+            NexusUi.block(),
+        )
+        setupProgressSection.addView(BusTheme.gap(this, 18))
     }
 
     private fun renderUpdateSection() {
@@ -848,6 +952,7 @@ class MainActivity : Activity() {
         val phase = getString(
             when (NexusPhoneState.glassesSetupStage) {
                 SetupStage.WAITING_FOR_ACCESSIBILITY -> R.string.onb_phase_waiting_for_accessibility
+                SetupStage.ENABLING_WIFI -> R.string.onb_phase_enabling_wifi
                 SetupStage.WAITING_FOR_WIFI -> R.string.onb_phase_waiting_for_wifi
                 SetupStage.ENABLING_DEVELOPER_OPTIONS -> R.string.onb_phase_enabling_developer_options
                 SetupStage.OPENING_WIRELESS_DEBUGGING -> R.string.onb_phase_opening_wireless_debugging
@@ -868,7 +973,13 @@ class MainActivity : Activity() {
                 append(getString(R.string.onb_glasses_status_duration))
             }
             NexusPhoneState.glassesSetupSupportCode
-                .takeIf { it.isNotBlank() && NexusPhoneState.glassesSetupFailureState.isNotBlank() }
+                .takeIf {
+                    it.isNotBlank() &&
+                        SetupProgressUiPolicy.showsSupportCode(
+                            stage = NexusPhoneState.glassesSetupStage,
+                            handoffFailed = handoff == NexusPhoneState.SetupHandoff.FAILED,
+                        )
+                }
                 ?.let {
                     append("  ")
                     append(getString(R.string.onb_glasses_status_support, it))
