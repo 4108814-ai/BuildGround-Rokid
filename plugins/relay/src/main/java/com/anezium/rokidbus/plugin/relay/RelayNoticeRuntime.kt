@@ -153,7 +153,25 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         invalidateSpeech()
         currentTranscript = null
         speechFinalReceived = false
-        queueEssential(NexusNoticeUpdate(footer = "Listening…"), dropPartial = true)
+        // Deliberately offers nothing while listening, and says so.
+        //
+        // Confirming spent the band's one answer, so the row is gone. Putting a
+        // Cancel chip back re-arms the band — and a temple pad that does not
+        // always send one press per touch then answers the new question with the
+        // bounce from the old one: measured on hardware, a tap on Reply was
+        // followed 433 ms later by a second action that closed the band. Guarding
+        // against that inside the plugin is worse still, because the glasses hub
+        // has already spent the answer by the time we see it, leaving a band that
+        // claims nothing and a wearer whose taps fall through to the launcher.
+        //
+        // Back needs none of this: it dismisses whenever a band is visible,
+        // answered or not. So the way out of dictation is Back, and the footer
+        // says it. The explicit TTL is what stops a footer this short from being
+        // handed the four-second floor.
+        queueEssential(
+            NexusNoticeUpdate(footer = "Listening… · Back to cancel", ttlMs = DECISION_TTL_MS),
+            dropPartial = true,
+        )
 
         val generation = speechGeneration
         val newSpeech = currentClient.speechSession(object : NexusSpeechCallbacks {
@@ -190,6 +208,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
                         ),
                         footer = "Review, then send",
                         actions = CONFIRM_ACTIONS,
+                        ttlMs = DECISION_TTL_MS,
                     ),
                     dropPartial = true,
                 )
@@ -224,7 +243,13 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         when (val result = ReplyRepository.sendReply(appContext, reply.id, transcript)) {
             ReplySendResult.Sent -> {
                 currentTranscript = null
+                // Confirm it, then take it away. The exchange is over: the band has
+                // nothing left to say and nothing left to ask, and an answered band
+                // that lingers claims no input while it sits there, so every tap the
+                // wearer aims at it falls through to whatever is behind. Waiting for
+                // a TTL to notice that would leave exactly that gap.
                 queueEssential(NexusNoticeUpdate(footer = "Sent"), dropPartial = true)
+                main.postDelayed({ if (activeNotice) dismissNotice() }, SENT_LINGER_MS)
             }
             ReplySendResult.Missing -> queueSendFailure("Notification gone")
             ReplySendResult.Blank -> queueSendFailure("Empty reply")
@@ -238,6 +263,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
             NexusNoticeUpdate(
                 footer = fitFooter("Reply failed: $cause"),
                 actions = CONFIRM_ACTIONS,
+                ttlMs = DECISION_TTL_MS,
             ),
             dropPartial = true,
         )
@@ -249,6 +275,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
             NexusNoticeUpdate(
                 footer = fitFooter("Voice failed: $cause"),
                 actions = SPEECH_FAILURE_ACTIONS,
+                ttlMs = DECISION_TTL_MS,
             ),
             dropPartial = true,
         )
@@ -342,7 +369,10 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         NexusSpeechStopReason.REVOKED -> "Permission revoked"
         NexusSpeechStopReason.DENIED_BUSY -> "Speech busy"
         NexusSpeechStopReason.DENIED_NO_LINK -> "No glasses link"
-        NexusSpeechStopReason.DENIED_NOT_READY -> "Speech not ready"
+        // The hub knows exactly why — no engine, no key, no microphone permission —
+        // but the SDK flattens all of it to NOT_READY. Point at the screen that
+        // does know rather than repeating a word the wearer cannot act on.
+        NexusSpeechStopReason.DENIED_NOT_READY -> "Set up speech in Nexus"
         NexusSpeechStopReason.DENIED_START_FAILED -> "Start failed"
         NexusSpeechStopReason.DENIED_INVALID -> "Invalid request"
     }
@@ -373,6 +403,21 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
             NexusSdkResult.CAPABILITY_NOT_AVAILABLE,
             NexusSdkResult.CAPABILITY_NOT_GRANTED,
         )
+
+        /**
+         * Every state that is waiting on the wearer says so explicitly.
+         *
+         * Left to the platform's default the TTL is derived from the text, which
+         * is right for a message and wrong for a question: an update carrying
+         * only "Voice failed: Speech not ready" is a 30-character footer and
+         * would be handed the four-second floor — gone before it has been read,
+         * let alone answered, and the wearer's next press falls through to the
+         * ROM launcher behind the band.
+         */
+        const val DECISION_TTL_MS = 30_000L
+
+        /** Long enough to read "Sent", short enough not to be in the way. */
+        const val SENT_LINGER_MS = 1_500L
 
         const val ACTION_REPLY = "reply"
         const val ACTION_DISMISS = "dismiss"
