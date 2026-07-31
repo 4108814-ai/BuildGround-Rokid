@@ -139,6 +139,58 @@ plugin describes that state and the platform decides whether it is currently a
 chip, panel, flare, pulse, or hidden. Plugins cannot select a presentation or
 supply activity layouts, images, animations, colors, or timings.
 
+### Surface list rows
+
+A card used to be a title and some lines. It can also be a **list**: rows with a
+second line, a weight saying how much each matters, and a selection the HUD
+draws itself. Pass `richLines` instead of `lines`.
+
+```kotlin
+enum class NexusRowTone { ALERT, NORMAL, DIM, BODY }
+
+data class NexusCardLine(
+    val text: String,
+    val badge: String? = null,
+    val trail: List<String> = emptyList(),
+    val sub: String? = null,                    // second line, smaller and dimmer
+    val tone: NexusRowTone = NexusRowTone.NORMAL,
+    val selected: Boolean = false,              // the HUD draws the rail
+)
+
+data class NexusCard(
+    val title: String,
+    val lines: List<String>,
+    val subtitle: String? = null,               // one dim line under the title
+    val footer: String? = null,
+    val contentKey: String? = null,
+    val richLines: List<NexusCardLine>? = null,
+    val handlesBack: Boolean = false,
+)
+```
+
+`text` and `sub` each hold 240 characters; `richLines` and `lines` are mutually
+exclusive, and up to 64 rows are accepted.
+
+| Tone | Means | Use it for |
+|---|---|---|
+| `ALERT` | Needs the wearer now | A question waiting on them, something failing |
+| `NORMAL` | An ordinary entry | The default |
+| `DIM` | Present, not competing | Finished, stale, no longer actionable |
+| `BODY` | Prose that must wrap | A message or log excerpt; `badge` becomes a label column beside it |
+
+**Do not draw your own selection.** A `>` typed into `text` costs two of the
+twenty-six monospace columns a row reads comfortably in, and puts the selection
+somewhere different from every other list on the device. Set `selected` and let
+the platform draw the rail.
+
+**Say what a row is worth, never how it should look.** `tone` describes
+importance; the platform maps it to size, weight and colour. A plugin that
+finds itself reaching for a colour is working around the tier.
+
+[surface-list-rows.html](surface-list-rows.html) draws all of it — plain lines,
+a list with sub lines and a rail, the four tones, body rows with their label
+column. Open it in a browser.
+
 ### Live activities
 
 Activities reuse the existing `surfaces` grant and plugin API version 3. They
@@ -351,9 +403,10 @@ Forward and backward change pages, the footer gains a platform `2/4` indicator,
 and nothing scrolls. The first page turn replaces both countdowns with a
 30-second inactivity timeout restarted on every page gesture.
 
-[notice-band-states.html](notice-band-states.html) shows the band's four
-states as the wearer sees them — plain, interactive, with actions, answered —
-with an interactive demo of the one-answer rule. Open it in a browser.
+[notice-band-states.html](notice-band-states.html) shows the band's six states
+as the wearer sees them — plain, interactive, with actions, answered, paged,
+and with an image — with an interactive demo of the one-answer rule. Open it in
+a browser.
 
 ```kotlin
 data class NexusNoticeAction(
@@ -410,9 +463,19 @@ interface NexusPluginCallbacks {
 Give a band up to three actions and the platform draws a row of glyph chips
 under the footer: forward and backward step along it, confirm fires the selected
 one, and you hear the id through `onNexusNoticeAction`. A fourth action is
-refused, not dropped. An answerable notice is deliberately one unpaged
-question, so the directions never mean both “choose” and “turn page.” With no
-actions, `interactive = true` claims one confirming gesture and calls
+refused, not dropped.
+
+**A band pages unless its row needs the directions.** With two or more actions
+the directions belong to the row, and such a band draws a single page. With one
+action or none there is nothing to step along, so they turn pages while the tap
+still answers — which is what lets a long message worth exactly one reply be
+both readable and answerable. No gesture ever carries two meanings, which is
+the rule this serves. So if you are sending a conversation *and* a way to
+answer it, send **one** action: Back already dismisses from anywhere, and a
+second chip usually buys nothing while costing the wearer everything past line
+eight.
+
+With no actions, `interactive = true` claims one confirming gesture and calls
 `onNexusNoticeInput`; the two callbacks never both fire. Setting `interactive`
 alongside actions is redundant: offering answers is already asking for one.
 
@@ -891,6 +954,18 @@ stop first and terminates with `CANCELLED`.
 After installing the APK, open **Rokid Nexus → Settings → Plugin access**. Review
 the requested capabilities and approve only those needed. Pending, denied,
 disabled, invalid, and missing-capability plugins are not launchable.
+
+**Your grants are true by the time you are told you are approved.** This is
+worth knowing if your plugin acts the instant it is approved — waking, pushing a
+pin or a notice, and going dormant again, which is the shape this SDK
+recommends. `onNexusRegistrationState(APPROVED)` used to arrive ahead of the
+grant list, so a plugin that pushed immediately asked about an empty set and
+was refused a capability the wearer had granted. The client now reads its own
+grants from the hub as approval lands, so `hasCapability` is answerable on the
+first callback. Against an older hub the call is unavailable and the grants
+follow a few milliseconds later as they always did — so if you push on
+approval, treat `CAPABILITY_NOT_GRANTED` there as "not yet" and let the retry
+happen, rather than as a refusal.
 
 For local software validation:
 

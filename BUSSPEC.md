@@ -67,7 +67,8 @@ remain hub-internal. JSON keeps the 3 KiB CXR-else-SPP routing rule.
 ## Binder plugin registration v3
 
 Bus API v3 preserves the first six AIDL transactions in their original order
-and appends `registerPlugin(packageName, pluginId, callback)` and `capabilities()`.
+and appends `registerPlugin(packageName, pluginId, callback)`, `capabilities()`,
+and `approvedCapabilities(pluginId)`.
 Phone plugins declare one exported service for
 `com.anezium.rokidbus.action.PLUGIN`. The hub derives the principal from the
 Binder calling UID, package ownership, the service manifest, and the current
@@ -156,7 +157,14 @@ anchor that overtakes a full payload cannot replace it with an incomplete surfac
 
 Surface kinds v1:
 
-- `card`: `title`, `lines` as an array of strings or `{text}`, and optional `footer`.
+- `card`: `title`, optional `subtitle`, optional `footer`, and `lines` as an
+  array of strings or row objects. A row object carries `text` plus any of
+  `badge`, `trail`, `sub`, `tone`, and `selected`. A card whose rows use `sub`,
+  `tone`, or `selected` renders as a **list** — secondary lines, a weight per
+  row, and a selection rail the glasses draw — rather than as plain text.
+  `tone` is one of `alert`, `normal` (the default), `dim`, or `body`; a `body`
+  row wraps as prose and puts its `badge` in a label column beside it. See
+  [surface-list-rows.html](docs/surface-list-rows.html).
 - `timed-lines`: `title`, optional `subtitle`/`footer`, full `lines` as
   `{ "timeMs": 1234, "text": "..." }`, and an `anchor`.
 - `media`: `title`/`subtitle` shell labels, `mediaTitle`, optional
@@ -429,7 +437,12 @@ than repeatedly replacing a pin.
 
 Notices reuse the `surfaces` grant; there is no notice capability and the
 plugin API version remains 3. Glasses announce support with feature bit 64
-(`NOTICE_SURFACE`) and `noticeSurfaceVersion`.
+(`NOTICE_SURFACE`) and `noticeSurfaceVersion`, which is **3**: v1 was the
+single-page band, v2 paged it and gave it an image, v3 added structured
+`lines`. Both hubs gate the tier on an exact match, so a pair speaking a
+different version declines the capability outright and the plugin hears
+`CAPABILITY_NOT_AVAILABLE` — which it can act on — instead of having its band
+accepted and then silently dropped.
 
 ### Paths
 
@@ -701,18 +714,26 @@ input when `interactive` is true **or** it carries actions: offering answers is
 already asking for one, so a plugin shipping a choice does not also have to set
 the flag.
 
-- **Confirm** — center tap, ENTER, or the temple key — is claimed and forwarded
-  to the owner once: as `/notice/action` carrying the selected action's id when
-  the band has a row, and as `/notice/input` when it does not. Both are
+- **Confirm** — ENTER or centre, meaning the firmware's *classification* of a
+  touch and never the raw contact that opens one — is claimed and forwarded to
+  the owner once: as `/notice/action` carrying the selected action's id when
+  the band has a row, and as `/notice/input` when it does not. Every touch
+  begins with a `KEYCODE_NOTIFICATION` contact and is only classified 300-500 ms
+  later, so accepting that contact made the *start of a swipe* answer the band.
+  A band is answered once and cannot take it back, which is why it waits for the
+  verdict where a surface does not. Both are
   owner-scoped like `/notice/closed`, and both spend the band's one answer; see
   below. This works with no surface open, which is the capability the tier
   adds: until now every input route in the glasses hub was gated on an active
   surface, so a dormant plugin could be shown but never answered.
 - **Forward and backward** — touchpad swipe or ring scroll — move the selection
   along an action row, wrapping at both ends, or replace the body with the
-  previous/next measured page. They are claimed only while the band has live
-  actions or multiple pages. A plain one-page notice claims no direction, so
-  every swipe keeps reaching the surface, activity, or launcher underneath.
+  previous/next measured page. They are claimed only while the band has **two
+  or more** live actions — a row of one has nothing to step along — or is
+  pageable. Which of the two they do follows the same test: a pageable band
+  turns pages, anything else moves the selection. A plain one-page notice
+  claims no direction, so every swipe keeps reaching the surface, activity, or
+  launcher underneath.
   Page indices clamp at the ends; once engaged, a held-end gesture still
   restarts inactivity. The swipe-pair dedupe is the one the rest of the hub
   uses, because the hardware emits each direction twice and one step must not
@@ -1284,8 +1305,20 @@ interface IBusService {
     oneway void sendBinary(String path, String id, in byte[] meta, in byte[] data);
     int registerPlugin(String packageName, String pluginId, IBusCallback cb);
     int capabilities();
+    String approvedCapabilities(String pluginId);   // the caller's own grants
 }
 ```
+
+`approvedCapabilities` answers the caller's own grants as a comma-separated
+list, and only ever the caller's: it is resolved from the registration the
+calling UID already holds, so an unknown plugin id, another app's id, or a
+caller with no live registration all get `""` rather than somebody else's
+grants. It exists because `registerPlugin` answers APPROVED synchronously while
+the grant list follows behind it as a `/plugin/registration` message — measured
+on hardware at 16 ms apart — so a plugin acting the instant it is approved read
+an empty grant set and was refused a capability the wearer had approved. A hub
+too old to answer fails this one call, the SDK reads null, and the message path
+stays in charge exactly as before.
 
 The method order is append-only so transaction codes remain stable. Link-state
 bits are `1 = CXR_CONTROL_UP`, `2 = SPP_DATA_UP`, and
@@ -1299,7 +1332,7 @@ phone-to-glasses camera announcements), bit `32` is `PIN_SURFACE`, bit `64` is
 include renderer bits in camera announcements. The glasses hub announces its
 renderer after either remote link connects by sending
 `/system/hub/capabilities` with
-`{"version":1,"features":226,"imageSurfaceVersion":1,"pinSurfaceVersion":1,"noticeSurfaceVersion":1,"activitySurfaceVersion":1,"maxImageBytes":65536,"versionName":"1.0.0","setupComplete":true}`.
+`{"version":1,"features":226,"imageSurfaceVersion":1,"pinSurfaceVersion":1,"noticeSurfaceVersion":3,"activitySurfaceVersion":1,"maxImageBytes":65536,"versionName":"1.0.0","setupComplete":true}`.
 `versionName` is the optional glasses app `BuildConfig.VERSION_NAME`; older glasses
 omit it and newer phones treat the missing field as an unknown installed version.
 `setupComplete` reports whether the on-device self-arm onboarding state is `COMPLETE`;
@@ -1335,6 +1368,7 @@ class BusClient(context, clientId, pathPrefixes: List<String>, listener: (BusEve
     fun request(path, payload, timeoutMs = 15_000): JSONObject   // suspend + callback overloads
     fun linkState(): Int
     fun capabilities(): Int
+    fun approvedCapabilities(): String?   // null when the hub predates the call
     fun close()
 ```
 

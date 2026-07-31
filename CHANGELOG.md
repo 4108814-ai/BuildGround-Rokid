@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+### Messages on your glasses
+
+- A message you can reply to now reaches the glasses as it arrives, lights the
+  display if it was dark, and is answered out loud without touching the phone.
+  Each message keeps its sender beside it rather than being flattened into one
+  paragraph, and a long conversation turns pages instead of stopping at eight
+  lines.
+- Speak your reply and it sends itself after a few seconds — visibly counted
+  down on the chip you are looking at, and cancellable for its whole length.
+  Nothing is sent that you were not shown: if the glasses went dark or lost the
+  link before the transcript appeared, the clock stops and waits for you.
+- Miss one, or let it expire, and it is in **Messages** in the Nexus menu:
+  every conversation waiting on you, newest first, read and answered the same
+  way. It updates while you are looking at it.
+- Everything with a reply box is relayed, from any app. Nothing else is, and
+  nothing is stored: revoke notification access and what it captured goes with
+  it.
+
+### Surfaces can be lists
+
+- A card can carry rows with a second line, a weight that says how much each
+  one matters, and a selection the glasses draw themselves. Plugins say what a
+  row is worth; the HUD decides what that looks like.
+- A row can also be prose, wrapping under a fixed label — which is what makes a
+  conversation read like one.
+
+### Notice bands, again
+
+- A band pages unless its answers need the swipes. One answer or none, and the
+  directions turn pages while a tap still replies, so a message worth exactly
+  one reply can be both read and answered.
+- A band is answered on the firmware's verdict about a touch, never on the
+  contact that opens one. Starting a swipe used to count as a tap, which meant
+  swiping toward Cancel could fire Reply instead.
+
+### Plugin SDK 0.9.0
+
+- `NexusRowTone`, plus `sub`, `tone`, and `selected` on `NexusCardLine` and
+  `subtitle` on `NexusCard`: list rows for any plugin that shows a list.
+- `approvedCapabilities` on the bus, so a plugin's grants are true by the time
+  it is told it is approved. Pushing a pin or a notice the instant approval
+  lands no longer reads an empty grant set.
+- `notice surface v3` — structured `lines` — and a visual reference for the new
+  rows at `docs/surface-list-rows.html`.
+
 ### Self-arm Settings navigation
 
 - Wireless Debugging setup now verifies every scroll, starts gestures inside
