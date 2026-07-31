@@ -40,13 +40,31 @@ internal object NotificationControl {
     var inboxOpen: Boolean = false
         private set
 
-    fun inboxOpened() {
+    @Volatile
+    private var inbox: RelayPluginService? = null
+
+    fun inboxOpened(service: RelayPluginService) {
+        inbox = service
         inboxOpen = true
         main.post { listener?.suspendBand() }
     }
 
-    fun inboxClosed() {
+    fun inboxClosed(service: RelayPluginService) {
+        if (inbox === service) inbox = null
         inboxOpen = false
+    }
+
+    /**
+     * A message arrived while the wearer is in the inbox, so the list redraws.
+     *
+     * This matters more than it looks: the band stands down while the inbox
+     * holds the bus, so if the list did not refresh, a message arriving during
+     * that time would be announced by nothing and appear nowhere — visible only
+     * after closing and reopening. The capture is already in the repository by
+     * the time this runs; all the list has to do is look again.
+     */
+    fun notifyCaptured() {
+        main.post { inbox?.onCaptureChanged() }
     }
 
     fun refreshFromSettings() {

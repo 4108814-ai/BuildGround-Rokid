@@ -22,6 +22,9 @@ class RelayNotificationListener : NotificationListenerService() {
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         sbn ?: return
         ReplyRepository.forget(sbn)
+        // Answering on the phone empties the row here too, while the wearer is
+        // looking straight at it.
+        NotificationControl.notifyCaptured()
     }
 
     /**
@@ -88,6 +91,9 @@ class RelayNotificationListener : NotificationListenerService() {
             "captured changed=${capture.shouldShowNow} textChars=${capture.reply.content.renderedText.length} " +
                 "imageBytes=${capture.reply.imagePreview?.bytes?.size ?: 0}",
         )
+        // The inbox, if it is open, is the only thing that will show this: the
+        // band stands down while it holds the bus.
+        NotificationControl.notifyCaptured()
         if (mayShow && capture.shouldShowNow) runtime.show(capture.reply)
         return true
     }

@@ -57,7 +57,7 @@ class RelayPluginService : NexusPluginService() {
     override fun onNexusOpen() {
         // One client per plugin id on the bus: the band steps aside while the
         // wearer is in here. See NotificationControl.inboxOpen.
-        NotificationControl.inboxOpened()
+        NotificationControl.inboxOpened(this)
         invalidateSpeech()
         entries = ReplyRepository.inboxEntries()
         selection.reset(entries.map(RelayInboxEntry::id))
@@ -67,7 +67,7 @@ class RelayPluginService : NexusPluginService() {
     }
 
     override fun onNexusClose() {
-        NotificationControl.inboxClosed()
+        NotificationControl.inboxClosed(this)
         invalidateSpeech()
         entries = emptyList()
         selection.reset(emptyList())
@@ -92,6 +92,19 @@ class RelayPluginService : NexusPluginService() {
 
             KeyEvent.KEYCODE_BACK -> back()
         }
+    }
+
+    /**
+     * A new message landed while the wearer is looking at the list.
+     *
+     * Only the list redraws. Someone reading a thread, dictating into one, or
+     * watching a send count down is in the middle of something, and pulling the
+     * screen out from under them to announce a different conversation would be
+     * worse than making them wait — the row will be there when they come back.
+     */
+    internal fun onCaptureChanged() {
+        if (selection.view != RelayInboxView.LIST) return
+        renderList(show = false)
     }
 
     private fun move(delta: Int) {
