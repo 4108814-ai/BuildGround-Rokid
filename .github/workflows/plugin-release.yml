@@ -75,6 +75,11 @@ jobs:
               changelog_path="plugins/photosync/CHANGELOG.md"
               release_name="Photo Sync"
               ;;
+            relay)
+              module_dir="plugins/relay"
+              changelog_path="plugins/relay/CHANGELOG.md"
+              release_name="Relay"
+              ;;
             sample)
               module_dir="plugins/sample"
               changelog_path="plugins/sample/CHANGELOG.md"

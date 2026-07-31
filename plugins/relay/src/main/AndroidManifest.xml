@@ -64,7 +64,13 @@
                 android:value="Relay" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.ICON"
-                android:value="chat" />
+                android:value="relay" />
+            <meta-data
+                android:name="com.anezium.rokidbus.plugin.ICON_DRAWABLE"
+                android:resource="@drawable/nexus_glyph_relay" />
+            <meta-data
+                android:name="com.anezium.rokidbus.plugin.GLYPHS"
+                android:resource="@array/nexus_glyphs" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.API_VERSION"
                 android:value="3" />

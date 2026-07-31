@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Photo Sync's launcher mark, rendered on the glasses where the hub has no APK
+     to read a drawable from. Generated from
+     `res/drawable/nexus_glyph_photosync.xml` - the drawable is the source, this
+     array follows it, and a test fails the build if the two drift apart. -->
 <resources>
     <string-array name="nexus_glyphs">
-        <item>photosync|M2,9 A2,2 0 0 1 4,7 L7.2,7 L8.5,4.8 L13.5,4.8 L14.8,7 L18,7 A2,2 0 0 1 20,9 L20,17 A2,2 0 0 1 18,19 L4,19 A2,2 0 0 1 2,17 Z M7.8,13 A3.2,3.2 0 1 0 14.2,13 A3.2,3.2 0 1 0 7.8,13 M18.6,5.6 L18.6,1.6 M18.6,1.6 L16.4,3.8 M18.6,1.6 L20.8,3.8</item>
+        <item>photosync|M10.9,17.9 L4.8,17.9 A1.87,1.87 0 0 1 2.94,16.04 L2.94,8.24 A1.87,1.87 0 0 1 4.8,6.37 L19.05,6.37 A1.87,1.87 0 0 1 20.91,8.24 L20.91,10.27 M9.04,2.6 L14.81,2.6 L15.86,7 L7.99,7 Z M9.53,11.95 A2.4,2.4 0 1 0 14.33,11.95 A2.4,2.4 0 1 0 9.53,11.95 Z M17.43,12.21 L21.32,16.26 L18.4,16.26 L18.4,21.05 L16.45,21.05 L16.45,16.26 L13.53,16.26 Z</item>
     </string-array>
 </resources>

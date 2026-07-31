@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Relay's own launcher mark: the message that arrived, and the answer going
+  back. Two bubbles rather than one, because Relay is a conversation and not a
+  pile of things shouted at the wearer.
+  Nexus renders plugin geometry as stroke only, so the overlap is drawn rather
+  than filled: the upper bubble's outline simply stops on both sides of where
+  the reply crosses it, which reads as one shape passing in front of the other
+  exactly the way a filled gutter would. The gap is a full unit wide, because
+  anything tighter closes up on additive optics.
+  The tails carry the direction: the upper bubble's sits bottom left, where a
+  received message's tail sits in every chat app the wearer already uses, and
+  the reply's sits bottom right, where their own outgoing messages live.
+  The pair spans nearly the whole 24-unit box on both axes - a mark that reads
+  as a conversation needs both halves legible, so neither can be small.
+-->
+<resources>
+    <string-array name="nexus_glyphs">
+        <item>relay|M9.6,11.8 L8.4,11.8 L5.4,15.2 L5.4,11.8 L4.4,11.8 A2,2 0 0 1 2.4,9.8 L2.4,4.4 A2,2 0 0 1 4.4,2.4 L13.6,2.4 A2,2 0 0 1 15.6,4.4 L15.6,9.6 M12.6,10.6 L19.6,10.6 A2,2 0 0 1 21.6,12.6 L21.6,16.6 A2,2 0 0 1 19.6,18.6 L19.6,21.8 L16.4,18.6 L12.6,18.6 A2,2 0 0 1 10.6,16.6 L10.6,12.6 A2,2 0 0 1 12.6,10.6 Z</item>
+    </string-array>
+</resources>

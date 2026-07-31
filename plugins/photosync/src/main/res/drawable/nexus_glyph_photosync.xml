@@ -1,26 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A capture frame with a sync arrow leaving it.
+<!-- A capture frame with a sync arrow leaving it: the Store icon, transcribed.
 
-     Stroked, like every other mark in the set. It used to be filled, because
-     the plugin's own settings header rendered the resource untouched while the
-     hub tinted what it loaded cross-package — so a white silhouette stayed
-     white there and the green had to be baked in. That header tints now, which
-     is what let this go back to the design system. -->
+     Every coordinate here is measured off `photosync-icon3.png` in the registry
+     - connected components separated, stroke width and break points read at the
+     pixel, then scaled by 20/267 into the 24-unit box. The mark the wearer taps
+     in the Store is the mark they find afterwards, at any size.
+
+     Filled in the accent green rather than white: the hub tints what it loads
+     from another package, but a plugin's own header renders the resource
+     untouched, so a white fill showed up white there.
+
+     The frame's outline stops on the bottom edge and again partway down the
+     right side, and does not close - that is where the arrow crosses it. The
+     gap is what makes the capture read as leaving rather than as decoration
+     parked in a corner. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
+    <!-- The capture frame, opening where the arrow leaves it. -->
     <path
-        android:pathData="M2,9 A2,2 0 0 1 4,7 L7.2,7 L8.5,4.8 L13.5,4.8 L14.8,7 L18,7 A2,2 0 0 1 20,9 L20,17 A2,2 0 0 1 18,19 L4,19 A2,2 0 0 1 2,17 Z M7.8,13 A3.2,3.2 0 1 0 14.2,13 A3.2,3.2 0 1 0 7.8,13"
+        android:pathData="M10.9,17.9 L4.8,17.9 A1.87,1.87 0 0 1 2.94,16.04 L2.94,8.24 A1.87,1.87 0 0 1 4.8,6.37 L19.05,6.37 A1.87,1.87 0 0 1 20.91,8.24 L20.91,10.27"
         android:strokeColor="#FF4DFF8C"
         android:strokeWidth="1.7"
         android:strokeLineCap="round"
         android:strokeLineJoin="round" />
+    <!-- The viewfinder hump, solid as the icon draws it. -->
     <path
-        android:pathData="M18.6,5.6 L18.6,1.6 M18.6,1.6 L16.4,3.8 M18.6,1.6 L20.8,3.8"
-        android:strokeColor="#FF4DFF8C"
-        android:strokeWidth="1.7"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
+        android:fillColor="#FF4DFF8C"
+        android:pathData="M9.04,2.6 L14.81,2.6 L15.86,7 L7.99,7 Z" />
+    <!-- The lens. -->
+    <path
+        android:fillColor="#FF4DFF8C"
+        android:pathData="M9.53,11.95 A2.4,2.4 0 1 0 14.33,11.95 A2.4,2.4 0 1 0 9.53,11.95 Z" />
+    <!-- The capture on its way to the phone. -->
+    <path
+        android:fillColor="#FF4DFF8C"
+        android:pathData="M17.43,12.21 L21.32,16.26 L18.4,16.26 L18.4,21.05 L16.45,21.05 L16.45,16.26 L13.53,16.26 Z" />
 </vector>

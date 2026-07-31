@@ -1,20 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The plugin's own mark: a message bubble with two lines of someone else's
-  words in it. Stroked, not filled - on additive optics a filled bubble emits
-  as a solid green lozenge and loses the one detail that says "a message"
-  rather than "a shape".
-  The tail is square and sits at the bottom left, where a received message's
-  tail sits in every chat app the wearer already uses. A centred or right-hand
-  tail would read as their own outgoing reply, which is the opposite of what
-  this plugin announces.
+  The phone-side twin of Relay's launcher mark. Nexus shows this drawable where
+  it has the plugin's APK, and renders the identical geometry from
+  `res/values/nexus_glyphs.xml` on the glasses, where it does not. The two must
+  stay in step: if you move a point here, move it there.
+  Stroke only, no fill - see the glyph array for why the overlap is drawn as a
+  break in the upper outline rather than as a filled gutter.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:pathData="M6,4.5 L18,4.5 A2.5,2.5 0 0 1 20.5,7 L20.5,13.5 A2.5,2.5 0 0 1 18,16 L9.5,16 L5.5,20 L5.5,16 A2.5,2.5 0 0 1 3.5,13.5 L3.5,7 A2.5,2.5 0 0 1 6,4.5 Z"
+    <!-- The message that arrived, its outline stopping where the reply crosses it. -->
+    <path android:pathData="M9.6,11.8 L8.4,11.8 L5.4,15.2 L5.4,11.8 L4.4,11.8 A2,2 0 0 1 2.4,9.8 L2.4,4.4 A2,2 0 0 1 4.4,2.4 L13.6,2.4 A2,2 0 0 1 15.6,4.4 L15.6,9.6"
         android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
-    <path android:pathData="M7.5,8.8 L15.5,8.8"
-        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
-    <path android:pathData="M7.5,12.2 L13,12.2"
+    <!-- The answer going back, passing in front. -->
+    <path android:pathData="M12.6,10.6 L19.6,10.6 A2,2 0 0 1 21.6,12.6 L21.6,16.6 A2,2 0 0 1 19.6,18.6 L19.6,21.8 L16.4,18.6 L12.6,18.6 A2,2 0 0 1 10.6,16.6 L10.6,12.6 A2,2 0 0 1 12.6,10.6 Z"
         android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" />
 </vector>

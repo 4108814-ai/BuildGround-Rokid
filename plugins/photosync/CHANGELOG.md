@@ -1,5 +1,21 @@
 # Changelog — Photos Sync
 
+## 1.0.2
+
+- The plugin's mark matches its Store icon again. Converting the glyph set to
+  stroke-only in July had shrunk the sync arrow into a corner decoration and
+  closed the frame around it, which lost the one thing the mark says: the
+  capture leaves the glasses. The icon is now transcribed from the published
+  artwork measurement by measurement.
+
+## 1.0.1
+
+- A capture taken seconds ago is no longer skipped by auto-sync: scanning and
+  settling are separate decisions, so a file still being written is re-checked
+  instead of being dropped from the run.
+- The phone hub restarts itself after a reboot or an app update, rather than
+  waiting to be opened by hand while captures pile up on the glasses.
+
 ## 1.0.0
 
 - First release: glasses captures copy themselves into `Download/Hi Rokid/` on
