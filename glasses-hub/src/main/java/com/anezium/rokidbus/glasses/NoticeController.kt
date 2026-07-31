@@ -119,6 +119,15 @@ internal fun noticePageWindow(
 }
 
 /**
+ * The exact text handed to the real [android.text.StaticLayout]. A body is
+ * returned untouched for pixel compatibility; structured lines use the one
+ * platform-owned hard break between entries and otherwise rely on that same
+ * layout for wrapping and measurement.
+ */
+internal fun noticeBodyText(content: NoticeSurfaceContent): String? =
+    if (content.lines.isEmpty()) content.body else content.lines.joinToString("\n")
+
+/**
  * What a band's one answer turned out to be.
  *
  * Both kinds are the same event -- the wearer answered -- and differ only in
@@ -202,7 +211,11 @@ internal class NoticeStateMachine {
         val patched = patch.applyTo(current.content)
         // An update is allowed to clear any single field, but not to leave the
         // wearer looking at an empty box.
-        if (patched.title.isNullOrEmpty() && patched.body.isNullOrEmpty()) {
+        if (
+            patched.title.isNullOrEmpty() &&
+            patched.body.isNullOrEmpty() &&
+            patched.lines.isEmpty()
+        ) {
             return NoticeStateDecision.Ignored
         }
         latestSeq = seq

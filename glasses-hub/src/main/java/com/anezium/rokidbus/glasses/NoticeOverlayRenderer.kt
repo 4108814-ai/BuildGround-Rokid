@@ -259,7 +259,7 @@ object NoticeOverlayRenderer {
             val drawsImage = hasImage && notice.pageIndex == 0
             image.render(notice.imageBitmap?.takeIf { drawsImage })
             body.render(
-                text = notice.content.body,
+                text = noticeBodyText(notice.content),
                 pageIndex = notice.pageIndex,
                 firstPageLines = if (hasImage) IMAGE_PAGE_BODY_LINES else MAX_BODY_LINES,
                 paging = !notice.content.expectsInput,

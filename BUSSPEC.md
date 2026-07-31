@@ -508,6 +508,24 @@ for pins.
 }
 ```
 
+The alternate structured body keeps one event's parts distinct. It never
+appears alongside `body`:
+
+```json
+{
+  "surfaceId": "relay:notice",
+  "ownerPluginId": "relay",
+  "seq": 13,
+  "kind": "notice",
+  "title": "Mika",
+  "lines": [
+    "Can you check the build when you have a minute?",
+    "I added a second message to exercise thread extraction.",
+    "Reply from the glasses when you are ready."
+  ]
+}
+```
+
 The same band carrying a picture instead of a question. Note what is absent:
 an image notice asks nothing, so it offers no actions and its body is free to
 run long enough to page.
@@ -516,7 +534,7 @@ run long enough to page.
 {
   "surfaceId": "relay:notice",
   "ownerPluginId": "relay",
-  "seq": 13,
+  "seq": 14,
   "kind": "notice",
   "title": "Marie",
   "body": "Look at the view from the hotel window this morning.",
@@ -530,10 +548,18 @@ run long enough to page.
 }
 ```
 
-- `title` optional, 32 chars after trim. `body` optional, 1024. `footer`
-  optional, 40. At least one of title or body must survive trimming.
+- `title` optional, 32 chars after trim. `body` optional, 1024. `lines`
+  optional, at most 16 strings. `footer` optional, 40. At least one of title,
+  body, or lines must survive normalization. `body` and `lines` are mutually
+  exclusive on both show and update; supplying both is `INVALID_NOTICE`.
 - Newlines in the body collapse to spaces. The renderer wraps; a plugin does
   not lay the band out by hand.
+- Every lines entry is trimmed and has its own newlines collapsed to spaces;
+  normalized empty entries are dropped. The remaining text plus one separator
+  per line must fit the same 1024-character body budget. More than 16 input
+  entries is rejected before empty entries are dropped. The array is the only
+  supported way to request a hard break: the renderer breaks between entries,
+  then wraps overflow at the same left edge with no marker or indent.
 - `interactive` optional, default false.
 - `wakeDisplay` optional boolean, default false. It is honored only on
   `/notice/show` and omitted from normalized payloads when false.
@@ -565,6 +591,13 @@ out keeps the current row, and an empty array clears it. The wearer's selection
 follows its action id across a replacement, so a plugin reordering its answers
 does not move the wearer's finger onto a different one. When the selected id is
 gone the selection falls back to the first action.
+
+`/notice/update` also keeps body and lines as alternate representations. A
+`lines` field replaces and clears the current body, including when normalization
+drops every entry; a `body` field replaces and clears the current lines. An
+absent key keeps the current representation. The normalized patch, including an
+empty lines array, is relayed as sent so those replacement semantics survive the
+phone hop.
 
 **An update that carries the `actions` key or the `interactive` key is a new
 question** and reopens the band for another answer; one that carries neither is
@@ -626,12 +659,14 @@ Geometry is platform-owned; a plugin sends content, never layout. Top band,
 emit nothing for black, so the fill reads as transparent and only the border
 and content light up. The band is capped at 65% of screen height.
 
-The renderer measures the complete normalized body once with the real
-`StaticLayout`, width, typeface, and text size. Eight measured lines form a
-page; the controller owns the current page and the renderer draws that exact
-line window. There is no scroll offset and no upstream page calculation. A
-multi-page footer draws the plugin footer at the start and muted platform text
-such as `2/4` at the end. One page adds no indicator and no extra row.
+The renderer measures the complete normalized body representation once with the
+real `StaticLayout`, width, typeface, and text size. A body string enters that
+path unchanged; structured lines enter it with one hard break between entries.
+Eight measured lines form a page; the controller owns the current page and the
+renderer draws that exact line window. There is no scroll offset and no
+upstream page calculation. A multi-page footer draws the plugin footer at the
+start and muted platform text such as `2/4` at the end. One page adds no
+indicator and no extra row.
 
 An image is full content width below the title, aspect-preserved and capped at
 150 physical pixels high. It appears on page one only, where the body window is

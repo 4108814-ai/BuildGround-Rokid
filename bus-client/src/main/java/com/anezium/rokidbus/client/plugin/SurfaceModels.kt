@@ -613,11 +613,13 @@ data class NexusNoticeImage(
  * one gesture of reply. Anything the wearer follows over minutes is not a
  * notice, and anything static that should simply stay put is a pin.
  *
- * [title] is capped at 32 trimmed characters, [body] at 1024, [footer] at 40, and
- * at least one of title or body must survive trimming. Newlines in the body
- * collapse to spaces; the renderer wraps it into pages. When [ttlMs] is absent
- * the hub derives one from the text length; an explicit value is clamped to
- * 2-45 seconds.
+ * [title] is capped at 32 trimmed characters, [body] at 1024, [footer] at 40,
+ * and at least one of title, body, or [lines] must survive trimming. Body and
+ * lines are mutually exclusive. Up to 16 lines share the body's 1024-character
+ * budget, including one separator per line. Newlines collapse to spaces inside
+ * either representation; only the lines array asks the renderer for hard
+ * breaks. When [ttlMs] is absent the hub derives one from the text length; an
+ * explicit value is clamped to 2-45 seconds.
  *
  * @property interactive Ask for a single confirming gesture, answered on
  * [NexusPluginCallbacks.onNoticeInput]. Redundant when [actions] is set:
@@ -628,6 +630,8 @@ data class NexusNoticeImage(
  * still leaves on its own deadline, and Back still dismisses it.
  * @property wakeDisplay Ask the hub to wake a dark display for this new event.
  * Subject to one platform-wide wake per five seconds; never keeps it on.
+ * @property lines Structured alternative to [body]. Empty entries are dropped;
+ * an empty result is absent from the wire.
  */
 data class NexusNotice(
     val title: String? = null,
@@ -638,12 +642,24 @@ data class NexusNotice(
     val ttlMs: Long? = null,
     val image: NexusNoticeImage? = null,
     val wakeDisplay: Boolean = false,
+    val lines: List<String> = emptyList(),
 ) {
     init {
+        val normalizedLines = normalizedNoticeLines(lines)
         require(title == null || title.trim().length <= NoticeSurfaceContract.MAX_TITLE_CHARS)
         require(body == null || body.trim().length <= NoticeSurfaceContract.MAX_BODY_CHARS)
+        require(body == null || lines.isEmpty())
+        require(lines.size <= NoticeSurfaceContract.MAX_LINES)
+        require(
+            normalizedLines.sumOf { it.length.toLong() + 1L } <=
+                NoticeSurfaceContract.MAX_BODY_CHARS,
+        )
         require(footer == null || footer.trim().length <= NoticeSurfaceContract.MAX_FOOTER_CHARS)
-        require(!title?.trim().isNullOrEmpty() || !body?.trim().isNullOrEmpty())
+        require(
+            !title?.trim().isNullOrEmpty() ||
+                !body?.trim().isNullOrEmpty() ||
+                normalizedLines.isNotEmpty(),
+        )
         require(actions.size <= NoticeSurfaceContract.MAX_ACTIONS)
     }
 
@@ -653,6 +669,7 @@ data class NexusNotice(
         .apply {
             title?.trim()?.takeIf { it.isNotEmpty() }?.let { put("title", it) }
             body?.trim()?.takeIf { it.isNotEmpty() }?.let { put("body", it) }
+            if (lines.isNotEmpty()) putNoticeLines(lines)
             footer?.trim()?.takeIf { it.isNotEmpty() }?.let { put("footer", it) }
             if (interactive) put("interactive", true)
             // A notice with no answers sends no actions key at all, so every
@@ -682,6 +699,8 @@ data class NexusNotice(
  * through reading them; hide the notice instead. The wearer's selection follows
  * its action id across the swap, so reordering answers does not move their
  * finger onto a different one.
+ * @property lines A non-empty structured body replacement. An empty list is
+ * absent from the wire and leaves the current text alone.
  */
 data class NexusNoticeUpdate(
     val title: String? = null,
@@ -690,8 +709,15 @@ data class NexusNoticeUpdate(
     val interactive: Boolean? = null,
     val actions: List<NexusNoticeAction> = emptyList(),
     val ttlMs: Long? = null,
+    val lines: List<String> = emptyList(),
 ) {
     init {
+        require(body == null || lines.isEmpty())
+        require(lines.size <= NoticeSurfaceContract.MAX_LINES)
+        require(
+            normalizedNoticeLines(lines).sumOf { it.length.toLong() + 1L } <=
+                NoticeSurfaceContract.MAX_BODY_CHARS,
+        )
         require(actions.size <= NoticeSurfaceContract.MAX_ACTIONS)
     }
 
@@ -700,6 +726,7 @@ data class NexusNoticeUpdate(
         .apply {
             title?.let { put("title", it.trim()) }
             body?.let { put("body", it.trim()) }
+            if (lines.isNotEmpty()) putNoticeLines(lines)
             footer?.let { put("footer", it.trim()) }
             // Sent only when the plugin actually set it. An update that leaves
             // it null must not carry the field, or every text update would read
@@ -725,6 +752,17 @@ private fun JSONObject.putActions(actions: List<NexusNoticeAction>) {
         },
     )
 }
+
+private fun JSONObject.putNoticeLines(lines: List<String>) {
+    val normalized = normalizedNoticeLines(lines)
+    if (normalized.isNotEmpty()) put("lines", JSONArray(normalized))
+}
+
+private fun normalizedNoticeLines(lines: List<String>): List<String> = lines
+    .map { it.replace(NOTICE_NEWLINES, " ").trim() }
+    .filter(String::isNotEmpty)
+
+private val NOTICE_NEWLINES = Regex("[\\r\\n]+")
 
 private fun JSONObject.putNoticeImage(image: NexusNoticeImage, bytes: ByteArray) {
     put("imageVersion", ImageSurfaceContract.VERSION)

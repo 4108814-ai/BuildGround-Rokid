@@ -136,6 +136,51 @@ class NexusNoticeActionTest {
     }
 
     @Test
+    fun `structured lines normalize and serialize only when nonempty`() {
+        val fixture = approvedFixture()
+
+        fixture.client.showNotice(
+            NexusNotice(
+                lines = listOf("  First\nmessage  ", "   ", "Second message"),
+            ),
+        )
+        fixture.client.updateNotice(NexusNoticeUpdate(lines = listOf("Updated\r\nmessage")))
+        fixture.client.updateNotice(NexusNoticeUpdate(lines = emptyList()))
+
+        val shown = fixture.transport.sends[0].second
+        assertFalse(shown.has("body"))
+        assertEquals(2, shown.getJSONArray("lines").length())
+        assertEquals("First message", shown.getJSONArray("lines").getString(0))
+        assertEquals("Second message", shown.getJSONArray("lines").getString(1))
+
+        val updated = fixture.transport.sends[1].second
+        assertEquals("Updated message", updated.getJSONArray("lines").getString(0))
+        assertEquals(
+            setOf("surfaceId"),
+            fixture.transport.sends[2].second.keys().asSequence().toSet(),
+        )
+    }
+
+    @Test
+    fun `notice models enforce line exclusivity count and shared budget`() {
+        NexusNotice(lines = List(NoticeSurfaceContract.MAX_LINES) { "line $it" })
+        NexusNotice(lines = listOf("x".repeat(NoticeSurfaceContract.MAX_BODY_CHARS - 1)))
+
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusNotice(body = "paragraph", lines = listOf("line"))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusNoticeUpdate(body = "paragraph", lines = listOf("line"))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusNotice(lines = List(NoticeSurfaceContract.MAX_LINES + 1) { "line $it" })
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusNotice(lines = listOf("x".repeat(NoticeSurfaceContract.MAX_BODY_CHARS)))
+        }
+    }
+
+    @Test
     fun `actions travel trimmed and in order on show and update`() {
         val fixture = approvedFixture()
         val actions = listOf(

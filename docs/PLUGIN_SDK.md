@@ -19,7 +19,7 @@ resolved transitively.
 repositories { maven("https://jitpack.io") }
 
 dependencies {
-    implementation("com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.8.0")
+    implementation("com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.9.0")
 }
 ```
 
@@ -338,11 +338,18 @@ seconds; an explicit value is clamped to 2–45 seconds. The absolute lifetime i
 90 seconds. Anything the wearer follows over minutes is an activity; anything
 they browse or drive is a surface.
 
-A body may contain 1024 characters. Nexus measures it on the glasses and
-replaces one eight-line page with the next; your plugin never calculates page
-breaks. Forward and backward change pages, the footer gains a platform `2/4`
-indicator, and nothing scrolls. The first page turn replaces both countdowns
-with a 30-second inactivity timeout restarted on every page gesture.
+A body may contain 1024 characters. When one event has distinct parts, use
+`lines` instead: at most 16 strings sharing the same 1024-character budget,
+including one separator per line. Body and lines are mutually exclusive.
+Each line is trimmed, embedded newlines collapse to spaces, and empty lines are
+dropped. Nexus owns the break between entries, then wraps any entry that is too
+wide with no marker or continuation indent.
+
+Nexus measures either representation on the glasses and replaces one
+eight-line page with the next; your plugin never calculates page breaks.
+Forward and backward change pages, the footer gains a platform `2/4` indicator,
+and nothing scrolls. The first page turn replaces both countdowns with a
+30-second inactivity timeout restarted on every page gesture.
 
 [notice-band-states.html](notice-band-states.html) shows the band's four
 states as the wearer sees them — plain, interactive, with actions, answered —
@@ -371,6 +378,7 @@ data class NexusNotice(
     val ttlMs: Long? = null,
     val image: NexusNoticeImage? = null,
     val wakeDisplay: Boolean = false,
+    val lines: List<String> = emptyList(),
 )
 
 data class NexusNoticeUpdate(
@@ -380,6 +388,7 @@ data class NexusNoticeUpdate(
     val interactive: Boolean? = null,
     val actions: List<NexusNoticeAction> = emptyList(),
     val ttlMs: Long? = null,
+    val lines: List<String> = emptyList(),
 )
 
 val supportsNoticeSurface: Boolean
@@ -443,6 +452,22 @@ override fun onNexusNoticeAction(id: String) {
         "later" -> snooze()
     }
 }
+```
+
+One relayed conversation remains one notice while preserving its message
+boundaries:
+
+```kotlin
+nexusClient?.showNotice(
+    NexusNotice(
+        title = "Mika",
+        lines = listOf(
+            "Can you check the build when you have a minute?",
+            "I added a second message to exercise thread extraction.",
+            "Reply from the glasses when you are ready.",
+        ),
+    ),
+)
 ```
 
 To attach a JPEG or PNG, pass its declared metadata in the notice and its
@@ -510,7 +535,11 @@ of the band, so `footer = ""` really does take the footer off the band and
 passing a non-empty list replaces the whole row, while an empty list leaves the
 current row alone rather than clearing it. The wearer's selection follows its
 action id across a replacement, so reordering your answers does not move their
-finger onto a different one.
+finger onto a different one. Lines follow the same empty-list SDK convention:
+a non-empty list replaces a body or the current lines, while an empty list is
+absent from the wire and leaves the text alone. Sending `body` instead switches
+a lines notice back to the body representation; setting both in one update is
+rejected.
 
 Two of these fields also *reopen* an answered band: `actions` and `interactive`.
 Setting either is how you ask again — a new row, or `interactive = true` on a

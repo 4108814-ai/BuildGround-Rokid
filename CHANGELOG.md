@@ -14,6 +14,21 @@
 - Direct Wireless Debugging launch is capability-probed first; inaccessible
   YodaOS fragments fall back to the hardened Settings traversal.
 
+### Notices keep their message boundaries
+
+- A notice can now carry up to sixteen structured text lines. The platform
+  breaks between them, wraps long entries without bullets or indentation, and
+  still measures every page from the real glasses layout.
+- Body notices are untouched. Structured lines share their 1024-character
+  budget, collapse embedded newlines, drop empty entries, and cannot be sent
+  alongside `body`.
+
+### Plugin SDK 0.9.0
+
+- `lines` lands on `NexusNotice` and `NexusNoticeUpdate`, absent from the wire
+  when empty, so a conversation can remain one notice without becoming one
+  paragraph.
+
 ### Waking the display
 
 - A notice can now ask to light a dark display for a new event, and an activity

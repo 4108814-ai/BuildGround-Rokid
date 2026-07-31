@@ -80,6 +80,86 @@ class NoticeSurfaceContractTest {
     }
 
     @Test
+    fun `accepts sixteen lines and rejects a seventeenth before dropping empties`() {
+        val accepted = NoticeSurfaceContract.validateShow(
+            linesPayload(List(NoticeSurfaceContract.MAX_LINES) { "line $it" }),
+        )
+        val rejected = NoticeSurfaceContract.validateShow(
+            linesPayload(List(NoticeSurfaceContract.MAX_LINES) { "line $it" } + "   "),
+        )
+
+        assertTrue(accepted is NoticeSurfaceValidationResult.Valid)
+        assertTrue(rejected is NoticeSurfaceValidationResult.Invalid)
+    }
+
+    @Test
+    fun `lines share the body budget including one separator each`() {
+        val accepted = NoticeSurfaceContract.validateShow(
+            linesPayload(listOf("x".repeat(511), "y".repeat(511))),
+        )
+        val rejected = NoticeSurfaceContract.validateShow(
+            linesPayload(listOf("x".repeat(512), "y".repeat(511))),
+        )
+
+        assertTrue(accepted is NoticeSurfaceValidationResult.Valid)
+        assertTrue(rejected is NoticeSurfaceValidationResult.Invalid)
+    }
+
+    @Test
+    fun `lines trim collapse their own newlines and drop empty entries`() {
+        val result = NoticeSurfaceContract.validateShow(
+            linesPayload(
+                listOf(
+                    "  first\r\ncontinued  ",
+                    " \n ",
+                    "third\nline",
+                ),
+            ),
+        )
+
+        val content = (result as NoticeSurfaceValidationResult.Valid).content
+        assertEquals(listOf("first continued", "third line"), content.lines)
+        assertNull(content.body)
+        assertEquals(
+            NoticeSurfaceContract.derivedTtlMs(
+                "first continued".length + 1 + "third line".length + 1,
+            ),
+            content.ttlMs,
+        )
+    }
+
+    @Test
+    fun `body and lines together are invalid on show and update`() {
+        val show = NoticeSurfaceContract.validateShow(
+            linesPayload(listOf("first")).put("body", "paragraph"),
+        )
+        val update = NoticeSurfaceContract.validateUpdate(
+            JSONObject()
+                .put("body", "paragraph")
+                .put("lines", JSONArray().put("first")),
+        )
+
+        assertTrue(show is NoticeSurfaceValidationResult.Invalid)
+        assertTrue(update is NoticeSurfacePatchResult.Invalid)
+    }
+
+    @Test
+    fun `lines must be an array of strings`() {
+        assertTrue(
+            NoticeSurfaceContract.validateShow(
+                JSONObject().put("kind", "notice").put("lines", "first"),
+            ) is NoticeSurfaceValidationResult.Invalid,
+        )
+        assertTrue(
+            NoticeSurfaceContract.validateShow(
+                JSONObject()
+                    .put("kind", "notice")
+                    .put("lines", JSONArray().put(JSONObject().put("text", "first"))),
+            ) is NoticeSurfaceValidationResult.Invalid,
+        )
+    }
+
+    @Test
     fun `length derived ttl follows the reading rate and clamps`() {
         assertEquals(4_000L, NoticeSurfaceContract.derivedTtlMs(0))
         assertEquals(12_800L, NoticeSurfaceContract.derivedTtlMs(240))
@@ -196,6 +276,24 @@ class NoticeSurfaceContractTest {
 
         val reparsed = NoticeSurfaceContract.validateShow(payload)
         assertEquals(content.copy(ttlMs = content.ttlMs), (reparsed as NoticeSurfaceValidationResult.Valid).content)
+    }
+
+    @Test
+    fun `structured lines serialize in order and round-trip`() {
+        val content = NoticeSurfaceContent(
+            title = "Thread",
+            body = null,
+            footer = null,
+            lines = listOf("first", "second"),
+        )
+
+        val payload = NoticeSurfaceContract.toPayload("relay:notice", content)
+
+        assertFalse(payload.has("body"))
+        assertEquals(listOf("first", "second"), payload.getJSONArray("lines").toStringList())
+        val reparsed = NoticeSurfaceContract.validateShow(payload)
+            as NoticeSurfaceValidationResult.Valid
+        assertEquals(content, reparsed.content)
     }
 
     /**
@@ -372,12 +470,13 @@ class NoticeSurfaceContractTest {
             interactive = NoticeField(false),
             actions = NoticeField(emptyList()),
             ttlMs = NoticeField(12_000L),
+            lines = NoticeField(emptyList()),
         )
 
         val wire = NoticeSurfaceContract.toUpdatePayload("relay:notice", patch)
 
         assertEquals(
-            setOf("surfaceId", "title", "footer", "interactive", "actions", "ttlMs"),
+            setOf("surfaceId", "title", "footer", "interactive", "actions", "ttlMs", "lines"),
             wire.keys().asSequence().toSet(),
         )
         // Present and empty, which is how the patch spells a clear. Absent would
@@ -385,6 +484,7 @@ class NoticeSurfaceContractTest {
         assertEquals("", wire.getString("footer"))
         assertFalse(wire.getBoolean("interactive"))
         assertEquals(0, wire.getJSONArray("actions").length())
+        assertEquals(0, wire.getJSONArray("lines").length())
 
         val reread = (NoticeSurfaceContract.validateUpdate(wire) as NoticeSurfacePatchResult.Valid).patch
         assertEquals(patch, reread)
@@ -399,6 +499,30 @@ class NoticeSurfaceContractTest {
 
         assertEquals(setOf("surfaceId", "body"), wire.keys().asSequence().toSet())
         assertEquals("Five out", wire.getString("body"))
+    }
+
+    @Test
+    fun `a lines patch replaces body and a body patch replaces lines`() {
+        val paragraph = NoticeSurfaceContent(
+            title = "Marie",
+            body = "One paragraph",
+            footer = null,
+        )
+        val linesPatch = NoticeSurfaceContract.validateUpdate(
+            JSONObject().put("lines", JSONArray().put("First").put("Second")),
+        ) as NoticeSurfacePatchResult.Valid
+
+        val structured = linesPatch.patch.applyTo(paragraph)
+        assertNull(structured.body)
+        assertEquals(listOf("First", "Second"), structured.lines)
+        val wire = NoticeSurfaceContract.toUpdatePayload("relay:notice", linesPatch.patch)
+        assertEquals(setOf("surfaceId", "lines"), wire.keys().asSequence().toSet())
+
+        val bodyPatch = NoticeSurfaceContract.validateUpdate(JSONObject().put("body", "Replacement"))
+            as NoticeSurfacePatchResult.Valid
+        val replaced = bodyPatch.patch.applyTo(structured)
+        assertEquals("Replacement", replaced.body)
+        assertTrue(replaced.lines.isEmpty())
     }
 
     @Test
@@ -453,6 +577,13 @@ class NoticeSurfaceContractTest {
         .put("kind", "notice")
         .put("title", "Marie")
         .put("body", "On my way")
+
+    private fun linesPayload(lines: List<String>) = JSONObject()
+        .put("kind", "notice")
+        .put("lines", JSONArray(lines))
+
+    private fun JSONArray.toStringList(): List<String> =
+        List(length()) { index -> getString(index) }
 
     private fun action(id: String, glyph: String, label: String) = JSONObject()
         .put("id", id)

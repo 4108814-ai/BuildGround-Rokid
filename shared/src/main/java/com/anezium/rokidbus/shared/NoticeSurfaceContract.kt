@@ -53,6 +53,8 @@ data class NoticeSurfaceContent(
     val image: ImageSurfaceMetadata? = null,
     /** Whether this new event may ask the glasses hub to wake a dark display. */
     val wakeDisplay: Boolean = false,
+    /** Structured alternative to [body]; each entry owns one hard break. */
+    val lines: List<String> = emptyList(),
 ) {
     /**
      * Whether the band expects a gesture at all. Actions are an interaction by
@@ -79,12 +81,22 @@ data class NoticeSurfacePatch(
     val interactive: NoticeField<Boolean>? = null,
     val actions: NoticeField<List<NoticeAction>>? = null,
     val ttlMs: NoticeField<Long>? = null,
+    val lines: NoticeField<List<String>>? = null,
 ) {
     // Presence is the test, never the value: `?:` here would treat a field sent
     // empty as a field left out, and clearing a footer would silently keep it.
     fun applyTo(content: NoticeSurfaceContent): NoticeSurfaceContent = content.copy(
         title = if (title != null) title.value else content.title,
-        body = if (body != null) body.value else content.body,
+        body = when {
+            body != null -> body.value
+            lines != null -> null
+            else -> content.body
+        },
+        lines = when {
+            lines != null -> lines.value
+            body != null -> emptyList()
+            else -> content.lines
+        },
         footer = if (footer != null) footer.value else content.footer,
         interactive = if (interactive != null) interactive.value else content.interactive,
         actions = if (actions != null) actions.value else content.actions,
@@ -102,26 +114,30 @@ sealed interface NoticeSurfacePatchResult {
     data class Invalid(val reason: String) : NoticeSurfacePatchResult
 }
 
-/** Pure notice-surface v2 validation and normalization with no Android dependencies. */
+/** Pure notice-surface v3 validation and normalization with no Android dependencies. */
 object NoticeSurfaceContract {
     const val KIND = "notice"
 
     /**
-     * v2 is the paged band: a body four times longer than a glance, an image in
-     * the envelope, and a patch that replaces a live notice in place.
+     * v3 is the band that knows where a message ends: structured `lines`
+     * beside the body. v2 was the paged band — a body four times longer than a
+     * glance, an image in the envelope, and a patch that replaces a live notice
+     * in place.
      *
-     * The bump is what keeps a v1 pair honest. Both sides gate the capability on
-     * an exact version match, so glasses that still speak v1 now decline the
-     * capability outright and the plugin hears CAPABILITY_NOT_AVAILABLE. Left at
-     * 1 they would have accepted the handshake and then rejected every body past
-     * 240 characters in silence, which reads to the wearer as a plugin that
-     * simply stopped talking.
+     * The bump is what keeps an older pair honest, and the reasoning has not
+     * changed since v2. Both sides gate the capability on an exact version
+     * match, so glasses still speaking v2 decline the capability outright and
+     * the plugin hears CAPABILITY_NOT_AVAILABLE. Left at 2 they would accept the
+     * handshake and then reject every `lines` payload in silence — it carries no
+     * `body`, so it fails the "title or body" rule — and a band that vanishes
+     * without a word reads to the wearer as a plugin that stopped talking.
      */
-    const val VERSION = 2
+    const val VERSION = 3
     const val LOCAL_SURFACE_ID = "notice"
 
     const val MAX_TITLE_CHARS = 32
     const val MAX_BODY_CHARS = 1024
+    const val MAX_LINES = 16
     const val MAX_FOOTER_CHARS = 40
 
     /**
@@ -172,6 +188,9 @@ object NoticeSurfaceContract {
         binary: ByteArray? = null,
     ): NoticeSurfaceValidationResult {
         if (payload.opt("kind") != KIND) return invalid("kind must be notice")
+        if (payload.has("body") && payload.has("lines")) {
+            return invalid("body and lines are mutually exclusive")
+        }
 
         val title = when (val result = readText(payload, "title", MAX_TITLE_CHARS)) {
             is TextResult.Invalid -> return invalid(result.reason)
@@ -183,13 +202,18 @@ object NoticeSurfaceContract {
             is TextResult.Absent -> null
             is TextResult.Present -> result.value
         }
+        val lines = when (val result = readLines(payload, "lines")) {
+            is LinesResult.Invalid -> return invalid(result.reason)
+            is LinesResult.Absent -> emptyList()
+            is LinesResult.Present -> result.value
+        }
         val footer = when (val result = readText(payload, "footer", MAX_FOOTER_CHARS)) {
             is TextResult.Invalid -> return invalid(result.reason)
             is TextResult.Absent -> null
             is TextResult.Present -> result.value
         }
-        if (title.isNullOrEmpty() && body.isNullOrEmpty()) {
-            return invalid("title or body must contain text")
+        if (title.isNullOrEmpty() && body.isNullOrEmpty() && lines.isEmpty()) {
+            return invalid("title, body, or lines must contain text")
         }
 
         val interactive = when (val value = payload.opt("interactive")) {
@@ -212,7 +236,10 @@ object NoticeSurfaceContract {
 
         val ttlMs = when (val value = payload.opt("ttlMs")) {
             null -> derivedTtlMs(
-                title.orEmpty().length + body.orEmpty().length + footer.orEmpty().length,
+                title.orEmpty().length +
+                    body.orEmpty().length +
+                    lines.sumOf { it.length + 1 } +
+                    footer.orEmpty().length,
             )
             is Number -> integerLong(value)?.coerceIn(MIN_TTL_MS, MAX_TTL_MS)
                 ?: return invalid("ttlMs must be an integer")
@@ -234,6 +261,7 @@ object NoticeSurfaceContract {
                 title = title?.takeIf { it.isNotEmpty() },
                 body = body?.takeIf { it.isNotEmpty() },
                 footer = footer?.takeIf { it.isNotEmpty() },
+                lines = lines,
                 interactive = interactive,
                 actions = actions,
                 ttlMs = ttlMs,
@@ -260,6 +288,9 @@ object NoticeSurfaceContract {
         if (payload.has("wakeDisplay")) {
             return patchInvalid("wakeDisplay is show-only")
         }
+        if (payload.has("body") && payload.has("lines")) {
+            return patchInvalid("body and lines are mutually exclusive")
+        }
 
         val title = when (val result = readText(payload, "title", MAX_TITLE_CHARS)) {
             is TextResult.Invalid -> return patchInvalid(result.reason)
@@ -270,6 +301,11 @@ object NoticeSurfaceContract {
             is TextResult.Invalid -> return patchInvalid(result.reason)
             is TextResult.Absent -> null
             is TextResult.Present -> NoticeField(result.value?.takeIf { it.isNotEmpty() })
+        }
+        val lines = when (val result = readLines(payload, "lines")) {
+            is LinesResult.Invalid -> return patchInvalid(result.reason)
+            is LinesResult.Absent -> null
+            is LinesResult.Present -> NoticeField(result.value)
         }
         val footer = when (val result = readText(payload, "footer", MAX_FOOTER_CHARS)) {
             is TextResult.Invalid -> return patchInvalid(result.reason)
@@ -302,6 +338,7 @@ object NoticeSurfaceContract {
             NoticeSurfacePatch(
                 title = title,
                 body = body,
+                lines = lines,
                 footer = footer,
                 interactive = interactive,
                 actions = actions,
@@ -322,6 +359,7 @@ object NoticeSurfaceContract {
         .apply {
             content.title?.let { put("title", it) }
             content.body?.let { put("body", it) }
+            if (content.lines.isNotEmpty()) put("lines", linesJson(content.lines))
             content.footer?.let { put("footer", it) }
             // Omitted when false so a non-interactive payload stays minimal.
             if (content.interactive) put("interactive", true)
@@ -361,6 +399,7 @@ object NoticeSurfaceContract {
         .apply {
             patch.title?.let { put("title", it.value.orEmpty()) }
             patch.body?.let { put("body", it.value.orEmpty()) }
+            patch.lines?.let { put("lines", linesJson(it.value)) }
             patch.footer?.let { put("footer", it.value.orEmpty()) }
             patch.interactive?.let { put("interactive", it.value) }
             patch.actions?.let { put("actions", actionsJson(it.value)) }
@@ -390,6 +429,12 @@ object NoticeSurfaceContract {
         data object Absent : ActionsResult
         data class Present(val value: List<NoticeAction>?) : ActionsResult
         data class Invalid(val reason: String) : ActionsResult
+    }
+
+    private sealed interface LinesResult {
+        data object Absent : LinesResult
+        data class Present(val value: List<String>) : LinesResult
+        data class Invalid(val reason: String) : LinesResult
     }
 
     /**
@@ -443,6 +488,31 @@ object NoticeSurfaceContract {
         }
     }
 
+    private fun readLines(payload: JSONObject, key: String): LinesResult {
+        if (!payload.has(key)) return LinesResult.Absent
+        val array = payload.opt(key) as? JSONArray
+            ?: return LinesResult.Invalid("$key must be an array")
+        if (array.length() > MAX_LINES) {
+            return LinesResult.Invalid("$key exceeds $MAX_LINES entries")
+        }
+        val lines = buildList {
+            for (index in 0 until array.length()) {
+                val raw = array.opt(index) as? String
+                    ?: return LinesResult.Invalid("$key must contain strings")
+                val normalized = normalizeText(raw)
+                if (normalized.isNotEmpty()) add(normalized)
+            }
+        }
+        if (lines.sumOf { it.length.toLong() + 1L } > MAX_BODY_CHARS) {
+            return LinesResult.Invalid("$key exceeds $MAX_BODY_CHARS character budget")
+        }
+        return LinesResult.Present(lines)
+    }
+
+    private fun linesJson(lines: List<String>): JSONArray = JSONArray().apply {
+        lines.forEach { line -> put(line) }
+    }
+
     private fun readText(payload: JSONObject, key: String, maxChars: Int): TextResult {
         if (!payload.has(key)) return TextResult.Absent
         val raw = payload.opt(key)
@@ -450,10 +520,12 @@ object NoticeSurfaceContract {
         val text = raw as? String ?: return TextResult.Invalid("$key must be a string")
         // Newlines collapse to spaces: the renderer owns wrapping and paging,
         // and a plugin cannot be allowed to lay the band out by hand.
-        val normalized = text.replace(NEWLINES, " ").trim()
+        val normalized = normalizeText(text)
         if (normalized.length > maxChars) return TextResult.Invalid("$key exceeds $maxChars characters")
         return TextResult.Present(normalized)
     }
+
+    private fun normalizeText(text: String): String = text.replace(NEWLINES, " ").trim()
 
     private fun integerLong(number: Number): Long? {
         val double = number.toDouble()

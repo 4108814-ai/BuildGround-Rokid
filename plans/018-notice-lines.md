@@ -66,11 +66,28 @@ which point it takes two, which is what they expect.
 
 **Paging is unchanged in principle**: measured on the real layout, eight body
 lines to a page, count computed where the pixels are. It simply measures a
-layout that now contains hard breaks. Because the character budget is the same,
-the worst-case page count does not grow.
+layout that now contains hard breaks.
 
-This is a wire change, so the SDK bumps to **0.9.0**. `NexusNotice` and
-`NexusNoticeUpdate` gain `lines: List<String> = emptyList()`.
+It does **not** follow that the page count cannot grow — an earlier draft of
+this plan claimed it and was wrong. Sixteen one-word lines occupy sixteen
+measured lines where the same characters as prose would occupy one, so a `lines`
+notice can page where a `body` notice would not. That is correct behaviour, not
+a regression: it is the whole point that a message gets its own line. It is
+bounded, which is what matters — sixteen lines is at most two unwrapped pages,
+and the 1024-character budget caps the wrapped case.
+
+This is a wire change twice over. The SDK bumps to **0.9.0** — `NexusNotice` and
+`NexusNoticeUpdate` gain `lines: List<String> = emptyList()` — and
+`NoticeSurfaceContract.VERSION` goes **2 → 3**.
+
+The contract bump is not optional, for the same reason it was not optional at
+v2. Both hubs gate the notice capability on an *exact* version match, so leaving
+it at 2 would let an updated phone believe older glasses can render a `lines`
+payload. They would take the handshake and then reject the band in silence — it
+carries no `body`, so it fails the "title or body" rule — and the wearer would
+see a plugin that simply stopped talking. Bumped, the old pair declines the
+capability outright and the plugin hears `CAPABILITY_NOT_AVAILABLE`, which it
+can act on.
 
 ## What does not change
 
@@ -96,7 +113,8 @@ This is a wire change, so the SDK bumps to **0.9.0**. `NexusNotice` and
 
 1. Contract tests: the 16-line cap, the shared character budget including
    separators, both-fields rejection, per-line trimming and newline collapse,
-   empty-line dropping, and an absent `lines` behaving byte-for-byte as today.
+   empty-line dropping, an absent `lines` behaving byte-for-byte as today, and
+   `VERSION` reading 3.
 2. A pure paging test over a lines payload, alongside the existing body one:
    same budget, same page arithmetic, hard breaks respected.
 3. `assembleDebug` green for `phone-hub`, `glasses-hub`, the SDK and

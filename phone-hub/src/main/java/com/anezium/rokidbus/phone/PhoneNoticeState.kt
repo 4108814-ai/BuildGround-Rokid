@@ -131,7 +131,11 @@ internal class PhoneNoticeState(
             return PhoneNoticeUpdateResult.Rejected(NoticeSurfaceContract.ERROR_INVALID_NOTICE)
         }
         val patched = patch.patch.applyTo(current.content)
-        if (patched.title.isNullOrEmpty() && patched.body.isNullOrEmpty()) {
+        if (
+            patched.title.isNullOrEmpty() &&
+            patched.body.isNullOrEmpty() &&
+            patched.lines.isEmpty()
+        ) {
             return PhoneNoticeUpdateResult.Rejected(NoticeSurfaceContract.ERROR_INVALID_NOTICE)
         }
         val now = nowMs()

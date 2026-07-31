@@ -267,6 +267,36 @@ class PhoneNoticeStateTest {
     }
 
     @Test
+    fun `a lines update replaces body and is relayed as the validated patch`() {
+        state.show("relay", showPayload("relay"))
+
+        val accepted = state.update(
+            "relay",
+            JSONObject().put(
+                "lines",
+                JSONArray()
+                    .put("  First message  ")
+                    .put("Second\nmessage")
+                    .put("   "),
+            ),
+        ) as PhoneNoticeUpdateResult.Accepted
+
+        assertNull(accepted.notice.content.body)
+        assertEquals(listOf("First message", "Second message"), accepted.notice.content.lines)
+        assertFalse(accepted.notice.payload.has("body"))
+        assertEquals(
+            listOf("First message", "Second message"),
+            List(accepted.notice.payload.getJSONArray("lines").length()) { index ->
+                accepted.notice.payload.getJSONArray("lines").getString(index)
+            },
+        )
+        assertEquals(
+            setOf("surfaceId", "lines", "localSurfaceId", "ownerPluginId", "seq"),
+            accepted.notice.payload.keys().asSequence().toSet(),
+        )
+    }
+
+    @Test
     fun `a cleared field travels as a cleared field`() {
         state.show(
             "relay",

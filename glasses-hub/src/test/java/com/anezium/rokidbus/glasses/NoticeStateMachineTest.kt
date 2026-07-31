@@ -508,6 +508,42 @@ class NoticeStateMachineTest {
     }
 
     @Test
+    fun `body text reaches layout unchanged`() {
+        val body = "One paragraph that the real layout wraps"
+        val content = NoticeSurfaceContent(
+            title = "Marie",
+            body = body,
+            footer = null,
+        )
+
+        assertTrue(body === noticeBodyText(content))
+    }
+
+    @Test
+    fun `structured lines become hard breaks before measured page arithmetic`() {
+        val lines = List(16) { index -> "message $index" }
+        val content = NoticeSurfaceContent(
+            title = "Thread",
+            body = null,
+            footer = null,
+            lines = lines,
+        )
+
+        val textForLayout = checkNotNull(noticeBodyText(content))
+        assertEquals(lines.joinToString("\n"), textForLayout)
+        val hardBrokenLineCount = textForLayout.count { it == '\n' } + 1
+        assertEquals(16, hardBrokenLineCount)
+        assertEquals(
+            2,
+            noticePageCount(
+                lineCount = hardBrokenLineCount,
+                firstPageLines = 8,
+                followingPageLines = 8,
+            ),
+        )
+    }
+
+    @Test
     fun `page windows select the measured lines without overlap or loss`() {
         assertEquals(
             NoticePageWindow(0, 3),
