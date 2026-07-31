@@ -1648,7 +1648,7 @@ internal class SelfArmWirelessDebuggingAutomator(
         }
         if (!SelfArmOnboardingStore.isCurrentSession(service.applicationContext, finishingSessionId)) return
         leaveSettings()
-        service.returnToOnboarding(finishingSessionId)
+        service.returnToOnboardingAfter(finishingSessionId, SETTINGS_EXIT_SETTLE_MS)
         service.onWirelessBootstrapFinished(finishingSessionId)
         if (!SelfArmOnboardingStore.isCurrentSession(service.applicationContext, finishingSessionId)) return
         SelfArmOnboardingStore.finish(
@@ -1779,6 +1779,9 @@ internal class SelfArmWirelessDebuggingAutomator(
 
     companion object {
         private const val TAG = "NexusWirelessSetup"
+
+        /** Long enough for the home action to take, short enough not to read as a stall. */
+        private const val SETTINGS_EXIT_SETTLE_MS = 700L
         private const val TIMEOUT_MS = 110_000L
         private const val STEP_DELAY_MS = 450L
         private const val CLICK_COOLDOWN_MS = 850L

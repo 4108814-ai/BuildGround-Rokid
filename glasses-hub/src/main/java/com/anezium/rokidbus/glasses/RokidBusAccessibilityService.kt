@@ -1004,6 +1004,24 @@ class RokidBusAccessibilityService : AccessibilityService() {
         returnToOnboarding()
     }
 
+    /**
+     * The same hand-back, once the home action that cleared Settings has actually settled.
+     *
+     * Going home is asynchronous. Fired immediately before starting our own activity it lands
+     * after it, and the wearer ends up looking at the ROM launcher instead of the screen telling
+     * them setup is done. Deliberately posted on the service's handler and not the automator's,
+     * whose callbacks are cancelled the moment a run ends -- which is exactly when this has to
+     * happen.
+     */
+    internal fun returnToOnboardingAfter(sessionId: String, delayMs: Long) {
+        // The session check happens here, while the caller's session is still the live one, and
+        // not when the post fires: finishing a run closes the session within those few hundred
+        // milliseconds, so a guard evaluated late always says no and the wearer is left on the ROM
+        // launcher -- the exact thing this delay exists to prevent.
+        if (!SelfArmOnboardingStore.isCurrentSession(applicationContext, sessionId)) return
+        main.postDelayed({ returnToOnboarding() }, delayMs)
+    }
+
     private fun cancelSetupSessionWorkInternal(expectedSessionId: String? = null) {
         val trackedSessions = listOf(
             wirelessBootstrapSessionId,
