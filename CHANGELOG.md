@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.2
+
+- **Control messages leave the glasses over CXR again**, with SPP as the
+  fallback rather than the first choice. 1.1.1 reversed that order to route
+  around a CXR link that reported sends it had not delivered. It was the wrong
+  trade: SPP is one RFCOMM channel with a single write lock, and it is the
+  channel photo sync moves megabytes over, so a control message queued behind a
+  chunk waits for that chunk to finish. CXR's separate path and small size
+  ceiling are what keep control traffic out of that queue. The SPP fallback was
+  already there and is unchanged; what it cannot cover is a send reported as
+  successful that never arrived, which needs a real acknowledgement rather than
+  a different running order.
+
 ## 1.1.1
 
 A fix for something that only ever worked on one desk, found and fixed by
