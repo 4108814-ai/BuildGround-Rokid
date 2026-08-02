@@ -339,7 +339,10 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
                 // that lingers claims no input while it sits there, so every tap the
                 // wearer aims at it falls through to whatever is behind. Waiting for
                 // a TTL to notice that would leave exactly that gap.
-                queueEssential(NexusNoticeUpdate(footer = "Sent"), dropPartial = true)
+                queueEssential(
+                    NexusNoticeUpdate(footer = "", actions = SENT_ACTIONS),
+                    dropPartial = true,
+                )
                 main.postDelayed({ if (activeNotice) dismissNotice() }, SENT_LINGER_MS)
             }
             ReplySendResult.Missing -> queueSendFailure("Notification gone")
@@ -584,6 +587,21 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         const val ACTION_SEND = "send"
         const val ACTION_RETRY = "retry"
         const val ACTION_CANCEL = "cancel"
+
+        /** Deliberately handled by nothing: the chip says a thing, it is not one. */
+        const val ACTION_SENT = "sent"
+
+        /**
+         * The countdown chip, once there is nothing left to count.
+         *
+         * It keeps the same mark and the same slot the wearer was already
+         * watching, and only the word changes — the answer lands where the
+         * eye is instead of asking it to go looking. Leaving the old label up
+         * was the real fault: a chip promising to send in three seconds, after
+         * it had been sent, is the band lying about the one thing the wearer
+         * cared about.
+         */
+        val SENT_ACTIONS = listOf(NexusNoticeAction(ACTION_SENT, "send", "Sent"))
 
         /**
          * One answer, so the arriving band can be paged.
