@@ -42,6 +42,7 @@ class SettingsActivity : Activity() {
     private lateinit var logView: TextView
     private lateinit var logScroll: ScrollView
     private var speechValue: TextView? = null
+    private var voiceValue: TextView? = null
     private var hubUiClient: BusClient? = null
     private var lastLinkState = 0
     // State updates can land on a Binder thread, and touching the hierarchy from there leaves the
@@ -157,6 +158,8 @@ class SettingsActivity : Activity() {
             )
             addView(BusTheme.gap(this@SettingsActivity, 10))
             addView(speechRow(), NexusUi.block())
+            addView(BusTheme.gap(this@SettingsActivity, 10))
+            addView(voiceRow(), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 10))
             addView(phoneBatteryBadgeRow(), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 10))
@@ -584,11 +587,48 @@ class SettingsActivity : Activity() {
             renderSpeechRow()
         }
 
+    /** Speech is how the glasses listen; this is how they answer. */
+    private fun voiceRow(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = NexusUi.pressedBordered(this@SettingsActivity, NexusUi.PANEL, 15)
+            setPadding(
+                NexusUi.dp(this@SettingsActivity, 15),
+                NexusUi.dp(this@SettingsActivity, 14),
+                NexusUi.dp(this@SettingsActivity, 15),
+                NexusUi.dp(this@SettingsActivity, 14),
+            )
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                startActivity(Intent(this@SettingsActivity, VoiceSettingsActivity::class.java))
+            }
+            addView(
+                NexusUi.rowTitle(this@SettingsActivity, "Voice"),
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            voiceValue = NexusUi.metaLabel(this@SettingsActivity, "", NexusUi.GREEN)
+            addView(voiceValue)
+            renderVoiceRow()
+        }
+
+    private fun renderVoiceRow() {
+        val value = voiceValue ?: return
+        val rate = PhoneTtsSettingsStore(this).speechRate()
+        val label = if (rate == rate.toInt().toFloat()) "${rate.toInt()}x" else "${rate}x"
+        value.text = "$label ›"
+        value.setTextColor(NexusUi.GREEN)
+    }
+
     private fun renderSpeechRow() {
         val value = speechValue ?: return
         val ready = SpeechSettingsStore(this).readiness(HubSecretStore(this)) == SpeechReadiness.READY
         value.text = if (ready) "READY ›" else "SET UP ›"
-        value.setTextColor(if (ready) NexusUi.GREEN_DIM else NexusUi.GREEN)
+        // Every other row here opens in the same bright green, so dimming this one made a
+        // working screen look disabled. Amber is what the rest of the app uses to mean
+        // "this still wants you".
+        value.setTextColor(if (ready) NexusUi.GREEN else NexusUi.AMBER)
     }
 
     private fun actionRow(
