@@ -1,6 +1,28 @@
 # Changelog
 
-## Unreleased
+## 1.1.4
+
+- **Lists follow the selection past the viewport.** A card list rendered every
+  row and let the screen clip the rest: with more conversations than the optics
+  hold — eight notifications in the Relay inbox was enough — moving the
+  selection past the last visible row kept working but showed nothing, on every
+  plugin that sends list rows. The glasses now window the list around the
+  selection: the selected row is always fully visible with a row of context
+  after it when it fits, and muted `▴ 3` / `▾ 12` markers say how many rows
+  hide on each side. A list that fits renders exactly as before. Thanks to
+  Brilliant-Flight3682 for the report.
+
+- **A notice can black out everything behind it — when you ask it to.** By
+  default a notice still lands on top of whatever the wearer is doing, and the
+  scene stays visible around it; that superposition is the point of a
+  heads-up display. But a notification arriving over standby widgets reads as
+  a collage, so the notice protocol gains `backdrop`: an opt-in, show-only
+  flag that fades an opaque black scrim in with the band and hides every
+  window behind it until the notice leaves. On the additive optics the scrim
+  emits nothing — the rest of the display simply goes away. Relay surfaces it
+  as "Black out behind notifications", off by default. Thanks to
+  Brilliant-Flight3682 for describing the Even G2 experience this borrows
+  from.
 
 - **Glasses updates no longer fail on Android 11 phones.** The downloaded
   glasses APK was verified by asking the phone's PackageManager to parse it —
