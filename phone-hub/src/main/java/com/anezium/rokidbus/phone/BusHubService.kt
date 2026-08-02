@@ -3902,8 +3902,20 @@ class BusHubService : Service() {
                 throw IOException("GitHub release digest did not match")
             }
             val archive = AndroidArtifactPackageInspector(packageManager).inspect(apk)
-            if (archive?.packageName != GLASSES_HUB_PACKAGE) {
-                throw IOException("APK package was ${archive?.packageName ?: "unreadable"}")
+            val verdict = GlassesApkVerificationPolicy.verdict(
+                parsedPackageName = archive?.packageName,
+                expectedPackageName = GLASSES_HUB_PACKAGE,
+                phoneSdkInt = Build.VERSION.SDK_INT,
+                digestVerified = release.sha256 != null,
+            )
+            if (verdict is GlassesApkVerdict.Reject) {
+                throw IOException(verdict.reason)
+            }
+            if (archive == null) {
+                log(
+                    "glasses apk accepted unparsed: phone API ${Build.VERSION.SDK_INT} < " +
+                        "${GlassesApkVerificationPolicy.GLASSES_APK_MIN_SDK}, release digest verified",
+                )
             }
         }.onFailure { failure ->
             apk.delete()

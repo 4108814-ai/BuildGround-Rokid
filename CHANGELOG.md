@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Glasses updates no longer fail on Android 11 phones.** The downloaded
+  glasses APK was verified by asking the phone's PackageManager to parse it —
+  and Android refuses to parse any archive whose minSdk it does not meet. The
+  glasses hub ships with minSdk 31, so an Android 11 phone, the oldest Nexus
+  supports, reported every glasses APK as "unreadable" and could never install
+  or update the glasses app over the air, while the same APK installed fine
+  over a dev cable. The phone now accepts an archive it cannot parse when the
+  GitHub release digest has already verified it; phones new enough to parse
+  still enforce the package name as before. Thanks to Sofathinker for the
+  report and the settings log that pinned it.
+
 ## 1.1.3
 
 - **Messages leave the glasses over SPP again.** 1.1.2 sent control traffic over
