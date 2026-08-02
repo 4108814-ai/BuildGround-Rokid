@@ -89,6 +89,19 @@ The daemon then dials the phone directly whenever LAN broadcast discovery cannot
 it. A phone already linked at home accepts the tailnet dial without re-pairing because
 the daemon uses the same machine identity.
 
+## Running at logon
+
+`scripts/run-hidden.vbs` starts the daemon with no console window. Register it once
+from the `agentd` directory:
+
+```powershell
+schtasks /create /tn NexusAgentd /tr "wscript.exe //B \"$PWD\scripts\run-hidden.vbs\"" /sc onlogon /f
+schtasks /run /tn NexusAgentd
+```
+
+The daemon exits immediately if another instance already holds its port, so the task
+can be run at any time to make sure one is up.
+
 ## Hook management
 
 ```powershell
