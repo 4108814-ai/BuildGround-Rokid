@@ -22,6 +22,16 @@ class TtsContractTest {
     }
 
     @Test
+    fun `speak preserves an optional BCP 47 language tag`() {
+        val absent = TtsContract.validateSpeak(TtsContract.speakPayload("u1", "bonjour"))
+        val present = TtsContract.validateSpeak(TtsContract.speakPayload("u2", "bonjour", "fr-FR"))
+
+        assertEquals(null, (absent as TtsValidationResult.Valid).value.lang)
+        assertEquals("fr-FR", (present as TtsValidationResult.Valid).value.lang)
+        assertEquals("fr-FR", TtsContract.speakPayload("u2", "bonjour", "fr-FR").getString("lang"))
+    }
+
+    @Test
     fun `speak rejects blank oversized and wrongly typed fields`() {
         listOf(
             JSONObject().put("utteranceId", "id").put("text", "\n\r"),
@@ -29,6 +39,8 @@ class TtsContractTest {
             JSONObject().put("utteranceId", "id").put("text", "x".repeat(TtsContract.MAX_TEXT_CHARS + 1)),
             JSONObject().put("utteranceId", 7).put("text", "hi"),
             JSONObject().put("utteranceId", "id").put("text", true),
+            JSONObject().put("utteranceId", "id").put("text", "hi").put("lang", 7),
+            JSONObject().put("utteranceId", "id").put("text", "hi").put("lang", "not_a_tag"),
         ).forEach { payload ->
             assertEquals(
                 TtsValidationResult.Invalid(TtsContract.ERROR_INVALID_TTS),

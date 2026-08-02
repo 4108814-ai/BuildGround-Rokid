@@ -1,6 +1,5 @@
-package com.anezium.rokidbus.glasses
+package com.anezium.rokidbus.shared
 
-import com.anezium.rokidbus.shared.TtsDoneReason
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -33,6 +32,7 @@ class TtsPlaybackStateTest {
         )
         assertNull(state.started("engine-1"))
         assertNull(state.stopped("engine-1"))
+        assertNull(state.unavailable("engine-1"))
         assertEquals(TtsStartedEvent("beta", "u2"), state.started("engine-2"))
         assertEquals(
             TtsDoneEvent("beta", "u2", TtsDoneReason.COMPLETED),
@@ -47,10 +47,7 @@ class TtsPlaybackStateTest {
 
         assertNull(state.requestStop("beta", "shared"))
         assertNull(state.requestStop("alpha", "wrong"))
-        assertEquals(
-            "engine-1",
-            state.requestStop("alpha", "shared")?.engineId,
-        )
+        assertEquals("engine-1", state.requestStop("alpha", "shared")?.engineId)
         assertNull(state.requestStop("alpha", "shared"))
         assertEquals(
             TtsDoneEvent("alpha", "shared", TtsDoneReason.STOPPED),
@@ -59,7 +56,7 @@ class TtsPlaybackStateTest {
     }
 
     @Test
-    fun `controller cancellation seam reports platform cancellation without an owner lookup`() {
+    fun `controller cancellation reports platform cancellation without an owner lookup`() {
         val state = TtsPlaybackState()
         assertNull(state.cancelCurrent(TtsDoneReason.CANCELLED))
         state.accept("alpha", "u1", "engine-1", "hello")

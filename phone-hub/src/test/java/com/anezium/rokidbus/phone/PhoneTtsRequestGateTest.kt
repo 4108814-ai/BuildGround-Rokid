@@ -18,6 +18,7 @@ class PhoneTtsRequestGateTest {
             payload = JSONObject()
                 .put("utteranceId", "u1")
                 .put("text", "  hello\nthere  ")
+                .put("lang", "fr-FR")
                 .put("ownerPluginId", "spoofed"),
             hasBinary = false,
         )
@@ -26,6 +27,7 @@ class PhoneTtsRequestGateTest {
         val payload = (result as PhoneTtsGateResult.Accepted).payload
         assertEquals("u1", payload.getString("utteranceId"))
         assertEquals("hello there", payload.getString("text"))
+        assertEquals("fr-FR", payload.getString("lang"))
         assertEquals("hello", payload.getString("ownerPluginId"))
     }
 

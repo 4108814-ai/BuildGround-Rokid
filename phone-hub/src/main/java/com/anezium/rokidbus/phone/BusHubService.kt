@@ -55,6 +55,7 @@ import com.anezium.rokidbus.shared.PinSurfaceValidationResult
 import com.anezium.rokidbus.shared.SetupPairingFailureReason
 import com.anezium.rokidbus.shared.SetupPairingOfferContract
 import com.anezium.rokidbus.shared.TtsContract
+import com.anezium.rokidbus.shared.TtsDoneEvent
 import com.anezium.rokidbus.shared.TtsValidationResult
 import com.anezium.rokidbus.shared.plugin.PathRules
 import com.anezium.rokidbus.shared.plugin.PluginCapability
@@ -236,6 +237,7 @@ class BusHubService : Service() {
     private val externalSurfaceIds = ConcurrentHashMap<String, MutableSet<String>>()
     private val imageSurfaceRateLimiter = ImageSurfaceRateLimiter()
     private val ttsRequestGate = PhoneTtsRequestGate()
+    private lateinit var phoneTtsDispatcher: PhoneTtsDispatcher
     private val pluginBusJournal = busJournal
     private val sppLoopStarted = AtomicBoolean(false)
     private val audioLeaseArbitrator = SingleAudioLeaseArbitrator<AudioLease>()
@@ -629,6 +631,15 @@ class BusHubService : Service() {
         super.onCreate()
         NexusPhoneState.restore(applicationContext)
         activeInstance = this
+        phoneTtsDispatcher = PhoneTtsDispatcher(
+            playback = PhoneTtsPlayback(
+                output = PhoneTtsEngine(applicationContext, ::log),
+                emitStarted = ::emitPhoneTtsStarted,
+                emitDone = ::emitPhoneTtsDone,
+            ),
+            forwardToGlasses = ::sendRemote,
+            emitDone = ::emitPhoneTtsDone,
+        )
         manualPairingEngine = GlassesManualPairingEngine.create(
             context = applicationContext,
             control = GlassesManualControlSender(::sendManualSelfArmControl),
@@ -930,6 +941,7 @@ class BusHubService : Service() {
         stopAudioLease(InternalAudioStopReason.HUB_STOPPED)
         snapshotCaptureJob?.cancel()
         snapshotCaptureScope.cancel()
+        if (::phoneTtsDispatcher.isInitialized) phoneTtsDispatcher.shutdown()
         runCatching { cxrLink?.disconnect() }
         closeSocket()
         PhoneClientSupervisor.detach(applicationContext, this)
@@ -1285,7 +1297,7 @@ class BusHubService : Service() {
         }
         if (envelope.path == BusPaths.TTS_STARTED || envelope.path == BusPaths.TTS_DONE) {
             recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
-            handleRemoteTtsEvent(envelope)
+            handleTtsEvent(envelope, fromGlasses = true)
             return
         }
         if (::pluginRegistry.isInitialized && pluginRegistry.handleRemote(envelope)) return
@@ -2448,21 +2460,32 @@ class BusHubService : Service() {
                 rejectTts(envelope, senderUid, sender, result.code)
             is PhoneTtsGateResult.Accepted -> {
                 val forwarded = envelope.copy(payload = result.payload)
-                val error = sendRemote(forwarded)
-                if (error == null) {
-                    recordLocalRoute(
+                when (val dispatch = phoneTtsDispatcher.dispatch(forwarded)) {
+                    PhoneTtsDispatchResult.PhoneHandled -> recordLocalRoute(
                         forwarded,
                         senderUid,
                         sender,
                         PluginBusJournal.Verdict.OK,
                     )
-                } else {
-                    rejectTts(
-                        envelope,
-                        senderUid,
-                        sender,
-                        TtsContract.ERROR_CAPABILITY_NOT_AVAILABLE,
-                    )
+                    is PhoneTtsDispatchResult.Forwarded -> {
+                        if (dispatch.error == null) {
+                            recordLocalRoute(
+                                forwarded,
+                                senderUid,
+                                sender,
+                                PluginBusJournal.Verdict.OK,
+                            )
+                        } else {
+                            rejectTts(
+                                envelope,
+                                senderUid,
+                                sender,
+                                TtsContract.ERROR_CAPABILITY_NOT_AVAILABLE,
+                            )
+                        }
+                    }
+                    is PhoneTtsDispatchResult.Invalid ->
+                        rejectTts(envelope, senderUid, sender, dispatch.error)
                 }
             }
         }
@@ -2478,7 +2501,7 @@ class BusHubService : Service() {
         deliverError(sender.replyBinder, envelope.id, code)
     }
 
-    private fun handleRemoteTtsEvent(envelope: BusEnvelope) {
+    private fun handleTtsEvent(envelope: BusEnvelope, fromGlasses: Boolean) {
         if (envelope.binary != null) {
             log("tts event ignored path=${envelope.path} reason=${TtsContract.ERROR_INVALID_TTS}")
             return
@@ -2500,6 +2523,9 @@ class BusHubService : Service() {
         }
         val (request, reason) = routed
         val ownerPluginId = request.ownerPluginId ?: return
+        if (fromGlasses && reason != null && ::phoneTtsDispatcher.isInitialized) {
+            phoneTtsDispatcher.onRemoteDone(ownerPluginId, request.utteranceId)
+        }
         val registration = registrations.firstOrNull { registration ->
             registration.principal?.descriptor?.id == ownerPluginId &&
                 PluginCapability.TTS in registration.grantedCapabilities
@@ -2515,6 +2541,30 @@ class BusHubService : Service() {
         if (!deliverExternalLifecycle(principal, envelope.path, envelope.id, payload)) {
             log("tts event undelivered owner=$ownerPluginId path=${envelope.path}")
         }
+    }
+
+    private fun emitPhoneTtsStarted(ownerPluginId: String, utteranceId: String) {
+        handleTtsEvent(
+            BusEnvelope(
+                path = BusPaths.TTS_STARTED,
+                payload = TtsContract.startedPayload(ownerPluginId, utteranceId),
+            ),
+            fromGlasses = false,
+        )
+    }
+
+    private fun emitPhoneTtsDone(event: TtsDoneEvent) {
+        handleTtsEvent(
+            BusEnvelope(
+                path = BusPaths.TTS_DONE,
+                payload = TtsContract.donePayload(
+                    event.ownerPluginId,
+                    event.utteranceId,
+                    event.reason,
+                ),
+            ),
+            fromGlasses = false,
+        )
     }
 
     private fun resolveSender(senderUid: Int): AuthorizedSender {
@@ -3370,7 +3420,7 @@ class BusHubService : Service() {
     }
 
     /**
-     * Silences the glasses the moment the microphone opens, whoever opened it.
+     * Silences phone and glasses TTS the moment the microphone opens, whoever opened it.
      *
      * Speech and dictation share one pair of ears: left running, the glasses
      * record their own voice into what the wearer is saying. Every path that
@@ -3379,7 +3429,12 @@ class BusHubService : Service() {
      * speech never resumes; a plugin that still wants it said, says it again.
      */
     private fun silenceGlassesSpeechForMicrophone() {
-        sendRemote(BusEnvelope(path = BusPaths.TTS_CANCEL))?.let { error ->
+        val error = if (::phoneTtsDispatcher.isInitialized) {
+            phoneTtsDispatcher.cancelForMicrophone()
+        } else {
+            sendRemote(BusEnvelope(path = BusPaths.TTS_CANCEL))
+        }
+        error?.let {
             log("TTS cancel on microphone open failed code=$error")
         }
     }
@@ -4927,6 +4982,7 @@ class BusHubService : Service() {
         }
         if (state and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) == 0) {
             if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.onLinkLost()
+            if (::phoneTtsDispatcher.isInitialized) phoneTtsDispatcher.onLinkLost()
             remoteImageSurfaceVersion = 0
             remoteTtsVersion = 0
             remoteMaxImageBytes = 0
@@ -5082,6 +5138,7 @@ class BusHubService : Service() {
         remoteNoticeSurfaceVersion = if (noticeSupported) NoticeSurfaceContract.VERSION else 0
         remoteActivitySurfaceVersion = if (activitySupported) ActivitySurfaceContract.VERSION else 0
         remoteTtsVersion = if (ttsSupported) TtsContract.VERSION else 0
+        if (ttsSupported && ::phoneTtsDispatcher.isInitialized) phoneTtsDispatcher.initialize()
         remoteMaxImageBytes = if (imageSupported) advertised.maxImageBytes else 0
         updateRemoteGlassesAppState(
             advertised.versionName,

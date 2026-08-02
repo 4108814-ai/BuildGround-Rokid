@@ -28,7 +28,11 @@ internal class PhoneTtsRequestGate(
         val normalized = when (path) {
             BusPaths.TTS_SPEAK -> when (val result = TtsContract.validateSpeak(payload)) {
                 is TtsValidationResult.Valid ->
-                    TtsContract.speakPayload(result.value.utteranceId, result.value.text)
+                    TtsContract.speakPayload(
+                        result.value.utteranceId,
+                        result.value.text,
+                        result.value.lang,
+                    )
                 is TtsValidationResult.Invalid -> return rejected(result.reason)
             }
             BusPaths.TTS_STOP -> when (val result = TtsContract.validateStop(payload)) {

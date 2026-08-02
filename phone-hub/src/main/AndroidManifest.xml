@@ -29,6 +29,9 @@
         <intent>
             <action android:name="com.anezium.rokidbus.action.PLUGIN" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
     </queries>
 
     <application

@@ -1,6 +1,7 @@
 package com.anezium.rokidbus.shared
 
 import org.json.JSONObject
+import java.util.Locale
 
 enum class TtsDoneReason {
     COMPLETED,
@@ -20,6 +21,7 @@ data class TtsSpeakRequest(
     val utteranceId: String,
     val text: String,
     val ownerPluginId: String? = null,
+    val lang: String? = null,
 )
 
 data class TtsStopRequest(
@@ -44,6 +46,7 @@ object TtsContract {
      */
     const val MAX_TEXT_CHARS = 1024
     const val MAX_UTTERANCE_ID_CHARS = 64
+    const val MAX_LANGUAGE_TAG_CHARS = 64
     const val MAX_MESSAGES_PER_SECOND = 5
 
     const val ERROR_INVALID_TTS = "INVALID_TTS"
@@ -65,6 +68,13 @@ object TtsContract {
         if (!validUtteranceId(utteranceId)) return invalid()
         val normalizedText = normalizeText(text)
         if (normalizedText.isBlank() || normalizedText.length > MAX_TEXT_CHARS) return invalid()
+        val lang = if (payload.has("lang")) {
+            val value = payload.opt("lang") as? String ?: return invalid()
+            if (!validLanguageTag(value)) return invalid()
+            value
+        } else {
+            null
+        }
         val owner = if (requireOwner) {
             val value = payload.opt("ownerPluginId") as? String ?: return invalid()
             value.takeIf(com.anezium.rokidbus.shared.plugin.PluginDescriptor::isValidId)
@@ -77,6 +87,7 @@ object TtsContract {
                 utteranceId = utteranceId,
                 text = normalizedText,
                 ownerPluginId = owner,
+                lang = lang,
             ),
         )
     }
@@ -109,9 +120,11 @@ object TtsContract {
         return TtsValidationResult.Valid(stopped.value to reason)
     }
 
-    fun speakPayload(utteranceId: String, text: String): JSONObject = JSONObject()
-        .put("utteranceId", utteranceId)
-        .put("text", normalizeText(text))
+    fun speakPayload(utteranceId: String, text: String, lang: String? = null): JSONObject =
+        JSONObject()
+            .put("utteranceId", utteranceId)
+            .put("text", normalizeText(text))
+            .also { payload -> lang?.let { payload.put("lang", it) } }
 
     fun stopPayload(utteranceId: String): JSONObject = JSONObject()
         .put("utteranceId", utteranceId)
@@ -132,6 +145,11 @@ object TtsContract {
 
     private fun validUtteranceId(value: String): Boolean =
         value.isNotBlank() && value.length <= MAX_UTTERANCE_ID_CHARS
+
+    private fun validLanguageTag(value: String): Boolean =
+        value.isNotBlank() &&
+            value.length <= MAX_LANGUAGE_TAG_CHARS &&
+            runCatching { Locale.Builder().setLanguageTag(value).build() }.isSuccess
 
     private fun invalid() = TtsValidationResult.Invalid(ERROR_INVALID_TTS)
 

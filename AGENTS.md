@@ -6,16 +6,27 @@ plugin work specifically.
 
 ## Building
 
-This is the verified way to build and test a module. It works offline and does not need
-the Gradle wrapper to download anything:
+This is the verified way to build and test a module:
 
 ```
 ./gradlew :plugin-assistant:testDebugUnitTest :plugin-assistant:assembleDebug -PskipCxrGlobal=true
 ```
 
-`-PskipCxrGlobal=true` is supported by this repo and skips the vendor CXR project, which
-is not always present. Swap the module for whichever one you touched
-(`:phone-hub`, `:glasses-hub`, `:bus-client`, `:plugin-relay`, …).
+Swap the module for whichever one you touched (`:phone-hub`, `:glasses-hub`,
+`:bus-client`, `:plugin-relay`, …).
+
+**`-PskipCxrGlobal=true` is only for modules that do not link against the vendor CXR
+library.** It is right for the plugins. The hubs do link against it, so building
+`:phone-hub` or `:glasses-hub` with that flag fails with
+`Could not find com.example.cxrglobal:lib`. Build those without it:
+
+```
+./gradlew :phone-hub:testDebugUnitTest :phone-hub:assembleDebug
+```
+
+The flag works by substituting the `com.example.cxrglobal:lib` dependency with the
+sibling checkout at `../CxrGlobal` (see `settings.gradle.kts`), so that directory has to
+exist next to this one — including for a worktree.
 
 Gradle 9.5.1 and the Android SDK are already installed on this machine. Java 17 is the
 toolchain.

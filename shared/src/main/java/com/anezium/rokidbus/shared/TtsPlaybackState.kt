@@ -1,8 +1,6 @@
-package com.anezium.rokidbus.glasses
+package com.anezium.rokidbus.shared
 
-import com.anezium.rokidbus.shared.TtsDoneReason
-
-internal data class ActiveTtsUtterance(
+data class ActiveTtsUtterance(
     val ownerPluginId: String,
     val utteranceId: String,
     val engineId: String,
@@ -11,24 +9,24 @@ internal data class ActiveTtsUtterance(
     val terminalReason: TtsDoneReason? = null,
 )
 
-internal data class TtsStartedEvent(
+data class TtsStartedEvent(
     val ownerPluginId: String,
     val utteranceId: String,
 )
 
-internal data class TtsDoneEvent(
+data class TtsDoneEvent(
     val ownerPluginId: String,
     val utteranceId: String,
     val reason: TtsDoneReason,
 )
 
-internal data class TtsAcceptResult(
+data class TtsAcceptResult(
     val active: ActiveTtsUtterance,
     val preempted: TtsDoneEvent?,
 )
 
-/** Single-slot TTS policy. Binder and Android lifecycle details deliberately stay outside it. */
-internal class TtsPlaybackState {
+/** Single-slot TTS policy. Platform engine and lifecycle details deliberately stay outside it. */
+class TtsPlaybackState {
     private var active: ActiveTtsUtterance? = null
 
     fun accept(
@@ -62,7 +60,6 @@ internal class TtsPlaybackState {
         return requestCancellation(current, reason)
     }
 
-    /** Owner-free cancellation seam for the later microphone interlock. */
     fun cancelCurrent(reason: TtsDoneReason = TtsDoneReason.STOPPED): ActiveTtsUtterance? {
         val current = active ?: return null
         return requestCancellation(current, reason)
@@ -75,8 +72,9 @@ internal class TtsPlaybackState {
         return current.toDone(current.terminalReason ?: TtsDoneReason.COMPLETED)
     }
 
-    fun unavailable(): TtsDoneEvent? {
+    fun unavailable(engineId: String? = null): TtsDoneEvent? {
         val current = active ?: return null
+        if (engineId != null && current.engineId != engineId) return null
         active = null
         return current.toDone(TtsDoneReason.UNAVAILABLE)
     }
@@ -98,8 +96,8 @@ internal class TtsPlaybackState {
     )
 }
 
-/** Retains terminal events until the phone transport accepts each one, in FIFO order. */
-internal class TtsDoneOutbox {
+/** Retains terminal events until a transport accepts each one, in FIFO order. */
+class TtsDoneOutbox {
     private val pending = ArrayDeque<TtsDoneEvent>()
 
     fun enqueue(event: TtsDoneEvent) {
