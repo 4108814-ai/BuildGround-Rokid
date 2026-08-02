@@ -14,7 +14,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import com.anezium.rokidbus.client.ui.BusTheme
-import com.anezium.rokidbus.client.ui.NexusPluginIcons
 import com.anezium.rokidbus.client.ui.NexusUi
 
 /**
@@ -67,7 +66,7 @@ class AssistantConversationsActivity : Activity() {
             addView(
                 NexusUi.pluginHeader(
                     this@AssistantConversationsActivity,
-                    NexusPluginIcons.drawableFor("chat"),
+                    R.drawable.nexus_glyph_assistant,
                     "Conversations",
                     "Assistant history",
                 ),

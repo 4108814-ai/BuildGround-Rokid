@@ -18,7 +18,6 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
-import com.anezium.rokidbus.client.ui.NexusPluginIcons
 import com.anezium.rokidbus.client.ui.NexusUi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -260,7 +259,7 @@ class CodexChatGptSignInActivity : Activity() {
             addView(
                 NexusUi.pluginHeader(
                     this@CodexChatGptSignInActivity,
-                    NexusPluginIcons.drawableFor("chat"),
+                    R.drawable.nexus_glyph_assistant,
                     "Assistant",
                     "Sign in with ChatGPT",
                 ),

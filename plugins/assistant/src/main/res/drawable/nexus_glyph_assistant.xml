@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The HUD mark: someone, and the spark that says which someone.
+
+  A bust on its own would read as Contacts in a launcher list; the glint is
+  what makes it this plugin. It sits clear of the head rather than on it, so
+  the two shapes never merge at the sizes the glasses actually draw.
+  Stroke only, no fill anywhere - a filled shape on additive optics emits as
+  a green lozenge instead of a mark. That constraint is why this file and
+  nexus_icon_assistant.xml exist separately.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <!-- The head. -->
+    <path android:pathData="M6.3,8.6 a3.3,3.3 0 1,0 6.6,0 a3.3,3.3 0 1,0 -6.6,0"
+        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7"
+        android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <!-- The shoulders. -->
+    <path android:pathData="M3.0,20.6 A6.6,6.6 0 0 1 16.2,20.6"
+        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7"
+        android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <!-- The glint. Needle-sharp on purpose: a plump four-point star is
+         someone else's mark, and a thin one reads as light on glass. -->
+    <path android:pathData="M18.8,1.0 Q19.25,5.15 23.4,5.6 Q19.25,6.05 18.8,10.2 Q18.35,6.05 14.2,5.6 Q18.35,5.15 18.8,1.0 Z"
+        android:strokeColor="#FF4DFF8C" android:strokeWidth="1.7"
+        android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

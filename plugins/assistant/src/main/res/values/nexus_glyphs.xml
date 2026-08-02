@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The assistant's launcher mark: someone, and the glint that says which someone.
+
+  A bust alone reads as Contacts in a list of plugins; the glint is what makes
+  it this one. It is deliberately larger here than a decorative sparkle would
+  be: Nexus renders plugin geometry as stroke only, and on additive optics a
+  gap narrower than about a unit closes up, so a small four-point star arrives
+  as a lozenge. At this size the four rays still read as rays.
+  The glint sits clear of the head rather than on it, with more than a unit
+  between them, for the same reason.
+-->
+<resources>
+    <string-array name="nexus_glyphs">
+        <item>assistant|M6.3,8.6 a3.3,3.3 0 1,0 6.6,0 a3.3,3.3 0 1,0 -6.6,0 M3.0,20.6 A6.6,6.6 0 0 1 16.2,20.6 M18.8,1.0 Q19.25,5.15 23.4,5.6 Q19.25,6.05 18.8,10.2 Q18.35,6.05 14.2,5.6 Q18.35,5.15 18.8,1.0 Z</item>
+    </string-array>
+</resources>

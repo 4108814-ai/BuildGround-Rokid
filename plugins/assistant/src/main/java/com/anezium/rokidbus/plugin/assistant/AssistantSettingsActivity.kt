@@ -21,7 +21,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.anezium.rokidbus.client.ui.BusTheme
-import com.anezium.rokidbus.client.ui.NexusPluginIcons
 import com.anezium.rokidbus.client.ui.NexusUi
 
 /**
@@ -224,7 +223,7 @@ class AssistantSettingsActivity : Activity() {
             addView(
                 NexusUi.pluginHeader(
                     this@AssistantSettingsActivity,
-                    NexusPluginIcons.drawableFor("chat"),
+                    R.drawable.nexus_glyph_assistant,
                     "Assistant",
                     "Voice assistant · v${pluginVersionName()}",
                 ),

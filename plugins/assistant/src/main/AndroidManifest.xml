@@ -14,7 +14,9 @@
 
     <application
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="Assistant"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Assistant">
 
@@ -72,7 +74,13 @@
                 android:value="Assistant" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.ICON"
-                android:value="chat" />
+                android:value="assistant" />
+            <meta-data
+                android:name="com.anezium.rokidbus.plugin.ICON_DRAWABLE"
+                android:resource="@drawable/nexus_glyph_assistant" />
+            <meta-data
+                android:name="com.anezium.rokidbus.plugin.GLYPHS"
+                android:resource="@array/nexus_glyphs" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.API_VERSION"
                 android:value="3" />
