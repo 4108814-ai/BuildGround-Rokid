@@ -55,6 +55,9 @@ test("loopback HTTP server reports health and returns the completed hook decisio
       };
     },
     logger,
+    extraHealth: () => ({
+      codex: { enabled: true, available: false, reason: "codex not installed" },
+    }),
   });
   await server.start();
   try {
@@ -64,6 +67,7 @@ test("loopback HTTP server reports health and returns the completed hook decisio
       ok: true,
       sessions: 3,
       uptimeMs: JSON.parse(health.body).uptimeMs,
+      codex: { enabled: true, available: false, reason: "codex not installed" },
     });
 
     const payload = { session_id: "http-session", hook_event_name: "SessionStart" };

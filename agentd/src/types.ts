@@ -15,7 +15,7 @@ export interface SessionTurn {
 
 export interface Session {
   id: string;
-  provider: "claude";
+  provider: "claude" | "codex";
   machineId: string;
   machineName: string;
   title: string;
@@ -30,12 +30,18 @@ export interface Session {
   pendingRequest?: PendingRequest;
 }
 
+export interface CodexConfig {
+  enabled: boolean;
+  port: number;
+}
+
 export interface AgentConfig {
   token: string;
   wsPort: number;
   httpPort: number;
   machineId: string;
   machineName: string;
+  codex: CodexConfig;
 }
 
 export interface HookPayload {

@@ -10,6 +10,11 @@ import { installHooks, uninstallHooks } from "./settings";
 interface Health {
   ok: boolean;
   sessions: number;
+  codex?: {
+    enabled: boolean;
+    available: boolean;
+    reason?: string;
+  };
 }
 
 function getHealth(port: number): Promise<Health | undefined> {
@@ -100,7 +105,13 @@ async function main(): Promise<void> {
       const health = await getHealth(config.httpPort);
       process.stdout.write(
         health
-          ? `running: yes, sessions: ${health.sessions}\n`
+          ? `running: yes, sessions: ${health.sessions}, codex: ${
+              health.codex?.available
+                ? "available"
+                : health.codex?.enabled
+                  ? `unavailable (${health.codex.reason ?? "unknown reason"})`
+                  : "disabled"
+            }\n`
           : "running: no, sessions: 0\n",
       );
       break;

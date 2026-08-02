@@ -40,7 +40,7 @@ export function normalizeCwd(value: string | undefined): string {
   return value ? value.replace(/\\/g, "/") : "";
 }
 
-function basename(value: string): string {
+export function projectName(value: string): string {
   if (!value) {
     return "";
   }
@@ -104,7 +104,7 @@ export class SessionStore {
       return;
     }
     const cwd = normalizeCwd(discovered.cwd);
-    const project = basename(cwd) || basename(discovered.projectDir);
+    const project = projectName(cwd) || projectName(discovered.projectDir);
     const session: Session = {
       id: discovered.id,
       provider: "claude",
@@ -157,7 +157,7 @@ export class SessionStore {
     record.session.lastActivityAt = now;
     if (cwdFromHook) {
       record.session.cwd = normalizeCwd(cwdFromHook);
-      record.session.project = basename(record.session.cwd);
+      record.session.project = projectName(record.session.cwd);
     }
     if (transcriptPath) {
       record.transcriptPath = transcriptPath;
@@ -237,6 +237,19 @@ export class SessionStore {
     this.emitUpsert(record.session);
   }
 
+  /**
+   * Provider adapters publish already-normalized sessions here. Claude stays
+   * on its existing discovery/hook path so this cannot bypass hook semantics.
+   */
+  upsertProviderSession(session: Session): void {
+    if (session.provider === "claude") {
+      throw new Error("Claude sessions must use the hook and discovery paths");
+    }
+    const snapshot = cloneSession(session);
+    this.records.set(session.id, { session: snapshot });
+    this.emitUpsert(snapshot);
+  }
+
   sweepStalled(now = this.now()): void {
     for (const record of this.records.values()) {
       if (
@@ -271,7 +284,7 @@ export class SessionStore {
 
   private createRecord(sessionId: string, cwdValue: string | undefined, now: number): SessionRecord {
     const cwd = normalizeCwd(cwdValue);
-    const project = basename(cwd);
+    const project = projectName(cwd);
     const record: SessionRecord = {
       session: {
         id: sessionId,
@@ -317,7 +330,7 @@ export class SessionStore {
   private refreshDerivedTitle(record: SessionRecord): void {
     record.session.title =
       record.lastUserPrompt ||
-      basename(record.session.cwd) ||
+      projectName(record.session.cwd) ||
       record.session.id.slice(0, 8);
   }
 

@@ -25,6 +25,7 @@ export const PHONE_HELLO_TIMEOUT_MS = 15_000;
 export const REFUSAL_RECONNECT_DELAY_MS = 60_000;
 const DETAIL_MESSAGE_LIMIT = 40;
 const MAX_LINE_BYTES = 512 * 1024;
+export const MAX_PHONE_SESSIONS_PER_PROVIDER = 200;
 
 export interface PhoneLinkOptions {
   config: AgentConfig;
@@ -113,6 +114,7 @@ export class PhoneLink {
   private readonly rejectedPhones = new Map<string, RejectedPhone>();
   private readonly retryAt = new Map<string, number>();
   private readonly now: () => number;
+  private publishedSessions = new Map<string, Session>();
 
   constructor(private readonly options: PhoneLinkOptions) {
     this.now = options.now ?? Date.now;
@@ -158,6 +160,7 @@ export class PhoneLink {
     this.socket?.destroy();
     this.socket = undefined;
     this.authenticated = false;
+    this.publishedSessions.clear();
     this.discovery?.close();
     this.discovery = undefined;
   }
@@ -244,8 +247,8 @@ export class PhoneLink {
   }
 
   private subscribe(): () => void {
-    const upsert = this.options.store.onUpsert((session) => this.sendUpsert(session));
-    const removed = this.options.store.onRemoved((sessionId) => this.sendRemoved(sessionId));
+    const upsert = this.options.store.onUpsert((session) => this.reconcileSessions(session.id));
+    const removed = this.options.store.onRemoved((sessionId) => this.reconcileSessions(sessionId));
     return () => {
       upsert();
       removed();
@@ -260,6 +263,7 @@ export class PhoneLink {
     this.unsubscribe = undefined;
     this.socket = undefined;
     this.authenticated = false;
+    this.publishedSessions.clear();
     this.buffer = "";
     this.openSessionId = undefined;
     this.connectedTo = undefined;
@@ -479,11 +483,32 @@ export class PhoneLink {
   }
 
   private sendSnapshot(): void {
+    const sessions = sessionsForPhone(this.options.store.list());
+    this.publishedSessions = new Map(sessions.map((session) => [session.id, session]));
     this.send({
       type: "snapshot",
       seq: this.sequence,
-      sessions: this.options.store.list(),
+      sessions,
     });
+  }
+
+  private reconcileSessions(changedSessionId: string): void {
+    if (!this.authenticated) {
+      return;
+    }
+    const sessions = sessionsForPhone(this.options.store.list());
+    const next = new Map(sessions.map((session) => [session.id, session]));
+    for (const sessionId of this.publishedSessions.keys()) {
+      if (!next.has(sessionId)) {
+        this.sendRemoved(sessionId);
+      }
+    }
+    for (const session of sessions) {
+      if (!this.publishedSessions.has(session.id) || session.id === changedSessionId) {
+        this.sendUpsert(session);
+      }
+    }
+    this.publishedSessions = next;
   }
 
   private sendUpsert(session: Session): void {
@@ -515,4 +540,16 @@ export class PhoneLink {
       return false;
     }
   }
+}
+
+export function sessionsForPhone(sessions: Session[]): Session[] {
+  const counts = new Map<Session["provider"], number>();
+  return sessions.filter((session) => {
+    const count = counts.get(session.provider) ?? 0;
+    if (count >= MAX_PHONE_SESSIONS_PER_PROVIDER) {
+      return false;
+    }
+    counts.set(session.provider, count + 1);
+    return true;
+  });
 }

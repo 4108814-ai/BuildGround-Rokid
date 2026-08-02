@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const net = require("node:net");
 const { SessionStore } = require("../dist/session-store.js");
 const {
+  MAX_PHONE_SESSIONS_PER_PROVIDER,
   PhoneLink,
   REFUSAL_RECONNECT_DELAY_MS,
 } = require("../dist/phone-link.js");
@@ -295,6 +296,72 @@ test("missing hello_ack closes after the handshake deadline and retries normally
     now += 20;
     link.connectToPhone(announcement);
     await waitUntil(() => connections === 2, "normal retry did not dial again");
+  } finally {
+    link.stop();
+    store.dispose();
+    await closeServer(server, sockets);
+  }
+});
+
+test("snapshots and deltas publish at most 200 sessions per provider", async () => {
+  const sockets = [];
+  let acceptConnection;
+  const accepted = new Promise((resolve) => { acceptConnection = resolve; });
+  const server = net.createServer((socket) => {
+    sockets.push(socket);
+    const lines = collectLines(socket);
+    acceptConnection({ socket, lines });
+  });
+  const port = await listen(server);
+  const { link, store } = createLink();
+  for (let index = 0; index < 201; index += 1) {
+    store.upsertProviderSession({
+      id: `codex-${index}`,
+      provider: "codex",
+      machineId: config.machineId,
+      machineName: config.machineName,
+      title: `Codex ${index}`,
+      cwd: "E:/repo",
+      project: "repo",
+      status: "idle",
+      stale: false,
+      lastActivityAt: index,
+    });
+  }
+
+  try {
+    link.connectToPhone({ host: "127.0.0.1", port, name: "test phone" });
+    const { socket, lines } = await accepted;
+    await lines.waitFor((frame) => frame.type === "hello");
+    socket.write('{"type":"hello_ack","v":1}\n');
+    const snapshot = await lines.waitFor((frame) => frame.type === "snapshot");
+    assert.equal(MAX_PHONE_SESSIONS_PER_PROVIDER, 200);
+    assert.equal(
+      snapshot.sessions.filter((session) => session.provider === "codex").length,
+      200,
+    );
+    assert.equal(snapshot.sessions.some((session) => session.id === "codex-0"), false);
+
+    store.upsertProviderSession({
+      id: "codex-0",
+      provider: "codex",
+      machineId: config.machineId,
+      machineName: config.machineName,
+      title: "Codex 0 now active",
+      cwd: "E:/repo",
+      project: "repo",
+      status: "working",
+      stale: false,
+      lastActivityAt: 1000,
+    });
+    const removed = await lines.waitFor(
+      (frame) => frame.type === "session_removed" && frame.sessionId === "codex-1",
+    );
+    const upsert = await lines.waitFor(
+      (frame) => frame.type === "session_upsert" && frame.session.id === "codex-0",
+    );
+    assert.equal(removed.seq, snapshot.seq + 1);
+    assert.equal(upsert.seq, snapshot.seq + 2);
   } finally {
     link.stop();
     store.dispose();

@@ -8,6 +8,7 @@ export interface HookHttpServerOptions {
   sessionCount: () => number;
   onHook: (payload: HookPayload) => HookResponse | void | Promise<HookResponse | void>;
   logger: Logger;
+  extraHealth?: () => Record<string, unknown>;
 }
 
 export class HookHttpServer {
@@ -26,6 +27,7 @@ export class HookHttpServer {
           ok: true,
           sessions: this.options.sessionCount(),
           uptimeMs: Date.now() - this.startedAt,
+          ...this.options.extraHealth?.(),
         });
         response.writeHead(200, {
           "content-type": "application/json",

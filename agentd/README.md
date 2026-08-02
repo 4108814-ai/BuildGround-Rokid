@@ -53,6 +53,29 @@ The token, stable machine ID, ports, and machine name live in
 Runtime logs are appended to `~/.nexus-agentd/agentd.log`; at 5 MB the daemon rotates the
 file to `agentd.log.old`.
 
+## Codex monitoring
+
+Codex monitoring is disabled by default. Enable it in the existing
+`~/.nexus-agentd/config.json`:
+
+```json
+"codex": {
+  "enabled": true,
+  "port": 8390
+}
+```
+
+The daemon first tries to attach to `codex app-server` on that port. If nothing is
+listening, it starts and owns an app-server process. Both paths are fixed to
+`127.0.0.1`; the unauthenticated app-server WebSocket is never exposed to the network.
+Codex thread snapshots, live status changes, and approval requests use the already
+authenticated phone link. This integration is monitoring and approvals only: it does
+not create threads, send messages, steer turns, or interrupt work.
+
+If no phone decision is available, agentd sends no approval response to Codex. The
+app-server request remains pending for another subscribed Codex UI to answer and is
+replayed when a client resumes the thread.
+
 ## Hook management
 
 ```powershell

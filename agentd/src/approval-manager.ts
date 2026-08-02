@@ -31,7 +31,7 @@ export type HookResponse = Record<string, unknown>;
 interface PendingApproval {
   request: ApprovalRequest;
   timer: NodeJS.Timeout;
-  resolve: (response: HookResponse) => void;
+  resolve: (decision: ApprovalDecision | undefined) => void;
 }
 
 export interface ApprovalManagerOptions {
@@ -207,15 +207,6 @@ export class ApprovalManager {
       });
       return Promise.resolve({});
     }
-    if (!this.options.transport.connected) {
-      this.options.logger.info("approval_local", { reason: "phone_not_connected" });
-      return Promise.resolve({});
-    }
-    if (this.pending.size >= this.maxPending) {
-      this.options.logger.warn("approval_local", { reason: "pending_limit" });
-      return Promise.resolve({});
-    }
-
     const request: ApprovalRequest = {
       type: "approval_request",
       v: 1,
@@ -227,7 +218,33 @@ export class ApprovalManager {
       createdAt: this.now(),
     };
 
-    return new Promise<HookResponse>((resolve) => {
+    return this.requestDecision(request).then((decision) =>
+      decision ? decisionResponse(decision) : {},
+    );
+  }
+
+  /**
+   * Shares the phone approval lifecycle with providers whose native response
+   * contract is not Claude's PreToolUse hook contract.
+   */
+  requestDecision(request: ApprovalRequest): Promise<ApprovalDecision | undefined> {
+    if (!this.options.transport.connected) {
+      this.options.logger.info("approval_local", { reason: "phone_not_connected" });
+      return Promise.resolve(undefined);
+    }
+    if (this.pending.size >= this.maxPending) {
+      this.options.logger.warn("approval_local", { reason: "pending_limit" });
+      return Promise.resolve(undefined);
+    }
+    if (!request.requestId || this.pending.has(request.requestId)) {
+      this.options.logger.warn("approval_local", {
+        requestId: request.requestId,
+        reason: "duplicate_request",
+      });
+      return Promise.resolve(undefined);
+    }
+
+    return new Promise<ApprovalDecision | undefined>((resolve) => {
       const timer = setTimeout(() => this.onTimeout(request.requestId), this.timeoutMs);
       timer.unref();
       this.pending.set(request.requestId, { request, timer, resolve });
@@ -237,7 +254,7 @@ export class ApprovalManager {
       }
       this.options.logger.info("approval_requested", {
         requestId: request.requestId,
-        sessionId: sessionId.slice(0, 16),
+        sessionId: request.sessionId.slice(0, 16),
         tool: request.tool,
       });
     });
@@ -248,7 +265,7 @@ export class ApprovalManager {
     if (!pending) {
       return;
     }
-    pending.resolve(decisionResponse(decision));
+    pending.resolve(decision);
     this.options.logger.info("approval_decided", {
       requestId,
       decision,
@@ -277,6 +294,10 @@ export class ApprovalManager {
     }
   }
 
+  resolveRequest(requestId: string, reason = "upstream_resolved"): void {
+    this.resolveLocal(requestId, reason, true);
+  }
+
   dispose(): void {
     for (const requestId of [...this.pending.keys()]) {
       this.resolveLocal(requestId, "daemon_stop", true);
@@ -291,7 +312,7 @@ export class ApprovalManager {
     if (this.options.transport.connected) {
       this.options.transport.sendApprovalResolved(requestId, "timeout");
     }
-    pending.resolve({});
+    pending.resolve(undefined);
     this.options.logger.info("approval_timeout", { requestId });
   }
 
@@ -303,7 +324,7 @@ export class ApprovalManager {
     if (notifyPhone && this.options.transport.connected) {
       this.options.transport.sendApprovalResolved(requestId, "local");
     }
-    pending.resolve({});
+    pending.resolve(undefined);
     this.options.logger.info("approval_local", { requestId, reason });
   }
 

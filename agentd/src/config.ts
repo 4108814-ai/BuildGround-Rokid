@@ -7,6 +7,7 @@ import type { AgentConfig } from "./types";
 
 const DEFAULT_HTTP_PORT = 8791;
 const DEFAULT_WS_PORT = 8792;
+export const DEFAULT_CODEX_PORT = 8390;
 
 export function defaultStateDir(): string {
   return process.env.NEXUS_AGENTD_STATE_DIR || path.join(homedir(), ".nexus-agentd");
@@ -23,6 +24,10 @@ function newConfig(): AgentConfig {
     httpPort: DEFAULT_HTTP_PORT,
     machineId: randomBytes(16).toString("base64url"),
     machineName: os.hostname(),
+    codex: {
+      enabled: false,
+      port: DEFAULT_CODEX_PORT,
+    },
   };
 }
 
@@ -57,14 +62,38 @@ function parseConfig(raw: string, filePath: string): {
     throw new Error(`Invalid nexus-agentd config at ${filePath}`);
   }
 
-  const upgraded = typeof record.machineId !== "string" || record.machineId.length === 0;
+  const missingMachineId = typeof record.machineId !== "string" || record.machineId.length === 0;
+  const hasCodex = Object.prototype.hasOwnProperty.call(record, "codex");
+  const codexRecord =
+    record.codex && typeof record.codex === "object" && !Array.isArray(record.codex)
+      ? record.codex as Record<string, unknown>
+      : undefined;
+  if (
+    (hasCodex && !codexRecord) ||
+    (codexRecord &&
+      (typeof codexRecord.enabled !== "boolean" || !isPort(codexRecord.port)))
+  ) {
+    throw new Error(`Invalid nexus-agentd config at ${filePath}`);
+  }
+  const upgraded = missingMachineId || !hasCodex;
   return {
     config: {
       token: record.token,
       wsPort: record.wsPort,
       httpPort: record.httpPort,
-      machineId: upgraded ? randomBytes(16).toString("base64url") : record.machineId as string,
+      machineId: missingMachineId
+        ? randomBytes(16).toString("base64url")
+        : record.machineId as string,
       machineName: record.machineName,
+      codex: codexRecord
+        ? {
+            enabled: codexRecord.enabled as boolean,
+            port: codexRecord.port as number,
+          }
+        : {
+            enabled: false,
+            port: DEFAULT_CODEX_PORT,
+          },
     },
     upgraded,
   };

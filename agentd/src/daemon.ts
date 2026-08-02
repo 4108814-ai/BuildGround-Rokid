@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import { ApprovalManager, approvalTimeoutFromEnv, type HookResponse } from "./approval-manager";
+import { CodexMonitor } from "./codex/monitor";
 import { defaultStateDir, ensureConfig } from "./config";
 import { discoverRecentSessions } from "./discovery";
 import { HookHttpServer } from "./http-server";
@@ -93,11 +94,18 @@ export async function startDaemon(): Promise<RunningDaemon> {
     logger,
     timeoutMs: approvalTimeoutFromEnv(),
   });
+  const codex = new CodexMonitor({
+    config,
+    store: sessions,
+    approvals,
+    logger,
+  });
   const httpServer = new HookHttpServer({
     port: config.httpPort,
     sessionCount: () => sessions.size,
     onHook: processHook,
     logger,
+    extraHealth: () => ({ codex: codex.availability() }),
   });
   const heartbeatTimer = setInterval(() => sessions.sweepStalled(), 60_000);
   heartbeatTimer.unref();
@@ -106,9 +114,11 @@ export async function startDaemon(): Promise<RunningDaemon> {
     await httpServer.start();
     await hub.start();
     link.start();
+    codex.start();
   } catch (error) {
     clearInterval(heartbeatTimer);
     link.stop();
+    await codex.stop();
     await httpServer.stop().catch(() => undefined);
     await hub.stop().catch(() => undefined);
     tailManager.stopAll();
@@ -134,6 +144,7 @@ export async function startDaemon(): Promise<RunningDaemon> {
       }
       stopped = true;
       clearInterval(heartbeatTimer);
+      await codex.stop();
       approvals?.dispose();
       link.stop();
       tailManager.stopAll();

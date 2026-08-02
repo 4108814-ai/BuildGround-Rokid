@@ -200,3 +200,32 @@ test("approval timeout defaults to 120 seconds and accepts a positive environmen
   assert.equal(approvalTimeoutFromEnv("-1"), 120_000);
   assert.equal(approvalTimeoutFromEnv("999999999999"), 120_000);
 });
+
+test("provider-native approvals share timeout and link-loss handling without Claude responses", async () => {
+  const { manager, transport } = harness({ timeoutMs: 20 });
+  const request = {
+    type: "approval_request",
+    v: 1,
+    requestId: "codex:n:NDI",
+    sessionId: "codex-thread",
+    tool: "Command",
+    summary: "npm test",
+    detail: "npm test",
+    createdAt: 1_737_000_000_000,
+  };
+  const timed = manager.requestDecision(request);
+  assert.deepEqual(transport.frames[0], request);
+  assert.equal(await timed, undefined);
+  assert.deepEqual(transport.frames[1], {
+    type: "approval_resolved",
+    v: 1,
+    requestId: request.requestId,
+    outcome: "timeout",
+  });
+
+  const dropped = manager.requestDecision({ ...request, requestId: "codex:n:NDM" });
+  transport.connected = false;
+  manager.onLinkDisconnected();
+  assert.equal(await dropped, undefined);
+  assert.equal(transport.frames.length, 3, "link loss must not send a provider decision");
+});
