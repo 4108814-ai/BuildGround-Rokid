@@ -93,6 +93,47 @@ internal object FakeNotificationHarness {
         return posted
     }
 
+    /**
+     * Eight conversations at once, each from its own sender under its own
+     * notification id.
+     *
+     * Two test threads can show selection moving; they cannot show what
+     * happens when the list outgrows the glasses viewport, which is exactly
+     * where the 2026-08 invisible-selection report lived. Eight is one more
+     * than the optics hold, so the window has to move to keep up.
+     */
+    @Synchronized
+    fun postCrowd(context: Context): Boolean {
+        val appContext = context.applicationContext
+        val manager = appContext.getSystemService(NotificationManager::class.java) ?: return false
+        manager.createNotificationChannel(
+            NotificationChannel(
+                FAKE_CHANNEL_ID,
+                "Relay test thread",
+                NotificationManager.IMPORTANCE_HIGH,
+            ),
+        )
+        val now = System.currentTimeMillis()
+        val posted = CROWD_SENDERS.withIndex().map { (index, sender) ->
+            val thread = listOf(
+                Message(
+                    sender = sender,
+                    text = "Crowd message ${index + 1} of ${CROWD_SENDERS.size}.",
+                    timestamp = now - (CROWD_SENDERS.size - index) * 1_000L,
+                ),
+            )
+            runCatching {
+                manager.notify(
+                    "$CROWD_NOTIFICATION_TAG$index",
+                    CROWD_NOTIFICATION_ID_BASE + index,
+                    buildNotification(appContext, thread, sender, CROWD_NOTIFICATION_ID_BASE + index),
+                )
+            }.isSuccess
+        }.all { it }
+        notifyChanged()
+        return posted
+    }
+
     @Synchronized
     fun receiveReply(text: String) {
         deliveredReply = text.takeIf(String::isNotBlank)
@@ -230,4 +271,8 @@ internal object FakeNotificationHarness {
     private const val FAKE_NOTIFICATION_TAG = "relay_fake_thread"
     private const val SECOND_NOTIFICATION_ID = 17_002
     private const val SECOND_NOTIFICATION_TAG = "relay_fake_thread_2"
+    private const val CROWD_NOTIFICATION_ID_BASE = 17_100
+    private const val CROWD_NOTIFICATION_TAG = "relay_fake_crowd_"
+    private val CROWD_SENDERS =
+        listOf("Ada", "Bruno", "Chloe", "Denis", "Emma", "Farid", "Gwen", "Hugo")
 }

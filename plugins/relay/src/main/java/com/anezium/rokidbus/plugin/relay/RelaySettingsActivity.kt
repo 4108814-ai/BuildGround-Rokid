@@ -276,6 +276,20 @@ class RelaySettingsActivity : Activity() {
         addView(BusTheme.gap(this@RelaySettingsActivity, 8))
         addView(
             harnessButton(
+                // More threads than the glasses viewport holds, so list
+                // windowing has something real to chase.
+                "Eight threads" to {
+                    ensureCanPost() && FakeNotificationHarness.postCrowd(this@RelaySettingsActivity)
+                },
+            ),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        addView(BusTheme.gap(this@RelaySettingsActivity, 8))
+        addView(
+            harnessButton(
                 "Open access" to {
                     startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                 },
