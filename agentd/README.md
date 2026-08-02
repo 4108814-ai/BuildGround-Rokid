@@ -92,15 +92,16 @@ the daemon uses the same machine identity.
 ## Running at logon
 
 `scripts/run-hidden.vbs` starts the daemon with no console window. Register it once
-from the `agentd` directory:
+from an elevated prompt in the `agentd` directory:
 
 ```powershell
 schtasks /create /tn NexusAgentd /tr "wscript.exe //B \"$PWD\scripts\run-hidden.vbs\"" /sc onlogon /f
 schtasks /run /tn NexusAgentd
 ```
 
-The daemon exits immediately if another instance already holds its port, so the task
-can be run at any time to make sure one is up.
+Without elevation, dropping a shortcut to the script into `shell:startup` does the
+same job. The daemon exits immediately if another instance already holds its port, so
+either launcher can fire at any time to make sure one is up.
 
 ## Hook management
 
