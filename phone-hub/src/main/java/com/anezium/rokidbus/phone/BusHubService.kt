@@ -3076,6 +3076,13 @@ class BusHubService : Service() {
                 return@post
             }
 
+            // The microphone is about to open, so whatever the glasses are
+            // saying has to stop: they would otherwise record their own voice
+            // into someone's dictation. Cancelled speech does not resume when
+            // the lease ends — a plugin that still wants it said, says it again.
+            sendRemote(BusEnvelope(path = BusPaths.TTS_CANCEL))?.let { error ->
+                log("TTS cancel on audio lease grant failed code=$error")
+            }
             replyToAudioRequest(
                 envelope,
                 replyRemote,

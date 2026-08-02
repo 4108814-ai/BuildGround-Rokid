@@ -11,6 +11,7 @@ enum class NexusTtsDoneReason {
     COMPLETED,
     STOPPED,
     PREEMPTED,
+    CANCELLED,
     UNAVAILABLE,
 }
 

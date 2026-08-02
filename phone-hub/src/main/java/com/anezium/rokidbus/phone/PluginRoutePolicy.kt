@@ -26,9 +26,11 @@ object PluginRoutePolicy {
     private val localSurfaceIdPattern = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
     fun authorize(caller: PluginRouteCaller, path: String): PluginRouteDecision {
-        if (caller == PluginRouteCaller.Internal || caller == PluginRouteCaller.DebugLegacy) {
+        if (caller == PluginRouteCaller.Internal) {
             return PluginRouteDecision.Allowed
         }
+        if (PathRules.isHubOnly(path)) return PluginRouteDecision.Denied("SYSTEM_ROUTE_DENIED")
+        if (caller == PluginRouteCaller.DebugLegacy) return PluginRouteDecision.Allowed
         when (caller) {
             PluginRouteCaller.Unregistered -> return PluginRouteDecision.Denied("UNREGISTERED_CALLER")
             PluginRouteCaller.Ambiguous -> return PluginRouteDecision.Denied("AMBIGUOUS_CALLER")

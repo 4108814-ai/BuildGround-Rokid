@@ -6,6 +6,7 @@ enum class TtsDoneReason {
     COMPLETED,
     STOPPED,
     PREEMPTED,
+    CANCELLED,
     UNAVAILABLE,
     ;
 
@@ -34,7 +35,14 @@ sealed interface TtsValidationResult<out T> {
 /** Pure TTS protocol v1 validation and normalization with no Android dependencies. */
 object TtsContract {
     const val VERSION = 1
-    const val MAX_TEXT_CHARS = 500
+
+    /**
+     * The same budget a notice body gets, deliberately: what a plugin may show
+     * is what it may read out, so "speak the message I just displayed" never
+     * has to be "speak most of it". Long enough to be a minute of talking, so
+     * it is a ceiling, not an invitation.
+     */
+    const val MAX_TEXT_CHARS = 1024
     const val MAX_UTTERANCE_ID_CHARS = 64
     const val MAX_MESSAGES_PER_SECOND = 5
 

@@ -59,15 +59,18 @@ class TtsPlaybackStateTest {
     }
 
     @Test
-    fun `controller cancellation seam needs no owner lookup`() {
+    fun `controller cancellation seam reports platform cancellation without an owner lookup`() {
         val state = TtsPlaybackState()
+        assertNull(state.cancelCurrent(TtsDoneReason.CANCELLED))
         state.accept("alpha", "u1", "engine-1", "hello")
 
-        assertEquals("engine-1", state.cancelCurrent()?.engineId)
+        assertEquals("engine-1", state.cancelCurrent(TtsDoneReason.CANCELLED)?.engineId)
+        assertNull(state.cancelCurrent(TtsDoneReason.CANCELLED))
         assertEquals(
-            TtsDoneEvent("alpha", "u1", TtsDoneReason.STOPPED),
+            TtsDoneEvent("alpha", "u1", TtsDoneReason.CANCELLED),
             state.stopped("engine-1"),
         )
+        assertNull(state.stopped("engine-1"))
     }
 
     @Test

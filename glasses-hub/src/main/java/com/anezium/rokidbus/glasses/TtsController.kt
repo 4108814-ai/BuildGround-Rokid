@@ -76,6 +76,10 @@ internal object TtsController {
     }
 
     fun handleEnvelope(context: Context, envelope: BusEnvelope): Boolean {
+        if (envelope.path == BusPaths.TTS_CANCEL) {
+            cancelCurrent(TtsDoneReason.CANCELLED)
+            return true
+        }
         val command = when (envelope.path) {
             BusPaths.TTS_SPEAK -> when (
                 val result = TtsContract.validateSpeak(envelope.payload, requireOwner = true)

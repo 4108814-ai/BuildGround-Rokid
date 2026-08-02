@@ -1604,9 +1604,9 @@ Pending until the user re-approves it.
 ## TTS protocol v1
 
 Text-to-speech is a separate capability whose renderer lives behind the
-glasses hub. A plugin requests `tts` and may receive `/tts`; both command paths
-require an approved `tts` grant and an attached glasses hub that advertises
-`ttsVersion:1`.
+glasses hub. A plugin requests `tts` and may receive `/tts/started` and
+`/tts/done`; both command paths require an approved `tts` grant and an attached
+glasses hub that advertises `ttsVersion:1`.
 
 The plugin sends JSON with no binary attachment:
 
@@ -1616,9 +1616,10 @@ The plugin sends JSON with no binary attachment:
   answer never has to be matched by timing. It must be nonblank and at most 64
   characters; the SDK invents one when the caller does not care. Newline runs
   in `text` become spaces, then the text is trimmed. The normalized text must
-  be nonblank and at most 500 characters. That limit is a ceiling, not a
-  suggestion: at the rate the glasses speak, 500 characters is already about
-  half a minute of talking at someone who did not ask for it.
+  be nonblank and at most 1024 characters — the same budget a notice body
+  gets, so anything a plugin may put on the display it may also read out.
+  Treat it as a ceiling rather than an invitation: a full one is about a
+  minute of talking at someone who is doing something else.
 - `/tts/stop` payload `{"utteranceId":"<opaque>"}`. Only the plugin that owns
   the current matching utterance can stop it; stale, wrong, or differently
   owned IDs have no effect.
@@ -1629,6 +1630,11 @@ supplies or controls that owner. The glasses hub assigns a separate private
 UUID when calling the ROM engine, so a plugin utterance ID can never address
 another plugin's engine request.
 
+`/tts/cancel` is an empty phone-hub-to-glasses-hub command and is neither a
+plugin send path nor a plugin receive prefix. The phone sends it only after an
+audio lease is granted, because otherwise the open glasses microphone would
+hear the glasses' own speech and feed it into dictation.
+
 The glasses send owner-scoped events back through the phone. The phone removes
 the routing owner and delivers each event only to the live callback binder for
 that approved plugin:
@@ -1636,13 +1642,16 @@ that approved plugin:
 - `/tts/started` payload `{"utteranceId":"<opaque>"}`.
 - `/tts/done` payload
   `{"utteranceId":"<opaque>","reason":"COMPLETED"}`. Reason is exactly
-  `COMPLETED`, `STOPPED`, `PREEMPTED`, or `UNAVAILABLE`.
+  `COMPLETED`, `STOPPED`, `PREEMPTED`, `CANCELLED`, or `UNAVAILABLE`.
 
 Every accepted speak produces exactly one `/tts/done`, including a request for
 which the ROM service cannot be bound or dies during playback. A new accepted
 speak while one is current reports `PREEMPTED` for the old utterance; the ROM
 engine itself performs the corresponding single-slot preemption. A successful
 owner stop reports `STOPPED`. Normal ROM completion reports `COMPLETED`.
+An audio-lease grant reports `CANCELLED` for the current utterance: the platform
+needed the microphone, so the utterance is discarded rather than paused and
+releasing the lease does not resume it.
 Terminal events produced during a transient phone-link loss remain queued on
 the glasses and are retried in order when either control transport reconnects.
 

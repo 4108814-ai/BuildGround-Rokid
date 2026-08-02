@@ -164,6 +164,26 @@ class NexusTtsSessionTest {
     }
 
     @Test
+    fun `platform cancellation is exposed as CANCELLED`() {
+        val fixture = fixture()
+        val callbacks = TtsCallbacks()
+        val session = fixture.client.ttsSession(callbacks)
+        session.speak("hello")
+        val utteranceId = session.activeUtteranceId!!
+
+        fixture.transport.listener.onMessage(
+            BusPaths.TTS_DONE,
+            "cancelled",
+            JSONObject()
+                .put("utteranceId", utteranceId)
+                .put("reason", "CANCELLED"),
+        )
+
+        assertEquals(listOf(utteranceId to NexusTtsDoneReason.CANCELLED), callbacks.done)
+        assertNull(session.activeUtteranceId)
+    }
+
+    @Test
     fun `stop addresses only the SDK current utterance`() {
         val fixture = fixture()
         val callbacks = TtsCallbacks()

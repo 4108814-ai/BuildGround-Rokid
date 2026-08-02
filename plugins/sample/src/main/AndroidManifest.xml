@@ -58,7 +58,7 @@
                 android:value="surfaces,stt,tts" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.RECEIVE_PREFIXES"
-                android:value="/plugin/hello,/system/plugin,/stt,/tts" />
+                android:value="/plugin/hello,/system/plugin,/stt,/tts/started,/tts/done" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.SETTINGS_ACTIVITY"
                 android:value=".HelloActivity" />

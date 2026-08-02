@@ -153,7 +153,7 @@ class PluginDescriptorTest {
 
     @Test
     fun `tts descriptor and receive prefix require tts capability`() {
-        val receive = "/system/plugin,/plugin/hello.plugin,/tts"
+        val receive = "/system/plugin,/plugin/hello.plugin,/tts/started,/tts/done"
         val withTts = validMetadata() + mapOf(
             BusConstants.META_PLUGIN_CAPABILITIES to "tts",
             BusConstants.META_PLUGIN_RECEIVE_PREFIXES to receive,

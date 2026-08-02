@@ -58,6 +58,9 @@ object BusPaths {
     const val ACTIVITY_CLOSED = "/activity/closed"
     const val TTS_SPEAK = "/tts/speak"
     const val TTS_STOP = "/tts/stop"
+
+    /** Phone hub to glasses hub only; plugins cannot send or subscribe to this path. */
+    const val TTS_CANCEL = "/tts/cancel"
     const val TTS_STARTED = "/tts/started"
     const val TTS_DONE = "/tts/done"
     const val LAUNCHER_LIST = "/launcher/list"

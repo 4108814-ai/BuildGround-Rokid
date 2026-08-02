@@ -957,13 +957,14 @@ stop first and terminates with `CANCELLED`.
 
 ### 3.3 Text to speech
 
-Request `tts` and receive `/tts`:
+Request `tts` and, if you use raw receive prefixes, name only the two plugin
+events `/tts/started` and `/tts/done`:
 
 ```xml
 <meta-data android:name="com.anezium.rokidbus.plugin.CAPABILITIES"
     android:value="surfaces,tts" />
 <meta-data android:name="com.anezium.rokidbus.plugin.RECEIVE_PREFIXES"
-    android:value="/plugin/yourid,/system/plugin,/tts" />
+    android:value="/plugin/yourid,/system/plugin,/tts/started,/tts/done" />
 ```
 
 After install, the user must grant **Text to speech** in **Rokid Nexus →
@@ -987,7 +988,7 @@ class TtsPluginService : NexusPluginService() {
                 utteranceId: String,
                 reason: NexusTtsDoneReason,
             ) {
-                // COMPLETED, STOPPED, PREEMPTED, or UNAVAILABLE.
+                // COMPLETED, STOPPED, PREEMPTED, CANCELLED, or UNAVAILABLE.
             }
         })
 
@@ -1014,16 +1015,20 @@ own to `speak(text, utteranceId)` — a message key, a row id, whatever you
 already use — and answers arrive already matched to what asked for them;
 omit it and the SDK invents one, which is enough when a plugin only ever says
 one thing at a time. Text is normalized by replacing newline runs with spaces
-and trimming, and must remain nonblank and no longer than 500 characters
-afterwards. Treat that limit as a ceiling rather than a target: a
-maximum-length utterance talks at the wearer for about half a minute.
+and trimming, and must remain nonblank and no longer than 1024 characters
+afterwards — the same budget a notice body gets, so whatever you can show you
+can also read out. Treat it as a ceiling rather than a target: a
+maximum-length utterance talks at the wearer for about a minute.
 
 There is one renderer slot on the glasses. Calling `speak` again preempts the
 current utterance, whose callback receives `PREEMPTED`. `stop()` addresses only
 the session's current utterance and completes it with `STOPPED`; `close()` also
 stops current speech and finishes any tracked callback exactly once. Natural
 completion is `COMPLETED`. If the glasses renderer is absent, cannot bind, or
-restarts during the utterance, the result is `UNAVAILABLE`.
+restarts during the utterance, the result is `UNAVAILABLE`. `CANCELLED` means
+the platform stopped the utterance because something needed the glasses
+microphone. It will not resume when the microphone is released; call `speak`
+again if you still want it said.
 
 Speak and stop share a five-commands-per-second budget, enforced both in the
 SDK and in the hub. `INVALID_PAYLOAD` means the text or id did not survive

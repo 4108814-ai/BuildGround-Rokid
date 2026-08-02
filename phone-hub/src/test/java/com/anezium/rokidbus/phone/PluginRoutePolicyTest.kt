@@ -73,6 +73,14 @@ class PluginRoutePolicyTest {
     fun `plugins cannot send hub control routes`() {
         listOf("/launcher/list", "/launcher/open", "/surface/input", "/system/plugin/open", "/security/grants", "/error")
             .forEach { path -> assertTrue(path, PluginRoutePolicy.authorize(plugin(), path) is PluginRouteDecision.Denied) }
+        assertEquals(
+            PluginRouteDecision.Denied("SYSTEM_ROUTE_DENIED"),
+            PluginRoutePolicy.authorize(plugin(PluginCapability.TTS), "/tts/cancel"),
+        )
+        assertEquals(
+            PluginRouteDecision.Denied("SYSTEM_ROUTE_DENIED"),
+            PluginRoutePolicy.authorize(PluginRouteCaller.DebugLegacy, "/tts/cancel"),
+        )
     }
 
     @Test

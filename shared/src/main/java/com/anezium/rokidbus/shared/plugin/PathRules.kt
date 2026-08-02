@@ -4,6 +4,7 @@ import com.anezium.rokidbus.shared.BusPaths
 
 object PathRules {
     private val reservedRoots = setOf("/launcher", "/surface/input", "/system", "/security", "/error")
+    private val hubOnlyPaths = setOf(BusPaths.TTS_CANCEL)
     private val lifecyclePrefixes = setOf("/system/plugin")
     private val httpReplyPrefixes = setOf("/http/request/reply")
     private val audioReplyPrefixes = setOf(
@@ -13,7 +14,7 @@ object PathRules {
         "/audio/lease/revoked",
     )
     private val sttReceivePrefixes = setOf("/stt")
-    private val ttsReceivePrefixes = setOf("/tts")
+    private val ttsReceivePrefixes = setOf(BusPaths.TTS_STARTED, BusPaths.TTS_DONE)
     private val cameraReceivePrefixes = setOf(
         BusPaths.CAMERA_SESSION_STATE,
         BusPaths.CAMERA_LINK_OFFER,
@@ -37,8 +38,11 @@ object PathRules {
 
     fun isReserved(path: String): Boolean {
         val normalized = normalizeAbsolute(path) ?: return true
-        return reservedRoots.any { matchesPrefix(normalized, it) }
+        return isHubOnly(normalized) || reservedRoots.any { matchesPrefix(normalized, it) }
     }
+
+    fun isHubOnly(path: String): Boolean =
+        normalizeAbsolute(path)?.let(hubOnlyPaths::contains) == true
 
     fun isPluginPrivate(path: String, pluginId: String): Boolean =
         matchesPrefix(path, "/plugin/$pluginId")
@@ -113,7 +117,7 @@ object PathRules {
             sttReceivePrefixes.any { matchesPrefix(normalized, it) || matchesPrefix(it, normalized) }
         ) return true
         if (PluginCapability.TTS in requestedCapabilities &&
-            ttsReceivePrefixes.any { matchesPrefix(normalized, it) || matchesPrefix(it, normalized) }
+            normalized in ttsReceivePrefixes
         ) return true
         if (PluginCapability.CAMERA in requestedCapabilities &&
             cameraReceivePrefixes.any { matchesPrefix(normalized, it) }
@@ -135,7 +139,7 @@ object PathRules {
         if (sttReceivePrefixes.any { matchesPrefix(normalized, it) || matchesPrefix(it, normalized) }) {
             return PluginCapability.STT
         }
-        if (ttsReceivePrefixes.any { matchesPrefix(normalized, it) || matchesPrefix(it, normalized) }) {
+        if (normalized in ttsReceivePrefixes) {
             return PluginCapability.TTS
         }
         if (cameraReceivePrefixes.any { matchesPrefix(normalized, it) }) {

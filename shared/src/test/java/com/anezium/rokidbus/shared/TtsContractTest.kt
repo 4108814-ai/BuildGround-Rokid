@@ -58,6 +58,7 @@ class TtsContractTest {
     fun `started and done accept only the protocol reasons`() {
         val started = TtsContract.startedPayload("hello.plugin", "id")
         assertTrue(TtsContract.validateStarted(started) is TtsValidationResult.Valid)
+        assertEquals(TtsDoneReason.CANCELLED, TtsDoneReason.fromWireValue("CANCELLED"))
         TtsDoneReason.entries.forEach { reason ->
             assertTrue(
                 TtsContract.validateDone(

@@ -33,6 +33,8 @@ class PathRulesTest {
         assertTrue(PathRules.isReserved("/system/plugin/open"))
         assertTrue(PathRules.isReserved("/security/revoke"))
         assertTrue(PathRules.isReserved("/error"))
+        assertTrue(PathRules.isHubOnly("/tts/cancel"))
+        assertTrue(PathRules.isReserved("/tts/cancel"))
         assertFalse(PathRules.isReserved("/launcherish"))
     }
 
@@ -88,10 +90,18 @@ class PathRulesTest {
         val tts = setOf(PluginCapability.TTS)
         assertEquals(PluginCapability.TTS, PathRules.requiredCapability("/tts/speak"))
         assertEquals(PluginCapability.TTS, PathRules.requiredCapability("/tts/stop"))
-        assertTrue(PathRules.isAllowedReceivePrefix("/tts", "speaker", tts))
+        assertNull(PathRules.requiredCapability("/tts/cancel"))
+        assertTrue(PathRules.isAllowedReceivePrefix("/tts/started", "speaker", tts))
         assertTrue(PathRules.isAllowedReceivePrefix("/tts/done", "speaker", tts))
+        assertFalse(PathRules.isAllowedReceivePrefix("/tts", "speaker", tts))
+        assertFalse(PathRules.isAllowedReceivePrefix("/tts/cancel", "speaker", tts))
         assertFalse(PathRules.isAllowedReceivePrefix("/tts", "speaker", emptySet()))
-        assertEquals(PluginCapability.TTS, PathRules.requiredCapabilityForReceivePrefix("/tts"))
+        assertEquals(
+            PluginCapability.TTS,
+            PathRules.requiredCapabilityForReceivePrefix("/tts/started"),
+        )
+        assertNull(PathRules.requiredCapabilityForReceivePrefix("/tts"))
+        assertNull(PathRules.requiredCapabilityForReceivePrefix("/tts/cancel"))
         assertTrue(PathRules.isDirectReply("/tts/started"))
         assertTrue(PathRules.isDirectReply("/tts/done"))
         assertTrue(PathRules.isOwnerScoped("/tts/done"))
