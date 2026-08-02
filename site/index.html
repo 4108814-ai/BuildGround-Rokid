@@ -69,7 +69,7 @@
       <div class="hero__actions reveal" style="--i:4">
         <a class="btn btn--solid" href="https://github.com/Anezium/Rokid-Nexus/releases">
           Download for Android
-          <span class="btn__meta">v1.1.2 · APK</span>
+          <span class="btn__meta">v1.1.5 · APK</span>
         </a>
         <a class="btn btn--ghost" href="#roadmap">Read the roadmap</a>
       </div>
@@ -90,10 +90,11 @@
 <!-- ─────────────────────────  LATEST  ───────────────────────── -->
 <div class="latest">
   <div class="latest__in">
-    <span class="latest__tag">v1.1.2</span>
+    <span class="latest__tag">v1.1.5</span>
     <p>
-      Control messages back on their own path · <b>Relay</b> and <b>Photo Sync</b>
-      joined in 1.1.0 · SDK <code>sdk-v0.9.0</code> on JitPack · Apache-2.0
+      Plugins can speak, in the voice already on your glasses · <b>Relay</b>
+      reads a message aloud · SDK <code>sdk-v0.11.0</code> on JitPack ·
+      Apache-2.0
     </p>
     <a href="https://github.com/Anezium/Rokid-Nexus/blob/main/CHANGELOG.md">What changed →</a>
   </div>
@@ -103,7 +104,7 @@
 <div class="boardwrap">
   <div class="board reveal">
     <a class="board__cell" href="#shipped" data-state="shipped">
-      <b>7</b><span>shipped</span>
+      <b>8</b><span>shipped</span>
       <i>on hardware, in a public release</i>
     </a>
     <a class="board__cell" href="#building" data-state="building">
@@ -147,8 +148,9 @@
             Any APK may bind to the hub; installing one grants it nothing. A
             plugin is identified by <b>package + plugin id + signing
             certificate</b>, and each capability — <code>surfaces</code>,
-            <code>microphone</code>, <code>camera</code>,
-            <code>http_proxy</code> — is a separate user grant, checked at the
+            <code>microphone</code>, <code>stt</code>, <code>tts</code>,
+            <code>camera</code>, <code>http_proxy</code>,
+            <code>mediasync</code> — is a separate user grant, checked at the
             hub on every message rather than once at install.
           </p>
           <p class="road__tech">
@@ -232,6 +234,21 @@
             end. Now the roles invert — the phone hosts a
             <code>LocalOnlyHotspot</code> and the glasses join it — and the wire
             protocol, the decode, the overlays and freeze are unchanged.
+          </p>
+        </li>
+        <li>
+          <h3>Speech, in both directions</h3>
+          <p>
+            A plugin could take words from your mouth and put words on your
+            display; it could not say anything. <code>tts</code> is the other
+            half — read aloud by the neural voice already inside the glasses, so
+            nothing is sent anywhere and it works with the phone in a pocket.
+          </p>
+          <p class="road__tech">
+            Voice and speed stay in your assistant settings: one choice for
+            everything that speaks on the device. Opening the microphone
+            silences speech, or the glasses would record their own voice into
+            your dictation.
           </p>
         </li>
         <li>
@@ -585,9 +602,10 @@
 
   <p class="grid__foot reveal">
     Installation alone grants nothing. <b>Surfaces</b>, <b>microphone</b>,
-    <b>camera</b>, and <b>HTTP proxy</b> are approved one by one, per plugin,
-    keyed to its package, its plugin id, and its signing certificate — and
-    checked at the hub on every message, not at install time.
+    <b>speech to text</b>, <b>text to speech</b>, <b>camera</b>, <b>photos</b>
+    and <b>HTTP proxy</b> are approved one by one, per plugin, keyed to its
+    package, its plugin id, and its signing certificate — and checked at the hub
+    on every message, not at install time.
   </p>
 </section>
 <!-- ────────────────────────  GET STARTED  ──────────────────────── -->
@@ -627,7 +645,7 @@
 
 <span class="k">dependencies</span> {
     <span class="f">implementation</span>(
-        <span class="s">"com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.9.0"</span>
+        <span class="s">"com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.11.0"</span>
     )
 }</code></pre>
       </div>

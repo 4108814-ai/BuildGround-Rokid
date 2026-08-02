@@ -255,9 +255,10 @@ NexusUi.uninstallCard(this, "My Plugin") {
   approves the requested capabilities in **Rokid Nexus → Settings → Plugin
   access** (or the Store flow). Pending/denied/disabled plugins are not
   launchable.
-- Updating a descriptor's requested capability set, including adding `stt`,
-  returns the existing grant to Pending by design. The user must review and
-  approve the new set before the plugin is launchable again.
+- Updating a descriptor's requested capability set — adding `stt` or `tts` to a
+  plugin that already had `surfaces`, say — returns the existing grant to
+  Pending by design. The user must review and approve the new set before the
+  plugin is launchable again.
 - SharedPreferences live in the plugin's own package; name the main file
   `nexus_plugin_<id>`.
 - Uninstalling removes the plugin and all its state; the hub's grant becomes

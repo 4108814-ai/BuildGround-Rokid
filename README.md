@@ -118,8 +118,8 @@ releases, the glasses update over the Rokid link, plugins update through the
 Store.
 
 Trust model: any APK may request bus access, but capabilities (`surfaces`,
-`http_proxy`, `microphone`, `camera`) are granted per plugin by the user, keyed
-to package + plugin id + signing certificate. Installation alone never grants
+`http_proxy`, `microphone`, `stt`, `tts`, `camera`, `mediasync`) are granted per
+plugin by the user, keyed to package + plugin id + signing certificate. Installation alone never grants
 anything. Developer mode adds package, signer, protocol, and route diagnostics
 plus a live bus inspector.
 
@@ -131,7 +131,7 @@ A plugin is a headless phone APK against the published SDK:
 repositories { maven("https://jitpack.io") }
 
 dependencies {
-    implementation("com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.9.0")
+    implementation("com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.11.0")
 }
 ```
 

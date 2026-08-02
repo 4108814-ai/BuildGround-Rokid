@@ -1,6 +1,6 @@
 # Rokid Nexus — Roadmap
 
-Status: 2026-08-01. This file is the public roadmap and the source the
+Status: 2026-08-02. This file is the public roadmap and the source the
 [project site](https://rokid-nexus.anezium.me) renders. The founding product
 argument lives in [VISION.md](VISION.md); what actually shipped in each release
 lives in [CHANGELOG.md](CHANGELOG.md).
@@ -16,8 +16,9 @@ shipped until it has run on real hardware.
 
 Any APK may bind to the hub; installing one grants it nothing. A plugin is
 identified by **package + plugin id + signing certificate**, and each capability
-— `surfaces`, `microphone`, `camera`, `http_proxy` — is a separate user grant,
-checked at the hub on every message rather than once at install time.
+— `surfaces`, `microphone`, `stt`, `tts`, `camera`, `http_proxy`, `mediasync` —
+is a separate user grant, checked at the hub on every message rather than once
+at install time.
 
 Wake-on-message means a plugin does not have to be running: the hub binds it
 awake when traffic arrives (measured at ~1.6 s including cold start) and it goes
@@ -86,6 +87,23 @@ this. Now the roles invert — the phone hosts a `LocalOnlyHotspot` and the
 glasses join it — and the wire protocol, the decode, the overlays and freeze are
 unchanged.
 
+### Speech, in both directions
+
+Speech-to-text was half a conversation: a plugin could take words from the
+wearer's mouth and put words on their display, but it could not say anything.
+`tts` is the other half — a capability, granted per plugin and revocable like
+the rest, that reads text aloud on the glasses.
+
+The engine is the one already inside the glasses, the same neural voice the
+Rokid assistant uses. Nothing is sent anywhere, nothing needs a network, and it
+works with the phone in a pocket. Voice and speed stay in the wearer's assistant
+settings: they are one choice for everything that speaks on the device, so no
+plugin — and not the hub either — may change them.
+
+Reading and dictating share one pair of ears, so opening the microphone
+silences whatever is being spoken. Otherwise the glasses record their own voice
+into the transcript, and a plugin answering a message would be answering itself.
+
 ### Waking a dark display, without owning it
 
 A notice worth it can pulse the display awake: at most one wake every five
@@ -151,7 +169,7 @@ already exists — which is the point.
 | Idea | What it needs |
 |---|---|
 | Live captions and translation | audio lease · blocked on continuous speech |
-| A voice assistant | audio lease · blocked on continuous speech |
+| A voice assistant | audio lease · speaks back through `tts` · blocked on continuous speech |
 | Teleprompter, glanceables | today's surface kinds, no protocol work |
 | A visual assistant, FoodFacts | camera capability, shipped |
 | Sport HUD, CGM glucose | activity tier + a small protocol addition |

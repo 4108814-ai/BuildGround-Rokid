@@ -79,8 +79,9 @@ Descriptor metadata keys are `com.anezium.rokidbus.plugin.ID`,
 `.DISPLAY_NAME`, `.API_VERSION`, `.CAPABILITIES`, `.RECEIVE_PREFIXES`,
 `.SETTINGS_ACTIVITY`, and `.LAUNCHABLE`. Plugin IDs match
 `[a-z][a-z0-9._-]{2,63}`. Capability values are `surfaces`, `microphone`, `stt`,
-`http_proxy`, and `camera`; unknown values invalidate the descriptor. Grants are keyed by
-package, plugin ID, and signing digest and are never implied by installation.
+`tts`, `http_proxy`, `camera`, and `mediasync`; unknown values invalidate the
+descriptor. Grants are keyed by package, plugin ID, and signing digest and are
+never implied by installation.
 
 Legacy `register(clientId, prefixes, callback)` remains ABI-compatible for
 same-UID hub internals and explicit debug-probe compatibility. Release hubs

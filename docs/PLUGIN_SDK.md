@@ -19,7 +19,7 @@ resolved transitively.
 repositories { maven("https://jitpack.io") }
 
 dependencies {
-    implementation("com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.9.0")
+    implementation("com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.11.0")
 }
 ```
 
@@ -54,12 +54,15 @@ does not approve it.
 ```
 
 Plugin IDs use `[a-z][a-z0-9._-]{2,63}`. Requested capabilities are `surfaces`,
-`http_proxy`, `microphone`, `stt`, and `camera`. Camera paths are protected by the
-approved signer-bound grant. `microphone` is grantable from the phone UI for any
-plugin that requests it (see §3.1); the plugin needs no Android `RECORD_AUDIO`
-permission — glasses-microphone PCM reaches the plugin over the hub, not through
-the phone's own recorder. `stt` is a separate grant for hub-produced transcript
-text and does not require the plugin to request raw `microphone` access.
+`http_proxy`, `microphone`, `stt`, `tts`, `camera`, and `mediasync`. Camera paths
+are protected by the approved signer-bound grant. `microphone` is grantable from
+the phone UI for any plugin that requests it (see §3.1); the plugin needs no
+Android `RECORD_AUDIO` permission — glasses-microphone PCM reaches the plugin
+over the hub, not through the phone's own recorder. `stt` is a separate grant for
+hub-produced transcript text and does not require the plugin to request raw
+`microphone` access. `tts` is its opposite number, speech out rather than in
+(§3.3); it is likewise independent of `microphone`, since the plugin supplies
+text and never touches audio.
 
 ## 3. Implement the service
 

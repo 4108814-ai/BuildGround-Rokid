@@ -72,7 +72,7 @@ Copy `plugins/sample` as the canonical template. The hard rules:
 | Plugin id | 3–64 chars, `[a-z][a-z0-9._-]{2,63}` (lowercase start), unique on the device |
 | Display name | ≤ 80 chars |
 | API version | exactly **3** |
-| Capabilities | subset of `surfaces`, `http_proxy`, `microphone`, `stt`, `camera`, `mediasync` (`stt` grants hub-produced text without raw PCM; microphone needs no Android `RECORD_AUDIO` because PCM arrives over the hub; `mediasync` moves the wearer's captures to the phone gallery) |
+| Capabilities | subset of `surfaces`, `http_proxy`, `microphone`, `stt`, `tts`, `camera`, `mediasync` (`stt` grants hub-produced text without raw PCM; microphone needs no Android `RECORD_AUDIO` because PCM arrives over the hub; `tts` speaks text out of the glasses; `mediasync` moves the wearer's captures to the phone gallery) |
 | Receive prefixes | non-empty, normalized, within your authorized namespace `/plugin/<id>/…` |
 | Signer | exactly one current signing certificate |
 | UID | not shared with another discovered plugin |
@@ -121,6 +121,7 @@ Paths a plugin can **send to** (gated by capability):
 | `/http/request` → `/http/request/reply` | `http_proxy` | Phone-side HTTP proxy (strict policy, §9) |
 | `/audio/lease/acquire`, `/audio/lease/release` (+ `/reply` suffixes), `/audio/frames`, `/audio/lease/revoked` | `microphone` | Glasses mic lease + 16 kHz mono PCM frames. Use the SDK's `nexusAudioSession(callbacks)` rather than these paths directly. |
 | `/stt/session/start`, `/stt/session/stop` (+ replies), `/stt/state`, `/stt/partial`, `/stt/final`, `/stt/session/ended` | `stt` | Hub speech-to-text, targeted to the verified session binder. Use `nexusSpeechSession(callbacks)`; never log transcripts. |
+| `/tts/speak`, `/tts/stop` | `tts` | Speech out of the glasses. Use `nexusTtsSession(callbacks)`. `/tts/started` and `/tts/done` are **receive-only** — declare exactly those two in RECEIVE_PREFIXES, not `/tts`. Text is capped at 1024 characters, five commands per second, one utterance at a time on the glasses. Voice and speed belong to the wearer's Rokid assistant settings; nothing may change them. |
 | `/camera/freeze/result`, `/camera/overlay`, `/camera/link/offer` | `camera` | Camera platform sends (signer/grant-bound). `/camera/link/offer` is bidirectional so an approved camera plugin can advertise a reverse transport role. `/camera/session/state` and `/camera/freeze/image/chunk` remain **receive-only** (declare them in RECEIVE_PREFIXES); sending them is rejected |
 | `/mediasync/settings`, `/mediasync/now` | `mediasync` | Photo sync control: partial settings updates (`autoSyncOnCharge`, `deleteAfterSync`; an empty request is a refresh) and a manual "sync now". `/mediasync/status` is **receive-only** (declare it in RECEIVE_PREFIXES); every other `/mediasync/…` path is hub-to-hub and rejected if you send it |
 | `/plugin/<yourId>/…` | — | Your private namespace (must match your declared receive prefixes) |
