@@ -26,6 +26,9 @@ import com.anezium.rokidbus.client.plugin.NexusSpeechSession
 import com.anezium.rokidbus.client.plugin.NexusSpeechState
 import com.anezium.rokidbus.client.plugin.NexusSpeechStopReason
 import com.anezium.rokidbus.client.plugin.NexusSurfaceSession
+import com.anezium.rokidbus.client.plugin.NexusTtsCallbacks
+import com.anezium.rokidbus.client.plugin.NexusTtsDoneReason
+import com.anezium.rokidbus.client.plugin.NexusTtsSession
 import com.anezium.rokidbus.shared.ImageSurfaceContract
 import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
@@ -57,6 +60,7 @@ class HelloPluginService : NexusPluginService() {
     private val state = HelloPluginState()
     private var surface: NexusSurfaceSession? = null
     private var speech: NexusSpeechSession? = null
+    private var tts: NexusTtsSession? = null
     private var stopSpeechWhenStarted = false
     private var showingImage = false
     private var pinStep = PIN_HIDDEN
@@ -91,6 +95,15 @@ class HelloPluginService : NexusPluginService() {
             if (state.onSpeechStopped(reason, error)) render(show = false)
         }
     }
+    private val ttsCallbacks = object : NexusTtsCallbacks {
+        override fun onTtsStarted(utteranceId: String) {
+            log("TTS demo started")
+        }
+
+        override fun onTtsDone(utteranceId: String, reason: NexusTtsDoneReason) {
+            log("TTS demo done reason=$reason")
+        }
+    }
 
     override fun onNexusOpen() {
         state.resetToMenu()
@@ -110,6 +123,8 @@ class HelloPluginService : NexusPluginService() {
         stopSpeechWhenStarted = true
         speech?.stop()
         speech = null
+        tts?.close()
+        tts = null
         stopSpeechWhenStarted = false
         surface?.hide()
         surface = null
@@ -140,6 +155,7 @@ class HelloPluginService : NexusPluginService() {
                 when (state.activate()) {
                     HelloPluginAction.RENDER -> cycleDemoHud()
                     HelloPluginAction.START_SPEECH -> startSpeech()
+                    HelloPluginAction.SPEAK_TTS -> speakDemoLine()
                     HelloPluginAction.STOP_SPEECH -> {
                         stopSpeechWhenStarted = true
                         speech?.stop()
@@ -185,6 +201,12 @@ class HelloPluginService : NexusPluginService() {
         if (result != NexusSdkResult.SENT) {
             speech = null
         }
+    }
+
+    private fun speakDemoLine() {
+        val session = tts ?: nexusTtsSession(ttsCallbacks)?.also { tts = it }
+        val result = session?.speak("Hello from Rokid Nexus.")
+        if (result != NexusSdkResult.SENT) log("TTS demo refused: $result")
     }
 
     private fun showBundledImage(): Boolean {

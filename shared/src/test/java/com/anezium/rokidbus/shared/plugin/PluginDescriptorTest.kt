@@ -152,6 +152,27 @@ class PluginDescriptorTest {
     }
 
     @Test
+    fun `tts descriptor and receive prefix require tts capability`() {
+        val receive = "/system/plugin,/plugin/hello.plugin,/tts"
+        val withTts = validMetadata() + mapOf(
+            BusConstants.META_PLUGIN_CAPABILITIES to "tts",
+            BusConstants.META_PLUGIN_RECEIVE_PREFIXES to receive,
+        )
+        val descriptor = PluginDescriptorParser.parse(withTts)
+        assertTrue(descriptor is PluginDescriptorParseResult.Valid)
+        assertEquals(
+            setOf(PluginCapability.TTS),
+            (descriptor as PluginDescriptorParseResult.Valid).descriptor.requestedCapabilities,
+        )
+        assertEquals(
+            PluginDescriptorParseResult.Invalid("RECEIVE_PREFIX_OUTSIDE_NAMESPACE"),
+            PluginDescriptorParser.parse(
+                withTts + (BusConstants.META_PLUGIN_CAPABILITIES to "surfaces"),
+            ),
+        )
+    }
+
+    @Test
     fun `conflicting duplicate metadata is rejected`() {
         val entries = validMetadata().entries.map { it.key to it.value } +
             (BusConstants.META_PLUGIN_ID to "other")

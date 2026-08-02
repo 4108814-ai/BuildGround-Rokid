@@ -4,6 +4,7 @@ enum class PluginCapability(val wireValue: String) {
     SURFACES("surfaces"),
     MICROPHONE("microphone"),
     STT("stt"),
+    TTS("tts"),
     HTTP_PROXY("http_proxy"),
     CAMERA("camera"),
     MEDIA_SYNC("mediasync"),

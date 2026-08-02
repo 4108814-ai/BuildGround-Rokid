@@ -56,6 +56,10 @@ object BusPaths {
     const val ACTIVITY_END = "/activity/end"
     const val ACTIVITY_ACTION = "/activity/action"
     const val ACTIVITY_CLOSED = "/activity/closed"
+    const val TTS_SPEAK = "/tts/speak"
+    const val TTS_STOP = "/tts/stop"
+    const val TTS_STARTED = "/tts/started"
+    const val TTS_DONE = "/tts/done"
     const val LAUNCHER_LIST = "/launcher/list"
     const val LAUNCHER_GLYPHS = "/launcher/glyphs"
     const val LAUNCHER_OPEN = "/launcher/open"
@@ -148,6 +152,7 @@ object BusCapabilityBits {
     const val NOTICE_SURFACE = 1 shl 6
     const val ACTIVITY_SURFACE = 1 shl 7
     const val PHONE_ASSISTED_SETUP = 1 shl 8
+    const val TTS = 1 shl 9
 }
 
 object LinkStateBits {

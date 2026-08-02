@@ -14,7 +14,7 @@ class HelloPluginStateTest {
     fun `selection wraps once in either direction`() {
         val state = HelloPluginState()
         state.move(-1)
-        assertEquals(3, state.selectedIndex)
+        assertEquals(4, state.selectedIndex)
         state.move(1)
         assertEquals(0, state.selectedIndex)
     }
@@ -39,6 +39,16 @@ class HelloPluginStateTest {
             assertTrue("✓" in state.presentation().lines[index])
             assertEquals(HelloPluginMode.MENU, state.mode)
         }
+    }
+
+    @Test
+    fun `speak row triggers the one-line TTS demo without leaving the menu`() {
+        val state = HelloPluginState()
+        repeat(3) { state.move(1) }
+
+        assertEquals(HelloPluginAction.SPEAK_TTS, state.activate())
+        assertEquals(HelloPluginMode.MENU, state.mode)
+        assertTrue("✓" in state.presentation().lines[3])
     }
 
     @Test

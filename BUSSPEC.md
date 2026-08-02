@@ -1601,6 +1601,74 @@ such plugins rather than degrading transparently. Adding `stt` to an existing
 plugin's requested capability set also returns its signer-bound grant to
 Pending until the user re-approves it.
 
+## TTS protocol v1
+
+Text-to-speech is a separate capability whose renderer lives behind the
+glasses hub. A plugin requests `tts` and may receive `/tts`; both command paths
+require an approved `tts` grant and an attached glasses hub that advertises
+`ttsVersion:1`.
+
+The plugin sends JSON with no binary attachment:
+
+- `/tts/speak` payload `{"utteranceId":"<opaque>","text":"Hello"}`.
+  `utteranceId` is the sender's name for this utterance — a message key, a row
+  id, anything it already uses — and comes back on every event about it, so an
+  answer never has to be matched by timing. It must be nonblank and at most 64
+  characters; the SDK invents one when the caller does not care. Newline runs
+  in `text` become spaces, then the text is trimmed. The normalized text must
+  be nonblank and at most 500 characters. That limit is a ceiling, not a
+  suggestion: at the rate the glasses speak, 500 characters is already about
+  half a minute of talking at someone who did not ask for it.
+- `/tts/stop` payload `{"utteranceId":"<opaque>"}`. Only the plugin that owns
+  the current matching utterance can stop it; stale, wrong, or differently
+  owned IDs have no effect.
+
+The phone validates and normalizes each command, injects the verified
+`ownerPluginId`, and routes it to the active glasses transport. A plugin never
+supplies or controls that owner. The glasses hub assigns a separate private
+UUID when calling the ROM engine, so a plugin utterance ID can never address
+another plugin's engine request.
+
+The glasses send owner-scoped events back through the phone. The phone removes
+the routing owner and delivers each event only to the live callback binder for
+that approved plugin:
+
+- `/tts/started` payload `{"utteranceId":"<opaque>"}`.
+- `/tts/done` payload
+  `{"utteranceId":"<opaque>","reason":"COMPLETED"}`. Reason is exactly
+  `COMPLETED`, `STOPPED`, `PREEMPTED`, or `UNAVAILABLE`.
+
+Every accepted speak produces exactly one `/tts/done`, including a request for
+which the ROM service cannot be bound or dies during playback. A new accepted
+speak while one is current reports `PREEMPTED` for the old utterance; the ROM
+engine itself performs the corresponding single-slot preemption. A successful
+owner stop reports `STOPPED`. Normal ROM completion reports `COMPLETED`.
+Terminal events produced during a transient phone-link loss remain queued on
+the glasses and are retried in order when either control transport reconnects.
+
+The glasses hub binds lazily to
+`com.rokid.os.sprite.assistserver/com.rokid.os.sprite.tts.TtsService` with action
+`com.rokid.os.sprite.tts.TTS_SERVICE`. Package visibility for that service is a
+required part of the glasses manifest. The hub does not call `updateTtsParam`,
+change voice or speed, or write system properties; those settings belong to
+the device assistant.
+
+Speak and stop share a per-plugin budget of five commands in any one-second
+window. Invalid shapes, binary payloads, overlong ids, or invalid normalized
+text return `INVALID_TTS`; budget exhaustion returns `TTS_RATE_LIMITED`. A
+plugin whose `tts` grant is missing or not yet approved is denied
+`CAPABILITY_REQUIRED_TTS`, exactly as every other capability answers, so a
+forgotten grant never reads as broken hardware. `CAPABILITY_NOT_AVAILABLE` is
+reserved for the case where the grant is in order but nothing can speak: no
+glasses attached, no renderer advertised, or the link dropped under the
+command.
+
+TTS is additive and the plugin API remains version 3; there is no AIDL change.
+The glasses capability bit is `512`, and the capabilities payload carries
+`ttsVersion`. The phone routes on the advertised renderer rather than on the
+ROM implementation behind it, which is what leaves room for speech to be
+produced somewhere else later without a plugin noticing.
+
 ## Appendix: historical protocol versions
 
 Everything in this appendix is historical and must not be implemented as the

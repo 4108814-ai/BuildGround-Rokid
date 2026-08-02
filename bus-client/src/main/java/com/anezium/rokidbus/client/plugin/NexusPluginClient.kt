@@ -29,6 +29,7 @@ class NexusPluginClient internal constructor(
     private val seenEventIdSet = linkedSetOf<String>()
     private val audioSessionLock = Any()
     private val speechSessionLock = Any()
+    private val ttsSessionLock = Any()
     private var registrationState = PluginRegistrationResult.REGISTRATION_FAILED
     private var opened = false
     private var closed = false
@@ -37,6 +38,8 @@ class NexusPluginClient internal constructor(
     private var audioSessionApiUsed = false
     private var registeredSpeechSession: NexusSpeechSession? = null
     private var speechSessionApiUsed = false
+    private var registeredTtsSession: NexusTtsSession? = null
+    private var ttsSessionApiUsed = false
     @Volatile private var currentLinkState = 0
     @Volatile private var hubCapabilities = 0
 
@@ -163,6 +166,11 @@ class NexusPluginClient internal constructor(
     val supportsActivitySurface: Boolean
         get() = hubCapabilities and BusCapabilityBits.ACTIVITY_SURFACE != 0
 
+    /** Whether the current glasses/link announced TTS protocol v1. */
+    val supportsTts: Boolean
+        get() = currentLinkState and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) != 0 &&
+            hubCapabilities and BusCapabilityBits.TTS != 0
+
     fun startActivity(activity: NexusActivity): NexusSdkResult {
         activityPreflight()?.let { return it }
         val payload = activity.toStartPayload()
@@ -239,6 +247,8 @@ class NexusPluginClient internal constructor(
     internal fun isApprovedForAudio(): Boolean = !closed && isApproved
 
     internal fun isApprovedForSpeech(): Boolean = !closed && isApproved
+
+    internal fun isApprovedForTts(): Boolean = !closed && isApproved
 
     internal fun registerAudioSession(session: NexusAudioSession): Boolean =
         synchronized(audioSessionLock) {
@@ -332,6 +342,48 @@ class NexusPluginClient internal constructor(
         )
     }
 
+    internal fun registerTtsSession(session: NexusTtsSession): Boolean =
+        synchronized(ttsSessionLock) {
+            if (closed || registeredTtsSession?.let { it !== session } == true) {
+                false
+            } else {
+                registeredTtsSession = session
+                ttsSessionApiUsed = true
+                true
+            }
+        }
+
+    internal fun unregisterTtsSession(session: NexusTtsSession) {
+        synchronized(ttsSessionLock) {
+            if (registeredTtsSession === session) registeredTtsSession = null
+        }
+    }
+
+    internal fun sendTtsSpeak(
+        session: NexusTtsSession,
+        id: String,
+        payload: JSONObject,
+    ): Boolean {
+        if (synchronized(ttsSessionLock) { registeredTtsSession !== session }) return false
+        return send(BusPaths.TTS_SPEAK, id, payload)
+    }
+
+    internal fun sendTtsStop(
+        session: NexusTtsSession,
+        id: String,
+        utteranceId: String,
+    ): Boolean {
+        if (synchronized(ttsSessionLock) { registeredTtsSession !== session }) return false
+        return send(BusPaths.TTS_STOP, id, JSONObject().put("utteranceId", utteranceId))
+    }
+
+    internal fun releaseTtsSession() {
+        currentTtsSession()?.terminate(
+            reason = NexusTtsDoneReason.STOPPED,
+            stopCurrent = true,
+        )
+    }
+
     override fun onRegistrationState(result: Int) {
         if (closed) return
         registrationState = result
@@ -365,6 +417,10 @@ class NexusPluginClient internal constructor(
                 reason = NexusSpeechStopReason.ERROR,
                 stopActiveSession = false,
             )
+            terminateTtsSession(
+                reason = NexusTtsDoneReason.UNAVAILABLE,
+                stopCurrent = false,
+            )
         }
         callbacks.onRegistrationState(result)
         if (result != PluginRegistrationResult.APPROVED && opened) {
@@ -386,7 +442,15 @@ class NexusPluginClient internal constructor(
     }
 
     override fun onMessage(path: String, id: String, payload: JSONObject) {
-        if (closed || payload.optString("pluginId") != pluginId || !rememberEvent(id)) return
+        if (closed) return
+        if (path == BusPaths.TTS_STARTED || path == BusPaths.TTS_DONE) {
+            if (!rememberEvent(id)) return
+            if (!routeTtsMessage(path, payload) && isApproved) {
+                callbacks.onMessage(path, id, payload)
+            }
+            return
+        }
+        if (payload.optString("pluginId") != pluginId || !rememberEvent(id)) return
         if (routeSpeechMessage(path, payload)) return
         if (routeAudioMessage(path, payload)) return
         if (path == BusPaths.NOTICE_INPUT) {
@@ -455,6 +519,7 @@ class NexusPluginClient internal constructor(
                 opened = false
                 releaseAudioSession()
                 releaseSpeechSession()
+                releaseTtsSession()
                 callbacks.onClose()
             }
             BusPaths.PLUGIN_INPUT -> if (opened && isApproved) {
@@ -507,6 +572,10 @@ class NexusPluginClient internal constructor(
             reason = NexusSpeechStopReason.ERROR,
             stopActiveSession = false,
         )
+        terminateTtsSession(
+            reason = NexusTtsDoneReason.UNAVAILABLE,
+            stopCurrent = false,
+        )
         if (opened) {
             opened = false
             callbacks.onClose()
@@ -552,6 +621,18 @@ class NexusPluginClient internal constructor(
         return consume
     }
 
+    private fun routeTtsMessage(path: String, payload: JSONObject): Boolean {
+        if (path != BusPaths.TTS_STARTED && path != BusPaths.TTS_DONE) return false
+        val (session, consume) = synchronized(ttsSessionLock) {
+            registeredTtsSession to ttsSessionApiUsed
+        }
+        when (path) {
+            BusPaths.TTS_STARTED -> session?.onStarted(payload)
+            BusPaths.TTS_DONE -> session?.onDone(payload)
+        }
+        return consume
+    }
+
     private fun routeSpeechBinary(path: String): Boolean {
         if (!isSpeechPath(path)) return false
         return synchronized(speechSessionLock) { speechSessionApiUsed }
@@ -572,6 +653,9 @@ class NexusPluginClient internal constructor(
     private fun currentSpeechSession(): NexusSpeechSession? =
         synchronized(speechSessionLock) { registeredSpeechSession }
 
+    private fun currentTtsSession(): NexusTtsSession? =
+        synchronized(ttsSessionLock) { registeredTtsSession }
+
     private fun terminateAudioSession(
         reason: NexusAudioStopReason,
         releaseActiveLease: Boolean,
@@ -584,6 +668,13 @@ class NexusPluginClient internal constructor(
         stopActiveSession: Boolean,
     ) {
         currentSpeechSession()?.terminate(reason, stopActiveSession)
+    }
+
+    private fun terminateTtsSession(
+        reason: NexusTtsDoneReason,
+        stopCurrent: Boolean,
+    ) {
+        currentTtsSession()?.terminate(reason, stopCurrent)
     }
 
     private fun isSpeechPath(path: String): Boolean =

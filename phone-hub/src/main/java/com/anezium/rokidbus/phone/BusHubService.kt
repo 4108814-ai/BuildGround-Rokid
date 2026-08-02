@@ -54,6 +54,8 @@ import com.anezium.rokidbus.shared.PinSurfaceContract
 import com.anezium.rokidbus.shared.PinSurfaceValidationResult
 import com.anezium.rokidbus.shared.SetupPairingFailureReason
 import com.anezium.rokidbus.shared.SetupPairingOfferContract
+import com.anezium.rokidbus.shared.TtsContract
+import com.anezium.rokidbus.shared.TtsValidationResult
 import com.anezium.rokidbus.shared.plugin.PathRules
 import com.anezium.rokidbus.shared.plugin.PluginCapability
 import com.anezium.rokidbus.shared.plugin.PluginCapability.Companion.serialize
@@ -211,6 +213,7 @@ class BusHubService : Service() {
     private val debugImageSeq = AtomicLong(System.currentTimeMillis())
     private val externalSurfaceIds = ConcurrentHashMap<String, MutableSet<String>>()
     private val imageSurfaceRateLimiter = ImageSurfaceRateLimiter()
+    private val ttsRequestGate = PhoneTtsRequestGate()
     private val pluginBusJournal = busJournal
     private val sppLoopStarted = AtomicBoolean(false)
     private val audioLeaseArbitrator = SingleAudioLeaseArbitrator<AudioLease>()
@@ -262,6 +265,7 @@ class BusHubService : Service() {
     @Volatile private var remotePinSurfaceVersion = 0
     @Volatile private var remoteNoticeSurfaceVersion = 0
     @Volatile private var remoteActivitySurfaceVersion = 0
+    @Volatile private var remoteTtsVersion = 0
     @Volatile private var remoteMaxImageBytes = 0
     @Volatile private var remoteGlassesVersionName: String? = null
     @Volatile private var remoteGlassesSetupComplete = false
@@ -894,6 +898,10 @@ class BusHubService : Service() {
             deliverError(sender.replyBinder, envelope.id, decision.code)
             return
         }
+        if (envelope.path == BusPaths.TTS_SPEAK || envelope.path == BusPaths.TTS_STOP) {
+            handleLocalTts(envelope, senderUid, sender)
+            return
+        }
         if (
             envelope.path == BusPaths.PIN_SHOW || envelope.path == BusPaths.PIN_HIDE
         ) {
@@ -1171,6 +1179,11 @@ class BusHubService : Service() {
             cameraCompanionController.onRemoteEnvelope(envelope)
         ) {
             recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
+            return
+        }
+        if (envelope.path == BusPaths.TTS_STARTED || envelope.path == BusPaths.TTS_DONE) {
+            recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
+            handleRemoteTtsEvent(envelope)
             return
         }
         if (::pluginRegistry.isInitialized && pluginRegistry.handleRemote(envelope)) return
@@ -2173,6 +2186,106 @@ class BusHubService : Service() {
             }
         }.getOrDefault(false)
         mediaSyncCoordinator.onConsentChanged(consented)
+    }
+
+    private fun handleLocalTts(
+        envelope: BusEnvelope,
+        senderUid: Int,
+        sender: AuthorizedSender,
+    ) {
+        val principal = sender.principal
+        if (principal == null) {
+            rejectTts(envelope, senderUid, sender, TtsContract.ERROR_INVALID_TTS)
+            return
+        }
+        if (capabilities() and BusCapabilityBits.TTS == 0) {
+            rejectTts(
+                envelope,
+                senderUid,
+                sender,
+                TtsContract.ERROR_CAPABILITY_NOT_AVAILABLE,
+            )
+            return
+        }
+        when (
+            val result = ttsRequestGate.evaluate(
+                ownerPluginId = principal.descriptor.id,
+                path = envelope.path,
+                payload = envelope.payload,
+                hasBinary = envelope.binary != null,
+            )
+        ) {
+            is PhoneTtsGateResult.Rejected ->
+                rejectTts(envelope, senderUid, sender, result.code)
+            is PhoneTtsGateResult.Accepted -> {
+                val forwarded = envelope.copy(payload = result.payload)
+                val error = sendRemote(forwarded)
+                if (error == null) {
+                    recordLocalRoute(
+                        forwarded,
+                        senderUid,
+                        sender,
+                        PluginBusJournal.Verdict.OK,
+                    )
+                } else {
+                    rejectTts(
+                        envelope,
+                        senderUid,
+                        sender,
+                        TtsContract.ERROR_CAPABILITY_NOT_AVAILABLE,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun rejectTts(
+        envelope: BusEnvelope,
+        senderUid: Int,
+        sender: AuthorizedSender,
+        code: String,
+    ) {
+        recordLocalRoute(envelope, senderUid, sender, PluginBusJournal.Verdict.REJECTED, code)
+        deliverError(sender.replyBinder, envelope.id, code)
+    }
+
+    private fun handleRemoteTtsEvent(envelope: BusEnvelope) {
+        if (envelope.binary != null) {
+            log("tts event ignored path=${envelope.path} reason=${TtsContract.ERROR_INVALID_TTS}")
+            return
+        }
+        val routed = when (envelope.path) {
+            BusPaths.TTS_STARTED -> when (val result = TtsContract.validateStarted(envelope.payload)) {
+                is TtsValidationResult.Valid -> result.value to null
+                is TtsValidationResult.Invalid -> null
+            }
+            BusPaths.TTS_DONE -> when (val result = TtsContract.validateDone(envelope.payload)) {
+                is TtsValidationResult.Valid -> result.value
+                is TtsValidationResult.Invalid -> null
+            }
+            else -> null
+        }
+        if (routed == null) {
+            log("tts event ignored path=${envelope.path} reason=${TtsContract.ERROR_INVALID_TTS}")
+            return
+        }
+        val (request, reason) = routed
+        val ownerPluginId = request.ownerPluginId ?: return
+        val registration = registrations.firstOrNull { registration ->
+            registration.principal?.descriptor?.id == ownerPluginId &&
+                PluginCapability.TTS in registration.grantedCapabilities
+        }
+        val principal = registration?.principal
+        if (principal == null) {
+            log("tts event undelivered owner=$ownerPluginId reason=no_live_registration")
+            return
+        }
+        val payload = JSONObject()
+            .put("utteranceId", request.utteranceId)
+        reason?.let { payload.put("reason", it.name) }
+        if (!deliverExternalLifecycle(principal, envelope.path, envelope.id, payload)) {
+            log("tts event undelivered owner=$ownerPluginId path=${envelope.path}")
+        }
     }
 
     private fun resolveSender(senderUid: Int): AuthorizedSender {
@@ -4529,6 +4642,7 @@ class BusHubService : Service() {
         if (state and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) == 0) {
             if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.onLinkLost()
             remoteImageSurfaceVersion = 0
+            remoteTtsVersion = 0
             remoteMaxImageBytes = 0
             // remotePinSurfaceVersion and remoteActivitySurfaceVersion deliberately survive,
             // for the same reason as the setup state below: support is a property of the
@@ -4629,6 +4743,9 @@ class BusHubService : Service() {
         if (remoteActivitySurfaceVersion == ActivitySurfaceContract.VERSION) {
             capabilities = capabilities or BusCapabilityBits.ACTIVITY_SURFACE
         }
+        if (PhoneTtsCapabilityPolicy.isAvailable(remoteTtsVersion, linkState())) {
+            capabilities = capabilities or BusCapabilityBits.TTS
+        }
         // Unconditional: this build can always take a pairing offer off the glasses. Gating it on
         // link or session state would make the glasses read "no phone help available" during the
         // exact window where the offer is about to be sent.
@@ -4672,9 +4789,13 @@ class BusHubService : Service() {
         val activitySupported = advertised.protocolVersion == GlassesHubCapabilitiesContract.VERSION &&
             advertised.features and BusCapabilityBits.ACTIVITY_SURFACE != 0 &&
             advertised.activitySurfaceVersion == ActivitySurfaceContract.VERSION
+        val ttsSupported = advertised.protocolVersion == GlassesHubCapabilitiesContract.VERSION &&
+            advertised.features and BusCapabilityBits.TTS != 0 &&
+            advertised.ttsVersion == TtsContract.VERSION
         remotePinSurfaceVersion = if (pinSupported) PinSurfaceContract.VERSION else 0
         remoteNoticeSurfaceVersion = if (noticeSupported) NoticeSurfaceContract.VERSION else 0
         remoteActivitySurfaceVersion = if (activitySupported) ActivitySurfaceContract.VERSION else 0
+        remoteTtsVersion = if (ttsSupported) TtsContract.VERSION else 0
         remoteMaxImageBytes = if (imageSupported) advertised.maxImageBytes else 0
         updateRemoteGlassesAppState(
             advertised.versionName,
@@ -4711,6 +4832,7 @@ class BusHubService : Service() {
             "renderer capabilities image=$imageSupported pin=$pinSupported " +
                 "notice=${advertised.features and BusCapabilityBits.NOTICE_SURFACE != 0} " +
                 "activity=$activitySupported " +
+                "tts=$ttsSupported " +
                 "maxImageBytes=$remoteMaxImageBytes",
         )
         // Link bits may be unchanged; repeat the callback so clients refresh capabilities().

@@ -13,6 +13,7 @@ object PathRules {
         "/audio/lease/revoked",
     )
     private val sttReceivePrefixes = setOf("/stt")
+    private val ttsReceivePrefixes = setOf("/tts")
     private val cameraReceivePrefixes = setOf(
         BusPaths.CAMERA_SESSION_STATE,
         BusPaths.CAMERA_LINK_OFFER,
@@ -61,6 +62,7 @@ object PathRules {
     fun isDirectReply(path: String): Boolean = when (normalizeAbsolute(path)) {
         BusPaths.NOTICE_CLOSED, BusPaths.NOTICE_INPUT, BusPaths.NOTICE_ACTION,
         BusPaths.ACTIVITY_ACTION, BusPaths.ACTIVITY_CLOSED,
+        BusPaths.TTS_STARTED, BusPaths.TTS_DONE,
         -> true
         else -> false
     }
@@ -68,6 +70,7 @@ object PathRules {
     fun isOwnerScoped(path: String): Boolean = when (normalizeAbsolute(path)) {
         BusPaths.NOTICE_CLOSED, BusPaths.NOTICE_INPUT, BusPaths.NOTICE_ACTION,
         BusPaths.ACTIVITY_ACTION, BusPaths.ACTIVITY_CLOSED,
+        BusPaths.TTS_STARTED, BusPaths.TTS_DONE,
         -> true
         else -> matchesPrefix(path, "/system/plugin")
     }
@@ -80,6 +83,7 @@ object PathRules {
         -> PluginCapability.SURFACES
         "/audio/lease/acquire", "/audio/lease/release" -> PluginCapability.MICROPHONE
         "/stt/session/start", "/stt/session/stop" -> PluginCapability.STT
+        BusPaths.TTS_SPEAK, BusPaths.TTS_STOP -> PluginCapability.TTS
         "/http/request" -> PluginCapability.HTTP_PROXY
         BusPaths.CAMERA_LINK_OFFER,
         BusPaths.CAMERA_FREEZE_RESULT,
@@ -108,6 +112,9 @@ object PathRules {
         if (PluginCapability.STT in requestedCapabilities &&
             sttReceivePrefixes.any { matchesPrefix(normalized, it) || matchesPrefix(it, normalized) }
         ) return true
+        if (PluginCapability.TTS in requestedCapabilities &&
+            ttsReceivePrefixes.any { matchesPrefix(normalized, it) || matchesPrefix(it, normalized) }
+        ) return true
         if (PluginCapability.CAMERA in requestedCapabilities &&
             cameraReceivePrefixes.any { matchesPrefix(normalized, it) }
         ) return true
@@ -127,6 +134,9 @@ object PathRules {
         }
         if (sttReceivePrefixes.any { matchesPrefix(normalized, it) || matchesPrefix(it, normalized) }) {
             return PluginCapability.STT
+        }
+        if (ttsReceivePrefixes.any { matchesPrefix(normalized, it) || matchesPrefix(it, normalized) }) {
+            return PluginCapability.TTS
         }
         if (cameraReceivePrefixes.any { matchesPrefix(normalized, it) }) {
             return PluginCapability.CAMERA

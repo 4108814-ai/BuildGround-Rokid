@@ -411,6 +411,7 @@ enum class NexusSdkResult {
     CAPABILITY_NOT_AVAILABLE,
     INVALID_PAYLOAD,
     IMAGE_RATE_LIMITED,
+    TTS_RATE_LIMITED,
 }
 
 class NexusSurfaceSession internal constructor(

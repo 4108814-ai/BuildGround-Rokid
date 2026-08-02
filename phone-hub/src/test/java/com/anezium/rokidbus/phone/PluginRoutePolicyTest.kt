@@ -24,12 +24,22 @@ class PluginRoutePolicyTest {
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.MICROPHONE), "/audio/lease/acquire"))
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.STT), "/stt/session/start"))
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.STT), "/stt/session/stop"))
+        assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.TTS), "/tts/speak"))
+        assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.TTS), "/tts/stop"))
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.HTTP_PROXY), "/http/request"))
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/surface/update") is PluginRouteDecision.Denied)
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/pin/show") is PluginRouteDecision.Denied)
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/audio/lease/release") is PluginRouteDecision.Denied)
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/stt/session/start") is PluginRouteDecision.Denied)
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/stt/session/stop") is PluginRouteDecision.Denied)
+        assertEquals(
+            PluginRouteDecision.Denied("CAPABILITY_REQUIRED_TTS"),
+            PluginRoutePolicy.authorize(plugin(), "/tts/speak"),
+        )
+        assertEquals(
+            PluginRouteDecision.Denied("CAPABILITY_REQUIRED_TTS"),
+            PluginRoutePolicy.authorize(plugin(), "/tts/stop"),
+        )
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/http/request") is PluginRouteDecision.Denied)
     }
 

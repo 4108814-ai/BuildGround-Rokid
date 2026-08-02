@@ -14,6 +14,7 @@ internal enum class HelloPluginMode {
 internal enum class HelloPluginAction {
     RENDER,
     START_SPEECH,
+    SPEAK_TTS,
     STOP_SPEECH,
     STOP_SPEECH_AND_SHOW_MENU,
     SHOW_MENU,
@@ -29,7 +30,7 @@ internal data class HelloCardPresentation(
 )
 
 internal class HelloPluginState(
-    private val choices: List<String> = listOf("Hello", "SDK", "Open platform", DICTATION),
+    private val choices: List<String> = listOf("Hello", "SDK", "Open platform", SPEAK, DICTATION),
 ) {
     var selectedIndex: Int = 0
         private set
@@ -59,6 +60,9 @@ internal class HelloPluginState(
             if (choices[selectedIndex] == DICTATION) {
                 beginDictation()
                 HelloPluginAction.START_SPEECH
+            } else if (choices[selectedIndex] == SPEAK) {
+                activated = true
+                HelloPluginAction.SPEAK_TTS
             } else {
                 activated = true
                 HelloPluginAction.RENDER
@@ -241,6 +245,7 @@ internal class HelloPluginState(
 
     private companion object {
         const val DICTATION = "Dictation"
+        const val SPEAK = "Speak"
     }
 }
 

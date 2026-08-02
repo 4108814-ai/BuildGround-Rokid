@@ -84,6 +84,20 @@ class PathRulesTest {
     }
 
     @Test
+    fun `tts routes replies and receive namespace are capability conditioned`() {
+        val tts = setOf(PluginCapability.TTS)
+        assertEquals(PluginCapability.TTS, PathRules.requiredCapability("/tts/speak"))
+        assertEquals(PluginCapability.TTS, PathRules.requiredCapability("/tts/stop"))
+        assertTrue(PathRules.isAllowedReceivePrefix("/tts", "speaker", tts))
+        assertTrue(PathRules.isAllowedReceivePrefix("/tts/done", "speaker", tts))
+        assertFalse(PathRules.isAllowedReceivePrefix("/tts", "speaker", emptySet()))
+        assertEquals(PluginCapability.TTS, PathRules.requiredCapabilityForReceivePrefix("/tts"))
+        assertTrue(PathRules.isDirectReply("/tts/started"))
+        assertTrue(PathRules.isDirectReply("/tts/done"))
+        assertTrue(PathRules.isOwnerScoped("/tts/done"))
+    }
+
+    @Test
     fun `pin routes reuse the surfaces capability`() {
         assertEquals(PluginCapability.SURFACES, PathRules.requiredCapability("/pin/show"))
         assertEquals(PluginCapability.SURFACES, PathRules.requiredCapability("/pin/hide"))

@@ -13,13 +13,15 @@ class GlassesHubCapabilitiesContractTest {
         val capabilities = GlassesHubCapabilitiesContract.create(
             features = BusCapabilityBits.IMAGE_SURFACE or
                 BusCapabilityBits.PIN_SURFACE or
-                BusCapabilityBits.ACTIVITY_SURFACE,
+                BusCapabilityBits.ACTIVITY_SURFACE or
+                BusCapabilityBits.TTS,
             imageSurfaceVersion = ImageSurfaceContract.VERSION,
             pinSurfaceVersion = PinSurfaceContract.VERSION,
             activitySurfaceVersion = ActivitySurfaceContract.VERSION,
             maxImageBytes = ImageSurfaceContract.MAX_IMAGE_BYTES,
             versionName = " 1.0.1 ",
             setupComplete = true,
+            ttsVersion = TtsContract.VERSION,
         )
         val payload = GlassesHubCapabilitiesContract.toJson(capabilities)
             .put("futureField", true)
@@ -32,12 +34,15 @@ class GlassesHubCapabilitiesContractTest {
         assertEquals(
             BusCapabilityBits.IMAGE_SURFACE or
                 BusCapabilityBits.PIN_SURFACE or
-                BusCapabilityBits.ACTIVITY_SURFACE,
+                BusCapabilityBits.ACTIVITY_SURFACE or
+                BusCapabilityBits.TTS,
             parsed.features,
         )
         assertEquals(PinSurfaceContract.VERSION, parsed.pinSurfaceVersion)
         assertEquals(ActivitySurfaceContract.VERSION, parsed.activitySurfaceVersion)
+        assertEquals(TtsContract.VERSION, parsed.ttsVersion)
         assertEquals(128, BusCapabilityBits.ACTIVITY_SURFACE)
+        assertEquals(512, BusCapabilityBits.TTS)
     }
 
     @Test
@@ -70,6 +75,7 @@ class GlassesHubCapabilitiesContractTest {
         assertEquals(SetupStage.UNKNOWN, GlassesHubCapabilitiesContract.effectiveStage(parsed))
         assertEquals(0, parsed.pinSurfaceVersion)
         assertEquals(0, parsed.activitySurfaceVersion)
+        assertEquals(0, parsed.ttsVersion)
         assertFalse(versionlessPayload.has("versionName"))
         assertFalse(versionlessPayload.getBoolean("setupComplete"))
     }

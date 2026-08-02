@@ -31,6 +31,10 @@
         android:required="true" />
 
     <queries>
+        <package android:name="com.rokid.os.sprite.assistserver" />
+        <intent>
+            <action android:name="com.rokid.os.sprite.tts.TTS_SERVICE" />
+        </intent>
         <intent>
             <action android:name="com.anezium.rokidbus.action.CLIENT" />
         </intent>

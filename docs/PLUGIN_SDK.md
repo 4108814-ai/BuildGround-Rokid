@@ -955,6 +955,89 @@ consumed by the sticky typed route. Approval loss or direct client close
 terminates with `ERROR`, while the service's normal close/destruction calls
 stop first and terminates with `CANCELLED`.
 
+### 3.3 Text to speech
+
+Request `tts` and receive `/tts`:
+
+```xml
+<meta-data android:name="com.anezium.rokidbus.plugin.CAPABILITIES"
+    android:value="surfaces,tts" />
+<meta-data android:name="com.anezium.rokidbus.plugin.RECEIVE_PREFIXES"
+    android:value="/plugin/yourid,/system/plugin,/tts" />
+```
+
+After install, the user must grant **Text to speech** in **Rokid Nexus →
+Settings → Plugin access**. Adding `tts` to an existing descriptor changes the
+requested capability set and returns the plugin to Pending until the user
+re-approves it.
+
+Create one typed session with `nexusTtsSession(callbacks)` and speak a line:
+
+```kotlin
+class TtsPluginService : NexusPluginService() {
+    private var tts: NexusTtsSession? = null
+
+    override fun onNexusOpen() {
+        tts = nexusTtsSession(object : NexusTtsCallbacks {
+            override fun onTtsStarted(utteranceId: String) {
+                // The glasses began speaking this utterance.
+            }
+
+            override fun onTtsDone(
+                utteranceId: String,
+                reason: NexusTtsDoneReason,
+            ) {
+                // COMPLETED, STOPPED, PREEMPTED, or UNAVAILABLE.
+            }
+        })
+
+        when (tts?.speak("Hello from my Nexus plugin.")) {
+            NexusSdkResult.SENT -> Unit
+            NexusSdkResult.CAPABILITY_NOT_AVAILABLE -> Unit
+            NexusSdkResult.INVALID_PAYLOAD -> Unit
+            NexusSdkResult.TTS_RATE_LIMITED -> Unit
+            else -> Unit
+        }
+    }
+
+    override fun onNexusInput(event: NexusInputEvent) = Unit
+
+    override fun onNexusClose() {
+        tts?.close()
+        tts = null
+    }
+}
+```
+
+Every callback carries the `utteranceId` of the speech it is about. Pass your
+own to `speak(text, utteranceId)` — a message key, a row id, whatever you
+already use — and answers arrive already matched to what asked for them;
+omit it and the SDK invents one, which is enough when a plugin only ever says
+one thing at a time. Text is normalized by replacing newline runs with spaces
+and trimming, and must remain nonblank and no longer than 500 characters
+afterwards. Treat that limit as a ceiling rather than a target: a
+maximum-length utterance talks at the wearer for about half a minute.
+
+There is one renderer slot on the glasses. Calling `speak` again preempts the
+current utterance, whose callback receives `PREEMPTED`. `stop()` addresses only
+the session's current utterance and completes it with `STOPPED`; `close()` also
+stops current speech and finishes any tracked callback exactly once. Natural
+completion is `COMPLETED`. If the glasses renderer is absent, cannot bind, or
+restarts during the utterance, the result is `UNAVAILABLE`.
+
+Speak and stop share a five-commands-per-second budget, enforced both in the
+SDK and in the hub. `INVALID_PAYLOAD` means the text or id did not survive
+validation before anything was sent, `TTS_RATE_LIMITED` means the budget is
+spent, and `CAPABILITY_NOT_AVAILABLE` means the grant is fine but nothing can
+speak right now — no glasses, or no renderer on them. A missing grant is a
+different answer, `CAPABILITY_REQUIRED_TTS`, so a capability you forgot to
+request never looks like hardware that failed.
+
+Speech uses the voice and speed already configured on the glasses, in the
+Rokid assistant's own settings. Plugins cannot read or change them, and
+neither can the hub: they are the wearer's choice for every voice on the
+device, not a per-plugin one.
+
 ## 4. Approve and debug
 
 After installing the APK, open **Rokid Nexus → Settings → Plugin access**. Review

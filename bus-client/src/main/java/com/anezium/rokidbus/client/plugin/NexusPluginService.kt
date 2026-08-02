@@ -45,6 +45,9 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
     protected fun nexusSpeechSession(callbacks: NexusSpeechCallbacks): NexusSpeechSession? =
         client?.speechSession(callbacks)
 
+    protected fun nexusTtsSession(callbacks: NexusTtsCallbacks): NexusTtsSession? =
+        client?.ttsSession(callbacks)
+
     override fun onCreate() {
         super.onCreate()
         val descriptor = readOwnDescriptor()
@@ -67,6 +70,7 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
     override fun onDestroy() {
         client?.releaseAudioSession()
         client?.releaseSpeechSession()
+        client?.releaseTtsSession()
         client?.close()
         client = null
         sessionOpen = false
@@ -83,6 +87,7 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
     final override fun onClose() {
         client?.releaseAudioSession()
         client?.releaseSpeechSession()
+        client?.releaseTtsSession()
         try {
             onNexusClose()
         } finally {
@@ -106,6 +111,7 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
         }
         client?.releaseAudioSession()
         client?.releaseSpeechSession()
+        client?.releaseTtsSession()
         sessionOpen = false
         try {
             onNexusRegistrationState(result)

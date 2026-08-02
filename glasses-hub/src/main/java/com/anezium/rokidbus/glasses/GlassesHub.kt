@@ -34,6 +34,7 @@ import com.anezium.rokidbus.shared.SetupNoteContract
 import com.anezium.rokidbus.shared.SetupNoteMessage
 import com.anezium.rokidbus.shared.SetupPairingOfferContract
 import com.anezium.rokidbus.shared.SetupStage
+import com.anezium.rokidbus.shared.TtsContract
 import com.anezium.rokidbus.shared.plugin.PathRules
 import org.json.JSONArray
 import org.json.JSONObject
@@ -159,7 +160,10 @@ object GlassesHub {
         phoneConnected = connected || CxrBusBridge.isUp()
         if (!phoneConnected) clearRemotePhoneCapabilities()
         notifyLinkState()
-        if (connected) announceRendererCapabilities()
+        if (connected) {
+            TtsController.onPhoneLinkAvailable()
+            announceRendererCapabilities()
+        }
     }
 
     fun onCxrState(connected: Boolean) {
@@ -167,7 +171,10 @@ object GlassesHub {
         phoneConnected = connected || SppServerManager.isConnected()
         if (!phoneConnected) clearRemotePhoneCapabilities()
         notifyLinkState()
-        if (connected) announceRendererCapabilities()
+        if (connected) {
+            TtsController.onPhoneLinkAvailable()
+            announceRendererCapabilities()
+        }
     }
 
     fun onRemoteEnvelope(envelope: BusEnvelope) {
@@ -212,6 +219,7 @@ object GlassesHub {
         }
         if (PhoneBatteryController.handleEnvelope(envelope)) return
         appContext?.let { context ->
+            if (TtsController.handleEnvelope(context, envelope)) return
             if (PinController.handlePinEnvelope(envelope)) return
             if (NoticeController.handleNoticeEnvelope(context, envelope)) return
             if (ActivityController.handleActivityEnvelope(context, envelope)) return
@@ -378,6 +386,7 @@ object GlassesHub {
     private fun announceRendererCapabilities() {
         val context = appContext ?: return
         val onboarding = SelfArmOnboardingStore.snapshot(context)
+        val ttsAvailable = TtsController.isServiceAvailable(context)
         val onboardingState = SelfArmOnboardingStateMachine.evaluate(onboarding)
         val setupStage = when (onboardingState.stage) {
             SelfArmOnboardingState.Stage.COMPLETE -> SetupStage.COMPLETE
@@ -391,7 +400,8 @@ object GlassesHub {
             features = BusCapabilityBits.IMAGE_SURFACE or
                 BusCapabilityBits.PIN_SURFACE or
                 BusCapabilityBits.NOTICE_SURFACE or
-                BusCapabilityBits.ACTIVITY_SURFACE,
+                BusCapabilityBits.ACTIVITY_SURFACE or
+                (if (ttsAvailable) BusCapabilityBits.TTS else 0),
             imageSurfaceVersion = ImageSurfaceContract.VERSION,
             pinSurfaceVersion = PinSurfaceContract.VERSION,
             noticeSurfaceVersion = NoticeSurfaceContract.VERSION,
@@ -411,6 +421,7 @@ object GlassesHub {
             setupCompletionMode = onboarding.completionMode,
             coreReady = onboarding.coreReady,
             maintenanceReady = onboarding.maintenanceReady,
+            ttsVersion = if (ttsAvailable) TtsContract.VERSION else 0,
         )
         val error = sendRemote(
             BusEnvelope(
@@ -422,7 +433,8 @@ object GlassesHub {
             log(
                 "renderer capabilities announced imageVersion=${ImageSurfaceContract.VERSION} " +
                     "pinVersion=${PinSurfaceContract.VERSION} " +
-                    "activityVersion=${ActivitySurfaceContract.VERSION}",
+                    "activityVersion=${ActivitySurfaceContract.VERSION} " +
+                    "ttsVersion=${if (ttsAvailable) TtsContract.VERSION else 0}",
             )
         } else {
             log("renderer capability announcement failed code=$error")

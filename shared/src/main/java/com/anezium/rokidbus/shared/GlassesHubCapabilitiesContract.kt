@@ -24,6 +24,7 @@ data class GlassesHubCapabilities(
     val setupCompletionMode: String = "",
     val coreReady: Boolean = false,
     val maintenanceReady: Boolean = false,
+    val ttsVersion: Int = 0,
 )
 
 /** Additive glasses-to-phone hub capabilities payload. Unknown fields remain ignorable. */
@@ -54,6 +55,7 @@ object GlassesHubCapabilitiesContract {
         setupCompletionMode: String = "",
         coreReady: Boolean = false,
         maintenanceReady: Boolean = false,
+        ttsVersion: Int = 0,
     ): GlassesHubCapabilities = GlassesHubCapabilities(
         protocolVersion = VERSION,
         features = features,
@@ -74,6 +76,7 @@ object GlassesHubCapabilitiesContract {
         setupCompletionMode = SetupCompletionMode.normalize(setupCompletionMode),
         coreReady = coreReady,
         maintenanceReady = maintenanceReady,
+        ttsVersion = ttsVersion,
     )
 
     fun toJson(capabilities: GlassesHubCapabilities): JSONObject = JSONObject()
@@ -98,6 +101,7 @@ object GlassesHubCapabilitiesContract {
         )
         .put("coreReady", capabilities.coreReady)
         .put("maintenanceReady", capabilities.maintenanceReady)
+        .put("ttsVersion", capabilities.ttsVersion)
         .also { payload ->
             capabilities.versionName?.let { payload.put("versionName", it) }
         }
@@ -126,6 +130,7 @@ object GlassesHubCapabilitiesContract {
         ),
         coreReady = payload.optBoolean("coreReady", false),
         maintenanceReady = payload.optBoolean("maintenanceReady", false),
+        ttsVersion = payload.optInt("ttsVersion", 0),
     )
 
     fun effectiveStage(capabilities: GlassesHubCapabilities): String =
