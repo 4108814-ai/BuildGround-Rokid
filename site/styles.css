@@ -178,21 +178,11 @@ code {
   right: -14vw;
   width: min(1100px, 96vw);
   aspect-ratio: 1;
-  transform: translateY(-52%);
+  transform: translateY(-52%) translate3d(var(--px, 0px), var(--py, 0px), 0);
+  transition: transform 1.1s cubic-bezier(.2,.7,.3,1);
   z-index: -1;
 }
-.hero__field svg { width: 100%; height: 100%; }
-.hero__field .rings circle { fill: none; stroke: rgba(60, 240, 123, .14); stroke-width: 1; }
-.hero__field .rings circle:nth-child(2) { stroke-dasharray: 3 9; }
-.hero__field .mesh line { stroke: rgba(60, 240, 123, .17); stroke-width: 1; }
-.hero__field .nodes circle { fill: var(--glow); filter: drop-shadow(0 0 7px rgba(60, 240, 123, .85)); }
-.hero__field .nodes .n0 { animation: pulse 5.5s ease-in-out infinite; }
-.hero__field .nodes .n1 { animation: pulse 5.5s ease-in-out .6s infinite; }
-.hero__field .nodes .n2 { animation: pulse 5.5s ease-in-out 1.5s infinite; }
-.hero__field .nodes .n3 { animation: pulse 5.5s ease-in-out 2.4s infinite; }
-.hero__field .nodes .n4 { animation: pulse 5.5s ease-in-out 3.3s infinite; }
-
-@keyframes pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+.hero__field canvas { display: block; width: 100%; height: 100%; }
 
 .hero__inner {
   max-width: var(--wrap);
