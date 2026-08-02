@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.1.6
+
+- **Speech comes from your phone now, and it can finally pronounce your
+  language.** The last release had the glasses speak with their own engine.
+  That engine turned out to know English and Chinese and nothing else: handed a
+  French sentence it read the letters out one by one. It was never going to
+  learn — the Rokid assistant sounds right in French because it does not use
+  that engine either, it streams audio from the phone. So we do the same, with
+  the phone's own voice. It reaches the glasses over the Bluetooth audio they
+  already carry, which also means it follows your ears: put earbuds in and the
+  answer goes there instead. If your phone has no usable voice, the glasses
+  engine still takes over.
+
+- **A voice you choose, at a speed you choose.** On the glasses those were
+  device-wide settings shared with Rokid's own assistant, so we left them
+  alone. On the phone they are ours to set for each sentence, so Settings has a
+  Voice screen: pick the speed, pick among your phone's voices, and hear each
+  one before you keep it. Voices that need a network say so, because choosing
+  one sends what is spoken to be synthesised elsewhere.
+
+- **The answer no longer arrives a second after you read it.** Bluetooth audio
+  goes to sleep when nothing is playing, and waking it was being paid at the
+  worst possible moment — right when you were waiting to hear the reply.
+  Measured on real glasses, that cost 1.6 seconds. The link is now woken when
+  the microphone opens, which is when we already know an answer is coming, so
+  the wake-up hides behind your question: 6 milliseconds instead of 1600.
+
+- **The assistant speaks its answers, and knows what you have told ChatGPT.**
+  Ask it something and you hear the reply as well as see it, which is what a
+  thing you talk to should do. It also pulls in the memories and custom
+  instructions from the ChatGPT account you signed in with, instead of asking
+  you to paste them in by hand, so it starts out already knowing what that
+  account knows. Both can be turned off.
+
+- **A notice keeps the input it asked for, and hands the display back when it
+  leaves.** A banner that wanted your answer could have its taps taken by
+  whatever was underneath, and dismissing one did not always return the glasses
+  to standby.
+
 ## 1.1.5
 
 - **Plugins can speak.** A plugin could put words on your display and take
