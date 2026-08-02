@@ -31,6 +31,19 @@ internal class PhoneTtsPlayback(
 
     fun initialize() = output.initialize()
 
+    fun prewarm(): Boolean = synchronized(lock) {
+        if (!output.isReady || state.current() != null) return@synchronized false
+        output.prewarm()
+    }
+
+    fun availableVoices(locale: Locale): List<PhoneTtsVoiceOption> =
+        output.availableVoices(locale)
+
+    fun speakSample(text: String, locale: Locale): Boolean = synchronized(lock) {
+        if (!output.isReady || state.current() != null) return@synchronized false
+        output.speakSample(text, locale)
+    }
+
     fun speak(request: TtsSpeakRequest): Boolean = synchronized(lock) {
         if (!output.isReady) return@synchronized false
         val ownerPluginId = request.ownerPluginId ?: return@synchronized false
@@ -127,6 +140,16 @@ internal class PhoneTtsDispatcher(
     }
 
     fun initialize() = synchronized(dispatchLock) { playback.initialize() }
+
+    fun prewarm(): Boolean = synchronized(dispatchLock) { playback.prewarm() }
+
+    fun availableVoices(locale: Locale): List<PhoneTtsVoiceOption> =
+        synchronized(dispatchLock) { playback.availableVoices(locale) }
+
+    fun speakSample(text: String, locale: Locale): Boolean = synchronized(dispatchLock) {
+        if (hasRemoteInFlight()) return@synchronized false
+        playback.speakSample(text, locale)
+    }
 
     /**
      * A forwarded utterance is only cleared by the glasses reporting it done, so a link

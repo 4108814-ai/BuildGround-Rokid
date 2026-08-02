@@ -98,6 +98,7 @@ import java.io.IOException
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ConcurrentHashMap
@@ -3437,6 +3438,7 @@ class BusHubService : Service() {
         error?.let {
             log("TTS cancel on microphone open failed code=$error")
         }
+        if (::phoneTtsDispatcher.isInitialized) phoneTtsDispatcher.prewarm()
     }
 
     private fun releaseInternalAudio(tag: String) {
@@ -5328,6 +5330,19 @@ class BusHubService : Service() {
         internal fun onActivityPresentationPreferenceChanged() {
             activeInstance?.announcePhoneCapabilities()
         }
+
+        internal fun availablePhoneTtsVoices(locale: Locale): List<PhoneTtsVoiceOption> =
+            activeInstance
+                ?.takeIf { it::phoneTtsDispatcher.isInitialized }
+                ?.phoneTtsDispatcher
+                ?.availableVoices(locale)
+                ?: emptyList()
+
+        internal fun speakPhoneTtsSample(text: String, locale: Locale): Boolean =
+            activeInstance
+                ?.takeIf { it::phoneTtsDispatcher.isInitialized }
+                ?.phoneTtsDispatcher
+                ?.speakSample(text, locale) == true
 
         fun pluginCatalog(context: android.content.Context): PluginCatalog =
             activeInstance?.pluginRegistry?.catalog()

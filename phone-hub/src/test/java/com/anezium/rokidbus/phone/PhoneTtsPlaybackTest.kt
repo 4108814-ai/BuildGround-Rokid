@@ -8,11 +8,79 @@ import com.anezium.rokidbus.shared.TtsDoneReason
 import com.anezium.rokidbus.shared.TtsSpeakRequest
 import com.anezium.rokidbus.shared.TtsStopRequest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Locale
 
 class PhoneTtsPlaybackTest {
+    @Test
+    fun `prewarm is skipped when the engine is not ready`() {
+        val output = FakePhoneTtsOutput(ready = false)
+
+        assertFalse(playback(output, mutableListOf()).prewarm())
+
+        assertEquals(0, output.prewarmCount)
+    }
+
+    @Test
+    fun `prewarm is skipped while a plugin utterance is active`() {
+        val output = FakePhoneTtsOutput(ready = true)
+        val playback = playback(output, mutableListOf())
+        playback.speak(speak("alpha", "u1", "hello"))
+
+        assertFalse(playback.prewarm())
+
+        assertEquals(0, output.prewarmCount)
+    }
+
+    @Test
+    fun `reserved prewarm and sample ids emit no plugin events`() {
+        val output = FakePhoneTtsOutput(ready = true)
+        val started = mutableListOf<Pair<String, String>>()
+        val done = mutableListOf<TtsDoneEvent>()
+        PhoneTtsPlayback(
+            output = output,
+            emitStarted = { owner, id -> started += owner to id },
+            emitDone = done::add,
+        )
+
+        output.start(PhoneTtsEngine.PREWARM_UTTERANCE_ID)
+        output.done(PhoneTtsEngine.PREWARM_UTTERANCE_ID)
+        output.start(PhoneTtsEngine.SAMPLE_UTTERANCE_ID)
+        output.done(PhoneTtsEngine.SAMPLE_UTTERANCE_ID)
+
+        assertTrue(started.isEmpty())
+        assertTrue(done.isEmpty())
+    }
+
+    @Test
+    fun `sample refuses while a plugin utterance is active`() {
+        val output = FakePhoneTtsOutput(ready = true)
+        val playback = playback(output, mutableListOf())
+        playback.speak(speak("alpha", "u1", "hello"))
+
+        assertFalse(playback.speakSample("sample", Locale.US))
+
+        assertEquals(0, output.sampleCount)
+    }
+
+    @Test
+    fun `sample refuses while a glasses fallback utterance is active`() {
+        val output = FakePhoneTtsOutput(ready = false)
+        val dispatcher = PhoneTtsDispatcher(
+            playback = playback(output, mutableListOf()),
+            forwardToGlasses = { null },
+            emitDone = {},
+        )
+        dispatcher.dispatch(routedSpeak("alpha", "u1", "hello"))
+        output.ready = true
+
+        assertFalse(dispatcher.speakSample("sample", Locale.US))
+
+        assertEquals(0, output.sampleCount)
+    }
+
     @Test
     fun `preemption emits exactly one PREEMPTED and completion emits exactly one COMPLETED`() {
         val output = FakePhoneTtsOutput(ready = true)
@@ -209,6 +277,8 @@ class PhoneTtsPlaybackTest {
         private lateinit var listener: PhoneTtsOutput.Listener
         var initializeCount = 0
         var stopCount = 0
+        var prewarmCount = 0
+        var sampleCount = 0
         val spokenIds = mutableListOf<String>()
         val locales = mutableListOf<Locale>()
 
@@ -233,14 +303,26 @@ class PhoneTtsPlaybackTest {
             return speakResult
         }
 
+        override fun prewarm(): Boolean {
+            prewarmCount += 1
+            return ready
+        }
+
+        override fun availableVoices(locale: Locale): List<PhoneTtsVoiceOption> = emptyList()
+
+        override fun speakSample(text: String, locale: Locale): Boolean {
+            sampleCount += 1
+            return ready
+        }
+
         override fun stop() {
             stopCount += 1
         }
 
         override fun shutdown() = Unit
 
-        fun start() = listener.onStart(spokenIds.last())
-        fun done() = listener.onDone(spokenIds.last())
+        fun start(utteranceId: String = spokenIds.last()) = listener.onStart(utteranceId)
+        fun done(utteranceId: String = spokenIds.last()) = listener.onDone(utteranceId)
         fun stopped() = listener.onStopped(spokenIds.last())
         fun unavailable() = listener.onUnavailable(spokenIds.last())
     }

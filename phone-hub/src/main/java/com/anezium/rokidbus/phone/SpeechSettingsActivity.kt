@@ -19,6 +19,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import java.util.Locale
 import com.anezium.rokidbus.client.ui.BusTheme
 import com.anezium.rokidbus.client.ui.NexusUi
 import com.anezium.rokidbus.phone.speech.HubSecretStore
@@ -42,6 +43,7 @@ import com.anezium.rokidbus.phone.speech.TranscriptionLanguage
 class SpeechSettingsActivity : Activity() {
     private val settings by lazy { SpeechSettingsStore(this) }
     private val secrets by lazy { HubSecretStore(this) }
+    private val voiceSettings by lazy { PhoneTtsSettingsStore(this) }
 
     private var shownProvider: SpeechProvider = SpeechProvider.OPENAI
     private var keyEditing = false
@@ -66,6 +68,9 @@ class SpeechSettingsActivity : Activity() {
     private lateinit var testTranscriptView: TextView
     private lateinit var testCard: LinearLayout
     private lateinit var testActionMeta: TextView
+    private lateinit var voiceHeaderMeta: TextView
+    private lateinit var voiceSpeedHost: LinearLayout
+    private lateinit var voiceListHost: LinearLayout
     private var creditsMain: TextView? = null
     private var creditsSub: TextView? = null
     private var creditsBar: LinearLayout? = null
@@ -100,6 +105,9 @@ class SpeechSettingsActivity : Activity() {
         languageNoteHost = host()
         keyCardHost = host()
         keySectionHost = host()
+        voiceHeaderMeta = NexusUi.metaLabel(this, "", NexusUi.GREEN_DIM)
+        voiceSpeedHost = host()
+        voiceListHost = host()
 
         val content = NexusUi.contentColumn(this).apply {
             addView(sectionHeaderRow("Engine", engineHeaderMeta), NexusUi.block())
@@ -128,6 +136,12 @@ class SpeechSettingsActivity : Activity() {
             addView(sectionHeaderRow("Try it", readinessValue), NexusUi.block())
             addView(BusTheme.gap(this@SpeechSettingsActivity, 12))
             addView(dictationCard(), NexusUi.block())
+
+            // Everything above is how the glasses listen. This is how they answer.
+            addView(BusTheme.gap(this@SpeechSettingsActivity, 28))
+            addView(sectionHeaderRow("Voice", voiceHeaderMeta), NexusUi.block())
+            addView(BusTheme.gap(this@SpeechSettingsActivity, 12))
+            addView(voiceCard(), NexusUi.block())
         }
 
         val scroll = ScrollView(this).apply {
@@ -181,7 +195,174 @@ class SpeechSettingsActivity : Activity() {
         renderKeySection()
         renderReadiness()
         renderDictation()
+        renderVoiceSection()
     }
+
+    // --- Voice (what the glasses say back) ---
+
+    private fun voiceCard(): LinearLayout =
+        NexusUi.card(this).apply {
+            addView(
+                NexusUi.cardBody(
+                    this@SpeechSettingsActivity,
+                    "The answer is spoken by your phone, so it comes out wherever your " +
+                        "audio is going -- the glasses, or your earbuds if you have some in.",
+                ),
+                NexusUi.block(),
+            )
+            addView(BusTheme.gap(this@SpeechSettingsActivity, 14))
+            addView(voiceSpeedHost, NexusUi.block())
+            addView(BusTheme.gap(this@SpeechSettingsActivity, 14))
+            addView(voiceListHost, NexusUi.block())
+            addView(BusTheme.gap(this@SpeechSettingsActivity, 12))
+            addView(
+                NexusUi.textButton(this@SpeechSettingsActivity, "Hear it").apply {
+                    setOnClickListener { hearVoiceSample() }
+                },
+                NexusUi.block(),
+            )
+        }
+
+    private fun renderVoiceSection() {
+        val rate = voiceSettings.speechRate()
+        voiceHeaderMeta.text = formatRate(rate)
+
+        voiceSpeedHost.removeAllViews()
+        voiceSpeedHost.addView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(
+                    NexusUi.rowTitle(this@SpeechSettingsActivity, "Speed"),
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                )
+                SPEECH_RATES.forEach { addView(speedChip(it, rate)) }
+            },
+            NexusUi.block(),
+        )
+
+        voiceListHost.removeAllViews()
+        val voices = PhoneTtsUiApi.availableVoices(Locale.getDefault())
+        if (voices.isEmpty()) {
+            // Voices are read from the running hub, so an empty list means the hub is not
+            // up rather than that the phone has none.
+            voiceListHost.addView(
+                NexusUi.metaLabel(this, "START THE HUB TO CHOOSE A VOICE", NexusUi.INK4),
+                NexusUi.block(),
+            )
+            return
+        }
+        val selected = voiceSettings.voiceName()
+        voiceListHost.addView(voiceRow(null, "Default", null, selected == null), NexusUi.block())
+        voices.forEachIndexed { index, option ->
+            voiceListHost.addView(
+                voiceRow(
+                    option.name,
+                    "Voice ${index + 1}",
+                    if (option.needsNetwork) "needs network" else "on device",
+                    selected == option.name,
+                ),
+                NexusUi.block(),
+            )
+        }
+    }
+
+    private fun speedChip(rate: Float, current: Float): TextView =
+        TextView(this).apply {
+            text = formatRate(rate)
+            textSize = 12f
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            maxLines = 1
+            val selected = kotlin.math.abs(rate - current) < 0.01f
+            setTextColor(if (selected) NexusUi.GREEN else NexusUi.INK2)
+            background = if (selected) {
+                NexusUi.bordered(
+                    this@SpeechSettingsActivity,
+                    NexusUi.alpha(NexusUi.GREEN, 0x14),
+                    NexusUi.alpha(NexusUi.GREEN, 0x50),
+                    11,
+                )
+            } else {
+                NexusUi.pressedBordered(this@SpeechSettingsActivity, NexusUi.PANEL, 11)
+            }
+            setPadding(
+                NexusUi.dp(this@SpeechSettingsActivity, 12),
+                NexusUi.dp(this@SpeechSettingsActivity, 7),
+                NexusUi.dp(this@SpeechSettingsActivity, 12),
+                NexusUi.dp(this@SpeechSettingsActivity, 7),
+            )
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { marginStart = NexusUi.dp(this@SpeechSettingsActivity, 6) }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                voiceSettings.setSpeechRate(rate)
+                renderVoiceSection()
+                hearVoiceSample()
+            }
+        }
+
+    private fun voiceRow(
+        name: String?,
+        label: String,
+        badge: String?,
+        selected: Boolean,
+    ): LinearLayout {
+        val dot = NexusUi.dot(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                NexusUi.dp(this@SpeechSettingsActivity, 8),
+                NexusUi.dp(this@SpeechSettingsActivity, 8),
+            ).apply { marginStart = NexusUi.dp(this@SpeechSettingsActivity, 12) }
+        }
+        NexusUi.setDotColor(dot, if (selected) NexusUi.GREEN else NexusUi.INK4)
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = NexusUi.pressed(this@SpeechSettingsActivity, Color.TRANSPARENT, 10)
+            isClickable = true
+            isFocusable = true
+            contentDescription = label
+            setPadding(
+                0,
+                NexusUi.dp(this@SpeechSettingsActivity, 6),
+                0,
+                NexusUi.dp(this@SpeechSettingsActivity, 6),
+            )
+            setOnClickListener {
+                voiceSettings.setVoiceName(name)
+                renderVoiceSection()
+                hearVoiceSample()
+            }
+            addView(
+                NexusUi.rowTitle(this@SpeechSettingsActivity, label).apply {
+                    if (selected) setTextColor(NexusUi.INK)
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            badge?.let {
+                addView(
+                    NexusUi.metaLabel(
+                        this@SpeechSettingsActivity,
+                        it.uppercase(),
+                        if (selected) NexusUi.GREEN_DIM else NexusUi.INK4,
+                    ),
+                )
+            }
+            addView(dot)
+        }
+    }
+
+    private fun hearVoiceSample() {
+        if (!PhoneTtsUiApi.speakSample(VOICE_SAMPLE)) {
+            toast("Start the hub to hear the voice.")
+        }
+    }
+
+    private fun formatRate(rate: Float): String =
+        if (rate == rate.toInt().toFloat()) "${rate.toInt()}x" else "${rate}x"
 
     private fun renderEngineSection() {
         engineHeaderMeta.text = shownProvider.displayName.uppercase()
@@ -975,6 +1156,11 @@ class SpeechSettingsActivity : Activity() {
 }
 
 private const val REQUEST_RECORD_AUDIO = 4101
+
+private val SPEECH_RATES = listOf(0.75f, 1.0f, 1.25f, 1.5f)
+
+/** Long enough to judge a voice by, short enough to sit through four times in a row. */
+private const val VOICE_SAMPLE = "This is how I will read your answers."
 
 private fun SpeechProvider.credentialKindForUi(): SpeechCredentialKind =
     when (this) {
