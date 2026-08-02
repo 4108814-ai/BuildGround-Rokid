@@ -356,9 +356,19 @@ class SpeechSettingsActivity : Activity() {
     }
 
     private fun hearVoiceSample() {
-        if (!PhoneTtsUiApi.speakSample(VOICE_SAMPLE)) {
+        if (!PhoneTtsUiApi.speakSample(voiceSample())) {
             toast("Start the hub to hear the voice.")
         }
+    }
+
+    /**
+     * The sample has to be in the language the voice will actually speak, or it previews
+     * the wrong thing entirely -- a French voice reading English is exactly the mismatch
+     * this screen exists to let you avoid.
+     */
+    private fun voiceSample(): String = when (Locale.getDefault().language) {
+        "fr" -> "Voilà comment je vais lire vos réponses."
+        else -> "This is how I will read your answers."
     }
 
     private fun formatRate(rate: Float): String =
@@ -1158,9 +1168,6 @@ class SpeechSettingsActivity : Activity() {
 private const val REQUEST_RECORD_AUDIO = 4101
 
 private val SPEECH_RATES = listOf(0.75f, 1.0f, 1.25f, 1.5f)
-
-/** Long enough to judge a voice by, short enough to sit through four times in a row. */
-private const val VOICE_SAMPLE = "This is how I will read your answers."
 
 private fun SpeechProvider.credentialKindForUi(): SpeechCredentialKind =
     when (this) {
