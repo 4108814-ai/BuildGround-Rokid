@@ -103,6 +103,7 @@ class NexusNoticeActionTest {
         )
         assertFalse(payload.has("actions"))
         assertFalse(payload.has("wakeDisplay"))
+        assertFalse(payload.has("backdrop"))
         assertEquals("notice", payload.getString("surfaceId"))
         assertEquals("notice", payload.getString("kind"))
         assertEquals("Marie", payload.getString("title"))
@@ -121,6 +122,17 @@ class NexusNoticeActionTest {
 
         assertFalse(fixture.transport.sends[0].second.has("wakeDisplay"))
         assertTrue(fixture.transport.sends[1].second.getBoolean("wakeDisplay"))
+    }
+
+    @Test
+    fun `notice serializes backdrop only when requested`() {
+        val fixture = approvedFixture()
+
+        fixture.client.showNotice(NexusNotice(title = "Plain"))
+        fixture.client.showNotice(NexusNotice(title = "Private", backdrop = true))
+
+        assertFalse(fixture.transport.sends[0].second.has("backdrop"))
+        assertTrue(fixture.transport.sends[1].second.getBoolean("backdrop"))
     }
 
     @Test

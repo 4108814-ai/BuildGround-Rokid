@@ -668,6 +668,7 @@ data class NexusNoticeImage(
  * Subject to one platform-wide wake per five seconds; never keeps it on.
  * @property lines Structured alternative to [body]. Empty entries are dropped;
  * an empty result is absent from the wire.
+ * @property backdrop Hide the rest of the glasses display behind this notice.
  */
 data class NexusNotice(
     val title: String? = null,
@@ -679,6 +680,7 @@ data class NexusNotice(
     val image: NexusNoticeImage? = null,
     val wakeDisplay: Boolean = false,
     val lines: List<String> = emptyList(),
+    val backdrop: Boolean = false,
 ) {
     init {
         val normalizedLines = normalizedNoticeLines(lines)
@@ -713,6 +715,7 @@ data class NexusNotice(
             if (actions.isNotEmpty()) putActions(actions)
             ttlMs?.let { put("ttlMs", it) }
             if (wakeDisplay) put("wakeDisplay", true)
+            if (backdrop) put("backdrop", true)
             image?.let { metadata ->
                 if (imageBytes != null) putNoticeImage(metadata, imageBytes)
             }

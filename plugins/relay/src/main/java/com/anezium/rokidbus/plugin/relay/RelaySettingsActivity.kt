@@ -123,6 +123,15 @@ class RelaySettingsActivity : Activity() {
             ) { enabled -> settings.setClearAfterReply(enabled) },
             NexusUi.block(),
         )
+        content.addView(BusTheme.gap(this, 8))
+        content.addView(
+            switchCard(
+                "Black out behind notifications",
+                "The glasses show only the notification",
+                settings.noticeBackdrop(),
+            ) { enabled -> settings.setNoticeBackdrop(enabled) },
+            NexusUi.block(),
+        )
 
         content.addView(BusTheme.gap(this, 24))
         // Folded by default, and folded again every time this screen opens. It

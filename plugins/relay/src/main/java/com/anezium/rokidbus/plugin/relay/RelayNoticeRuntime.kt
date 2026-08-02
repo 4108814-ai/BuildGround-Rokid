@@ -30,6 +30,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
     private val essentialUpdates = ArrayDeque<NexusNoticeUpdate>()
+    private val settings = RelaySettings(appContext)
 
     private var client: NexusPluginClient? = null
     private var pendingShow: ReplyRepository.PendingReply? = null
@@ -136,6 +137,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
             actions = INITIAL_ACTIONS,
             image = image?.takeIf { currentClient.supportsImageSurface },
             wakeDisplay = true,
+            backdrop = settings.noticeBackdrop(),
         )
         val result = if (notice.image != null && preview != null) {
             currentClient.showNotice(notice, preview.bytes)

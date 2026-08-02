@@ -924,6 +924,12 @@ class BusHubService : Service() {
                 ) {
                     log("notice update rejected field=wakeDisplay reason=show_only")
                 }
+                if (
+                    envelope.path == BusPaths.NOTICE_UPDATE &&
+                    envelope.payload.has("backdrop")
+                ) {
+                    log("notice update rejected field=backdrop reason=show_only")
+                }
                 recordLocalRoute(
                     envelope,
                     senderUid,

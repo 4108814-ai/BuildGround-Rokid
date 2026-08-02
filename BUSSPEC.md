@@ -456,8 +456,9 @@ Phone to glasses:
   the plugin that owns the slot and only while a band is actually visible,
   otherwise ignored with a log rather than an error — an update racing a
   deadline that fired a frame earlier is ordinary. Updates are always
-  text-only; a binary frame is `INVALID_NOTICE`. `wakeDisplay` is show-only;
-  supplying it on an update is also `INVALID_NOTICE` and is logged by the hub.
+  text-only; a binary frame is `INVALID_NOTICE`. `wakeDisplay` and `backdrop`
+  are show-only; supplying either on an update is also `INVALID_NOTICE` and is
+  logged by the hub.
 
   **The phone relays the owner's validated patch**, stamped with the hub's own
   fields — the wire `surfaceId` `<pluginId>:notice`, `localSurfaceId`,
@@ -517,7 +518,8 @@ for pins.
     {"id": "later", "glyph": "timer", "label": "Later"}
   ],
   "ttlMs": 8000,
-  "wakeDisplay": true
+  "wakeDisplay": true,
+  "backdrop": true
 }
 ```
 
@@ -576,6 +578,9 @@ run long enough to page.
 - `interactive` optional, default false.
 - `wakeDisplay` optional boolean, default false. It is honored only on
   `/notice/show` and omitted from normalized payloads when false.
+- `backdrop` optional boolean, default false. It is honored only on
+  `/notice/show` and omitted from normalized payloads when false. When true,
+  an opaque black scrim hides the rest of the glasses display behind the band.
 - `actions` optional and **omitted entirely when empty**. At most three, and a
   fourth is rejected rather than dropped. Every action has nonblank `id`,
   `glyph`, and `label`, with the same rules as an activity's: the glyph name is
@@ -702,6 +707,10 @@ keep updating until it expires.
 
 The band arrives and leaves through the shared motion layer (plan 013) rather
 than blinking into place.
+
+By default the band is superimposed over whatever is already on screen. A show
+with `backdrop: true` fades the platform's opaque black scrim with the band and
+hides everything behind it until that notice leaves or is replaced.
 
 The window is never focusable and never touchable, and it never keeps the
 screen on. A show with `wakeDisplay: true` may wake a dark display through the

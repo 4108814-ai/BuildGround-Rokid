@@ -54,6 +54,16 @@ class NoticeEnvelopePolicyTest {
                 ),
             ),
         )
+        assertFalse(
+            isValidLocalNoticeEnvelope(
+                BusEnvelope(
+                    BusPaths.NOTICE_UPDATE,
+                    payload = JSONObject()
+                        .put("surfaceId", NoticeSurfaceContract.LOCAL_SURFACE_ID)
+                        .put("backdrop", true),
+                ),
+            ),
+        )
     }
 
     private fun jpeg(width: Int, height: Int): ByteArray =

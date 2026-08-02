@@ -22,6 +22,9 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
 
+internal fun noticeBackdropAlpha(fadeAlpha: Float, backdrop: Boolean): Float =
+    if (backdrop) fadeAlpha else 0f
+
 /**
  * The notice band: a transient panel across the top that arrives, says its
  * piece, and leaves.
@@ -46,11 +49,12 @@ object NoticeOverlayRenderer {
     private var band: NoticeBandView? = null
     private var unsubscribe: (() -> Unit)? = null
     private var bandHeightPx = 0
+    private var backdrop = false
 
     private val slide = HudMotionValue(0f) { offset -> band?.translationY = offset }
     private val fade = HudMotionValue(0f) { alpha ->
         band?.alpha = alpha
-        scrim?.alpha = alpha
+        scrim?.alpha = noticeBackdropAlpha(alpha, backdrop)
     }
 
     fun onServiceConnected(service: AccessibilityService) {
@@ -86,6 +90,8 @@ object NoticeOverlayRenderer {
             dismiss()
             return
         }
+        backdrop = notice.content.backdrop
+        scrim?.alpha = noticeBackdropAlpha(fade.current, backdrop)
         val activeService = service ?: return
         val view = ensureWindow(activeService) ?: return
         val arriving = fade.current == 0f
@@ -114,11 +120,10 @@ object NoticeOverlayRenderer {
             ?: service.getSystemService(WindowManager::class.java)
             ?: return null
         val root = FrameLayout(service)
-        // A notice owns the whole display while it is up. The scrim is opaque
-        // black: the additive optics emit nothing for it, but it occludes every
-        // window underneath — ROM widgets, launcher, an active surface — so the
-        // wearer reads one thing, not a collage. It rides the band's fade and,
-        // being part of a NOT_TOUCHABLE window, blocks nothing but light.
+        // An opted-in notice can own the whole display while it is up. The scrim
+        // is opaque black: the additive optics emit nothing for it, but it
+        // occludes every window underneath. It rides the band's fade and, being
+        // part of a NOT_TOUCHABLE window, blocks nothing but light.
         val shade = View(service).apply {
             setBackgroundColor(0xFF000000.toInt())
             alpha = 0f
@@ -170,6 +175,7 @@ object NoticeOverlayRenderer {
         container = null
         scrim = null
         band = null
+        backdrop = false
         slide.snapTo(0f)
         fade.snapTo(0f)
     }

@@ -53,6 +53,41 @@ class NoticeStateMachineTest {
     }
 
     @Test
+    fun `backdrop reaches glasses state survives updates and resets on replacement`() {
+        val state = NoticeStateMachine()
+        val shown = state.show(
+            "relay:notice",
+            seq = 1,
+            content = content(backdrop = true),
+            nowMs = 0L,
+        ) as NoticeStateDecision.Shown
+        assertTrue(shown.notice.content.backdrop)
+
+        val refreshed = state.update(
+            surfaceId = "relay:notice",
+            seq = 2,
+            patch = NoticeSurfacePatch(footer = NoticeField("Listening")),
+            nowMs = 1_000L,
+        ) as NoticeStateDecision.Updated
+        assertTrue(refreshed.notice.content.backdrop)
+
+        val replaced = state.show(
+            "maps:notice",
+            seq = 3,
+            content = content(backdrop = false),
+            nowMs = 2_000L,
+        ) as NoticeStateDecision.Shown
+        assertFalse(replaced.notice.content.backdrop)
+    }
+
+    @Test
+    fun `renderer gives fade alpha only to an opted-in backdrop`() {
+        assertEquals(0f, noticeBackdropAlpha(1f, backdrop = false))
+        assertEquals(0f, noticeBackdropAlpha(0f, backdrop = true))
+        assertEquals(0.4f, noticeBackdropAlpha(0.4f, backdrop = true))
+    }
+
+    @Test
     fun `an update from another plugin is ignored, not applied`() {
         val state = NoticeStateMachine()
         state.show("relay:notice", seq = 1, content = content(), nowMs = 0L)
@@ -696,6 +731,7 @@ class NoticeStateMachineTest {
         interactive: Boolean = false,
         footer: String? = null,
         actions: List<NoticeAction> = emptyList(),
+        backdrop: Boolean = false,
     ) = NoticeSurfaceContent(
         title = "Marie",
         body = "On my way",
@@ -703,5 +739,6 @@ class NoticeStateMachineTest {
         interactive = interactive,
         actions = actions,
         ttlMs = ttlMs,
+        backdrop = backdrop,
     )
 }

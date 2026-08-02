@@ -42,6 +42,13 @@ internal class RelaySettings(context: Context) {
         prefs.edit().putBoolean(KEY_CLEAR_AFTER_REPLY, enabled).apply()
     }
 
+    fun noticeBackdrop(): Boolean =
+        prefs.getBoolean(KEY_NOTICE_BACKDROP, DEFAULT_NOTICE_BACKDROP)
+
+    fun setNoticeBackdrop(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_NOTICE_BACKDROP, enabled).apply()
+    }
+
     fun admits(): Boolean = NotificationAdmission.appIsAdmitted(enabled())
 
     companion object {
@@ -52,6 +59,7 @@ internal class RelaySettings(context: Context) {
         const val MAX_MESSAGES_PER_THREAD = 40
         const val DEFAULT_PAUSE_SCREEN_ON = false
         const val DEFAULT_CLEAR_AFTER_REPLY = true
+        const val DEFAULT_NOTICE_BACKDROP = false
 
         private const val PREFS = "relay_settings"
         private const val KEY_ENABLED = "enabled"
@@ -59,5 +67,6 @@ internal class RelaySettings(context: Context) {
         private const val KEY_MESSAGES_PER_THREAD = "messages_per_thread"
         private const val KEY_PAUSE_SCREEN_ON = "pause_screen_on"
         private const val KEY_CLEAR_AFTER_REPLY = "clear_after_reply"
+        private const val KEY_NOTICE_BACKDROP = "notice_backdrop"
     }
 }

@@ -432,6 +432,7 @@ data class NexusNotice(
     val image: NexusNoticeImage? = null,
     val wakeDisplay: Boolean = false,
     val lines: List<String> = emptyList(),
+    val backdrop: Boolean = false,
 )
 
 data class NexusNoticeUpdate(
@@ -629,6 +630,11 @@ seconds, never held on. The same global five-second budget is shared with every
 plugin, notice, activity, and surface. If the display is already interactive,
 no lock is needed and the budget remains available for the next dark-screen
 event.
+
+Set `backdrop = true` only when the notice should hide everything else on the
+glasses display behind an opaque black scrim. It defaults to false, is
+serialized only when true, and is show-only; updates preserve the value chosen
+by the original show, while a replacement notice chooses its own value.
 
 ### Real image surfaces
 

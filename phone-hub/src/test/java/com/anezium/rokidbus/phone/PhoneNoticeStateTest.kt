@@ -25,6 +25,8 @@ class PhoneNoticeStateTest {
         assertNull(result.replacedOwnerPluginId)
         assertFalse(notice.content.wakeDisplay)
         assertFalse(notice.payload.has("wakeDisplay"))
+        assertFalse(notice.content.backdrop)
+        assertFalse(notice.payload.has("backdrop"))
     }
 
     @Test
@@ -40,6 +42,26 @@ class PhoneNoticeStateTest {
             (rejected as PhoneNoticeUpdateResult.Rejected).code,
         )
         assertTrue(shown.notice.content.wakeDisplay)
+    }
+
+    @Test
+    fun `relays a requested backdrop on show and rejects it on update`() {
+        val shown = state.show("relay", showPayload("relay").put("backdrop", true))
+            as PhoneNoticeShowResult.Accepted
+        assertTrue(shown.notice.content.backdrop)
+        assertTrue(shown.notice.payload.getBoolean("backdrop"))
+
+        val refreshed = state.update("relay", JSONObject().put("footer", "Listening"))
+            as PhoneNoticeUpdateResult.Accepted
+        assertTrue(refreshed.notice.content.backdrop)
+        assertFalse(refreshed.notice.payload.has("backdrop"))
+
+        val rejected = state.update("relay", JSONObject().put("backdrop", false))
+        assertEquals(
+            NoticeSurfaceContract.ERROR_INVALID_NOTICE,
+            (rejected as PhoneNoticeUpdateResult.Rejected).code,
+        )
+        assertTrue(refreshed.notice.content.backdrop)
     }
 
     @Test

@@ -55,6 +55,8 @@ data class NoticeSurfaceContent(
     val wakeDisplay: Boolean = false,
     /** Structured alternative to [body]; each entry owns one hard break. */
     val lines: List<String> = emptyList(),
+    /** Whether the notice should hide the rest of the glasses display. */
+    val backdrop: Boolean = false,
 ) {
     /**
      * Whether the band expects a gesture at all. Actions are an interaction by
@@ -228,6 +230,12 @@ object NoticeSurfaceContract {
             else -> return invalid("wakeDisplay must be a boolean")
         }
 
+        val backdrop = when (val value = payload.opt("backdrop")) {
+            null -> false
+            is Boolean -> value
+            else -> return invalid("backdrop must be a boolean")
+        }
+
         val actions = when (val result = readActions(payload, "actions")) {
             is ActionsResult.Invalid -> return invalid(result.reason)
             is ActionsResult.Absent -> emptyList()
@@ -267,6 +275,7 @@ object NoticeSurfaceContract {
                 ttlMs = ttlMs,
                 image = image,
                 wakeDisplay = wakeDisplay,
+                backdrop = backdrop,
             ),
         )
     }
@@ -287,6 +296,9 @@ object NoticeSurfaceContract {
         }
         if (payload.has("wakeDisplay")) {
             return patchInvalid("wakeDisplay is show-only")
+        }
+        if (payload.has("backdrop")) {
+            return patchInvalid("backdrop is show-only")
         }
         if (payload.has("body") && payload.has("lines")) {
             return patchInvalid("body and lines are mutually exclusive")
@@ -365,6 +377,8 @@ object NoticeSurfaceContract {
             if (content.interactive) put("interactive", true)
             // Waking is opt-in and show-only; old payloads stay byte-for-byte minimal.
             if (content.wakeDisplay) put("wakeDisplay", true)
+            // The blackout is likewise opt-in and show-only.
+            if (content.backdrop) put("backdrop", true)
             // Omitted when empty for the same reason, and for one more: a notice
             // that offers no choice must put nothing new on the wire, so every
             // banner written before this feature existed still serialises byte
