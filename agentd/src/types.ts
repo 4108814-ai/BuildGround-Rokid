@@ -41,6 +41,7 @@ export interface AgentConfig {
   httpPort: number;
   machineId: string;
   machineName: string;
+  phoneHosts: string[];
   codex: CodexConfig;
 }
 

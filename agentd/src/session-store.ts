@@ -163,6 +163,7 @@ export class SessionStore {
       record.transcriptPath = transcriptPath;
     }
 
+    let refreshTitle = true;
     switch (eventName) {
       case "SessionStart":
         record.session.status = "idle";
@@ -171,9 +172,11 @@ export class SessionStore {
         break;
       case "UserPromptSubmit": {
         const prompt = asString(payload.prompt);
-        if (prompt) {
+        if (prompt && !prompt.trim().startsWith("<")) {
           record.lastUserPrompt = truncateText(prompt, 120);
           record.session.title = record.lastUserPrompt || record.session.title;
+        } else if (prompt) {
+          refreshTitle = false;
         }
         record.session.status = "working";
         record.session.statusDetail = undefined;
@@ -209,7 +212,9 @@ export class SessionStore {
         break;
     }
 
-    this.refreshDerivedTitle(record);
+    if (refreshTitle) {
+      this.refreshDerivedTitle(record);
+    }
     this.emitUpsert(record.session);
   }
 

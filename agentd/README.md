@@ -76,6 +76,19 @@ If no phone decision is available, agentd sends no approval response to Codex. T
 app-server request remains pending for another subscribed Codex UI to answer and is
 replayed when a client resumes the thread.
 
+## Away from home (Tailscale)
+
+Install Tailscale on the PC and phone, then read the phone's tailnet IP from the
+Tailscale app. Add it as a direct target and restart the daemon:
+
+```powershell
+agentd link-phone 100.x.y.z
+```
+
+The daemon then dials the phone directly whenever LAN broadcast discovery cannot find
+it. A phone already linked at home accepts the tailnet dial without re-pairing because
+the daemon uses the same machine identity.
+
 ## Hook management
 
 ```powershell

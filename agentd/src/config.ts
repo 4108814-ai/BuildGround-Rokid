@@ -8,6 +8,7 @@ import type { AgentConfig } from "./types";
 const DEFAULT_HTTP_PORT = 8791;
 const DEFAULT_WS_PORT = 8792;
 export const DEFAULT_CODEX_PORT = 8390;
+export const DEFAULT_PHONE_LINK_PORT = 8792;
 
 export function defaultStateDir(): string {
   return process.env.NEXUS_AGENTD_STATE_DIR || path.join(homedir(), ".nexus-agentd");
@@ -24,6 +25,7 @@ function newConfig(): AgentConfig {
     httpPort: DEFAULT_HTTP_PORT,
     machineId: randomBytes(16).toString("base64url"),
     machineName: os.hostname(),
+    phoneHosts: [],
     codex: {
       enabled: false,
       port: DEFAULT_CODEX_PORT,
@@ -33,6 +35,23 @@ function newConfig(): AgentConfig {
 
 function isPort(value: unknown): value is number {
   return Number.isInteger(value) && Number(value) > 0 && Number(value) <= 65_535;
+}
+
+export function parsePhoneTarget(value: string): { host: string; port: number } | undefined {
+  if (!value || value.trim() !== value) {
+    return undefined;
+  }
+  const separator = value.lastIndexOf(":");
+  if (separator < 0) {
+    return { host: value, port: DEFAULT_PHONE_LINK_PORT };
+  }
+  const host = value.slice(0, separator);
+  const portText = value.slice(separator + 1);
+  if (!host || !/^\d+$/.test(portText)) {
+    return undefined;
+  }
+  const port = Number(portText);
+  return isPort(port) ? { host, port } : undefined;
 }
 
 function parseConfig(raw: string, filePath: string): {
@@ -63,6 +82,14 @@ function parseConfig(raw: string, filePath: string): {
   }
 
   const missingMachineId = typeof record.machineId !== "string" || record.machineId.length === 0;
+  const hasPhoneHosts = Object.prototype.hasOwnProperty.call(record, "phoneHosts");
+  const phoneHosts = Array.isArray(record.phoneHosts) ? record.phoneHosts : undefined;
+  if (
+    (hasPhoneHosts && !phoneHosts) ||
+    (phoneHosts && phoneHosts.some((entry) => typeof entry !== "string" || !parsePhoneTarget(entry)))
+  ) {
+    throw new Error(`Invalid nexus-agentd config at ${filePath}`);
+  }
   const hasCodex = Object.prototype.hasOwnProperty.call(record, "codex");
   const codexRecord =
     record.codex && typeof record.codex === "object" && !Array.isArray(record.codex)
@@ -75,7 +102,7 @@ function parseConfig(raw: string, filePath: string): {
   ) {
     throw new Error(`Invalid nexus-agentd config at ${filePath}`);
   }
-  const upgraded = missingMachineId || !hasCodex;
+  const upgraded = missingMachineId || !hasPhoneHosts || !hasCodex;
   return {
     config: {
       token: record.token,
@@ -85,6 +112,7 @@ function parseConfig(raw: string, filePath: string): {
         ? randomBytes(16).toString("base64url")
         : record.machineId as string,
       machineName: record.machineName,
+      phoneHosts: (phoneHosts as string[] | undefined) ?? [],
       codex: codexRecord
         ? {
             enabled: codexRecord.enabled as boolean,
@@ -106,6 +134,11 @@ function writeConfig(filePath: string, config: AgentConfig): void {
     mode: 0o600,
   });
   renameSync(tempPath, filePath);
+}
+
+export function saveConfig(config: AgentConfig, stateDir = defaultStateDir()): void {
+  mkdirSync(stateDir, { recursive: true });
+  writeConfig(configPath(stateDir), config);
 }
 
 export function ensureConfig(stateDir = defaultStateDir()): AgentConfig {

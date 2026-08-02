@@ -14,6 +14,7 @@ const config = {
   httpPort: 8791,
   machineId: "machine-phone-link",
   machineName: "phone-link-pc",
+  phoneHosts: [],
 };
 
 function loggerHarness() {
@@ -99,6 +100,72 @@ function createLink(overrides = {}) {
   });
   return { link, store, logs };
 }
+
+test("static phone targets dial and complete the existing handshake", async () => {
+  const sockets = [];
+  let acceptConnection;
+  const accepted = new Promise((resolve) => { acceptConnection = resolve; });
+  const server = net.createServer((socket) => {
+    sockets.push(socket);
+    acceptConnection({ socket, lines: collectLines(socket) });
+  });
+  const port = await listen(server);
+  const { link, store } = createLink({
+    config: { ...config, phoneHosts: [`127.0.0.1:${port}`] },
+  });
+
+  try {
+    link.start();
+    const { socket, lines } = await accepted;
+    const hello = await lines.waitFor((frame) => frame.type === "hello");
+    assert.equal(hello.machineId, config.machineId);
+    assert.equal(hello.token, config.token);
+    socket.write('{"type":"hello_ack","v":1}\n');
+    await waitUntil(() => link.connected, "static target did not authenticate");
+    await lines.waitFor((frame) => frame.type === "snapshot");
+  } finally {
+    link.stop();
+    store.dispose();
+    await closeServer(server, sockets);
+  }
+});
+
+test("static phone refusal backoff prevents an immediate redial", async () => {
+  const sockets = [];
+  let connections = 0;
+  const server = net.createServer((socket) => {
+    sockets.push(socket);
+    connections += 1;
+    const lines = collectLines(socket);
+    void lines.waitFor((frame) => frame.type === "hello").then(() => {
+      socket.write('{"type":"hello_reject","v":1,"reason":"unknown_machine"}\n');
+    });
+  });
+  const port = await listen(server);
+  let now = 20_000;
+  const { link, store } = createLink({
+    config: { ...config, phoneHosts: [`127.0.0.1:${port}`] },
+    now: () => now,
+    reconnectDelayMs: 0,
+    operatorMessage() {},
+  });
+
+  try {
+    link.start();
+    await waitUntil(() => connections === 1 && !link.socket, "static target did not refuse");
+    link.announce();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(connections, 1, "static refusal backoff allowed an immediate redial");
+
+    now += REFUSAL_RECONNECT_DELAY_MS;
+    link.announce();
+    await waitUntil(() => connections === 2, "static target did not retry after backoff");
+  } finally {
+    link.stop();
+    store.dispose();
+    await closeServer(server, sockets);
+  }
+});
 
 test("TCP stays dialling until hello_ack, then sends data and accepts decisions", async () => {
   const sockets = [];

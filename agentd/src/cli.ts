@@ -2,7 +2,12 @@
 import { request } from "node:http";
 import path from "node:path";
 import qrcode from "qrcode-terminal";
-import { defaultStateDir, ensureConfig } from "./config";
+import {
+  defaultStateDir,
+  ensureConfig,
+  parsePhoneTarget,
+  saveConfig,
+} from "./config";
 import { startDaemon } from "./daemon";
 import { pairingPayload } from "./pairing";
 import { installHooks, uninstallHooks } from "./settings";
@@ -64,6 +69,18 @@ async function run(): Promise<void> {
   process.once("SIGTERM", shutdown);
 }
 
+function phoneTargetArgument(command: string): string {
+  const target = process.argv[3];
+  if (!target || !parsePhoneTarget(target)) {
+    throw new Error(`Usage: agentd ${command} <host[:port]>`);
+  }
+  return target;
+}
+
+function printPhoneHosts(phoneHosts: string[]): void {
+  process.stdout.write(`${JSON.stringify(phoneHosts)}\n`);
+}
+
 async function main(): Promise<void> {
   const command = process.argv[2] || "run";
   const agentRoot = path.resolve(__dirname, "..");
@@ -100,6 +117,26 @@ async function main(): Promise<void> {
       qrcode.generate(payload, { small: true }, (code) => process.stdout.write(`${code}\n`));
       break;
     }
+    case "link-phone": {
+      const target = phoneTargetArgument(command);
+      const stateDir = defaultStateDir();
+      const config = ensureConfig(stateDir);
+      if (!config.phoneHosts.includes(target)) {
+        config.phoneHosts.push(target);
+      }
+      saveConfig(config, stateDir);
+      printPhoneHosts(config.phoneHosts);
+      break;
+    }
+    case "unlink-phone": {
+      const target = phoneTargetArgument(command);
+      const stateDir = defaultStateDir();
+      const config = ensureConfig(stateDir);
+      config.phoneHosts = config.phoneHosts.filter((entry) => entry !== target);
+      saveConfig(config, stateDir);
+      printPhoneHosts(config.phoneHosts);
+      break;
+    }
     case "status": {
       const config = ensureConfig(defaultStateDir());
       const health = await getHealth(config.httpPort);
@@ -118,7 +155,7 @@ async function main(): Promise<void> {
     }
     default:
       throw new Error(
-        `Unknown command '${command}'. Use run, install-hooks, uninstall-hooks, pair, or status.`,
+        `Unknown command '${command}'. Use run, install-hooks, uninstall-hooks, pair, link-phone, unlink-phone, or status.`,
       );
   }
 }

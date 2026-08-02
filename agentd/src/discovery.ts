@@ -60,8 +60,8 @@ async function inspectTail(candidate: Candidate): Promise<{ cwd?: string; title?
       const role = typeof message?.role === "string" ? message.role.toLowerCase() : "";
       if (type === "user" || role === "user") {
         const textContent = contentText(message?.content ?? entry.content);
-        if (textContent) {
-          title = textContent.slice(0, 120);
+        if (textContent && !textContent.trim().startsWith("<")) {
+          title = textContent.trim().slice(0, 120);
         }
       }
     } catch {

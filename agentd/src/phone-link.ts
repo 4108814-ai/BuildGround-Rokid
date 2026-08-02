@@ -6,6 +6,7 @@ import type {
   ApprovalOutcome,
   ApprovalRequest,
 } from "./approval-manager";
+import { parsePhoneTarget } from "./config";
 import type { SessionStore } from "./session-store";
 import type { AgentConfig, Logger, Session, SessionMessage } from "./types";
 
@@ -203,6 +204,15 @@ export class PhoneLink {
           this.options.logger.warn("discovery_send_failed", { target, reason: error.name });
         }
       });
+    }
+    for (const configuredTarget of this.options.config.phoneHosts) {
+      const target = parsePhoneTarget(configuredTarget);
+      if (target) {
+        this.connectToPhone({ ...target, name: target.host });
+      }
+      if (this.socket) {
+        break;
+      }
     }
   }
 

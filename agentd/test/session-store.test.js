@@ -108,3 +108,36 @@ test("working sessions become stalled errors and session end becomes done", () =
   assert.equal(store.get(base.session_id).status, "done");
   store.dispose();
 });
+
+test("synthetic user prompts preserve the human title while keeping status transitions", () => {
+  let now = 1_753_380_000_000;
+  const store = new SessionStore(identity, silentLogger, () => now);
+  const base = {
+    session_id: "synthetic-prompt-session",
+    cwd: "E:\\work\\sample",
+  };
+  store.handleHook({
+    ...base,
+    hook_event_name: "UserPromptSubmit",
+    prompt: "Human-written title",
+  });
+  now += 10;
+  store.handleHook({
+    ...base,
+    hook_event_name: "Notification",
+    message: "Permission required to continue",
+  });
+  now += 10;
+  store.handleHook({
+    ...base,
+    hook_event_name: "UserPromptSubmit",
+    prompt: "  <task-notification>synthetic wrapper</task-notification>",
+  });
+
+  const session = store.get(base.session_id);
+  assert.equal(session.title, "Human-written title");
+  assert.equal(session.status, "working");
+  assert.equal(session.pendingRequest, undefined);
+  assert.equal(session.turn.activeSince, now);
+  store.dispose();
+});
