@@ -42,12 +42,16 @@ object NoticeOverlayRenderer {
     private var service: AccessibilityService? = null
     private var windowManager: WindowManager? = null
     private var container: FrameLayout? = null
+    private var scrim: View? = null
     private var band: NoticeBandView? = null
     private var unsubscribe: (() -> Unit)? = null
     private var bandHeightPx = 0
 
     private val slide = HudMotionValue(0f) { offset -> band?.translationY = offset }
-    private val fade = HudMotionValue(0f) { alpha -> band?.alpha = alpha }
+    private val fade = HudMotionValue(0f) { alpha ->
+        band?.alpha = alpha
+        scrim?.alpha = alpha
+    }
 
     fun onServiceConnected(service: AccessibilityService) {
         this.service = service
@@ -110,6 +114,22 @@ object NoticeOverlayRenderer {
             ?: service.getSystemService(WindowManager::class.java)
             ?: return null
         val root = FrameLayout(service)
+        // A notice owns the whole display while it is up. The scrim is opaque
+        // black: the additive optics emit nothing for it, but it occludes every
+        // window underneath — ROM widgets, launcher, an active surface — so the
+        // wearer reads one thing, not a collage. It rides the band's fade and,
+        // being part of a NOT_TOUCHABLE window, blocks nothing but light.
+        val shade = View(service).apply {
+            setBackgroundColor(0xFF000000.toInt())
+            alpha = 0f
+        }
+        root.addView(
+            shade,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
         val view = NoticeBandView(service, NoticeController::setPageCount)
         val metrics = service.resources.displayMetrics
         root.addView(
@@ -127,6 +147,7 @@ object NoticeOverlayRenderer {
             return null
         }
         container = root
+        scrim = shade
         band = view
         view.alpha = 0f
         fade.snapTo(0f)
@@ -147,6 +168,7 @@ object NoticeOverlayRenderer {
         runCatching { windowManager?.removeView(root) }
             .onFailure { logError("Notice overlay removal failed", it) }
         container = null
+        scrim = null
         band = null
         slide.snapTo(0f)
         fade.snapTo(0f)
