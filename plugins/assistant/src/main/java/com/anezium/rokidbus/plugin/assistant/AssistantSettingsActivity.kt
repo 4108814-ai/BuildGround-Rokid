@@ -56,8 +56,16 @@ class AssistantSettingsActivity : Activity() {
     private val photosNames = mutableMapOf<Boolean, TextView>()
     private val windowDots = mutableMapOf<Int, View>()
     private val windowNames = mutableMapOf<Int, TextView>()
+    private val syncDots = mutableMapOf<Boolean, View>()
+    private val syncNames = mutableMapOf<Boolean, TextView>()
+    private lateinit var syncSection: LinearLayout
+    private lateinit var syncFooter: LinearLayout
+    private lateinit var memorySyncStatus: TextView
+    private lateinit var refreshButton: View
+    @Volatile private var syncing = false
 
     private val threadStore by lazy { AssistantThreadStore(applicationContext) }
+    private val accountContextSync by lazy { AccountContextSync(applicationContext) }
 
     private enum class AccountMode { EMPTY, CHATGPT, API_KEY }
 
@@ -212,7 +220,22 @@ class AssistantSettingsActivity : Activity() {
             addView(BusTheme.gap(this@AssistantSettingsActivity, 28))
             addView(NexusUi.sectionRow(this@AssistantSettingsActivity, "Memory"), NexusUi.block())
             addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
-            addView(memoryCard(), NexusUi.block())
+            syncSection = LinearLayout(this@AssistantSettingsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(
+                    NexusUi.cardBody(
+                        this@AssistantSettingsActivity,
+                        "Your saved ChatGPT memories and custom instructions are pulled in " +
+                            "automatically and added to every question you ask.",
+                    ),
+                    NexusUi.block(),
+                )
+                addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
+                addView(syncCard(), NexusUi.block())
+                addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
+            }
+            addView(syncSection, NexusUi.block())
+            addView(notesCard(), NexusUi.block())
             addView(BusTheme.gap(this@AssistantSettingsActivity, 28))
             addView(NexusUi.sectionRow(this@AssistantSettingsActivity, "Plugin"), NexusUi.block())
             addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
@@ -870,21 +893,100 @@ class AssistantSettingsActivity : Activity() {
         else -> "$count saved on this phone"
     }
 
-    private fun memoryCard(): LinearLayout =
+    private fun syncCard(): LinearLayout =
+        NexusUi.card(this).apply {
+            addView(syncRow(true, "On", "memories + custom instructions"), NexusUi.block())
+            addView(NexusUi.divider(this@AssistantSettingsActivity))
+            addView(syncRow(false, "Off", "use only the notes below"), NexusUi.block())
+            addView(NexusUi.divider(this@AssistantSettingsActivity))
+            memorySyncStatus = NexusUi.rowSub(this@AssistantSettingsActivity, "")
+            refreshButton = NexusUi.textButton(this@AssistantSettingsActivity, "Refresh now").apply {
+                setOnClickListener { refreshNow() }
+            }
+            syncFooter = LinearLayout(this@AssistantSettingsActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(
+                    memorySyncStatus,
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                )
+                addView(refreshButton)
+            }
+            addView(syncFooter, NexusUi.block())
+        }
+
+    private fun syncRow(
+        enabled: Boolean,
+        title: String,
+        hint: String,
+    ): LinearLayout =
+        pickerRow(
+            title = title,
+            hint = hint,
+            description = if (enabled) "Sync memory from ChatGPT" else "Do not sync from ChatGPT",
+            onClick = {
+                authStore.setSyncAccountContext(enabled)
+                if (enabled) {
+                    // Turning it on should show something now, not at the next open.
+                    refreshNow()
+                } else {
+                    // Off is a privacy promise kept at the tap: drop the cached copy now.
+                    authStore.clearSyncedAccountContext()
+                }
+                renderMemory()
+            },
+            nameSink = { syncNames[enabled] = it },
+            dotSink = { syncDots[enabled] = it },
+        )
+
+    private fun refreshNow() {
+        if (syncing) return
+        if (authStore.authMode() != CodexAuthStore.AUTH_MODE_CHATGPT) {
+            toast("Connect a ChatGPT account first.")
+            return
+        }
+        syncing = true
+        refreshButton.isEnabled = false
+        memorySyncStatus.text = "Syncing…"
+        Thread {
+            val result = runCatching {
+                kotlinx.coroutines.runBlocking { accountContextSync.syncNow() }
+            }.getOrElse { SyncResult.Unavailable(SyncUnavailableReason.UNKNOWN) }
+            runOnUiThread {
+                syncing = false
+                refreshButton.isEnabled = true
+                when (result) {
+                    is SyncResult.Success -> toast(
+                        if (result.chars == 0) {
+                            "Synced. Nothing to add yet."
+                        } else if (result.memoryCount == 1) {
+                            "Synced 1 memory."
+                        } else {
+                            "Synced ${result.memoryCount} memories."
+                        },
+                    )
+                    is SyncResult.Unavailable -> toast("Couldn't sync right now.")
+                    SyncResult.NotSignedIn -> toast("Connect a ChatGPT account first.")
+                    SyncResult.Disabled -> Unit
+                }
+                renderMemory()
+            }
+        }.start()
+    }
+
+    private fun notesCard(): LinearLayout =
         NexusUi.card(this).apply {
             addView(
                 NexusUi.cardBody(
                     this@AssistantSettingsActivity,
-                    "ChatGPT has no memory export. Open ChatGPT, go to Settings -> " +
-                        "Personalization -> Manage memories, copy the list, and paste it " +
-                        "here. It is added to every question you ask.",
+                    "Notes the assistant keeps in mind for every question you ask.",
                 ),
                 NexusUi.block(),
             )
             addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
             memoryField = NexusUi.field(
                 this@AssistantSettingsActivity,
-                "Paste what ChatGPT knows about you",
+                "Add a note",
             ).apply {
                 setSingleLine(false)
                 inputType = InputType.TYPE_CLASS_TEXT or
@@ -892,7 +994,7 @@ class AssistantSettingsActivity : Activity() {
                     InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
                 imeOptions = EditorInfo.IME_ACTION_NONE
                 gravity = Gravity.TOP or Gravity.START
-                minHeight = NexusUi.dp(this@AssistantSettingsActivity, 132)
+                minHeight = NexusUi.dp(this@AssistantSettingsActivity, 108)
                 setPadding(
                     NexusUi.dp(this@AssistantSettingsActivity, 16),
                     NexusUi.dp(this@AssistantSettingsActivity, 14),
@@ -928,7 +1030,7 @@ class AssistantSettingsActivity : Activity() {
         manager?.hideSoftInputFromWindow(memoryField.windowToken, 0)
         memoryField.clearFocus()
         renderMemory()
-        toast(if (authStore.assistantMemory().isBlank()) "Memory cleared." else "Memory saved.")
+        toast(if (authStore.assistantMemory().isBlank()) "Notes cleared." else "Notes saved.")
     }
 
     private fun renderMemory() {
@@ -937,10 +1039,44 @@ class AssistantSettingsActivity : Activity() {
             memoryField.setText(stored)
         }
         memoryStatus.text = when {
-            stored.isBlank() -> "Nothing pasted yet"
+            stored.isBlank() -> "No notes yet"
             stored.length >= CodexAuthStore.MAX_ASSISTANT_MEMORY_CHARS ->
                 "Saved, trimmed to ${CodexAuthStore.MAX_ASSISTANT_MEMORY_CHARS} characters"
             else -> "Saved, ${stored.length} characters"
+        }
+
+        val chatGpt = authStore.authMode() == CodexAuthStore.AUTH_MODE_CHATGPT
+        syncSection.visibility = if (chatGpt) View.VISIBLE else View.GONE
+        if (!chatGpt) return
+
+        val on = authStore.syncAccountContext()
+        syncDots.forEach { (value, dotView) ->
+            NexusUi.setDotColor(dotView, if (value == on) NexusUi.GREEN else NexusUi.INK4)
+        }
+        syncNames.forEach { (value, nameView) ->
+            nameView.setTextColor(if (value == on) NexusUi.INK else NexusUi.INK2)
+        }
+        syncFooter.visibility = if (on) View.VISIBLE else View.GONE
+        if (on) {
+            memorySyncStatus.text = if (syncing) "Syncing…" else syncStatusText()
+        }
+    }
+
+    private fun syncStatusText(): String {
+        val at = authStore.accountContextSyncedAtMs()
+        if (at <= 0L) return "Not synced yet"
+        val chars = authStore.syncedAccountContext().length
+        val ago = relativeTime(at)
+        return if (chars == 0) "Synced $ago · nothing found" else "Synced $ago · $chars characters"
+    }
+
+    private fun relativeTime(ms: Long): String {
+        val delta = System.currentTimeMillis() - ms
+        return when {
+            delta < 60_000L -> "just now"
+            delta < 3_600_000L -> "${delta / 60_000L}m ago"
+            delta < 86_400_000L -> "${delta / 3_600_000L}h ago"
+            else -> "${delta / 86_400_000L}d ago"
         }
     }
 
