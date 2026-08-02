@@ -3076,13 +3076,7 @@ class BusHubService : Service() {
                 return@post
             }
 
-            // The microphone is about to open, so whatever the glasses are
-            // saying has to stop: they would otherwise record their own voice
-            // into someone's dictation. Cancelled speech does not resume when
-            // the lease ends — a plugin that still wants it said, says it again.
-            sendRemote(BusEnvelope(path = BusPaths.TTS_CANCEL))?.let { error ->
-                log("TTS cancel on audio lease grant failed code=$error")
-            }
+            silenceGlassesSpeechForMicrophone()
             replyToAudioRequest(
                 envelope,
                 replyRemote,
@@ -3135,6 +3129,7 @@ class BusHubService : Service() {
                     InternalAudioAcquireResult.NO_LINK
                 }
             } else {
+                silenceGlassesSpeechForMicrophone()
                 InternalAudioAcquireResult.OK
             }
         }
@@ -3143,6 +3138,21 @@ class BusHubService : Service() {
         audioLeaseArbitrator.clearIf { it.leaseId == lease.leaseId }
         stopAudioStreamQuietly()
         return InternalAudioAcquireResult.START_FAILED
+    }
+
+    /**
+     * Silences the glasses the moment the microphone opens, whoever opened it.
+     *
+     * Speech and dictation share one pair of ears: left running, the glasses
+     * record their own voice into what the wearer is saying. Every path that
+     * grants the microphone calls this — the plugin-facing lease and the hub's
+     * own internal one, which is the one dictation actually uses. Cancelled
+     * speech never resumes; a plugin that still wants it said, says it again.
+     */
+    private fun silenceGlassesSpeechForMicrophone() {
+        sendRemote(BusEnvelope(path = BusPaths.TTS_CANCEL))?.let { error ->
+            log("TTS cancel on microphone open failed code=$error")
+        }
     }
 
     private fun releaseInternalAudio(tag: String) {
