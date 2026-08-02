@@ -402,10 +402,11 @@ test("monitor attaches, resumes, refreshes, streams statuses, and routes approva
   }
 });
 
-test("monitor caps discovery at 200 sessions and never requests a third page", async () => {
+test("monitor caps discovery at the session cap and never requests an extra page", async () => {
   const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
   await new Promise((resolve) => server.once("listening", resolve));
   const port = server.address().port;
+  const fakePageSize = 40;
   const listRequests = [];
   server.on("connection", (socket) => {
     socket.on("message", (raw) => {
@@ -417,8 +418,8 @@ test("monitor caps discovery at 200 sessions and never requests a third page", a
       }
       if (message.method === "thread/list") {
         listRequests.push(message.params);
-        const offset = message.params.cursor ? 100 : 0;
-        const data = Array.from({ length: 100 }, (_, index) =>
+        const offset = (listRequests.length - 1) * fakePageSize;
+        const data = Array.from({ length: fakePageSize }, (_, index) =>
           makeThread({
             id: `thread-${offset + index}`,
             updatedAt: 1_753_001_000 - offset - index,
@@ -429,7 +430,7 @@ test("monitor caps discovery at 200 sessions and never requests a third page", a
           id: message.id,
           result: {
             data,
-            nextCursor: offset === 0 ? "page-2" : "page-3-must-not-be-read",
+            nextCursor: `page-${listRequests.length + 1}-must-not-be-read-past-the-cap`,
             backwardsCursor: null,
           },
         }));
@@ -453,10 +454,13 @@ test("monitor caps discovery at 200 sessions and never requests a third page", a
   try {
     monitor.start();
     await waitUntil(() => monitor.availability().available, "monitor did not finish discovery", 5000);
-    assert.equal(MAX_CODEX_SESSIONS, 200);
-    assert.equal(store.list().filter((session) => session.provider === "codex").length, 200);
-    assert.equal(listRequests.length, 2);
-    assert.deepEqual(listRequests.map((params) => params.limit), [100, 100]);
+    assert.equal(
+      store.list().filter((session) => session.provider === "codex").length,
+      MAX_CODEX_SESSIONS,
+    );
+    assert.equal(listRequests.length, Math.ceil(MAX_CODEX_SESSIONS / fakePageSize));
+    assert.equal(listRequests[0].limit, MAX_CODEX_SESSIONS);
+    assert.equal(listRequests.at(-1).limit, MAX_CODEX_SESSIONS - fakePageSize);
     assert.ok(listRequests.every((params) => params.sortKey === "recency_at"));
   } finally {
     await monitor.stop();

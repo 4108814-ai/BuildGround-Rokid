@@ -28,10 +28,14 @@ import type {
   Turn,
 } from "./protocol";
 
-export const MAX_CODEX_SESSIONS = 200;
-const APP_SERVER_PAGE_SIZE = 100;
+// The HUD board never shows more than 63 rows, and one thread/resume replays a
+// full rollout: a deep backlog at 200 threads kept the first synchronize from
+// ever finishing on a real machine. Sixty recent threads is more than the
+// glasses can show and cheap enough to resume.
+export const MAX_CODEX_SESSIONS = 60;
+const APP_SERVER_PAGE_SIZE = 60;
 const DEFAULT_CONNECT_TIMEOUT_MS = 800;
-const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_START_TIMEOUT_MS = 5_000;
 const DEFAULT_RECONNECT_DELAY_MS = 3_000;
 const START_RETRY_MS = 150;
