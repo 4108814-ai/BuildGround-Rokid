@@ -48,6 +48,8 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         maxLines = 1
     }
     private var surface: NexusSurface? = null
+    private var listRenderGeneration = 0L
+    private var pendingListLayoutListener: View.OnLayoutChangeListener? = null
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -118,10 +120,12 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
 
     override fun onDetachedFromWindow() {
         removeCallbacks(ticker)
+        invalidatePendingListLayout()
         super.onDetachedFromWindow()
     }
 
     private fun renderNow(surface: NexusSurface) {
+        invalidatePendingListLayout()
         titleView.text = surface.title
         titleView.visibility = visibleIf(surface.title.isNotBlank())
         subtitleView.text = surface.subtitle
@@ -196,18 +200,96 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         boardView.visibility = VISIBLE
         boardView.gravity = Gravity.TOP
         boardView.removeAllViews()
-        rows.forEachIndexed { index, row ->
+        val rowViews = rows.mapIndexed { index, row ->
+            val view = if (row.tone == SurfaceRow.TONE_BODY) bodyRow(row) else listRow(row)
+            val params = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                if (index > 0) {
+                    topMargin = px(
+                        if (row.tone == SurfaceRow.TONE_BODY) LIST_BODY_GAP_DP else LIST_ROW_GAP_DP,
+                    )
+                }
+            }
+            view to params
+        }
+        // The board's height is weight-fixed, but the chrome above it is not: a
+        // title appearing on this render moves the board's bounds only at the
+        // next layout pass. Window against whatever size is current, then again
+        // whenever the bounds actually change — the size key keeps the listener
+        // from looping on the layout its own re-attachment triggers.
+        var windowedSizeKey = 0L
+        fun windowNow() {
+            val width = boardView.width - boardView.paddingLeft - boardView.paddingRight
+            val height = boardView.height - boardView.paddingTop - boardView.paddingBottom
+            if (width <= 0 || height <= 0) return
+            val sizeKey = (width.toLong() shl 32) or height.toLong()
+            if (sizeKey == windowedSizeKey) return
+            windowedSizeKey = sizeKey
+            attachListWindow(rows, rowViews)
+        }
+
+        val generation = listRenderGeneration
+        val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (generation == listRenderGeneration) windowNow()
+        }
+        pendingListLayoutListener = listener
+        boardView.addOnLayoutChangeListener(listener)
+        windowNow()
+        if (windowedSizeKey == 0L) boardView.requestLayout()
+    }
+
+    private fun attachListWindow(
+        rows: List<SurfaceRow>,
+        rowViews: List<Pair<View, LayoutParams>>,
+    ) {
+        val viewportWidth = (boardView.width - boardView.paddingLeft - boardView.paddingRight)
+            .coerceAtLeast(1)
+        val viewportHeight = (boardView.height - boardView.paddingTop - boardView.paddingBottom)
+            .coerceAtLeast(0)
+        val widthSpec = View.MeasureSpec.makeMeasureSpec(viewportWidth, View.MeasureSpec.EXACTLY)
+        val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        val rowOuterHeights = rowViews.map { (view, params) ->
+            view.measure(widthSpec, heightSpec)
+            view.measuredHeight + params.topMargin
+        }
+        val indicatorProbe = listOverflowIndicator(up = false, hiddenCount = rows.size)
+        indicatorProbe.measure(widthSpec, heightSpec)
+        val selectedIndex = rows.indexOfFirst { it.selected }.takeIf { it >= 0 }
+        val window = surfaceListViewport(
+            rowOuterHeightsPx = rowOuterHeights,
+            viewportHeightPx = viewportHeight,
+            selectedIndex = selectedIndex,
+            indicatorHeightPx = indicatorProbe.measuredHeight,
+        )
+
+        boardView.removeAllViews()
+        if (window.hiddenAbove > 0) {
             boardView.addView(
-                if (row.tone == SurfaceRow.TONE_BODY) bodyRow(row) else listRow(row),
-                LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
-                    if (index > 0) {
-                        topMargin = px(
-                            if (row.tone == SurfaceRow.TONE_BODY) LIST_BODY_GAP_DP else LIST_ROW_GAP_DP,
-                        )
-                    }
-                },
+                listOverflowIndicator(up = true, hiddenCount = window.hiddenAbove),
+                LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT),
             )
         }
+        for (index in window.firstRow until window.lastRowExclusive) {
+            val (view, params) = rowViews[index]
+            boardView.addView(view, params)
+        }
+        if (window.hiddenBelow > 0) {
+            boardView.addView(
+                listOverflowIndicator(up = false, hiddenCount = window.hiddenBelow),
+                LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT),
+            )
+        }
+    }
+
+    private fun listOverflowIndicator(up: Boolean, hiddenCount: Int): TextView =
+        monoText(LIST_SUB_SP, BusTheme.muted).apply {
+            text = "${if (up) "▴" else "▾"} $hiddenCount"
+            maxLines = 1
+        }
+
+    private fun invalidatePendingListLayout() {
+        listRenderGeneration += 1
+        pendingListLayoutListener?.let(boardView::removeOnLayoutChangeListener)
+        pendingListLayoutListener = null
     }
 
     private fun listRow(row: SurfaceRow): LinearLayout =
@@ -474,6 +556,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
     }
 
     private fun clear() {
+        invalidatePendingListLayout()
         titleView.text = ""
         subtitleView.text = ""
         previousView.text = ""
