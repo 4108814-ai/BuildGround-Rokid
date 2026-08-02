@@ -25,6 +25,10 @@ import com.anezium.rokidbus.client.plugin.NexusSpeechSession
 import com.anezium.rokidbus.client.plugin.NexusSpeechState
 import com.anezium.rokidbus.client.plugin.NexusSpeechStopReason
 import com.anezium.rokidbus.client.plugin.NexusSurfaceSession
+import com.anezium.rokidbus.client.plugin.NexusTtsCallbacks
+import com.anezium.rokidbus.client.plugin.NexusTtsDoneReason
+import com.anezium.rokidbus.client.plugin.NexusTtsSession
+import com.anezium.rokidbus.client.plugin.ttsSession
 import com.anezium.rokidbus.shared.LinkStateBits
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
 import com.anezium.rokidbus.shared.plugin.PluginCapability
@@ -92,6 +96,8 @@ class AssistantPluginService : NexusPluginService() {
     private var speechSession: NexusSpeechSession? = null
     private var audioSession: NexusAudioSession? = null
     private var snapshotSession: NexusSnapshotSession? = null
+    private var ttsSession: NexusTtsSession? = null
+    private var activeTtsUtteranceId: String? = null
     private var captureGeneration = 0L
     private var captureActive = false
     private var fallbackTranscribePending = false
@@ -106,6 +112,19 @@ class AssistantPluginService : NexusPluginService() {
     private var photoJpegForCompletedTurn: ByteArray? = null
     private var currentLinkState = 0
     private val captureTriggerGate = AssistantCaptureTriggerGate()
+    private val answerSpeaker = AssistantAnswerSpeaker(
+        // A bound reference here would read authStore while the service is still
+        // being constructed, before it has a base context to build one from.
+        enabled = { authStore.speakAnswers() },
+        speak = ::speakAnswer,
+    )
+    private val ttsCallbacks = object : NexusTtsCallbacks {
+        override fun onTtsStarted(utteranceId: String) = Unit
+
+        override fun onTtsDone(utteranceId: String, reason: NexusTtsDoneReason) {
+            if (utteranceId == activeTtsUtteranceId) activeTtsUtteranceId = null
+        }
+    }
     private val uiController = AssistantUiController(
         scope = serviceScope,
         renderer = object : AssistantUiRenderer {
@@ -146,6 +165,7 @@ class AssistantPluginService : NexusPluginService() {
         captureTriggerGate.resetSession()
         resetCapture()
         cancelPipeline()
+        closeAnswerSpeechSession()
         surface = null
     }
 
@@ -163,6 +183,7 @@ class AssistantPluginService : NexusPluginService() {
     }
 
     override fun onNexusNoticeClosed(reason: NexusNoticeCloseReason) {
+        if (reason == NexusNoticeCloseReason.USER) stopAnswerSpeech()
         uiController.onNoticeClosed(reason)
     }
 
@@ -195,11 +216,13 @@ class AssistantPluginService : NexusPluginService() {
         uiController.onClose()
         resetCapture()
         cancelPipeline()
+        closeAnswerSpeechSession()
         serviceScope.cancel()
         super.onDestroy()
     }
 
     private fun startCaptureOnce() {
+        stopAnswerSpeech()
         if (captureActive) return
         beginCapture()
     }
@@ -528,6 +551,7 @@ class AssistantPluginService : NexusPluginService() {
             }
             if (!failed) {
                 currentCoroutineContext().ensureActive()
+                answerSpeaker.speakCompletedAnswer(finalAnswer.orEmpty())
                 try {
                     val keepPhotosAtCompletion = authStore.keepPhotosInConversations()
                     withContext(Dispatchers.IO) {
@@ -889,6 +913,7 @@ class AssistantPluginService : NexusPluginService() {
     }
 
     private fun cancelPipeline() {
+        stopAnswerSpeech()
         pipelineJob?.cancel()
         pipelineJob = null
         val activeSnapshot = snapshotSession
@@ -901,6 +926,34 @@ class AssistantPluginService : NexusPluginService() {
         currentRequestId = null
         currentAssistantGeneration = null
         photoJpegForCompletedTurn = null
+    }
+
+    private fun speakAnswer(text: String, utteranceId: String): NexusSdkResult {
+        if (captureActive || speechSession != null || audioSession != null) {
+            return NexusSdkResult.CAPABILITY_NOT_AVAILABLE
+        }
+        val currentClient = nexusClient ?: return NexusSdkResult.NOT_REGISTERED
+        val session = ttsSession ?: currentClient.ttsSession(ttsCallbacks).also { ttsSession = it }
+        activeTtsUtteranceId = utteranceId
+        val result = session.speak(text, utteranceId)
+        Log.i(TAG, "tts speak utteranceId=$utteranceId result=$result textChars=${text.length}")
+        if (result != NexusSdkResult.SENT && activeTtsUtteranceId == utteranceId) {
+            activeTtsUtteranceId = null
+        }
+        return result
+    }
+
+    private fun stopAnswerSpeech() {
+        val utteranceId = activeTtsUtteranceId ?: return
+        activeTtsUtteranceId = null
+        val result = ttsSession?.stop() ?: return
+        Log.i(TAG, "tts stop utteranceId=$utteranceId result=$result")
+    }
+
+    private fun closeAnswerSpeechSession() {
+        stopAnswerSpeech()
+        ttsSession?.close()
+        ttsSession = null
     }
 
     private fun resetCapture() {

@@ -14,11 +14,25 @@ class CodexAuthStoreLogicTest {
 
         assertTrue(store.keepConversation())
         assertTrue(store.keepPhotosInConversations())
+        assertTrue(store.speakAnswers())
         assertEquals(CodexAuthStore.DEFAULT_IDLE_WINDOW_MINUTES, store.conversationIdleWindowMinutes())
         assertEquals("", store.assistantMemory())
         assertTrue(store.syncAccountContext())
         assertEquals("", store.syncedAccountContext())
         assertEquals(0L, store.accountContextSyncedAtMs())
+    }
+
+    @Test
+    fun speakAnswersDefaultsTrueAndRoundTrips() {
+        val store = CodexAuthStore(FakeSharedPreferences())
+
+        assertTrue(store.speakAnswers())
+
+        store.setSpeakAnswers(false)
+        assertFalse(store.speakAnswers())
+
+        store.setSpeakAnswers(true)
+        assertTrue(store.speakAnswers())
     }
 
     @Test
@@ -50,11 +64,13 @@ class CodexAuthStoreLogicTest {
         val store = CodexAuthStore(FakeSharedPreferences())
         store.setKeepConversation(false)
         store.setKeepPhotosInConversations(false)
+        store.setSpeakAnswers(false)
         store.setConversationIdleWindowMinutes(30)
         store.setAssistantMemory("Uses metric units.")
 
         assertFalse(store.keepConversation())
         assertFalse(store.keepPhotosInConversations())
+        assertFalse(store.speakAnswers())
         assertEquals(30, store.conversationIdleWindowMinutes())
         assertEquals("Uses metric units.", store.assistantMemory())
 
@@ -62,6 +78,7 @@ class CodexAuthStoreLogicTest {
 
         assertTrue(store.keepConversation())
         assertTrue(store.keepPhotosInConversations())
+        assertTrue(store.speakAnswers())
         assertEquals(CodexAuthStore.DEFAULT_IDLE_WINDOW_MINUTES, store.conversationIdleWindowMinutes())
         assertEquals("", store.assistantMemory())
     }

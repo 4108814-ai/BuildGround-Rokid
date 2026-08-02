@@ -93,6 +93,8 @@ class CodexAuthStore {
     fun keepPhotosInConversations(): Boolean =
         prefs.getBoolean(KEY_KEEP_PHOTOS_IN_CONVERSATIONS, true)
 
+    fun speakAnswers(): Boolean = prefs.getBoolean(KEY_SPEAK_ANSWERS, true)
+
     fun conversationIdleWindowMinutes(): Int = supportedIdleWindowMinutes(
         prefs.getInt(KEY_CONVERSATION_IDLE_WINDOW_MINUTES, DEFAULT_IDLE_WINDOW_MINUTES),
     )
@@ -133,6 +135,10 @@ class CodexAuthStore {
 
     fun setKeepPhotosInConversations(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_KEEP_PHOTOS_IN_CONVERSATIONS, enabled).apply()
+    }
+
+    fun setSpeakAnswers(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SPEAK_ANSWERS, enabled).apply()
     }
 
     fun setConversationIdleWindowMinutes(minutes: Int) {
@@ -255,6 +261,7 @@ class CodexAuthStore {
         private const val KEY_KEEP_CONVERSATION = "keep_conversation"
         private const val KEY_KEEP_PHOTOS_IN_CONVERSATIONS =
             "keep_photos_in_conversations"
+        private const val KEY_SPEAK_ANSWERS = "speak_answers"
         private const val KEY_CONVERSATION_IDLE_WINDOW_MINUTES =
             "conversation_idle_window_minutes"
         private const val KEY_ASSISTANT_MEMORY = "assistant_memory"

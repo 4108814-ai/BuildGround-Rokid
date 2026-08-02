@@ -54,6 +54,8 @@ class AssistantSettingsActivity : Activity() {
     private val keepNames = mutableMapOf<Boolean, TextView>()
     private val photosDots = mutableMapOf<Boolean, View>()
     private val photosNames = mutableMapOf<Boolean, TextView>()
+    private val voiceDots = mutableMapOf<Boolean, View>()
+    private val voiceNames = mutableMapOf<Boolean, TextView>()
     private val windowDots = mutableMapOf<Int, View>()
     private val windowNames = mutableMapOf<Int, TextView>()
     private val syncDots = mutableMapOf<Boolean, View>()
@@ -212,6 +214,13 @@ class AssistantSettingsActivity : Activity() {
             )
             addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
             addView(photosCard(), NexusUi.block())
+            addView(BusTheme.gap(this@AssistantSettingsActivity, 18))
+            addView(
+                NexusUi.sectionRow(this@AssistantSettingsActivity, "Voice"),
+                NexusUi.block(),
+            )
+            addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
+            addView(voiceCard(), NexusUi.block())
             addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
             conversationsSlot = LinearLayout(this@AssistantSettingsActivity).apply {
                 orientation = LinearLayout.VERTICAL
@@ -748,6 +757,36 @@ class AssistantSettingsActivity : Activity() {
             dotSink = { photosDots[keep] = it },
         )
 
+    private fun voiceCard(): LinearLayout =
+        NexusUi.card(this).apply {
+            addView(
+                voiceRow(true, "Speak answers", "you hear the answer"),
+                NexusUi.block(),
+            )
+            addView(NexusUi.divider(this@AssistantSettingsActivity))
+            addView(
+                voiceRow(false, "Silent", "the HUD only"),
+                NexusUi.block(),
+            )
+        }
+
+    private fun voiceRow(
+        enabled: Boolean,
+        title: String,
+        hint: String,
+    ): LinearLayout =
+        pickerRow(
+            title = title,
+            hint = hint,
+            description = if (enabled) "Speak answers out loud" else "Show answers on the HUD only",
+            onClick = {
+                authStore.setSpeakAnswers(enabled)
+                renderConversationSettings()
+            },
+            nameSink = { voiceNames[enabled] = it },
+            dotSink = { voiceDots[enabled] = it },
+        )
+
     private fun windowCard(): LinearLayout =
         NexusUi.card(this).apply {
             CodexAuthStore.SUPPORTED_IDLE_WINDOW_MINUTES.forEachIndexed { index, minutes ->
@@ -859,6 +898,14 @@ class AssistantSettingsActivity : Activity() {
         }
         photosNames.forEach { (value, nameView) ->
             nameView.setTextColor(if (value == keepPhotos) NexusUi.INK else NexusUi.INK2)
+        }
+
+        val speakAnswers = authStore.speakAnswers()
+        voiceDots.forEach { (value, dotView) ->
+            NexusUi.setDotColor(dotView, if (value == speakAnswers) NexusUi.GREEN else NexusUi.INK4)
+        }
+        voiceNames.forEach { (value, nameView) ->
+            nameView.setTextColor(if (value == speakAnswers) NexusUi.INK else NexusUi.INK2)
         }
 
         renderConversationsCard()
