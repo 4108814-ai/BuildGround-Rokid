@@ -1,9 +1,13 @@
 package com.anezium.rokidbus.glasses
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.view.KeyEvent
 import com.anezium.rokidbus.shared.BusEnvelope
@@ -70,6 +74,23 @@ internal data class NexusNoticeSurface(
 
     val claimsDirection: Boolean get() = liveActions.size > 1 || isPaged
 }
+
+internal fun noticeVisibleForInput(
+    activeNotice: NexusNoticeSurface?,
+    cameraOverlayActive: Boolean,
+): NexusNoticeSurface? = activeNotice.takeUnless { cameraOverlayActive }
+
+internal fun noticeClaimsAllInput(
+    activeNotice: NexusNoticeSurface?,
+    cameraOverlayActive: Boolean,
+): Boolean = noticeVisibleForInput(activeNotice, cameraOverlayActive)?.content?.backdrop == true
+
+internal fun noticeOwnsRingInput(
+    activeNotice: NexusNoticeSurface?,
+    cameraOverlayActive: Boolean,
+): Boolean = noticeVisibleForInput(activeNotice, cameraOverlayActive)?.let { notice ->
+    notice.expectsInput || notice.claimsDirection || notice.content.backdrop
+} == true
 
 /**
  * Where the selection lands after a step. Wraps in both directions: the row is
@@ -405,13 +426,37 @@ internal object NoticeController {
     }
     private var expiry: Runnable? = null
     private var cameraOverlayActive = false
+    private var serviceContext: Context? = null
+    private var sleepDisplay: (() -> Unit)? = null
+    private var episodeOwnsWake = false
+    private var screenOffReceiverRegistered = false
+    private val screenOffReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            runOnMain { episodeOwnsWake = false }
+        }
+    }
     private val ringInputPolicy = RingSurfaceInputPolicy()
     private val ringTapExpiry = Runnable(::resolveRingTap)
 
     fun activeNotice(): NexusNoticeSurface? = state.activeNotice()
 
+    fun onServiceConnected(context: Context, sleepDisplay: () -> Unit) {
+        runOnMain {
+            serviceContext = context.applicationContext
+            this.sleepDisplay = sleepDisplay
+            registerScreenOffReceiver(context.applicationContext)
+        }
+    }
+
+    fun onServiceDestroyed() {
+        runOnMain {
+            sleepDisplay = null
+            serviceContext = null
+        }
+    }
+
     fun visibleNotice(): NexusNoticeSurface? =
-        state.activeNotice().takeUnless { cameraOverlayActive }
+        noticeVisibleForInput(state.activeNotice(), cameraOverlayActive)
 
     fun observe(listener: (NexusNoticeSurface?) -> Unit): () -> Unit {
         listeners += listener
@@ -455,18 +500,30 @@ internal object NoticeController {
     /**
      * Whether a notice is up and asked for a gesture. Only then does anything
      * below claim a key, and only the keys that mean confirm and dismiss:
-     * everything else keeps reaching whatever is underneath, because a banner
-     * is not a reason for the glasses to stop responding.
+     * everything else keeps reaching whatever is underneath. Backdrop notices
+     * add a separate modal fallback claim because they hide that native UI.
      */
     fun claimsInput(): Boolean = visibleNotice()?.expectsInput == true
 
     /**
      * Forward and backward belong to the band only when they can change its
      * state: they choose an offered answer or turn measured pages. A plain
-     * one-page notice claims neither, so the surface underneath stays usable.
+     * one-page non-backdrop notice claims neither, so the surface underneath
+     * stays usable.
      */
     fun claimsDirection(): Boolean =
         visibleNotice()?.claimsDirection == true
+
+    /** A backdrop hides the native UI, so none of its touchpad input may leak through. */
+    fun claimsAllInput(): Boolean =
+        noticeClaimsAllInput(state.activeNotice(), cameraOverlayActive)
+
+    /**
+     * The ring bridge must stand down for every interactive, paged, or backdrop
+     * notice. Per-key claims still decide which gestures change notice state.
+     */
+    fun ownsRingInput(): Boolean =
+        noticeOwnsRingInput(state.activeNotice(), cameraOverlayActive)
 
     /**
      * The wearer confirmed. The owner hears about it once; nobody else does.
@@ -477,8 +534,9 @@ internal object NoticeController {
      * spent in the same step -- there is no reading here for a second tap to
      * race.
      *
-     * An answered band of either kind claims nothing: the second of two fast
-     * taps falls through to whatever is underneath.
+     * An answered band has no live confirm claim. A non-backdrop band therefore
+     * lets the second of two fast taps through; a backdrop band's modal fallback
+     * swallows it without answering again.
      */
     fun handleConfirm(keyCode: Int): Boolean {
         if (visibleNotice()?.expectsInput != true) return false
@@ -510,8 +568,9 @@ internal object NoticeController {
 
     /**
      * Which ring keys the band takes. The tap belongs to a question; directions
-     * belong to either its row or measured pages. A plain one-page banner takes
-     * neither, so the surface behind it stays usable and the ring never freezes.
+     * belong to either its row or measured pages. Ownership is broader than
+     * these per-key claims: unclaimed keys are swallowed while any interactive,
+     * paged, or backdrop notice owns the R08 bridge focus.
      */
     fun claimsRingKey(keyCode: Int): Boolean = when (keyCode) {
         RingSurfaceInputPolicy.RING_KEYCODE_TAP -> claimsInput()
@@ -662,11 +721,12 @@ internal object NoticeController {
         }
         applyDecision(decision)
         if (decision is NoticeStateDecision.Shown) {
-            DisplayWakePolicy.requestWake(
+            val wakeDecision = DisplayWakePolicy.requestWake(
                 context,
                 DisplayWakeKind.NOTICE,
                 requested = decision.notice.content.wakeDisplay,
             )
+            if (wakeDecision is DisplayWakeDecision.Wake) episodeOwnsWake = true
             previous?.imageBitmap
                 ?.takeUnless { it === decision.notice.imageBitmap }
                 ?.recycleSafely()
@@ -726,6 +786,7 @@ internal object NoticeController {
                 ringInputPolicy.reset()
                 reportClosed(decision.surfaceId, decision.reason)
                 notifyChanged()
+                maybeSleepDisplay(decision.reason)
                 decision.imageBitmap?.let { released ->
                     main.postDelayed({ released.recycleSafely() }, HudMotion.EXIT_MS + 1L)
                 }
@@ -767,8 +828,58 @@ internal object NoticeController {
         }
     }
 
+    private fun maybeSleepDisplay(closeReason: NoticeCloseReason) {
+        // A USER or TIMEOUT close ends the wake episode whether or not the sleep
+        // below runs: the band is gone, so nothing is owed standby after this.
+        // Only an OWNER hide keeps the episode alive, because owners hide and
+        // show in sequence and the next band continues the same interruption.
+        val episodeEnds = closeReason != NoticeCloseReason.OWNER
+        try {
+            val context = serviceContext ?: return
+            val sleep = sleepDisplay ?: return
+            val power = context.getSystemService(PowerManager::class.java)
+            if (power == null) {
+                log("notice display sleep skipped condition=power_unavailable")
+                return
+            }
+            when (
+                val decision = NoticeSleepPolicy.decide(
+                    closeReason = closeReason,
+                    episodeOwnsWake = episodeOwnsWake,
+                    isInteractive = power.isInteractive,
+                    launcherShown = LauncherOverlayRenderer.isShown(),
+                    surfaceActive = SurfaceController.activeSurface() != null,
+                    activityPresenting = ActivityController.isPresenting(),
+                    cameraOverlayActive = cameraOverlayActive,
+                )
+            ) {
+                NoticeSleepDecision.Sleep -> {
+                    log("notice display sleep")
+                    sleep()
+                }
+                is NoticeSleepDecision.Skip ->
+                    log("notice display sleep skipped condition=${decision.reason.logValue}")
+            }
+        } finally {
+            if (episodeEnds) episodeOwnsWake = false
+        }
+    }
+
+    /**
+     * Registered once per process, on the application context. The display
+     * going dark by any hand — this sleep, the ROM's timeout, the wearer's own
+     * toggle — ends the wake episode; without this, a stale flag could put the
+     * display to sleep under a wearer who had long since woken it themselves.
+     */
+    private fun registerScreenOffReceiver(context: Context) {
+        if (screenOffReceiverRegistered) return
+        context.registerReceiver(screenOffReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
+        screenOffReceiverRegistered = true
+    }
+
     private fun notifyChanged() {
         val visible = visibleNotice()
+        RingFocusBroadcastCoordinator.setNoticeOwnsRing(ownsRingInput())
         listeners.forEach { listener -> runCatching { listener(visible) } }
     }
 

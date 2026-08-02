@@ -702,6 +702,85 @@ class NoticeStateMachineTest {
         assertFalse(state.activeNotice()!!.claimsDirection)
     }
 
+    @Test
+    fun `backdrop owns all input and ring even without live claims`() {
+        val state = NoticeStateMachine()
+        state.show(
+            "relay:notice",
+            seq = 1,
+            content = content(backdrop = true),
+            nowMs = 0L,
+        )
+        val notice = state.activeNotice()
+
+        assertFalse(notice!!.expectsInput)
+        assertFalse(notice.claimsDirection)
+        assertTrue(noticeClaimsAllInput(notice, cameraOverlayActive = false))
+        assertTrue(noticeOwnsRingInput(notice, cameraOverlayActive = false))
+    }
+
+    @Test
+    fun `non-backdrop interactive and paged claims keep ring ownership selective`() {
+        val interactive = NoticeStateMachine().apply {
+            show(
+                "relay:interactive",
+                seq = 1,
+                content = content(interactive = true),
+                nowMs = 0L,
+            )
+        }.activeNotice()
+        val pagedState = NoticeStateMachine().apply {
+            show("relay:paged", seq = 1, content = content(), nowMs = 0L)
+            setPageCount("relay:paged", seq = 1, count = 3)
+        }
+        val paged = pagedState.activeNotice()
+
+        assertTrue(interactive!!.expectsInput)
+        assertFalse(noticeClaimsAllInput(interactive, cameraOverlayActive = false))
+        assertTrue(noticeOwnsRingInput(interactive, cameraOverlayActive = false))
+        assertTrue(paged!!.claimsDirection)
+        assertFalse(noticeClaimsAllInput(paged, cameraOverlayActive = false))
+        assertTrue(noticeOwnsRingInput(paged, cameraOverlayActive = false))
+    }
+
+    @Test
+    fun `answered multi-action backdrop keeps owning input`() {
+        val state = NoticeStateMachine()
+        state.show(
+            "relay:notice",
+            seq = 1,
+            content = content(actions = threeActions(), backdrop = true),
+            nowMs = 0L,
+        )
+        state.answer(CONFIRM_KEY)
+        val answered = state.activeNotice()
+
+        assertFalse(answered!!.expectsInput)
+        assertFalse(answered.claimsDirection)
+        assertTrue(noticeClaimsAllInput(answered, cameraOverlayActive = false))
+        assertTrue(noticeOwnsRingInput(answered, cameraOverlayActive = false))
+    }
+
+    @Test
+    fun `no visible notice owns input`() {
+        val state = NoticeStateMachine()
+        state.show(
+            "relay:notice",
+            seq = 1,
+            content = content(interactive = true, backdrop = true),
+            nowMs = 0L,
+        )
+
+        assertFalse(noticeClaimsAllInput(null, cameraOverlayActive = false))
+        assertFalse(noticeOwnsRingInput(null, cameraOverlayActive = false))
+        assertFalse(noticeClaimsAllInput(state.activeNotice(), cameraOverlayActive = true))
+        assertFalse(noticeOwnsRingInput(state.activeNotice(), cameraOverlayActive = true))
+
+        state.close(NoticeCloseReason.USER)
+        assertFalse(noticeClaimsAllInput(state.activeNotice(), cameraOverlayActive = false))
+        assertFalse(noticeOwnsRingInput(state.activeNotice(), cameraOverlayActive = false))
+    }
+
     /** `KeyEvent.KEYCODE_ENTER`, spelled out so the test needs no framework. */
     private val CONFIRM_KEY = 66
 

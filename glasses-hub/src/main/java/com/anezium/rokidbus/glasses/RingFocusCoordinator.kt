@@ -6,7 +6,7 @@ import android.os.Handler
 import android.os.Looper
 
 /**
- * Edge-triggered union of the launcher and plugin-surface ring owners.
+ * Edge-triggered union of the launcher, plugin-surface, and notice ring owners.
  *
  * A launcher-to-surface handoff temporarily retains focus after the launcher
  * source drops. The matching surface show completes it atomically; a bounded
@@ -18,6 +18,7 @@ internal class RingFocusCoordinator(
     private var launcherShown = false
     private var surfaceActive = false
     private var surfaceHandoffPending = false
+    private var noticeOwnsRing = false
     private var publishedFocused = false
 
     @Synchronized
@@ -31,6 +32,12 @@ internal class RingFocusCoordinator(
     fun setSurfaceActive(active: Boolean, completesHandoff: Boolean = false) {
         surfaceActive = active
         if (active && completesHandoff) surfaceHandoffPending = false
+        publishIfChanged()
+    }
+
+    @Synchronized
+    fun setNoticeOwnsRing(owns: Boolean) {
+        noticeOwnsRing = owns
         publishIfChanged()
     }
 
@@ -51,11 +58,12 @@ internal class RingFocusCoordinator(
         launcherShown = false
         surfaceActive = false
         surfaceHandoffPending = false
+        noticeOwnsRing = false
         publishIfChanged()
     }
 
     private fun publishIfChanged() {
-        val focused = launcherShown || surfaceActive || surfaceHandoffPending
+        val focused = launcherShown || surfaceActive || surfaceHandoffPending || noticeOwnsRing
         if (focused == publishedFocused) return
         publishedFocused = focused
         publish(focused)
@@ -74,10 +82,15 @@ internal object RingFocusBroadcastCoordinator {
     private val coordinator = RingFocusCoordinator(::sendFocusBroadcast)
     private val handoffExpiry = Runnable { coordinator.expireSurfaceHandoff() }
 
-    fun onServiceConnected(context: Context, surfaceActive: Boolean) {
+    fun onServiceConnected(
+        context: Context,
+        surfaceActive: Boolean,
+        noticeOwnsRing: Boolean,
+    ) {
         appContext = context.applicationContext
         inputServiceConnected = true
         coordinator.setSurfaceActive(surfaceActive)
+        coordinator.setNoticeOwnsRing(noticeOwnsRing)
     }
 
     fun onServiceDestroyed(context: Context) {
@@ -117,6 +130,11 @@ internal object RingFocusBroadcastCoordinator {
     fun setSurfaceInactive() {
         if (!inputServiceConnected) return
         coordinator.setSurfaceActive(false)
+    }
+
+    fun setNoticeOwnsRing(owns: Boolean) {
+        if (!inputServiceConnected) return
+        coordinator.setNoticeOwnsRing(owns)
     }
 
     private fun sendFocusBroadcast(focused: Boolean) {

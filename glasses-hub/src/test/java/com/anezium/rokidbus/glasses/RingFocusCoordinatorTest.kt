@@ -20,6 +20,20 @@ class RingFocusCoordinatorTest {
     }
 
     @Test
+    fun `notice ownership joins the focus union without duplicate edges`() {
+        val published = mutableListOf<Boolean>()
+        val coordinator = RingFocusCoordinator { published += it }
+
+        coordinator.setNoticeOwnsRing(true)
+        coordinator.setNoticeOwnsRing(true)
+        coordinator.setSurfaceActive(true)
+        coordinator.setNoticeOwnsRing(false)
+        coordinator.setSurfaceActive(false)
+
+        assertEquals(listOf(true, false), published)
+    }
+
+    @Test
     fun `launcher to matching surface handoff has no false blip`() {
         val published = mutableListOf<Boolean>()
         val coordinator = RingFocusCoordinator { published += it }
@@ -68,11 +82,11 @@ class RingFocusCoordinatorTest {
     }
 
     @Test
-    fun `reset releases active focus exactly once`() {
+    fun `reset clears notice ownership and releases focus exactly once`() {
         val published = mutableListOf<Boolean>()
         val coordinator = RingFocusCoordinator { published += it }
 
-        coordinator.setSurfaceActive(true)
+        coordinator.setNoticeOwnsRing(true)
         coordinator.reset()
         coordinator.reset()
 

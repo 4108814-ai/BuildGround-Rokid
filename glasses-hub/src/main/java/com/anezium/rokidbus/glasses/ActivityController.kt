@@ -461,8 +461,10 @@ internal object ActivityController {
         }
     }
 
+    fun isPresenting(): Boolean = latestRender.primary != null
+
     fun claimsInput(): Boolean =
-        latestRender.primary != null &&
+        isPresenting() &&
             !cameraOverlayActive &&
             SurfaceController.activeSurface() == null &&
             NoticeController.visibleNotice() == null &&

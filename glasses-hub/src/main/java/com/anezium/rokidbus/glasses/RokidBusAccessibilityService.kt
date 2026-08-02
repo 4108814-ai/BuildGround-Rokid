@@ -65,11 +65,15 @@ class RokidBusAccessibilityService : AccessibilityService() {
         RingFocusBroadcastCoordinator.onServiceConnected(
             this,
             surfaceActive = SurfaceController.activeSurface() != null,
+            noticeOwnsRing = NoticeController.ownsRingInput(),
         )
         SurfaceOverlayRenderer.onServiceConnected(this)
         PinOverlayRenderer.onServiceConnected(this)
         ActivityController.onServiceConnected(applicationContext) {
             performGlobalAction(GLOBAL_ACTION_BACK)
+        }
+        NoticeController.onServiceConnected(applicationContext) {
+            performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
         }
         ActivityOverlayRenderer.onServiceConnected(this)
         NoticeOverlayRenderer.onServiceConnected(this)
@@ -158,6 +162,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
                     noticeConsumesBack(event) -> true
                     noticeConsumesDirection(event) -> true
                     noticeConsumesConfirm(event) -> true
+                    noticeConsumesBackdropClassification(event) -> true
                     LauncherOverlayRenderer.handleKeyEvent(event) -> true
                     SurfaceController.handleKeyEvent(event) -> true
                     ActivityController.handleKeyEvent(event) -> true
@@ -201,10 +206,22 @@ class RokidBusAccessibilityService : AccessibilityService() {
             NoticeController.handleConfirm(event.keyCode)
 
     /**
+     * Specific notice claims above keep their existing behavior. This final
+     * notice branch only swallows classifications that would otherwise reach a
+     * native UI hidden behind an opted-in backdrop.
+     */
+    private fun noticeConsumesBackdropClassification(event: KeyEvent): Boolean =
+        NoticeTouchpadInputPolicy.consumesUnclaimedKey(
+            claimsAllInput = NoticeController.claimsAllInput(),
+            keyCode = event.keyCode,
+            action = event.action,
+        )
+
+    /**
      * Scroll moves the selection, and only while the band actually has a row to
-     * move along. A notice without actions claims nothing here, so every swipe
-     * keeps reaching the launcher, the surface, or the activity underneath
-     * exactly as it did before this existed.
+     * move along. A non-backdrop notice without actions claims nothing here, so
+     * every swipe keeps reaching the launcher, surface, or activity underneath.
+     * The separate backdrop fallback swallows unclaimed classifications.
      *
      * The swipe pair dedupe is shared with the rest of the hub: the hardware
      * emits each direction twice, and a wearer stepping one glyph must not
@@ -271,17 +288,17 @@ class RokidBusAccessibilityService : AccessibilityService() {
         }
         val launcherShown = LauncherOverlayRenderer.isShown()
         val surfaceActive = SurfaceController.activeSurface() != null
-        val noticeClaims = NoticeController.claimsInput()
+        val noticeOwnsRing = NoticeController.ownsRingInput()
         val noticeRingClaims = NoticeController.claimsRingKey(event.keyCode)
         val activityClaims = ActivityController.claimsRingKey(event.keyCode)
-        if (!launcherShown && !surfaceActive && !noticeClaims && !activityClaims) return false
+        if (!launcherShown && !surfaceActive && !noticeOwnsRing && !activityClaims) return false
 
         if (event.action != KeyEvent.ACTION_DOWN) return true
         if (event.repeatCount == 0) {
             when {
-                // The band takes the tap, and scroll only while it is offering a
-                // choice or holding pages. Anything else keeps reaching whatever
-                // is underneath, so a notice never freezes the ring.
+                // Claimed keys change notice state. While the band owns the ring,
+                // every other R08 key stops here as a no-op so neither the bridge
+                // nor an underlying Nexus layer can drive hidden native UI.
                 //
                 // It is asked before the launcher because the band is drawn on
                 // top of it: a paged notice that arrives over an open launcher is
@@ -289,6 +306,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
                 // scroll a tile row they cannot see.
                 noticeRingClaims ->
                     NoticeController.handleRingKey(event.keyCode, event.eventTime)
+                noticeOwnsRing -> Unit
                 launcherShown ->
                     LauncherOverlayRenderer.handleRingKey(event.keyCode, event.eventTime)
                 surfaceActive ->
@@ -331,6 +349,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
         PinOverlayRenderer.onServiceDestroyed(this)
         ActivityOverlayRenderer.onServiceDestroyed(this)
         ActivityController.onServiceDestroyed()
+        NoticeController.onServiceDestroyed()
         SurfaceOverlayRenderer.onServiceDestroyed(this)
         NoticeOverlayRenderer.onServiceDestroyed(this)
         SurfaceController.cancelRingInput()
