@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Nexus Agents</string>
+    <string name="agent_sessions_channel">Agent sessions</string>
+    <string name="agent_monitor_channel">Agent monitor</string>
+</resources>

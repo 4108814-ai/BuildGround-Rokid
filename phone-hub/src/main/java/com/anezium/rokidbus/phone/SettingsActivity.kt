@@ -1,12 +1,10 @@
 package com.anezium.rokidbus.phone
 
-import com.anezium.rokidbus.client.ui.NexusUi
 import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.res.ColorStateList
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
@@ -18,13 +16,13 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.anezium.rokidbus.client.BusClient
 import com.anezium.rokidbus.client.BusEvent
 import com.anezium.rokidbus.client.ui.BusTheme
+import com.anezium.rokidbus.client.ui.NexusUi
 import com.anezium.rokidbus.phone.speech.HubSecretStore
 import com.anezium.rokidbus.phone.speech.SpeechReadiness
 import com.anezium.rokidbus.phone.speech.SpeechSettingsStore
@@ -479,16 +477,8 @@ class SettingsActivity : Activity() {
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
             )
             addView(
-                Switch(this@SettingsActivity).apply {
+                NexusUi.switch(this@SettingsActivity).apply {
                     isChecked = developerModeStore.isEnabled()
-                    thumbTintList = ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(NexusUi.GREEN, NexusUi.INK3),
-                    )
-                    trackTintList = ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(NexusUi.GREEN_DIM, NexusUi.LINE),
-                    )
                     setOnCheckedChangeListener { _, enabled ->
                         developerModeStore.setEnabled(enabled)
                         buildUi()
@@ -524,16 +514,8 @@ class SettingsActivity : Activity() {
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
             )
             addView(
-                Switch(this@SettingsActivity).apply {
+                NexusUi.switch(this@SettingsActivity).apply {
                     isChecked = store.isEnabled()
-                    thumbTintList = ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(NexusUi.GREEN, NexusUi.INK3),
-                    )
-                    trackTintList = ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(NexusUi.GREEN_DIM, NexusUi.LINE),
-                    )
                     setOnCheckedChangeListener { _, enabled -> store.setEnabled(enabled) }
                 },
             )
@@ -566,16 +548,8 @@ class SettingsActivity : Activity() {
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
             )
             addView(
-                Switch(this@SettingsActivity).apply {
+                NexusUi.switch(this@SettingsActivity).apply {
                     isChecked = settings.isAlwaysExpanded()
-                    thumbTintList = ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(NexusUi.GREEN, NexusUi.INK3),
-                    )
-                    trackTintList = ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(NexusUi.GREEN_DIM, NexusUi.LINE),
-                    )
                     setOnCheckedChangeListener { _, enabled ->
                         settings.setAlwaysExpanded(enabled)
                         BusHubService.onActivityPresentationPreferenceChanged()
