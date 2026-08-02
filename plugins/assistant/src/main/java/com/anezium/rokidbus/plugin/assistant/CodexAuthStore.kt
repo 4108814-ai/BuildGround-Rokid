@@ -99,6 +99,14 @@ class CodexAuthStore {
 
     fun assistantMemory(): String = prefs.getString(KEY_ASSISTANT_MEMORY, "").orEmpty()
 
+    fun syncAccountContext(): Boolean = prefs.getBoolean(KEY_SYNC_ACCOUNT_CONTEXT, true)
+
+    fun syncedAccountContext(): String =
+        prefs.getString(KEY_SYNCED_ACCOUNT_CONTEXT, "").orEmpty()
+
+    fun accountContextSyncedAtMs(): Long =
+        prefs.getLong(KEY_ACCOUNT_CONTEXT_SYNCED_AT, 0L)
+
     /** [AUTH_MODE_CHATGPT], [AUTH_MODE_API_KEY], or null when nothing is connected. */
     fun authMode(): String? = prefs.getString(KEY_AUTH_MODE, null)?.takeIf(String::isNotBlank)
 
@@ -136,6 +144,30 @@ class CodexAuthStore {
     fun setAssistantMemory(memory: String) {
         prefs.edit()
             .putString(KEY_ASSISTANT_MEMORY, memory.trim().take(MAX_ASSISTANT_MEMORY_CHARS))
+            .apply()
+    }
+
+    fun setSyncAccountContext(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SYNC_ACCOUNT_CONTEXT, enabled).apply()
+    }
+
+    fun setSyncedAccountContext(text: String) {
+        prefs.edit()
+            .putString(
+                KEY_SYNCED_ACCOUNT_CONTEXT,
+                text.trim().take(MAX_SYNCED_ACCOUNT_CONTEXT_CHARS),
+            )
+            .apply()
+    }
+
+    fun setAccountContextSyncedAtMs(ms: Long) {
+        prefs.edit().putLong(KEY_ACCOUNT_CONTEXT_SYNCED_AT, ms.coerceAtLeast(0L)).apply()
+    }
+
+    fun clearSyncedAccountContext() {
+        prefs.edit()
+            .remove(KEY_SYNCED_ACCOUNT_CONTEXT)
+            .remove(KEY_ACCOUNT_CONTEXT_SYNCED_AT)
             .apply()
     }
 
@@ -212,6 +244,7 @@ class CodexAuthStore {
         val SUPPORTED_IDLE_WINDOW_MINUTES = listOf(2, 5, 10, 30)
         const val DEFAULT_IDLE_WINDOW_MINUTES = 10
         const val MAX_ASSISTANT_MEMORY_CHARS = 4000
+        const val MAX_SYNCED_ACCOUNT_CONTEXT_CHARS = 6000
 
         private const val PREFS_NAME = "assistant_auth_v1"
         private const val KEY_API_KEY = "api_key"
@@ -225,6 +258,9 @@ class CodexAuthStore {
         private const val KEY_CONVERSATION_IDLE_WINDOW_MINUTES =
             "conversation_idle_window_minutes"
         private const val KEY_ASSISTANT_MEMORY = "assistant_memory"
+        private const val KEY_SYNC_ACCOUNT_CONTEXT = "sync_account_context"
+        private const val KEY_SYNCED_ACCOUNT_CONTEXT = "synced_account_context"
+        private const val KEY_ACCOUNT_CONTEXT_SYNCED_AT = "account_context_synced_at"
         private const val KEY_ACCOUNT_LABEL = "account_label"
         private const val KEY_AUTH_MODE = "auth_mode"
         private const val KEY_API_KEY_EXCHANGE_ERROR = "api_key_exchange_error"

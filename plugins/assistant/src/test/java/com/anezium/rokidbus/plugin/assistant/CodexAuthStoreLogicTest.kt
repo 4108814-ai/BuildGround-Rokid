@@ -16,6 +16,9 @@ class CodexAuthStoreLogicTest {
         assertTrue(store.keepPhotosInConversations())
         assertEquals(CodexAuthStore.DEFAULT_IDLE_WINDOW_MINUTES, store.conversationIdleWindowMinutes())
         assertEquals("", store.assistantMemory())
+        assertTrue(store.syncAccountContext())
+        assertEquals("", store.syncedAccountContext())
+        assertEquals(0L, store.accountContextSyncedAtMs())
     }
 
     @Test
@@ -61,6 +64,31 @@ class CodexAuthStoreLogicTest {
         assertTrue(store.keepPhotosInConversations())
         assertEquals(CodexAuthStore.DEFAULT_IDLE_WINDOW_MINUTES, store.conversationIdleWindowMinutes())
         assertEquals("", store.assistantMemory())
+    }
+
+    @Test
+    fun syncedAccountContextSettingsRoundTripCapAndClear() {
+        val store = CodexAuthStore(FakeSharedPreferences())
+        val oversized = " " +
+            "x".repeat(CodexAuthStore.MAX_SYNCED_ACCOUNT_CONTEXT_CHARS + 25) +
+            " "
+
+        store.setSyncAccountContext(false)
+        store.setSyncedAccountContext(oversized)
+        store.setAccountContextSyncedAtMs(123_456L)
+
+        assertFalse(store.syncAccountContext())
+        assertEquals(
+            "x".repeat(CodexAuthStore.MAX_SYNCED_ACCOUNT_CONTEXT_CHARS),
+            store.syncedAccountContext(),
+        )
+        assertEquals(123_456L, store.accountContextSyncedAtMs())
+
+        store.clearSyncedAccountContext()
+
+        assertEquals("", store.syncedAccountContext())
+        assertEquals(0L, store.accountContextSyncedAtMs())
+        assertFalse(store.syncAccountContext())
     }
 
     @Test

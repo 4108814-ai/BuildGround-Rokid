@@ -52,6 +52,7 @@ import kotlin.math.sqrt
 class AssistantPluginService : NexusPluginService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val authStore by lazy { CodexAuthStore(applicationContext) }
+    private val accountContextSync by lazy { AccountContextSync(applicationContext) }
     private val threadStore by lazy { AssistantThreadStore(applicationContext) }
     private val conversationThreading by lazy { AssistantConversationThreading(threadStore) }
     private val openAiClient by lazy { OpenAiApiClient(authStore::apiKey) }
@@ -129,9 +130,15 @@ class AssistantPluginService : NexusPluginService() {
         resetCapture = ::resetCapture,
     )
 
+    override fun onCreate() {
+        super.onCreate()
+        scheduleAccountContextSyncIfStale()
+    }
+
     override fun onNexusOpen() {
         surface = nexusSurfaceSession(SURFACE_ID)
         uiController.onOpen()
+        scheduleAccountContextSyncIfStale()
     }
 
     override fun onNexusClose() {
@@ -413,6 +420,31 @@ class AssistantPluginService : NexusPluginService() {
         pipelineJob = launched
     }
 
+    private fun scheduleAccountContextSyncIfStale() {
+        serviceScope.launch {
+            try {
+                when (val result = accountContextSync.syncIfStale()) {
+                    is SyncResult.Success -> Log.i(
+                        TAG,
+                        "Account context sync succeeded: memories=${result.memoryCount}, " +
+                            "chars=${result.chars}",
+                    )
+                    is SyncResult.Unavailable -> Log.w(
+                        TAG,
+                        "Account context sync unavailable: ${result.reason.name}",
+                    )
+                    SyncResult.Disabled -> Log.i(TAG, "Account context sync disabled")
+                    SyncResult.NotSignedIn -> Log.i(TAG, "Account context sync not signed in")
+                    null -> Unit
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                Log.w(TAG, "Account context sync failed: ${error.javaClass.simpleName}")
+            }
+        }
+    }
+
     private suspend fun streamAssistantAnswer(transcript: String) {
         val noticeBandMode = uiController.isNoticeBandMode
         uiController.showTransient("Thinking…")
@@ -431,7 +463,7 @@ class AssistantPluginService : NexusPluginService() {
             userText = transcript,
             systemPrompt = NexusAgentPolicy.buildSystemPrompt(
                 noticeBand = noticeBandMode,
-                memory = authStore.assistantMemory(),
+                memory = authStore.combinedAssistantContextForPrompt(),
             ),
             history = conversationContext.history,
             model = when (authStore.authMode()) {
