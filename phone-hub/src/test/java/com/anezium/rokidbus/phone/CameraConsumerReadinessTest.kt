@@ -9,7 +9,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CameraConsumerReadinessTest {
-    private fun principal(id: String) = PhonePluginPrincipal(
+    private fun principal(
+        id: String,
+        receivePrefixes: List<String> = listOf(
+            "/system/plugin",
+            "/camera/session/state",
+            "/camera/link/offer",
+        ),
+    ) = PhonePluginPrincipal(
         "dev.$id",
         ComponentName("dev.$id", "dev.$id.Service"),
         10001,
@@ -19,7 +26,7 @@ class CameraConsumerReadinessTest {
             id,
             3,
             setOf(PluginCapability.CAMERA),
-            listOf("/system/plugin", "/camera/session/state"),
+            receivePrefixes,
             null,
             false,
         ),
@@ -49,5 +56,35 @@ class CameraConsumerReadinessTest {
         installed = emptyList()
         readiness.recompute()
         assertFalse(readiness.isReady())
+    }
+
+    @Test
+    fun `snapshot-only camera grant is not a live camera consumer`() {
+        val assistant = principal(
+            "assistant",
+            listOf(
+                "/system/plugin",
+                "/camera/snapshot/result",
+                "/camera/snapshot/error",
+            ),
+        )
+        val missingLinkOffer = principal(
+            "partial",
+            listOf("/system/plugin", "/camera/session/state"),
+        )
+        val lens = principal("lens")
+        val approved = listOf(assistant, missingLinkOffer, lens).associate {
+            it.grantKey() to PluginGrantState.Approved(setOf(PluginCapability.CAMERA))
+        }
+        val readiness = CameraConsumerReadiness(
+            installedPrincipals = { listOf(assistant, missingLinkOffer, lens) },
+            grantState = { approved.getValue(it.grantKey()) },
+        )
+
+        assertFalse(readiness.isApprovedCameraConsumer(assistant))
+        assertFalse(readiness.isApprovedCameraConsumer(missingLinkOffer))
+        assertTrue(readiness.isApprovedCameraConsumer(lens))
+        readiness.recompute()
+        assertEquals("lens", readiness.resolveApproved()?.descriptor?.id)
     }
 }

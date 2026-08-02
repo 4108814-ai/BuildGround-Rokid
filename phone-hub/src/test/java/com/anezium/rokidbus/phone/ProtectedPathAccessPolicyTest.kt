@@ -43,7 +43,13 @@ class ProtectedPathAccessPolicyTest {
         val unsignedOther = principal("dev.unsigned", "camera.unsigned", "other-signer")
         store.approve(granted, setOf(PluginCapability.CAMERA))
 
-        listOf(BusPaths.CAMERA_SESSION_STATE, BusPaths.CAMERA_OVERLAY)
+        listOf(
+            BusPaths.CAMERA_SESSION_STATE,
+            BusPaths.CAMERA_OVERLAY,
+            BusPaths.CAMERA_SNAPSHOT_REQUEST,
+            BusPaths.CAMERA_SNAPSHOT_RESULT,
+            BusPaths.CAMERA_SNAPSHOT_ERROR,
+        )
             .forEach { path ->
                 assertTrue(ProtectedPathAccessPolicy.isAllowed(path, true, null, null))
             }

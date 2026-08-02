@@ -72,6 +72,9 @@ object BusPaths {
     const val CAMERA_FREEZE_IMAGE_CHUNK = "/camera/freeze/image/chunk"
     const val CAMERA_FREEZE_IMAGE_ACK = "/camera/freeze/image/ack"
     const val CAMERA_OVERLAY = "/camera/overlay"
+    const val CAMERA_SNAPSHOT_REQUEST = "/camera/snapshot/request"
+    const val CAMERA_SNAPSHOT_RESULT = "/camera/snapshot/result"
+    const val CAMERA_SNAPSHOT_ERROR = "/camera/snapshot/error"
     const val MEDIA_SYNC_STATUS = "/mediasync/status"
     const val MEDIA_SYNC_SETTINGS = "/mediasync/settings"
     const val MEDIA_SYNC_NOW = "/mediasync/now"
@@ -108,6 +111,14 @@ object BusPaths {
     const val GLASSES_VOLUME_REQUEST = "/glasses/volume/request"
     const val GLASSES_DEVICE_INFO = "/glasses/device-info"
 
+    /**
+     * Phone hub to glasses hub only: arm the native-assistant dismiss so an approved plugin
+     * holding the ASSISTANT capability can replace Rokid's assistant with its own surface.
+     * The gesture is consumed inside the ROM and never reaches our accessibility service, so the
+     * phone — which the ROM does notify — is the only place that can tell the glasses to act.
+     */
+    const val GLASSES_ASSISTANT_DISMISS = "/glasses/assistant/dismiss"
+
     /** Phone hub to glasses hub only; see [PhoneBatteryContract] for why it is not a plugin path. */
     const val PHONE_BATTERY = "/phone/battery"
     const val PLUGIN_OPEN = "/system/plugin/open"
@@ -143,7 +154,10 @@ object BusPaths {
             path == CAMERA_FREEZE_RESULT || path.startsWith("$CAMERA_FREEZE_RESULT/") ||
             path == CAMERA_FREEZE_IMAGE_CHUNK || path.startsWith("$CAMERA_FREEZE_IMAGE_CHUNK/") ||
             path == CAMERA_FREEZE_IMAGE_ACK || path.startsWith("$CAMERA_FREEZE_IMAGE_ACK/") ||
-            path == CAMERA_OVERLAY || path.startsWith("$CAMERA_OVERLAY/")
+            path == CAMERA_OVERLAY || path.startsWith("$CAMERA_OVERLAY/") ||
+            path == CAMERA_SNAPSHOT_REQUEST || path.startsWith("$CAMERA_SNAPSHOT_REQUEST/") ||
+            path == CAMERA_SNAPSHOT_RESULT || path.startsWith("$CAMERA_SNAPSHOT_RESULT/") ||
+            path == CAMERA_SNAPSHOT_ERROR || path.startsWith("$CAMERA_SNAPSHOT_ERROR/")
 }
 
 object BusCapabilityBits {

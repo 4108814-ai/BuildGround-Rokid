@@ -49,6 +49,10 @@ class PluginRoutePolicyTest {
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(granted, "/camera/link/offer"))
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(granted, "/camera/freeze/result"))
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(granted, "/camera/overlay"))
+        assertEquals(
+            PluginRouteDecision.Allowed,
+            PluginRoutePolicy.authorize(granted, "/camera/snapshot/request"),
+        )
         assertTrue(PluginRoutePolicy.authorize(granted, "/camera/session/state") is PluginRouteDecision.Denied)
         listOf(
             plugin(),
@@ -58,6 +62,7 @@ class PluginRoutePolicyTest {
         ).forEach { caller ->
             assertTrue(PluginRoutePolicy.authorize(caller, "/camera/freeze/result") is PluginRouteDecision.Denied)
             assertTrue(PluginRoutePolicy.authorize(caller, "/camera/overlay") is PluginRouteDecision.Denied)
+            assertTrue(PluginRoutePolicy.authorize(caller, "/camera/snapshot/request") is PluginRouteDecision.Denied)
         }
     }
 

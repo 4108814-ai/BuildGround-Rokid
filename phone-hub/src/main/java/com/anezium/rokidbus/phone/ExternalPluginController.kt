@@ -17,6 +17,17 @@ interface ExternalPluginScheduler {
     fun cancel(key: String)
 }
 
+data class ExternalPluginOpenFollowUp(
+    val path: String,
+    val type: String,
+    val extra: () -> JSONObject = { JSONObject() },
+)
+
+data class ExternalPluginOpenRequest(
+    val type: String = "open",
+    val followUp: ExternalPluginOpenFollowUp? = null,
+)
+
 class ExternalPluginController(
     private val runtime: ExternalPluginRuntime,
     private val scheduler: ExternalPluginScheduler,
@@ -34,8 +45,12 @@ class ExternalPluginController(
         }
     private var openGeneration = 0L
     private var automaticRebindAttempted = false
+    private var openRequest = ExternalPluginOpenRequest()
 
-    fun open(principal: PhonePluginPrincipal): Boolean {
+    fun open(
+        principal: PhonePluginPrincipal,
+        request: ExternalPluginOpenRequest = ExternalPluginOpenRequest(),
+    ): Boolean {
         active?.takeIf { it.grantKey() != principal.grantKey() }?.let { closePrincipal(it, "switch") }
         pending?.takeIf { it.grantKey() != principal.grantKey() }?.let { previous ->
             cancelWatchdogs(previous)
@@ -44,6 +59,7 @@ class ExternalPluginController(
         cancelWatchdogs(principal)
         openGeneration += 1
         automaticRebindAttempted = false
+        openRequest = request
         return beginColdOpen(principal, openGeneration)
     }
 
@@ -97,7 +113,7 @@ class ExternalPluginController(
         scheduler.cancel(registrationTimeoutKey(pendingPrincipal))
         pending = null
         active = pendingPrincipal
-        if (!deliverOpen(pendingPrincipal, "open", openGeneration)) {
+        if (!deliverOpen(pendingPrincipal, openRequest, openGeneration)) {
             if (automaticRebindAttempted) {
                 giveUpOpen(pendingPrincipal, openGeneration)
             } else {
@@ -152,8 +168,9 @@ class ExternalPluginController(
         cancelWatchdogs(principal)
         openGeneration += 1
         automaticRebindAttempted = false
+        openRequest = ExternalPluginOpenRequest(type = "adopted")
         active = principal
-        if (!deliverOpen(principal, "adopted", openGeneration)) {
+        if (!deliverOpen(principal, openRequest, openGeneration)) {
             closePrincipal(principal, "adopt_failed")
             return false
         }
@@ -238,10 +255,13 @@ class ExternalPluginController(
 
     private fun deliverOpen(
         principal: PhonePluginPrincipal,
-        type: String,
+        request: ExternalPluginOpenRequest,
         generation: Long,
     ): Boolean {
-        if (!deliver(principal, BusPaths.PLUGIN_OPEN, type)) return false
+        if (!deliver(principal, BusPaths.PLUGIN_OPEN, request.type)) return false
+        request.followUp?.let { followUp ->
+            if (!deliver(principal, followUp.path, followUp.type, followUp.extra())) return false
+        }
         val timeoutKey = openAckTimeoutKey(principal)
         scheduler.cancel(timeoutKey)
         scheduler.schedule(timeoutKey, OPEN_ACK_TIMEOUT_MS) {

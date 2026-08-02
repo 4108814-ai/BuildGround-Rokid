@@ -19,6 +19,8 @@ object PathRules {
         BusPaths.CAMERA_SESSION_STATE,
         BusPaths.CAMERA_LINK_OFFER,
         BusPaths.CAMERA_FREEZE_IMAGE_CHUNK,
+        BusPaths.CAMERA_SNAPSHOT_RESULT,
+        BusPaths.CAMERA_SNAPSHOT_ERROR,
     )
     private val mediaSyncReceivePrefixes = setOf(BusPaths.MEDIA_SYNC_STATUS)
 
@@ -67,6 +69,7 @@ object PathRules {
         BusPaths.NOTICE_CLOSED, BusPaths.NOTICE_INPUT, BusPaths.NOTICE_ACTION,
         BusPaths.ACTIVITY_ACTION, BusPaths.ACTIVITY_CLOSED,
         BusPaths.TTS_STARTED, BusPaths.TTS_DONE,
+        BusPaths.CAMERA_SNAPSHOT_RESULT, BusPaths.CAMERA_SNAPSHOT_ERROR,
         -> true
         else -> false
     }
@@ -75,6 +78,7 @@ object PathRules {
         BusPaths.NOTICE_CLOSED, BusPaths.NOTICE_INPUT, BusPaths.NOTICE_ACTION,
         BusPaths.ACTIVITY_ACTION, BusPaths.ACTIVITY_CLOSED,
         BusPaths.TTS_STARTED, BusPaths.TTS_DONE,
+        BusPaths.CAMERA_SNAPSHOT_RESULT, BusPaths.CAMERA_SNAPSHOT_ERROR,
         -> true
         else -> matchesPrefix(path, "/system/plugin")
     }
@@ -92,6 +96,7 @@ object PathRules {
         BusPaths.CAMERA_LINK_OFFER,
         BusPaths.CAMERA_FREEZE_RESULT,
         BusPaths.CAMERA_OVERLAY,
+        BusPaths.CAMERA_SNAPSHOT_REQUEST,
         -> PluginCapability.CAMERA
         BusPaths.MEDIA_SYNC_SETTINGS,
         BusPaths.MEDIA_SYNC_NOW,

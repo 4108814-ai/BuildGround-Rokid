@@ -82,6 +82,14 @@ import com.example.cxrglobal.callbacks.ICustomCmdCbk
 import com.example.cxrglobal.callbacks.IGlassAppCbk
 import com.rokid.cxr.Caps
 import com.anezium.rokidbus.phone.mediasync.MediaSyncCoordinator
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.Closeable
 import java.io.File
@@ -135,6 +143,14 @@ private const val AUDIO_LEASE_ACQUIRE = "/audio/lease/acquire"
 private const val AUDIO_LEASE_RELEASE = "/audio/lease/release"
 private const val AUDIO_FRAMES = "/audio/frames"
 private const val AUDIO_LEASE_REVOKED = "/audio/lease/revoked"
+private const val PLUGIN_AI_ASSIST_PATH = "/system/plugin/ai-assist"
+private const val PLUGIN_AI_ASSIST_OPEN_TYPE = "ai_assist"
+private val NATIVE_ASSISTANT_EXIT_BURST_DELAYS_MILLIS = longArrayOf(0L, 50L, 150L, 300L)
+private const val SNAPSHOT_JPEG_QUALITY = 80
+private const val SNAPSHOT_ERROR_BUSY = "BUSY"
+private const val SNAPSHOT_ERROR_LINK_DOWN = "LINK_DOWN"
+private const val SNAPSHOT_ERROR_CAPTURE_FAILED = "CAPTURE_FAILED"
+private const val SNAPSHOT_ERROR_TIMEOUT = "TIMEOUT"
 private const val CXR_AUDIO_PCM = 1
 private const val AUDIO_SAMPLE_RATE = 16_000
 private const val AUDIO_CHANNELS = 1
@@ -197,6 +213,7 @@ class BusHubService : Service() {
     private val phoneActivityState = PhoneActivityState(nowMs = { SystemClock.elapsedRealtime() })
     /** Serializes canonical mutation with its wire send, including reconnect batches. */
     private val activityWireLock = Any()
+    private val assistantExitHandler = Handler(Looper.getMainLooper())
     private val updateCheckHandler = Handler(Looper.getMainLooper())
     @Volatile private var updateCheckLoopStopped = true
     private val updateCheckTick = object : Runnable {
@@ -209,6 +226,11 @@ class BusHubService : Service() {
         }
     }
     private val registrations = CopyOnWriteArrayList<Registration>()
+    private val glassAiAssistActive = AtomicBoolean(false)
+    private val snapshotCaptureScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val snapshotCapture = CxrSnapshotCapture()
+    private val snapshotInFlight = AtomicBoolean(false)
+    @Volatile private var snapshotCaptureJob: Job? = null
     private val externalSurfaceSeq = ConcurrentHashMap<String, AtomicLong>()
     private val debugImageSeq = AtomicLong(System.currentTimeMillis())
     private val externalSurfaceIds = ConcurrentHashMap<String, MutableSet<String>>()
@@ -466,7 +488,10 @@ class BusHubService : Service() {
             log("CXR-L connected=$connected")
             notifyLinkState()
             if (!connected) failActiveGlassesAppOperation("Connection to the glasses was lost.")
-            if (!isCxrUp()) revokeAudioLease("LINK_DOWN")
+            if (!isCxrUp()) {
+                revokeAudioLease("LINK_DOWN")
+                cancelSnapshotForLinkDown()
+            }
         }
 
         override fun onGlassBtConnected(connected: Boolean) {
@@ -475,7 +500,10 @@ class BusHubService : Service() {
             log("Hi Rokid glass BT connected=$connected")
             notifyLinkState()
             if (!connected) failActiveGlassesAppOperation("Connection to the glasses was lost.")
-            if (!isCxrUp()) revokeAudioLease("LINK_DOWN")
+            if (!isCxrUp()) {
+                revokeAudioLease("LINK_DOWN")
+                cancelSnapshotForLinkDown()
+            }
         }
 
         override fun onGlassDeviceInfo(info: GlassInfo) {
@@ -488,11 +516,73 @@ class BusHubService : Service() {
         }
 
         override fun onGlassAiAssistStart() {
-            notifyGlassesAiButton(active = true)
+            if (!glassAiAssistActive.compareAndSet(false, true)) return
+            val assistant = approvedAssistantPrincipal() ?: return
+            val gestureId = UUID.randomUUID().toString()
+            val alreadyActive = externalPluginController.activeId() == assistant.descriptor.id
+            val captureSignaled = if (alreadyActive) {
+                notifyGlassesAiButton(active = true)
+                true
+            } else {
+                externalPluginController.open(
+                    assistant,
+                    ExternalPluginOpenRequest(
+                        type = PLUGIN_AI_ASSIST_OPEN_TYPE,
+                        followUp = ExternalPluginOpenFollowUp(
+                            path = PLUGIN_AI_ASSIST_PATH,
+                            type = PLUGIN_AI_ASSIST_OPEN_TYPE,
+                            extra = {
+                                JSONObject()
+                                    .put("gestureId", gestureId)
+                                    .put("buttonActive", glassAiAssistActive.get())
+                                    .put("source", "glass_ai_assist_start")
+                            },
+                        ),
+                    ),
+                )
+            }
+            if (!captureSignaled) {
+                log("assistant gesture wake failed plugin=${assistant.descriptor.id}")
+                return
+            }
+            sendNativeAssistantExitBurst(gestureId)
+            val error = sendRemote(
+                BusEnvelope(
+                    path = BusPaths.GLASSES_ASSISTANT_DISMISS,
+                    payload = JSONObject()
+                        .put("version", 1)
+                        .put("gestureId", gestureId)
+                        .put("source", "glass_ai_assist_start"),
+                ),
+            )
+            log(
+                "assistant gesture plugin=${assistant.descriptor.id} active=$alreadyActive " +
+                    "gestureId=$gestureId; native dismiss " +
+                    "sent=${error == null} result=${error ?: "OK"}",
+            )
         }
 
         override fun onGlassAiAssistStop() {
+            // Also reached as the echo of our own sendExit burst (the native
+            // scene closing reports onAiExit). Must stay side-effect-free
+            // beyond flag/notify: capture stop belongs to the plugin's VAD,
+            // and anything stronger here would let the burst cancel it.
+            glassAiAssistActive.set(false)
             notifyGlassesAiButton(active = false)
+        }
+    }
+
+    // Phone-side kill of the native assistant popup, complementing the
+    // glasses-side BACK burst: Hi Rokid's exported service forwards sendExit
+    // to the scene the gesture just opened. A single shot can lose the race
+    // against the scene's opening animation, hence the spaced repeats.
+    private fun sendNativeAssistantExitBurst(gestureId: String) {
+        val link = cxrLink ?: return
+        for (delayMs in NATIVE_ASSISTANT_EXIT_BURST_DELAYS_MILLIS) {
+            assistantExitHandler.postDelayed({
+                val sent = link.sendExit(false)
+                log("assistant native exit burst delay=${delayMs}ms sent=$sent gestureId=$gestureId")
+            }, delayMs)
         }
     }
 
@@ -812,6 +902,7 @@ class BusHubService : Service() {
         if (::speechSessionManager.isInitialized) speechSessionManager.cancel()
         stopAudioLease(InternalAudioStopReason.HUB_STOPPED)
         clearAllActivitiesForHubStop()
+        snapshotCaptureJob?.cancel()
         runCatching { cxrLink?.disconnect() }
         cxrLink = null
         cxrConnected = false
@@ -837,6 +928,8 @@ class BusHubService : Service() {
         sppLoopStop = true
         if (::speechSessionManager.isInitialized) speechSessionManager.close()
         stopAudioLease(InternalAudioStopReason.HUB_STOPPED)
+        snapshotCaptureJob?.cancel()
+        snapshotCaptureScope.cancel()
         runCatching { cxrLink?.disconnect() }
         closeSocket()
         PhoneClientSupervisor.detach(applicationContext, this)
@@ -1010,6 +1103,22 @@ class BusHubService : Service() {
                 return
             }
         }
+        if (
+            sender.principal != null &&
+            // A plugin that answers its PLUGIN_OPEN on any owner-drawn tier is
+            // alive; a notice-only assistant must not be rebound as unresponsive.
+            // This must run before the tier dispatches below return -- including
+            // the notice image check, which rejects and returns.
+            ownedEnvelope.path in setOf(
+                BusPaths.SURFACE_SHOW, BusPaths.SURFACE_UPDATE, BusPaths.SURFACE_HIDE,
+                BusPaths.NOTICE_SHOW, BusPaths.NOTICE_UPDATE, BusPaths.NOTICE_HIDE,
+                BusPaths.PIN_SHOW, BusPaths.PIN_HIDE,
+                BusPaths.ACTIVITY_START, BusPaths.ACTIVITY_UPDATE, BusPaths.ACTIVITY_END,
+            ) &&
+            ::externalPluginController.isInitialized
+        ) {
+            externalPluginController.onPluginActivity(sender.principal.descriptor.id)
+        }
         if (ownedEnvelope.path == BusPaths.NOTICE_SHOW && ownedEnvelope.binary != null) {
             val validation = NoticeSurfaceContract.validateShow(
                 ownedEnvelope.payload,
@@ -1059,13 +1168,6 @@ class BusHubService : Service() {
             deliverError(sender.replyBinder, ownedEnvelope.id, "SURFACE_BUSY")
             log("surface rejected path=${ownedEnvelope.path} plugin=${sender.principal.descriptor.id} reason=foreground_busy")
             return
-        }
-        if (
-            sender.principal != null &&
-            ownedEnvelope.path in setOf(BusPaths.SURFACE_SHOW, BusPaths.SURFACE_UPDATE, BusPaths.SURFACE_HIDE) &&
-            ::externalPluginController.isInitialized
-        ) {
-            externalPluginController.onPluginActivity(sender.principal.descriptor.id)
         }
         val authorizedEnvelope = if (
             sender.principal != null &&
@@ -1968,6 +2070,10 @@ class BusHubService : Service() {
                 acquireAudioLease(envelope, replyRemote, senderUid, replyBinder)
             }
             AUDIO_LEASE_RELEASE -> executor.execute { releaseAudioLease(envelope, replyRemote, replyBinder) }
+            BusPaths.CAMERA_SNAPSHOT_REQUEST -> {
+                if (replyRemote || principal == null) return false
+                requestCameraSnapshot(envelope, principal)
+            }
             BusPaths.MEDIA_SYNC_SETTINGS -> executor.execute {
                 if (::mediaSyncCoordinator.isInitialized) {
                     mediaSyncCoordinator.applySettings(envelope.payload)
@@ -1985,6 +2091,129 @@ class BusHubService : Service() {
             else -> return false
         }
         return true
+    }
+
+    private fun requestCameraSnapshot(
+        request: BusEnvelope,
+        principal: PhonePluginPrincipal,
+    ) {
+        if (::cameraCompanionController.isInitialized &&
+            cameraCompanionController.activeSessionId() != null
+        ) {
+            deliverSnapshotError(principal, request.id, SNAPSHOT_ERROR_BUSY)
+            return
+        }
+        if (!isCxrUp() || cxrLink == null) {
+            deliverSnapshotError(principal, request.id, SNAPSHOT_ERROR_LINK_DOWN)
+            return
+        }
+        if (!snapshotInFlight.compareAndSet(false, true)) {
+            deliverSnapshotError(principal, request.id, SNAPSHOT_ERROR_BUSY)
+            return
+        }
+
+        val job = snapshotCaptureScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                if (::cameraCompanionController.isInitialized &&
+                    cameraCompanionController.activeSessionId() != null
+                ) {
+                    deliverSnapshotError(principal, request.id, SNAPSHOT_ERROR_BUSY)
+                    return@launch
+                }
+                val link = cxrLink
+                if (link == null || !isCxrUp()) {
+                    deliverSnapshotError(principal, request.id, SNAPSHOT_ERROR_LINK_DOWN)
+                    return@launch
+                }
+
+                val raw = snapshotCapture.capture(CxrLinkSnapshotAdapter(link))
+                val normalized = SnapshotJpegEncoder.normalize(
+                    encoded = raw,
+                    maxBytes = LOCAL_BINARY_MAX_BYTES,
+                    jpegQuality = SNAPSHOT_JPEG_QUALITY,
+                )
+                val payload = JSONObject()
+                    .put("version", 1)
+                    .put("type", "snapshot")
+                    .put("requestId", request.id)
+                    .put("pluginId", principal.descriptor.id)
+                    .put("mimeType", "image/jpeg")
+                    .put("sizeBytes", normalized.jpeg.size)
+                    .put("width", normalized.width)
+                    .put("height", normalized.height)
+                    .put("quality", normalized.quality)
+                val delivered = deliverExternalBinary(
+                    principal = principal,
+                    path = BusPaths.CAMERA_SNAPSHOT_RESULT,
+                    id = request.id,
+                    payload = payload,
+                    data = normalized.jpeg,
+                )
+                log(
+                    "snapshot result plugin=${principal.descriptor.id} request=${request.id} " +
+                        "bytes=${normalized.jpeg.size} dimensions=${normalized.width}x${normalized.height} " +
+                        "delivered=$delivered",
+                )
+            } catch (_: SnapshotLinkDownCancellationException) {
+                deliverSnapshotError(principal, request.id, SNAPSHOT_ERROR_LINK_DOWN)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (timeout: SnapshotCaptureTimeoutException) {
+                deliverSnapshotError(
+                    principal,
+                    request.id,
+                    if (isCxrUp()) SNAPSHOT_ERROR_TIMEOUT else SNAPSHOT_ERROR_LINK_DOWN,
+                )
+            } catch (failure: Throwable) {
+                log(
+                    "snapshot capture failed plugin=${principal.descriptor.id} " +
+                        "request=${request.id} type=${failure.javaClass.simpleName}",
+                )
+                deliverSnapshotError(
+                    principal,
+                    request.id,
+                    if (isCxrUp()) SNAPSHOT_ERROR_CAPTURE_FAILED else SNAPSHOT_ERROR_LINK_DOWN,
+                )
+            }
+        }
+        snapshotCaptureJob = job
+        job.invokeOnCompletion {
+            if (snapshotCaptureJob === job) snapshotCaptureJob = null
+            snapshotInFlight.set(false)
+        }
+        job.start()
+    }
+
+    private fun deliverSnapshotError(
+        principal: PhonePluginPrincipal,
+        requestId: String,
+        code: String,
+    ) {
+        val payload = JSONObject()
+            .put("version", 1)
+            .put("type", "error")
+            .put("requestId", requestId)
+            .put("pluginId", principal.descriptor.id)
+            .put("code", code)
+            .put("message", snapshotErrorMessage(code))
+        deliverExternalLifecycle(
+            principal = principal,
+            path = BusPaths.CAMERA_SNAPSHOT_ERROR,
+            id = requestId,
+            payload = payload,
+        )
+        log("snapshot error plugin=${principal.descriptor.id} request=$requestId code=$code")
+    }
+
+    private fun snapshotErrorMessage(code: String): String = when (code) {
+        SNAPSHOT_ERROR_BUSY -> "Camera is busy."
+        SNAPSHOT_ERROR_LINK_DOWN -> "Glasses link is down."
+        SNAPSHOT_ERROR_TIMEOUT -> "Camera capture timed out."
+        else -> "Camera capture failed."
+    }
+
+    private fun cancelSnapshotForLinkDown() {
+        snapshotCaptureJob?.cancel(SnapshotLinkDownCancellationException())
     }
 
     private fun isGlassesControlRequest(path: String): Boolean =
@@ -4626,6 +4855,46 @@ class BusHubService : Service() {
             runCatching { registration.callback.onGlassesAiButton(active) }
                 .onFailure { removeRegistration(registration, "dead callback") }
         }
+    }
+
+    /**
+     * Resolves the assistant from installed principals as well as live registrations because the
+     * normal plugin state is dormant and therefore has no binder registration. The current grant
+     * remains the authority; a live registration, when present, must agree with it.
+     */
+    private fun approvedAssistantPrincipal(): PhonePluginPrincipal? {
+        if (!::externalPluginController.isInitialized ||
+            !::pluginDiscovery.isInitialized ||
+            !::pluginGrantStore.isInitialized
+        ) {
+            return null
+        }
+        val activePluginId = externalPluginController.activeId()
+        val installed = runCatching(::installedPluginPrincipals).getOrDefault(emptyList())
+        val live = registrations.mapNotNull(Registration::principal)
+        return (installed + live)
+            .distinctBy(PhonePluginPrincipal::grantKey)
+            .filter { principal ->
+                if (PluginCapability.ASSISTANT !in principal.descriptor.requestedCapabilities) {
+                    return@filter false
+                }
+                val currentGrant = pluginGrantStore.stateFor(principal) as? PluginGrantState.Approved
+                    ?: return@filter false
+                if (PluginCapability.ASSISTANT !in currentGrant.capabilities) return@filter false
+                val registration = registrations.firstOrNull {
+                    it.principal?.grantKey() == principal.grantKey()
+                }
+                registration == null ||
+                    PluginCapability.ASSISTANT in registration.grantedCapabilities
+            }
+            .sortedWith(
+                compareBy<PhonePluginPrincipal>(
+                    { it.descriptor.id != activePluginId },
+                    { it.descriptor.id },
+                    { it.packageName },
+                ),
+            )
+            .firstOrNull()
     }
 
     private fun notifyGlassesDeviceInfo(info: GlassInfo) {

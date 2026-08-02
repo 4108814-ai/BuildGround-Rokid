@@ -52,11 +52,17 @@ class RokidBusAccessibilityService : AccessibilityService() {
     private var wifiResumeManual = false
     private var wifiResumeCallback: ConnectivityManager.NetworkCallback? = null
     private var wifiResumeRunnable: Runnable? = null
+    private var lastNativeAssistantBackAtMs = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         serviceInfo = serviceInfo.apply {
-            flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+            eventTypes = eventTypes or
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
+                AccessibilityEvent.TYPE_WINDOWS_CHANGED
+            flags = flags or
+                AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS or
+                AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
         }
         wirelessDebuggingAutomator = SelfArmWirelessDebuggingAutomator(this, main)
         developerOptionsEnabler = SelfArmDeveloperOptionsEnabler(this, main)
@@ -114,6 +120,9 @@ class RokidBusAccessibilityService : AccessibilityService() {
         if (SelfArmOnboardingStore.isSetupRequested(applicationContext)) {
             resumeSetupSessionFromObservedState()
         }
+        if (isNativeAssistantDismissArmed()) {
+            scheduleNativeAssistantDismissChecks("service_connected")
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -121,6 +130,12 @@ class RokidBusAccessibilityService : AccessibilityService() {
         wirelessDebuggingAutomator?.onAccessibilityEvent(event)
         developerOptionsEnabler?.onAccessibilityEvent(event)
         StatusBadgeOverlayRenderer.onAccessibilityEvent(event)
+        if (event != null && isNativeAssistantDismissArmed()) {
+            val packageName = event.packageName?.toString().orEmpty()
+            if (packageName in NATIVE_ASSISTANT_PACKAGES) {
+                dismissNativeAssistantWindow("event:$packageName")
+            }
+        }
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
@@ -383,6 +398,58 @@ class RokidBusAccessibilityService : AccessibilityService() {
             ActivityController.handlePendingTempleTap()
         }
     }
+
+    private fun scheduleNativeAssistantDismissChecks(reason: String) {
+        NATIVE_ASSISTANT_DISMISS_DELAYS_MS.forEach { delayMs ->
+            main.postDelayed(
+                {
+                    if (isNativeAssistantDismissArmed()) {
+                        dismissNativeAssistantWindow("burst:$reason")
+                    }
+                },
+                delayMs,
+            )
+        }
+    }
+
+    private fun dismissNativeAssistantWindow(reason: String): Boolean {
+        if (!isNativeAssistantDismissArmed()) return false
+        val activePackage = activeWindowPackage()
+        // The back lands on whatever window is in front. Once our own overlay is
+        // the active window the burst must hold fire, or it closes the plugin
+        // surface it just cleared the way for.
+        val nativePackage = when (activePackage) {
+            null -> nativeAssistantWindowPackage() ?: return false
+            in NATIVE_ASSISTANT_PACKAGES -> activePackage
+            else -> return false
+        }
+        val now = SystemClock.uptimeMillis()
+        if (now - lastNativeAssistantBackAtMs < NATIVE_ASSISTANT_BACK_DEBOUNCE_MS) {
+            return false
+        }
+        lastNativeAssistantBackAtMs = now
+        val dismissed = performGlobalAction(GLOBAL_ACTION_BACK)
+        log(
+            "native assistant dismiss reason=$reason active=$activePackage " +
+                "native=$nativePackage back=$dismissed",
+        )
+        return dismissed
+    }
+
+    private fun activeWindowPackage(): String? {
+        rootInActiveWindow?.packageName?.toString()?.let { return it }
+        return windows
+            .asSequence()
+            .filter { window -> window.isActive || window.isFocused }
+            .mapNotNull { window -> window.root?.packageName?.toString() }
+            .firstOrNull()
+    }
+
+    private fun nativeAssistantWindowPackage(): String? =
+        windows
+            .asSequence()
+            .mapNotNull { window -> window.root?.packageName?.toString() }
+            .firstOrNull { packageName -> packageName in NATIVE_ASSISTANT_PACKAGES }
 
     private fun resumeSetupSessionFromObservedState() {
         val sessionId = SelfArmOnboardingStore.currentActiveSessionId(applicationContext)
@@ -1093,10 +1160,45 @@ class RokidBusAccessibilityService : AccessibilityService() {
         private const val MANUAL_OPEN_TIMEOUT_MS = 30_000L
         private const val MANUAL_WIFI_NETWORK_POLL_MS = 500L
         private const val MANUAL_WIFI_NETWORK_TIMEOUT_MS = 30_000L
+        // The phone's CXR sendExit closes the native scene in ~150 ms
+        // (measured 2026-08-02); this burst is the fallback for when that
+        // race is lost, so it no longer needs to hunt for seconds. The ROM
+        // launcher is deliberately absent from the target set: the only
+        // launcher windows ever observed here are the home screen resuming
+        // after the scene died, and BACK on a home screen is pure noise.
+        private const val NATIVE_ASSISTANT_DISMISS_ARM_MS = 3_000L
+        private const val NATIVE_ASSISTANT_BACK_DEBOUNCE_MS = 120L
+        private val NATIVE_ASSISTANT_DISMISS_DELAYS_MS =
+            longArrayOf(0L, 120L, 280L, 600L, 1_000L, 1_800L)
+        private val NATIVE_ASSISTANT_PACKAGES = setOf(
+            "com.rokid.os.sprite.assistserver",
+            "com.rokid.overlayrec",
+        )
         @Volatile private var liveInstance: RokidBusAccessibilityService? = null
+        @Volatile private var nativeAssistantDismissUntilMs = 0L
 
         /** True while the AccessibilityService is connected and able to drive Settings. */
         internal fun isLive(): Boolean = liveInstance != null
+
+        /**
+         * Called only by [GlassesHub] for the phone hub's capability-gated arm envelope. The
+         * deadline is retained across a short AccessibilityService recreation, but can never
+         * outlive the fixed arm window.
+         */
+        internal fun requestNativeAssistantDismiss(): Boolean {
+            nativeAssistantDismissUntilMs = maxOf(
+                nativeAssistantDismissUntilMs,
+                SystemClock.uptimeMillis() + NATIVE_ASSISTANT_DISMISS_ARM_MS,
+            )
+            val service = liveInstance ?: return false
+            service.main.post {
+                service.scheduleNativeAssistantDismissChecks("phone_ai_assist_start")
+            }
+            return true
+        }
+
+        private fun isNativeAssistantDismissArmed(): Boolean =
+            SystemClock.uptimeMillis() <= nativeAssistantDismissUntilMs
 
         internal fun requestWirelessBootstrap(context: Context, force: Boolean = false): Boolean {
             val appContext = context.applicationContext

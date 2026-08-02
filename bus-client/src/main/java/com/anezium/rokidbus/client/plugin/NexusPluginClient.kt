@@ -30,6 +30,7 @@ class NexusPluginClient internal constructor(
     private val audioSessionLock = Any()
     private val speechSessionLock = Any()
     private val ttsSessionLock = Any()
+    private val snapshotSessionLock = Any()
     private var registrationState = PluginRegistrationResult.REGISTRATION_FAILED
     private var opened = false
     private var closed = false
@@ -40,6 +41,8 @@ class NexusPluginClient internal constructor(
     private var speechSessionApiUsed = false
     private var registeredTtsSession: NexusTtsSession? = null
     private var ttsSessionApiUsed = false
+    private var registeredSnapshotSession: NexusSnapshotSession? = null
+    private var snapshotSessionApiUsed = false
     @Volatile private var currentLinkState = 0
     @Volatile private var hubCapabilities = 0
 
@@ -249,6 +252,7 @@ class NexusPluginClient internal constructor(
     internal fun isApprovedForSpeech(): Boolean = !closed && isApproved
 
     internal fun isApprovedForTts(): Boolean = !closed && isApproved
+    internal fun isApprovedForSnapshot(): Boolean = !closed && isApproved
 
     internal fun registerAudioSession(session: NexusAudioSession): Boolean =
         synchronized(audioSessionLock) {
@@ -353,6 +357,17 @@ class NexusPluginClient internal constructor(
             }
         }
 
+    internal fun registerSnapshotSession(session: NexusSnapshotSession): Boolean =
+        synchronized(snapshotSessionLock) {
+            if (closed || registeredSnapshotSession?.let { it !== session } == true) {
+                false
+            } else {
+                registeredSnapshotSession = session
+                snapshotSessionApiUsed = true
+                true
+            }
+        }
+
     internal fun unregisterTtsSession(session: NexusTtsSession) {
         synchronized(ttsSessionLock) {
             if (registeredTtsSession === session) registeredTtsSession = null
@@ -382,6 +397,25 @@ class NexusPluginClient internal constructor(
             reason = NexusTtsDoneReason.STOPPED,
             stopCurrent = true,
         )
+    }
+
+    internal fun unregisterSnapshotSession(session: NexusSnapshotSession) {
+        synchronized(snapshotSessionLock) {
+            if (registeredSnapshotSession === session) registeredSnapshotSession = null
+        }
+    }
+
+    internal fun sendSnapshotRequest(session: NexusSnapshotSession, id: String): Boolean {
+        if (synchronized(snapshotSessionLock) { registeredSnapshotSession !== session }) return false
+        return send(
+            NEXUS_SNAPSHOT_REQUEST_PATH,
+            id,
+            JSONObject().put("version", 1).put("requestId", id),
+        )
+    }
+
+    internal fun releaseSnapshotSession() {
+        currentSnapshotSession()?.terminate(NexusSnapshotError.CANCELLED)
     }
 
     override fun onRegistrationState(result: Int) {
@@ -421,6 +455,7 @@ class NexusPluginClient internal constructor(
                 reason = NexusTtsDoneReason.UNAVAILABLE,
                 stopCurrent = false,
             )
+            terminateSnapshotSession(NexusSnapshotError.ERROR)
         }
         callbacks.onRegistrationState(result)
         if (result != PluginRegistrationResult.APPROVED && opened) {
@@ -451,6 +486,7 @@ class NexusPluginClient internal constructor(
             return
         }
         if (payload.optString("pluginId") != pluginId || !rememberEvent(id)) return
+        if (routeSnapshotMessage(path, id, payload)) return
         if (routeSpeechMessage(path, payload)) return
         if (routeAudioMessage(path, payload)) return
         if (path == BusPaths.NOTICE_INPUT) {
@@ -520,6 +556,7 @@ class NexusPluginClient internal constructor(
                 releaseAudioSession()
                 releaseSpeechSession()
                 releaseTtsSession()
+                releaseSnapshotSession()
                 callbacks.onClose()
             }
             BusPaths.PLUGIN_INPUT -> if (opened && isApproved) {
@@ -554,6 +591,7 @@ class NexusPluginClient internal constructor(
 
     override fun onBinary(path: String, id: String, payload: JSONObject, data: ByteArray) {
         if (closed || !isApproved || payload.optString("pluginId") != pluginId || !rememberEvent(id)) return
+        if (routeSnapshotBinary(path, id, payload, data)) return
         if (routeSpeechBinary(path)) return
         if (routeAudioBinary(path, payload, data)) return
         callbacks.onBinary(path, id, payload, data)
@@ -576,6 +614,7 @@ class NexusPluginClient internal constructor(
             reason = NexusTtsDoneReason.UNAVAILABLE,
             stopCurrent = false,
         )
+        terminateSnapshotSession(NexusSnapshotError.ERROR)
         if (opened) {
             opened = false
             callbacks.onClose()
@@ -602,6 +641,29 @@ class NexusPluginClient internal constructor(
             NEXUS_AUDIO_LEASE_RELEASE_REPLY_PATH -> session?.onReleaseReply(payload)
             NEXUS_AUDIO_LEASE_REVOKED_PATH -> session?.onRevoked(payload)
         }
+        return consume
+    }
+
+    private fun routeSnapshotMessage(path: String, id: String, payload: JSONObject): Boolean {
+        if (path != NEXUS_SNAPSHOT_ERROR_PATH) return false
+        val (session, consume) = synchronized(snapshotSessionLock) {
+            registeredSnapshotSession to snapshotSessionApiUsed
+        }
+        session?.onSnapshotError(id, payload)
+        return consume
+    }
+
+    private fun routeSnapshotBinary(
+        path: String,
+        id: String,
+        payload: JSONObject,
+        data: ByteArray,
+    ): Boolean {
+        if (path != NEXUS_SNAPSHOT_RESULT_PATH) return false
+        val (session, consume) = synchronized(snapshotSessionLock) {
+            registeredSnapshotSession to snapshotSessionApiUsed
+        }
+        session?.onSnapshotResult(id, payload, data)
         return consume
     }
 
@@ -655,6 +717,8 @@ class NexusPluginClient internal constructor(
 
     private fun currentTtsSession(): NexusTtsSession? =
         synchronized(ttsSessionLock) { registeredTtsSession }
+    private fun currentSnapshotSession(): NexusSnapshotSession? =
+        synchronized(snapshotSessionLock) { registeredSnapshotSession }
 
     private fun terminateAudioSession(
         reason: NexusAudioStopReason,
@@ -675,6 +739,10 @@ class NexusPluginClient internal constructor(
         stopCurrent: Boolean,
     ) {
         currentTtsSession()?.terminate(reason, stopCurrent)
+    }
+
+    private fun terminateSnapshotSession(error: NexusSnapshotError) {
+        currentSnapshotSession()?.terminate(error)
     }
 
     private fun isSpeechPath(path: String): Boolean =

@@ -1,5 +1,6 @@
 package com.anezium.rokidbus.shared.plugin
 
+import com.anezium.rokidbus.shared.BusPaths
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -51,6 +52,19 @@ class PathRulesTest {
             PathRules.requiredCapabilityForReceivePrefix("/camera/link/offer"),
         )
         assertEquals(PluginCapability.CAMERA, PathRules.requiredCapability("/camera/link/offer"))
+        assertEquals(
+            PluginCapability.CAMERA,
+            PathRules.requiredCapability(BusPaths.CAMERA_SNAPSHOT_REQUEST),
+        )
+        assertTrue(
+            PathRules.isAllowedReceivePrefix(
+                BusPaths.CAMERA_SNAPSHOT_RESULT,
+                "assistant",
+                camera,
+            ),
+        )
+        assertTrue(PathRules.isDirectReply(BusPaths.CAMERA_SNAPSHOT_RESULT))
+        assertTrue(PathRules.isOwnerScoped(BusPaths.CAMERA_SNAPSHOT_ERROR))
         assertNull(PathRules.requiredCapability("/camera/session/state"))
     }
 

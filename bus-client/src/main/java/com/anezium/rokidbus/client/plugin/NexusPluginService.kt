@@ -47,6 +47,8 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
 
     protected fun nexusTtsSession(callbacks: NexusTtsCallbacks): NexusTtsSession? =
         client?.ttsSession(callbacks)
+    protected fun nexusSnapshotSession(callbacks: NexusSnapshotCallbacks): NexusSnapshotSession? =
+        client?.snapshotSession(callbacks)
 
     override fun onCreate() {
         super.onCreate()
@@ -71,6 +73,7 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
         client?.releaseAudioSession()
         client?.releaseSpeechSession()
         client?.releaseTtsSession()
+        client?.releaseSnapshotSession()
         client?.close()
         client = null
         sessionOpen = false
@@ -88,6 +91,7 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
         client?.releaseAudioSession()
         client?.releaseSpeechSession()
         client?.releaseTtsSession()
+        client?.releaseSnapshotSession()
         try {
             onNexusClose()
         } finally {
@@ -112,6 +116,7 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
         client?.releaseAudioSession()
         client?.releaseSpeechSession()
         client?.releaseTtsSession()
+        client?.releaseSnapshotSession()
         sessionOpen = false
         try {
             onNexusRegistrationState(result)

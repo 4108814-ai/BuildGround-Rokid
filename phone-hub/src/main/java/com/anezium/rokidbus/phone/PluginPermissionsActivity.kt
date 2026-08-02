@@ -254,6 +254,7 @@ class PluginPermissionsActivity : Activity() {
             PluginCapability.HTTP_PROXY -> "Nexus HTTP proxy"
             PluginCapability.CAMERA -> "Glasses camera"
             PluginCapability.MEDIA_SYNC -> "Glasses photos and videos"
+            PluginCapability.ASSISTANT -> "Replace the glasses assistant"
         }
         val note = when (capability) {
             PluginCapability.SURFACES -> "Render cards and images on the HUD"
@@ -263,6 +264,7 @@ class PluginPermissionsActivity : Activity() {
             PluginCapability.HTTP_PROXY -> "Fetch through the phone connection"
             PluginCapability.CAMERA -> "Only while the camera view is open"
             PluginCapability.MEDIA_SYNC -> "Copy captures to this phone over the glasses link"
+            PluginCapability.ASSISTANT -> "Close Rokid's assistant while this plugin is open"
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL

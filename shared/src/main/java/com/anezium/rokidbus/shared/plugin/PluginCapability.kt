@@ -8,6 +8,7 @@ enum class PluginCapability(val wireValue: String) {
     HTTP_PROXY("http_proxy"),
     CAMERA("camera"),
     MEDIA_SYNC("mediasync"),
+    ASSISTANT("assistant"),
     ;
 
     companion object {

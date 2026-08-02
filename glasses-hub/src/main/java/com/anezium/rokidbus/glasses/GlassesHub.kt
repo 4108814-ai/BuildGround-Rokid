@@ -204,6 +204,11 @@ object GlassesHub {
             }
             return
         }
+        if (envelope.path == BusPaths.GLASSES_ASSISTANT_DISMISS) {
+            val serviceConnected = RokidBusAccessibilityService.requestNativeAssistantDismiss()
+            log("native assistant dismiss armed serviceConnected=$serviceConnected")
+            return
+        }
         MediaSyncEngine.trafficMonitor.note(envelope.path)
         if (envelope.path == BusPaths.MEDIA_SYNC_CONFIG) {
             MediaSyncEngine.onConfig(envelope.payload)

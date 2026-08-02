@@ -78,6 +78,47 @@ class ExternalPluginControllerTest {
         controller.onRegistered(principal)
         assertEquals(BusPaths.PLUGIN_OPEN, runtime.deliveries.single().first)
         assertEquals("hello", runtime.deliveries.single().second.getString("pluginId"))
+        assertEquals("open", runtime.deliveries.single().second.getString("type"))
+    }
+
+    @Test
+    fun `gesture open delivers tagged open then live follow-up after registration`() {
+        val runtime = FakeRuntime()
+        val controller = ExternalPluginController(runtime, FakeScheduler())
+        val principal = principal()
+        var buttonActive = true
+
+        assertTrue(
+            controller.open(
+                principal,
+                ExternalPluginOpenRequest(
+                    type = "ai_assist",
+                    followUp = ExternalPluginOpenFollowUp(
+                        path = "/system/plugin/ai-assist",
+                        type = "ai_assist",
+                        extra = {
+                            JSONObject()
+                                .put("gestureId", "gesture-1")
+                                .put("buttonActive", buttonActive)
+                        },
+                    ),
+                ),
+            ),
+        )
+        assertTrue(runtime.deliveries.isEmpty())
+        buttonActive = false
+
+        runtime.registered = true
+        controller.onRegistered(principal)
+
+        assertEquals(
+            listOf(BusPaths.PLUGIN_OPEN, "/system/plugin/ai-assist"),
+            runtime.deliveries.map { it.first },
+        )
+        assertEquals("ai_assist", runtime.deliveries[0].second.getString("type"))
+        assertEquals("ai_assist", runtime.deliveries[1].second.getString("type"))
+        assertEquals("gesture-1", runtime.deliveries[1].second.getString("gestureId"))
+        assertFalse(runtime.deliveries[1].second.getBoolean("buttonActive"))
     }
 
     @Test

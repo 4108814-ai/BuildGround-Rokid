@@ -12,6 +12,9 @@ class CameraContractTest {
             BusPaths.CAMERA_LINK_OFFER,
             BusPaths.CAMERA_FREEZE_RESULT,
             BusPaths.CAMERA_OVERLAY,
+            BusPaths.CAMERA_SNAPSHOT_REQUEST,
+            BusPaths.CAMERA_SNAPSHOT_RESULT,
+            BusPaths.CAMERA_SNAPSHOT_ERROR,
         ).forEach { path ->
             assertTrue(path, BusPaths.isProtectedCameraPath(path))
             assertTrue("$path/future", BusPaths.isProtectedCameraPath("$path/future"))

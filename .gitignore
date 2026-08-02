@@ -18,6 +18,7 @@ local.properties
 
 .gradle-user/
 .gradle-sandbox-home/
+.gradle-sandbox-project/
 
 /scratchpad/
 /.claude/
