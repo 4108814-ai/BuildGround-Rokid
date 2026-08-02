@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.0
+
+- **Read notifications aloud.** A new switch, off by default, has the glasses
+  speak a message when it arrives. It reads the newest message whole — not a
+  preview, not the first line, because a message cut off halfway sends you back
+  to your phone anyway, which is the thing Relay exists to avoid. The band is
+  held open while it reads and gives you the usual answering window once it
+  stops, so a message is never still being read after its band has gone.
+  Answering interrupts the reading, and so does dictating: the glasses stop
+  talking the moment they start listening. Needs Rokid Nexus 1.1.5 on the hub;
+  the reading is produced on the glasses, so nothing leaves the device and no
+  network is involved. Speed and voice come from your Rokid assistant settings.
+
+- **"Sent" lands on the chip you were watching.** Sending used to confirm
+  itself above the button while the button went on counting down to a send that
+  had already happened. The countdown chip now becomes the confirmation in
+  place, and the line above it goes quiet.
+
 ## 1.0.2
 
 - **Black out behind notifications.** A new switch, off by default, asks the

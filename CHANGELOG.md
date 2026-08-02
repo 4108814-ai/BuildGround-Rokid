@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.1.5
+
+- **Plugins can speak.** A plugin could put words on your display and take
+  words from your mouth; it could not say anything. `tts` is the missing half:
+  a new capability, granted per plugin and revocable like the others, that has
+  the glasses read text aloud. The speech is produced on the glasses
+  themselves, by the engine the Rokid assistant already uses — nothing is sent
+  anywhere, nothing needs a network, and it works exactly as well with the
+  phone in your pocket. Voice and speed stay where you already set them, in the
+  Rokid assistant's own settings: they are your choice for everything that
+  speaks on the device, so no plugin and not even the hub may change them.
+
+- **Speech stops the moment the microphone opens.** Reading and dictating share
+  one pair of ears. Left running together, the glasses record their own voice
+  into whatever you are trying to say, and the transcript comes back with the
+  notification read into it. Any request for the microphone now silences
+  whatever is being spoken, and the plugin is told plainly that the platform
+  stopped it. Cancelled speech never resumes on its own: by the time the
+  microphone closes you have moved on, and a sentence finishing itself behind
+  you is worse than one you did not hear.
+
 ## 1.1.4
 
 - **Lists follow the selection past the viewport.** A card list rendered every
