@@ -229,7 +229,13 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
 
         val generation = listRenderGeneration
         val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            if (generation == listRenderGeneration) windowNow()
+            // Never attach from inside the layout pass: children added mid-layout
+            // sit in the tree unmeasured and the board draws empty (seen on
+            // device, first render of a fresh surface window). The post lands
+            // after the traversal, where addView schedules a clean one.
+            boardView.post {
+                if (generation == listRenderGeneration) windowNow()
+            }
         }
         pendingListLayoutListener = listener
         boardView.addOnLayoutChangeListener(listener)
