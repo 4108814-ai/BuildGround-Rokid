@@ -49,6 +49,13 @@ internal class RelaySettings(context: Context) {
         prefs.edit().putBoolean(KEY_NOTICE_BACKDROP, enabled).apply()
     }
 
+    fun readAloud(): Boolean =
+        prefs.getBoolean(KEY_READ_ALOUD, DEFAULT_READ_ALOUD)
+
+    fun setReadAloud(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_READ_ALOUD, enabled).apply()
+    }
+
     fun admits(): Boolean = NotificationAdmission.appIsAdmitted(enabled())
 
     companion object {
@@ -60,6 +67,7 @@ internal class RelaySettings(context: Context) {
         const val DEFAULT_PAUSE_SCREEN_ON = false
         const val DEFAULT_CLEAR_AFTER_REPLY = true
         const val DEFAULT_NOTICE_BACKDROP = false
+        const val DEFAULT_READ_ALOUD = false
 
         private const val PREFS = "relay_settings"
         private const val KEY_ENABLED = "enabled"
@@ -68,5 +76,6 @@ internal class RelaySettings(context: Context) {
         private const val KEY_PAUSE_SCREEN_ON = "pause_screen_on"
         private const val KEY_CLEAR_AFTER_REPLY = "clear_after_reply"
         private const val KEY_NOTICE_BACKDROP = "notice_backdrop"
+        private const val KEY_READ_ALOUD = "read_aloud"
     }
 }

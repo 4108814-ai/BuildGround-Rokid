@@ -19,7 +19,11 @@ import com.anezium.rokidbus.client.plugin.NexusSpeechError
 import com.anezium.rokidbus.client.plugin.NexusSpeechSession
 import com.anezium.rokidbus.client.plugin.NexusSpeechState
 import com.anezium.rokidbus.client.plugin.NexusSpeechStopReason
+import com.anezium.rokidbus.client.plugin.NexusTtsCallbacks
+import com.anezium.rokidbus.client.plugin.NexusTtsDoneReason
+import com.anezium.rokidbus.client.plugin.NexusTtsSession
 import com.anezium.rokidbus.client.plugin.speechSession
+import com.anezium.rokidbus.client.plugin.ttsSession
 import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
 import org.json.JSONObject
@@ -41,6 +45,8 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
     private var speechGeneration = 0
     private var speechFinalReceived = false
     private var speech: NexusSpeechSession? = null
+    private var tts: NexusTtsSession? = null
+    private var activeTtsUtteranceId: String? = null
     private var pendingPartial: NexusNoticeUpdate? = null
     private var updateDrainScheduled = false
     private var lastNoticeMessageAtMs = Long.MIN_VALUE
@@ -56,6 +62,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         showGeneration += 1
         val generation = showGeneration
         invalidateSpeech()
+        stopReadAloud()
         essentialUpdates.clear()
         pendingPartial = null
         currentReply = reply
@@ -81,7 +88,11 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
 
     override fun onOpen() = Unit
 
-    override fun onClose() = Unit
+    override fun onClose() = onMain {
+        // The client object may register again after a hub reconnect. Its TTS
+        // session belongs to the registration that created it, never the next one.
+        closeReadAloudSession()
+    }
 
     override fun onInput(event: NexusInputEvent) = Unit
 
@@ -99,6 +110,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
     override fun onNoticeAction(id: String) = onMain {
         // The wearer decided, so the clock stops rather than firing behind them.
         cancelSendCountdown()
+        stopReadAloud()
         when (id) {
             ACTION_REPLY, ACTION_RETRY -> startListening()
             ACTION_SEND -> sendConfirmedReply()
@@ -153,9 +165,65 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
             pendingShow = null
             activeNotice = true
             lastNoticeMessageAtMs = SystemClock.uptimeMillis()
+            readNoticeAloud(reply)
         } else if (result !in RETRYABLE_SHOW_RESULTS) {
             closeClient()
         }
+    }
+
+    private fun readNoticeAloud(reply: ReplyRepository.PendingReply) {
+        val text = RelayReadAloud.textFor(
+            enabled = settings.readAloud(),
+            sender = reply.content.title,
+            renderedThread = reply.content.renderedText,
+        ) ?: return
+        val currentClient = client ?: return
+        val utteranceId = "notice-$showGeneration"
+        val session = tts ?: currentClient.ttsSession(readAloudCallbacks).also { tts = it }
+        activeTtsUtteranceId = utteranceId
+        val result = session.speak(text, utteranceId)
+        Log.i(TAG, "tts speak utteranceId=$utteranceId result=$result textChars=${text.length}")
+        if (result != NexusSdkResult.SENT && activeTtsUtteranceId == utteranceId) {
+            activeTtsUtteranceId = null
+        }
+    }
+
+    private val readAloudCallbacks = object : NexusTtsCallbacks {
+        override fun onTtsStarted(utteranceId: String) = onMain {
+            Log.i(TAG, "tts started utteranceId=$utteranceId")
+            if (utteranceId != activeTtsUtteranceId || !activeNotice) return@onMain
+            queueEssential(
+                NexusNoticeUpdate(ttlMs = NoticeSurfaceContract.MAX_TTL_MS),
+                dropPartial = false,
+            )
+        }
+
+        override fun onTtsDone(
+            utteranceId: String,
+            reason: NexusTtsDoneReason,
+        ) = onMain {
+            Log.i(TAG, "tts done utteranceId=$utteranceId reason=$reason")
+            if (utteranceId != activeTtsUtteranceId) return@onMain
+            activeTtsUtteranceId = null
+            if (reason == NexusTtsDoneReason.CANCELLED || !activeNotice) return@onMain
+            queueEssential(
+                NexusNoticeUpdate(ttlMs = DECISION_TTL_MS),
+                dropPartial = false,
+            )
+        }
+    }
+
+    private fun stopReadAloud() {
+        val utteranceId = activeTtsUtteranceId ?: return
+        activeTtsUtteranceId = null
+        val result = tts?.stop() ?: return
+        Log.i(TAG, "tts stop utteranceId=$utteranceId result=$result")
+    }
+
+    private fun closeReadAloudSession() {
+        stopReadAloud()
+        tts?.close()
+        tts = null
     }
 
     private fun startListening() {
@@ -403,6 +471,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         cancelSendCountdown()
         showGeneration += 1
         invalidateSpeech()
+        closeReadAloudSession()
         essentialUpdates.clear()
         pendingPartial = null
         updateDrainScheduled = false

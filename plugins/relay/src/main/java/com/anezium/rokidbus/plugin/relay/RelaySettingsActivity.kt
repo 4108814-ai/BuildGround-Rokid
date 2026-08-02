@@ -132,6 +132,15 @@ class RelaySettingsActivity : Activity() {
             ) { enabled -> settings.setNoticeBackdrop(enabled) },
             NexusUi.block(),
         )
+        content.addView(BusTheme.gap(this, 8))
+        content.addView(
+            switchCard(
+                "Read notifications aloud",
+                "The glasses speak the message when it arrives",
+                settings.readAloud(),
+            ) { enabled -> settings.setReadAloud(enabled) },
+            NexusUi.block(),
+        )
 
         content.addView(BusTheme.gap(this, 24))
         // Folded by default, and folded again every time this screen opens. It

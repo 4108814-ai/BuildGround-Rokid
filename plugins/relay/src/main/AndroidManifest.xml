@@ -76,10 +76,10 @@
                 android:value="3" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.CAPABILITIES"
-                android:value="surfaces,stt" />
+                android:value="surfaces,stt,tts" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.RECEIVE_PREFIXES"
-                android:value="/plugin/relay,/system/plugin,/stt" />
+                android:value="/plugin/relay,/system/plugin,/stt,/tts/started,/tts/done" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.SETTINGS_ACTIVITY"
                 android:value=".RelaySettingsActivity" />
