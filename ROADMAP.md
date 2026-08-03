@@ -1,6 +1,6 @@
 # Rokid Nexus — Roadmap
 
-Status: 2026-08-02. This file is the public roadmap and the source the
+Status: 2026-08-03. This file is the public roadmap and the source the
 [project site](https://rokid-nexus.anezium.me) renders. The founding product
 argument lives in [VISION.md](VISION.md); what actually shipped in each release
 lives in [CHANGELOG.md](CHANGELOG.md).
@@ -110,9 +110,10 @@ A notice worth it can pulse the display awake: at most one wake every five
 seconds *across every plugin*, always a short pulse, never held on. No other
 tier may do it at all, including activities.
 
-### Eight plugins, none of them built in
+### Nine plugins, none of them built in
 
-Relay · Lens · Feeds · Transit · Lyrics · Media Deck · Photos Sync · Sample
+Relay · Assistant · Lens · Feeds · Transit · Lyrics · Media Deck · Photos Sync
+· Sample
 
 ---
 
@@ -161,18 +162,52 @@ Committed, not started, in this order.
 
 ---
 
-## Exploring
+## Plugins
 
-Not committed. Each one is an ordinary phone APK against a capability that
-already exists — which is the point.
+Everything above is the platform's roadmap; this is the ecosystem's. The rule
+does not change down here — each of these is an ordinary phone APK against a
+capability that already exists or is named above, and none of them puts code on
+the glasses. One of the old explorations already made the crossing: "a voice
+assistant" was a table row on this page, and it shipped as Assistant.
+
+### Shipped, and what each one still owes
+
+| Plugin | Still owed |
+|---|---|
+| Relay | Notifications from ordinary apps, not just messengers · an app picker, so the wearer chooses which apps may reach the eye |
+| Assistant | Providers beyond ChatGPT · tools that act — control the music, set a reminder, ask Transit |
+| Feeds | Posting and replying by voice · sources beyond Bluesky and X · video in the timeline |
+| Media Deck | Voice control — "next" and "pause" said instead of tapped |
+| Photos Sync | Sync rules — Wi-Fi only, photos but not videos · freeing glasses storage once a shot is safely across |
+| Lens · Transit · Lyrics | Complete as they stand |
+
+Navigation is deliberately absent from Transit's row: it deserves a plugin of
+its own, below.
+
+### Next
+
+In order.
+
+1. **Navigation.** Google Maps and Citymapper already emit turn-by-turn as
+   notifications; the plugin reads those, keeps maneuver, distance and ETA
+   pinned with notices for the moments that matter, and graduates to the `nav`
+   surface the platform roadmap commits to above.
+2. **T3code, as an alpha.** Drive T3Code from the glasses: start a thread,
+   follow its agents while they work. An alpha on purpose — it exists to
+   rehearse the next one.
+3. **Terminal / Agent.** The real product. A coding agent in the wearer's eye:
+   its questions and permission prompts arrive as notices and are answered by
+   voice, its progress rides a pin, and the next task is dictated instead of
+   typed.
+
+### Ideas
+
+Not committed.
 
 | Idea | What it needs |
 |---|---|
-| Live captions and translation | audio lease · blocked on continuous speech |
-| A voice assistant | audio lease · speaks back through `tts` · blocked on continuous speech |
-| Teleprompter, glanceables | today's surface kinds, no protocol work |
 | A visual assistant, FoodFacts | camera capability, shipped |
-| Sport HUD, CGM glucose | activity tier + a small protocol addition |
+| Sport HUD | activity tier + a small protocol addition · possibly fed by the R08 ring |
 
 ---
 

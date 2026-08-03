@@ -1,7 +1,8 @@
 # Plan 015 — Notice pages and images
 
-Status: spec decided, geometry landed, the rest unbuilt.
-Depends on 011 (notice surface), 012 (activities — the band view is shared),
+Status: DONE — shipped in sdk-v0.7.0 (pages and images both live; plan 017
+consumed them on hardware).
+Depended on 011 (notice surface), 012 (activities — the band view is shared),
 013 (HUD motion), and the image channel already shipped for surfaces.
 
 ## Goal

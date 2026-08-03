@@ -1,6 +1,6 @@
 # Plan 010 — Pin surface (persistent corner overlay)
 
-Status: spec locked, branch `pin-surface`, implementation in flight.
+Status: DONE — shipped; the pin tier is live on hardware.
 
 ## Goal
 

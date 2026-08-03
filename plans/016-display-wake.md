@@ -1,7 +1,7 @@
 # Plan 016 — Waking the display
 
-Status: spec decided, unbuilt. Depends on 011 (notice surface) and 012
-(activities), both shipped. Blocks 017 (relay notifications).
+Status: DONE — shipped; the roadmap's "Waking a dark display, without owning
+it" is this plan. Unblocked 017 (relay notifications), which also shipped.
 
 ## Goal
 

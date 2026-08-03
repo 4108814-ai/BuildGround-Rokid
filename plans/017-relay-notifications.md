@@ -1,8 +1,8 @@
 # Plan 017 — Relay notifications
 
-Status: spec decided, unbuilt. Depends on 011 (notice surface) and 015 (pages
-and images), both shipped in sdk-v0.7.0, on 009 (speech to text), and on 016
-(display wake), which is unbuilt and blocking.
+Status: DONE — Relay is shipped and on hardware (plugins/relay; inbox windowing
+landed in 1.1.4, spoken replies ride the tts capability). Its dependencies —
+011, 015, 009, 016 (display wake) — all shipped before it.
 
 Source app: **Rokid Relay v0.1.16**, `E:\Tools\Rokid\Rokid Relay`. Inventory of
 record: Codex read-only report, 2026-07-31, `E:\Tools\codexbg\runs\0731-142150`.

@@ -786,6 +786,7 @@ code {
 
 .section--roadmap { border-top: 1px solid var(--line-soft); }
 .road { display: grid; gap: clamp(2.5rem, 5vw, 4rem); }
+.road--plugins { margin-top: clamp(3rem, 6vw, 4.5rem); }
 
 .road__group {
   display: grid;

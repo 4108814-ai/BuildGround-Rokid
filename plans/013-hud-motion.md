@@ -1,6 +1,6 @@
 # Plan 013 — HUD motion
 
-Status: layer built and measured on hardware (branch `hud-motion`). Serves 010
+Status: DONE — shipped and measured on hardware. Serves 010
 (pin), 011 (notice) and 012 (activities); introduces no protocol of its own.
 
 ## Goal

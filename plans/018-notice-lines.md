@@ -1,8 +1,9 @@
 # Plan 018 — A notice that knows where a message ends
 
-Status: spec decided, unbuilt. Depends on 011 (notice surface) and 015 (pages
-and images), both shipped. Motivated by 017 (relay notifications), which is what
-made the gap visible on hardware.
+Status: DONE — `lines` is in the notice contract (shared
+NoticeSurfaceContract, validated create and update paths, contract tests).
+Motivated by 017 (relay notifications), which is what made the gap visible on
+hardware.
 
 ## Goal
 

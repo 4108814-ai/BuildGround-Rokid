@@ -1,6 +1,6 @@
 # Plan 012 — Activities (unified live-process layer)
 
-Status: spec fully decided; the layer is built and not yet run on hardware.
+Status: DONE — shipped; the activity tier is live on hardware.
 Depends on 010 (pin
 surface, shipped), 011 (notice surface, banner mechanics and window machinery),
 and the glyph foundations landed on `plan-012-foundations`.

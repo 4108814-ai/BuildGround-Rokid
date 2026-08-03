@@ -1,6 +1,7 @@
 # Plan 016 — Model-driven Assistant camera tool
 
-Status: SPECIFICATION
+Status: DONE — shipped; `take_photo` lives in
+`plugins/assistant/.../AssistantTool.kt` with the policy tests beside it.
 
 ## Decision
 

@@ -12,15 +12,31 @@ The existing CXR-L/SPP transport and single glasses anchor are preserved. The pl
 
 ## Execution order
 
-| Plan | Outcome | Priority | Effort | Depends on | Status |
-|---|---|---:|---:|---|---|
-| [001](001-safety-and-verification.md) | Establish a safe, bounded, green verification baseline | P1 | L | — | DONE |
-| [002](002-plugin-identity-and-capabilities.md) | Authorize plugin principals and enforce capabilities | P1 | L | 001 | DONE |
-| [003](003-external-plugin-sdk.md) | Deliver the external SDK, lifecycle, sample, and publication path | P1 | L | 002 | DONE |
-| [004](004-externalize-transit.md) | Ship Transit as the first independent phone plugin APK | P1 | L | 003 | DONE |
-| [005](005-nexus-store-registry.md) | Nexus Store from the RokidBrew registry (plugins) + app self-update | P1 | L | 003, 004 | TODO |
+Statuses refreshed 2026-08-03 against the shipped roadmap and the code; the
+individual plan headers are the detail of record.
 
-Status values are `TODO`, `IN PROGRESS`, `BLOCKED`, and `DONE`. Update both this table and the individual plan when execution status changes.
+| Plan | Outcome | Status |
+|---|---|---|
+| [001](001-safety-and-verification.md) | Establish a safe, bounded, green verification baseline | DONE |
+| [002](002-plugin-identity-and-capabilities.md) | Authorize plugin principals and enforce capabilities | DONE |
+| [003](003-external-plugin-sdk.md) | Deliver the external SDK, lifecycle, sample, and publication path | DONE |
+| [004](004-externalize-transit.md) | Ship Transit as the first independent phone plugin APK | DONE |
+| [005](005-nexus-store-registry.md) | Nexus Store from the RokidBrew registry (plugins) + app self-update | DONE |
+| [006](006-video-playback-on-glasses.md) | Video playback on the glasses | TODO — Feeds video in the timeline builds on it |
+| [007](007-camera-platform-and-lens-plugin.md) | Camera as a platform capability + Lens as its consumer | DONE |
+| [008](008-plugin-devex.md) | Plugin developer experience, developer mode | DONE |
+| [009](009-stt-capability.md) | Speech to text | IN PROGRESS — slices 1–3 shipped; slice 4 is the roadmap's continuous speech |
+| [010](010-pin-surface.md) | Pin surface | DONE |
+| [011](011-notice-surface.md) | Notice surface | DONE |
+| [012](012-activities.md) | Activity tier | DONE |
+| [013](013-hud-motion.md) | HUD motion layer | DONE |
+| [015](015-notice-pages-and-images.md) | Notice pages and images | DONE |
+| [016](016-display-wake.md) | Waking the display | DONE |
+| [016](016-assistant-camera-tool.md) | Assistant `take_photo` camera tool | DONE |
+| [017](017-relay-notifications.md) | Relay notifications | DONE |
+| [018](018-notice-lines.md) | Notice lines | DONE |
+
+Status values are `TODO`, `IN PROGRESS`, `BLOCKED`, and `DONE`. Update both this table and the individual plan when execution status changes. What comes after these plans is tracked on the roadmap, not here: display arbitration, continuous speech, and the plugin roadmap's Navigation, T3code, and Terminal/Agent do not have plan documents yet.
 
 ## Why this order is strict
 

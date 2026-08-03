@@ -115,9 +115,9 @@
       <b>3</b><span>next</span>
       <i>committed, not started</i>
     </a>
-    <a class="board__cell" href="#exploring" data-state="exploring">
-      <b>5</b><span>exploring</span>
-      <i>each one an ordinary phone APK</i>
+    <a class="board__cell" href="#coming" data-state="exploring">
+      <b>5</b><span>plugins coming</span>
+      <i>navigation · terminal/agent · t3code</i>
     </a>
   </div>
 </div>
@@ -347,20 +347,6 @@
     </div>
 
 
-    <div class="road__group reveal" id="exploring" data-state="exploring">
-      <div class="road__meta">
-        <span class="chip chip--exploring">Exploring</span>
-        <p>Not committed. Each one is an ordinary phone APK against a capability that already exists — which is the point.</p>
-      </div>
-      <ul class="road__items road__items--compact">
-        <li><h3>Live captions and translation</h3><p>audio lease · blocked on continuous speech</p></li>
-        <li><h3>A voice assistant</h3><p>audio lease · blocked on continuous speech</p></li>
-        <li><h3>Teleprompter, glanceables</h3><p>today's surface kinds, no protocol work</p></li>
-        <li><h3>A visual assistant, FoodFacts</h3><p>camera capability, shipped</p></li>
-        <li><h3>Sport HUD, CGM glucose</h3><p>activity tier + a small protocol addition</p></li>
-      </ul>
-    </div>
-
   </div>
 
     <div class="nogo nogo--promo reveal">
@@ -520,7 +506,7 @@
   <div class="section__head section__head--rail">
     <div>
       <span class="tick" aria-hidden="true"></span>
-      <h2>Eight plugins, none of them built in</h2>
+      <h2>Nine plugins, none of them built in</h2>
       <p class="section__sub">
         Every one is an ordinary phone APK installed from the in-app Store,
         pinned by hash and signer before it installs. The hub itself ships
@@ -569,6 +555,20 @@
     <figure class="slide slide--card">
       <div class="slide__mark" aria-hidden="true">
         <svg viewBox="0 0 72 72" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 12h52v32H32L18 56V44h-8z" />
+          <path d="M22 22h28M22 30h18" />
+          <path d="M44 54v6M51 50v14M58 54v6" opacity=".55" />
+        </svg>
+      </div>
+      <figcaption>
+        <span class="slide__tag">talks back</span>
+        <b>Assistant</b>
+        <span>Ask out loud, hear the answer through your phone's own voice — and the model can look through the camera when the question needs eyes.</span>
+      </figcaption>
+    </figure>
+    <figure class="slide slide--card">
+      <div class="slide__mark" aria-hidden="true">
+        <svg viewBox="0 0 72 72" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="6" y="10" width="38" height="28" rx="3" />
           <path d="M6 30l10-8 8 6 7-6 13 10" />
           <circle cx="34" cy="19" r="3" />
@@ -607,6 +607,70 @@
     package, its plugin id, and its signing certificate — and checked at the hub
     on every message, not at install time.
   </p>
+
+  <div class="road road--plugins">
+
+    <div class="road__group reveal" id="adding" data-state="building">
+      <div class="road__meta">
+        <span class="chip chip--building">Adding</span>
+        <p>The released plugins are not finished. What each one still gains.</p>
+      </div>
+      <ul class="road__items road__items--compact">
+        <li><h3>Relay</h3><p>ordinary apps, not just messengers · an app picker for what may reach the eye</p></li>
+        <li><h3>Assistant</h3><p>providers beyond ChatGPT · tools that act — music, reminders, Transit</p></li>
+        <li><h3>Feeds</h3><p>posting and replying by voice · more sources · video in the timeline</p></li>
+        <li><h3>Media Deck</h3><p>voice control — “next” and “pause” said instead of tapped</p></li>
+        <li><h3>Photos Sync</h3><p>sync rules · freeing glasses storage once a shot is safely across</p></li>
+      </ul>
+    </div>
+
+    <div class="road__group reveal" id="coming" data-state="next">
+      <div class="road__meta">
+        <span class="chip chip--next">Coming</span>
+        <p>Plugins that do not exist yet, in order. One row has already made this crossing: “a voice assistant” sat here, and shipped as Assistant.</p>
+      </div>
+      <ul class="road__items">
+        <li>
+          <h3>Navigation</h3>
+          <p>
+            Google Maps and Citymapper already emit turn-by-turn as
+            notifications. The plugin reads those, keeps maneuver, distance and
+            ETA pinned with notices for the moments that matter, and graduates
+            to the <code>nav</code> surface when the platform ships it.
+          </p>
+        </li>
+        <li>
+          <h3>T3code, as an alpha</h3>
+          <p>
+            Drive T3Code from the glasses: start a thread, follow its agents
+            while they work. An alpha on purpose — it exists to rehearse the
+            next one.
+          </p>
+        </li>
+        <li>
+          <h3>Terminal / Agent</h3>
+          <p>
+            The real product. A coding agent in the wearer's eye: its questions
+            and permission prompts arrive as notices and are answered by voice,
+            its progress rides a pin, and the next task is dictated instead of
+            typed.
+          </p>
+        </li>
+      </ul>
+    </div>
+
+    <div class="road__group reveal" id="plugin-ideas" data-state="exploring">
+      <div class="road__meta">
+        <span class="chip chip--exploring">Ideas</span>
+        <p>Not committed.</p>
+      </div>
+      <ul class="road__items road__items--compact">
+        <li><h3>A visual assistant, FoodFacts</h3><p>camera capability, shipped</p></li>
+        <li><h3>Sport HUD</h3><p>activity tier + a small protocol addition · possibly fed by the R08 ring</p></li>
+      </ul>
+    </div>
+
+  </div>
 </section>
 <!-- ────────────────────────  GET STARTED  ──────────────────────── -->
 <section class="section section--start" id="start">
