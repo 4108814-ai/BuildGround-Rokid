@@ -175,7 +175,7 @@ assistant" was a table row on this page, and it shipped as Assistant.
 | Plugin | Still owed |
 |---|---|
 | Relay | Notifications from ordinary apps, not just messengers · an app picker, so the wearer chooses which apps may reach the eye |
-| Assistant | Providers beyond ChatGPT · tools that act — control the music, set a reminder, ask Transit |
+| Assistant | Providers beyond ChatGPT · tools that act — control the music, set a reminder, ask Transit · a keyboard mode — the request typed on the phone instead of spoken, for the places where talking to your glasses is not an option |
 | Feeds | Posting and replying by voice · sources beyond Bluesky and X · video in the timeline |
 | Media Deck | Voice control — "next" and "pause" said instead of tapped |
 | Photos Sync | Sync rules — Wi-Fi only, photos but not videos · freeing glasses storage once a shot is safely across |
