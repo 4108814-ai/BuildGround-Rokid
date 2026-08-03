@@ -42,6 +42,7 @@ dependencies {
     implementation(project(":shared"))
     implementation(project(":bus-client"))
     implementation("androidx.activity:activity:1.10.1")
+    implementation("androidx.exifinterface:exifinterface:1.4.2")
     implementation("com.example.cxrglobal:lib:0.2.0")
     implementation("com.flyfishxu:kadb:2.1.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

@@ -178,7 +178,7 @@ assistant" was a table row on this page, and it shipped as Assistant.
 | Assistant | Providers beyond ChatGPT · tools that act — control the music, set a reminder, ask Transit · a keyboard mode — the request typed on the phone instead of spoken, for the places where talking to your glasses is not an option |
 | Feeds | Posting and replying by voice · sources beyond Bluesky and X · video in the timeline |
 | Media Deck | Voice control — "next" and "pause" said instead of tapped |
-| Photos Sync | Sync rules — Wi-Fi only, photos but not videos · freeing glasses storage once a shot is safely across · the capture date the glasses camera never writes, so a batch lands in your timeline when it was taken rather than when it arrived · a video's location tag, which Android strips on the way out |
+| Photos Sync | Sync rules — Wi-Fi only, photos but not videos · freeing glasses storage once a shot is safely across · a video's location tag, which Android strips on the way out |
 | Lens · Transit · Lyrics | Complete as they stand |
 
 Navigation is deliberately absent from Transit's row: it deserves a plugin of

@@ -1,14 +1,20 @@
 package com.anezium.rokidbus.phone.mediasync
 
+import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
+import androidx.exifinterface.media.ExifInterface
 import com.anezium.rokidbus.shared.MediaSyncMediaFile
 import com.anezium.rokidbus.shared.MediaSyncTransferContract
 import java.io.Closeable
 import java.io.OutputStream
 import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 /**
  * Where a synced capture lands on the phone.
@@ -27,7 +33,7 @@ object MediaSyncGalleryTarget {
 }
 
 interface MediaSyncGalleryWriter {
-    /** True when a file with this name and size is already published in the target folder. */
+    /** True when a file with this capture name is already published in the target folder. */
     fun alreadyPublished(name: String, sizeBytes: Long): Boolean
 
     /** Null when the row could not be created; the caller reports the file as failed. */
@@ -46,28 +52,31 @@ interface MediaSyncGalleryTransfer : Closeable {
     fun discard()
 }
 
-class AndroidMediaSyncGalleryWriter(
-    context: Context,
+class AndroidMediaSyncGalleryWriter internal constructor(
+    private val contentResolver: ContentResolver,
     private val logger: (String) -> Unit = {},
 ) : MediaSyncGalleryWriter {
-    private val appContext = context.applicationContext
+    constructor(
+        context: Context,
+        logger: (String) -> Unit = {},
+    ) : this(context.applicationContext.contentResolver, logger)
+
     private val collection: Uri =
         MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
 
     override fun alreadyPublished(name: String, sizeBytes: Long): Boolean = runCatching {
-        appContext.contentResolver.query(
+        contentResolver.query(
             collection,
-            arrayOf(MediaStore.MediaColumns.SIZE),
+            arrayOf(MediaStore.MediaColumns._ID),
             "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND " +
                 "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND " +
                 "${MediaStore.MediaColumns.IS_PENDING} = 0",
             arrayOf(name, MediaSyncGalleryTarget.RELATIVE_PATH),
             null,
         )?.use { cursor ->
-            while (cursor.moveToNext()) {
-                if (cursor.getLong(0) == sizeBytes) return@runCatching true
-            }
-            false
+            // EXIF enrichment changes the published byte count, but the glasses capture name is
+            // stable across old untouched imports and newly enriched files.
+            cursor.moveToFirst()
         } ?: false
     }.onFailure { logger("mediaSync gallery lookup failed name=$name error=${it.message}") }
         .getOrDefault(false)
@@ -79,24 +88,31 @@ class AndroidMediaSyncGalleryWriter(
             put(MediaStore.MediaColumns.RELATIVE_PATH, MediaSyncGalleryTarget.RELATIVE_PATH)
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
-        val uri = runCatching { appContext.contentResolver.insert(collection, values) }
+        val uri = runCatching { contentResolver.insert(collection, values) }
             .onFailure { logger("mediaSync gallery insert failed name=$name error=${it.message}") }
             .getOrNull()
             ?: return null
-        val stream = runCatching { appContext.contentResolver.openOutputStream(uri, "w") }
+        val stream = runCatching { contentResolver.openOutputStream(uri, "w") }
             .onFailure { logger("mediaSync gallery open failed name=$name error=${it.message}") }
             .getOrNull()
         if (stream == null) {
-            runCatching { appContext.contentResolver.delete(uri, null, null) }
+            runCatching { contentResolver.delete(uri, null, null) }
             return null
         }
-        return AndroidMediaSyncGalleryTransfer(appContext, uri, stream, logger)
+        return AndroidMediaSyncGalleryTransfer(
+            contentResolver,
+            uri,
+            MediaSyncGalleryTarget.mimeType(name),
+            stream,
+            logger,
+        )
     }
 }
 
 private class AndroidMediaSyncGalleryTransfer(
-    private val appContext: Context,
+    private val contentResolver: ContentResolver,
     private val uri: Uri,
+    private val mimeType: String,
     private val stream: OutputStream,
     private val logger: (String) -> Unit,
 ) : MediaSyncGalleryTransfer {
@@ -121,13 +137,13 @@ private class AndroidMediaSyncGalleryTransfer(
             deleteRow()
             return false
         }
+        writeMissingCaptureTimestamp(capturedAtMillis)
         val published = runCatching {
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.IS_PENDING, 0)
-                put(MediaStore.MediaColumns.DATE_TAKEN, capturedAtMillis)
                 put(MediaStore.MediaColumns.DATE_MODIFIED, capturedAtMillis / 1000L)
             }
-            appContext.contentResolver.update(uri, values, null, null) > 0
+            contentResolver.update(uri, values, null, null) > 0
         }.onFailure { logger("mediaSync gallery publish failed error=${it.message}") }
             .getOrDefault(false)
         if (!published) deleteRow()
@@ -143,8 +159,29 @@ private class AndroidMediaSyncGalleryTransfer(
 
     override fun close() = discard()
 
+    private fun writeMissingCaptureTimestamp(capturedAtMillis: Long) {
+        if (mimeType != "image/jpeg") return
+        runCatching {
+            val descriptor = contentResolver.openFileDescriptor(uri, "rw")
+                ?: error("file descriptor unavailable")
+            descriptor.use {
+                val exif = ExifInterface(it.fileDescriptor)
+                if (exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL) == null) {
+                    val formatter = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).apply {
+                        timeZone = TimeZone.getDefault()
+                    }
+                    exif.setAttribute(
+                        ExifInterface.TAG_DATETIME_ORIGINAL,
+                        formatter.format(Date(capturedAtMillis)),
+                    )
+                    exif.saveAttributes()
+                }
+            }
+        }.onFailure { logger("mediaSync gallery EXIF update failed uri=$uri error=${it.message}") }
+    }
+
     private fun deleteRow() {
-        runCatching { appContext.contentResolver.delete(uri, null, null) }
+        runCatching { contentResolver.delete(uri, null, null) }
             .onFailure { logger("mediaSync gallery cleanup failed uri=$uri error=${it.message}") }
     }
 }
