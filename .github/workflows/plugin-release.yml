@@ -80,6 +80,11 @@ jobs:
               changelog_path="plugins/relay/CHANGELOG.md"
               release_name="Relay"
               ;;
+            assistant)
+              module_dir="plugins/assistant"
+              changelog_path="plugins/assistant/CHANGELOG.md"
+              release_name="Assistant"
+              ;;
             sample)
               module_dir="plugins/sample"
               changelog_path="plugins/sample/CHANGELOG.md"
