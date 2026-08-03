@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.1.7
+
+- **Videos from the glasses finally reach your phone.** Photo Sync has always
+  promised that a long video resumes across sessions, and that machinery does
+  work — but no video ever got far enough to use it. The capture catalog
+  scanned only the folder the photos land in, on the belief that videos landed
+  beside them. They do not: this firmware keeps them somewhere else entirely.
+  So a recording was never listed, never transferred, and tapping *Sync now*
+  answered that nothing was waiting while a 47 MB clip sat on the glasses. Both
+  folders are watched now.
+
+- **A synced photo keeps the day it was taken.** Captures reached the phone
+  gallery with no date of their own, so they sorted by the moment they arrived:
+  a day of photos synced at bedtime piled up at bedtime, in the wrong place in
+  your timeline. The cause was inside the files. The glasses camera writes one
+  EXIF date field and not the one Android actually reads, so the phone now
+  fills in the missing field as each capture is published, using the capture
+  time the filename already carries. Photos synced before this release keep the
+  date they were given.
+
 ## 1.1.6
 
 - **Speech comes from your phone now, and it can finally pronounce your
