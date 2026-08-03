@@ -10,7 +10,7 @@ SEENFILE="$BASE/$NAME.seen"
 PENDING_DISABLE="$BASE/$NAME.pending-disable"
 CHANNEL="/sdcard/Android/data/com.anezium.rokidbus.glasses/files/cmd_bridge"
 DOORBELL="$CHANNEL/doorbell"
-VERSION="2026-07-26.4"
+VERSION="2026-08-04.1"
 CAPTURE_DIR="/sdcard/DCIM/Camera"
 SCRIPT_PATH="$BASE/$NAME.sh"
 PACKAGE="com.anezium.rokidbus.glasses"
@@ -83,10 +83,24 @@ is_lower_hex() {
   esac
 }
 
+discard_foreign_channel() {
+  # The channel must belong to the app: under FUSE the app cannot write into, nor delete, a
+  # directory this uid created inside its own data dir, so a shell-owned channel silently kills
+  # every command forever. Only this uid can clear it, and the app recreates it on its next
+  # request.
+  [ -d "$CHANNEL" ] || return 0
+  channel_owner="$(stat -c %u "$CHANNEL" 2>/dev/null)"
+  files_owner="$(stat -c %u "$CHANNEL/.." 2>/dev/null)"
+  [ -n "$channel_owner" ] && [ -n "$files_owner" ] || return 0
+  [ "$channel_owner" = "$files_owner" ] && return 0
+  log_line "channel owned by $channel_owner not $files_owner; clearing for the app to recreate"
+  rm -rf "$CHANNEL" 2>/dev/null
+  return 0
+}
+
 prepare_channel() {
-  if [ ! -d "$CHANNEL" ]; then
-    mkdir -p "$CHANNEL" 2>/dev/null || return 1
-  fi
+  discard_foreign_channel
+  [ -d "$CHANNEL" ] || return 1
   if [ -e "$DOORBELL" ] && [ ! -p "$DOORBELL" ]; then
     rm -f "$DOORBELL" 2>/dev/null || return 1
   fi

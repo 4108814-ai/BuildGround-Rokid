@@ -6,10 +6,17 @@ import android.system.Os
 import android.system.OsConstants
 import android.os.SystemClock
 import android.util.Base64
+import android.util.Log
 import com.anezium.rokidbus.shared.MediaSyncCatalogContract
 import java.io.File
+import java.io.IOException
+import java.nio.file.FileVisitResult
 import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.BasicFileAttributes
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.UUID
@@ -150,6 +157,7 @@ internal object SelfArmCommandBridgeClient {
     const val SECRET_PLACEHOLDER = "__ROKID_NEXUS_BRIDGE_SECRET_HEX__"
     private val secureRandom = SecureRandom()
     private val secretLock = Any()
+    private val channelLock = Any()
 
     fun setWifiEnabled(context: Context, enabled: Boolean, timeoutMs: Long = DEFAULT_TIMEOUT_MS): Boolean {
         val command = if (enabled) {
@@ -270,13 +278,103 @@ internal object SelfArmCommandBridgeClient {
      * shell-uid bridge (responses/FIFO, via the shared ext_data_rw group) can write into it.
      * Create it here, from the app, before the bridge is ever spawned — if the bridge created it
      * first it would be shell-owned and the app could not drop requests into it.
+     *
+     * The repair below is best-effort and measured to fail against exactly that case: under FUSE
+     * the app cannot write into, nor delete, a directory another uid created inside its own data
+     * dir. Clearing a foreign channel belongs to the bridge script, which has the only uid that
+     * can. What this detection buys is the log line saying so, instead of a delete that reports
+     * `not_permitted` forever with nothing to point at.
      */
     internal fun ensureChannelDir(context: Context): File? {
         val externalFiles = context.applicationContext.getExternalFilesDir(null) ?: return null
-        val channel = File(externalFiles, CHANNEL_NAME)
-        if (!channel.isDirectory && !channel.mkdirs() && !channel.isDirectory) return null
-        return channel
+        val result = synchronized(channelLock) {
+            ensureChannelDirLocked(externalFiles, ::isChannelWritable, ::removeChannelDirectory)
+        }
+        result.repairReason?.let { reason ->
+            val outcome = if (result.directory != null) "succeeded" else "failed"
+            Log.w(TAG, "command bridge channel repair reason=$reason result=$outcome")
+        }
+        return result.directory
     }
+
+    internal fun ensureChannelDir(
+        externalFiles: File,
+        writableProbe: (File) -> Boolean = ::isChannelWritable,
+        removeChannel: (File) -> Boolean = ::removeChannelDirectory,
+    ): File? = synchronized(channelLock) {
+        ensureChannelDirLocked(externalFiles, writableProbe, removeChannel).directory
+    }
+
+    private fun ensureChannelDirLocked(
+        externalFiles: File,
+        writableProbe: (File) -> Boolean,
+        removeChannel: (File) -> Boolean,
+    ): ChannelDirectoryResult {
+        val channel = File(externalFiles, CHANNEL_NAME)
+        val path = channel.toPath()
+        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            if (!channel.mkdirs() && !channel.isDirectory) return ChannelDirectoryResult(null)
+        }
+
+        val reason = channelProblem(channel, writableProbe) ?: return ChannelDirectoryResult(channel)
+        repeat(CHANNEL_REPAIR_ATTEMPTS) {
+            if (removeChannel(channel) &&
+                (channel.mkdirs() || channel.isDirectory) &&
+                channelProblem(channel, writableProbe) == null
+            ) {
+                return ChannelDirectoryResult(channel, reason)
+            }
+        }
+        return ChannelDirectoryResult(null, reason)
+    }
+
+    private fun channelProblem(channel: File, writableProbe: (File) -> Boolean): String? = when {
+        Files.isSymbolicLink(channel.toPath()) -> "symbolic_link"
+        !channel.isDirectory -> "not_directory"
+        !writableProbe(channel) -> "not_writable"
+        else -> null
+    }
+
+    private fun isChannelWritable(channel: File): Boolean {
+        var probe: File? = null
+        return try {
+            probe = File.createTempFile(".write-probe-", ".tmp", channel)
+            probe.delete()
+        } catch (_: IOException) {
+            false
+        } catch (_: SecurityException) {
+            false
+        } finally {
+            probe?.delete()
+        }
+    }
+
+    private fun removeChannelDirectory(channel: File): Boolean = runCatching {
+        val channelPath = channel.toPath()
+        if (!Files.exists(channelPath, LinkOption.NOFOLLOW_LINKS)) return@runCatching true
+        // The default walk does not follow links, so cleanup cannot escape the fixed channel path.
+        Files.walkFileTree(
+            channelPath,
+            object : SimpleFileVisitor<Path>() {
+                override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    Files.deleteIfExists(file)
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun postVisitDirectory(directory: Path, exception: IOException?): FileVisitResult {
+                    if (exception != null) throw exception
+                    Files.deleteIfExists(directory)
+                    return FileVisitResult.CONTINUE
+                }
+            },
+        )
+        !Files.exists(channelPath, LinkOption.NOFOLLOW_LINKS)
+    }.getOrDefault(false)
+
+    private data class ChannelDirectoryResult(
+        val directory: File?,
+        val repairReason: String? = null,
+    )
 
     private fun execute(context: Context, command: String, targetEnabled: Boolean, timeoutMs: Long): Boolean {
         if (timeoutMs <= 0L) return false
@@ -388,4 +486,7 @@ internal object SelfArmCommandBridgeClient {
         file.setReadable(true, true)
         file.setWritable(true, true)
     }
+
+    private const val TAG = "NexusCommandBridge"
+    private const val CHANNEL_REPAIR_ATTEMPTS = 3
 }
