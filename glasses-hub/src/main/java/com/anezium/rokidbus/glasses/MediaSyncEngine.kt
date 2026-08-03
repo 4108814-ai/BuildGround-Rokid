@@ -57,9 +57,9 @@ internal object MediaSyncEngine {
     private var deferredTrigger: MediaSyncTrigger? = null
     private var captureFuture: ScheduledFuture<*>? = null
     private var watchdogFuture: ScheduledFuture<*>? = null
-    private var captureObserver: FileObserver? = null
+    private var captureObservers: List<FileObserver> = emptyList()
 
-    /** Last seen state of the capture directory, so the safety scan reacts to changes only. */
+    /** Last seen state of the capture directories, so the safety scan reacts to changes only. */
     @Volatile private var captureFingerprint: String? = null
 
     private class Session(val id: String, val sender: MediaSyncTransferSender)
@@ -103,26 +103,31 @@ internal object MediaSyncEngine {
     }
 
     /**
-     * Watches the capture directory so automatic modes react to a photo the moment it is taken
+     * Watches the capture directories so automatic modes react to a capture the moment it is taken
      * rather than waiting for the next reconnect. The observer only ever nudges an attempt — the
      * stability gate decides whether a file is actually ready, so a half-written video is simply
      * not eligible yet and the settling re-check picks it up shortly after.
      */
     private fun startCaptureObserver() {
-        val directory = File(MediaCatalog.DEFAULT_DIRECTORY)
-        val observer = runCatching {
-            @Suppress("DEPRECATION")
-            object : FileObserver(directory.absolutePath, CAPTURE_EVENTS) {
-                override fun onEvent(event: Int, path: String?) {
-                    if (path.isNullOrBlank()) return
-                    onCaptureObserved()
+        captureObservers = MediaCatalog.DEFAULT_DIRECTORIES.mapNotNull { path ->
+            val directory = File(path)
+            if (!directory.isDirectory) return@mapNotNull null
+            val observer = runCatching {
+                @Suppress("DEPRECATION")
+                object : FileObserver(directory.absolutePath, CAPTURE_EVENTS) {
+                    override fun onEvent(event: Int, path: String?) {
+                        if (path.isNullOrBlank()) return
+                        onCaptureObserved()
+                    }
                 }
-            }
-        }.onFailure { logError("mediaSync capture observer unavailable", it) }.getOrNull() ?: return
-        runCatching { observer.startWatching() }
-            .onFailure { logError("mediaSync capture observer start failed", it) }
-        captureObserver = observer
-        logSync("capture observer watching ${directory.absolutePath}")
+            }.onFailure { logError("mediaSync capture observer unavailable", it) }
+                .getOrNull()
+                ?: return@mapNotNull null
+            runCatching { observer.startWatching() }
+                .onFailure { logError("mediaSync capture observer start failed", it) }
+            logSync("capture observer watching ${directory.absolutePath}")
+            observer
+        }
     }
 
     /**
@@ -181,9 +186,9 @@ internal object MediaSyncEngine {
 
     /** Cheap directory summary: what changed, not what is pending. */
     private fun readCaptureFingerprint(): String {
-        val files = runCatching { File(MediaCatalog.DEFAULT_DIRECTORY).listFiles() }
-            .getOrNull()
-            .orEmpty()
+        val files = MediaCatalog.DEFAULT_DIRECTORIES.flatMap { path ->
+            runCatching { File(path).listFiles()?.toList() }.getOrNull().orEmpty()
+        }
             .filter { it.isFile && MediaSyncMediaFile.isSupported(it.name) }
         val newest = files.maxOfOrNull { it.lastModified() } ?: 0L
         val bytes = files.sumOf { it.length() }
