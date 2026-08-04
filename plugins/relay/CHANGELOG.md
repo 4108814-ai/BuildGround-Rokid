@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.1
+
+- **Choose how long messages stay up.** Display time has always scaled with
+  the length of the message, which means a two-word text was gone in about
+  four seconds — often before your hand reached the touchpad, let alone the
+  Reply chip. A new Message display time stepper sets a fixed duration
+  instead, from 5 to 45 seconds, applied to every message whatever its
+  length. Auto, the default, keeps the scaling behavior unchanged. Reading
+  aloud is not affected: while the glasses speak a message the band already
+  stays up for the reading, plus the usual answering window after it.
+
 ## 1.1.0
 
 - **Read notifications aloud.** A new switch, off by default, has the glasses
