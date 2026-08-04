@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.8
+
+- **Deleting a capture from the glasses after it syncs works again, and stays
+  working.** The hub and the privileged helper that does what an ordinary app
+  cannot talk through a folder on the glasses. If the helper created that
+  folder first, it owned it, and the hub could no longer put a single request
+  in — so every command through that channel failed, silently and for good:
+  removing a synced capture, and turning the glasses' Wi-Fi on without taking
+  over your display. Photo Sync said the glasses had refused the delete, which
+  was true and useless. The helper no longer creates the folder, clears one
+  that is not the hub's, and the hub now checks that the channel it is about to
+  use is one it can actually write to.
+
 ## 1.1.7
 
 - **Videos from the glasses finally reach your phone.** Photo Sync has always
