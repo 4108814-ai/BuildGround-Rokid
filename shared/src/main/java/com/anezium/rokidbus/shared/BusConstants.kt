@@ -112,6 +112,15 @@ object BusPaths {
     const val GLASSES_DEVICE_INFO = "/glasses/device-info"
 
     /**
+     * Phone hub to glasses hub only: the owner's switch for the boot-time repair of the
+     * privileged helper, and the on-demand "repair now" with its reply. See
+     * [GlassesRepairContract] for why the switch is persisted on the glasses.
+     */
+    const val GLASSES_REPAIR_CONFIG = "/glasses/repair/config"
+    const val GLASSES_REPAIR_REQUEST = "/glasses/repair/request"
+    const val GLASSES_REPAIR_REPLY = "/glasses/repair/reply"
+
+    /**
      * Phone hub to glasses hub only: arm the native-assistant dismiss so an approved plugin
      * holding the ASSISTANT capability can replace Rokid's assistant with its own surface.
      * The gesture is consumed inside the ROM and never reaches our accessibility service, so the

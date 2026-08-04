@@ -37,6 +37,8 @@ class RokidBusAccessibilityService : AccessibilityService() {
     private var setupWifiEnableForced = false
     private var setupWifiFallbackRunnable: Runnable? = null
     private var wifiEnableActive = false
+    private var repairWifiEnableActive = false
+    private var repairWifiEnableCompletion: ((Boolean) -> Unit)? = null
     private var manualWifiEnableActive = false
     private var manualNavigationActive = false
     private var forcedWirelessBootstrap = false
@@ -87,6 +89,9 @@ class RokidBusAccessibilityService : AccessibilityService() {
         StatusBadgeOverlayRenderer.onServiceConnected(this)
         GlassesHub.start(applicationContext)
         AccessibilityRearmWatcher.start(applicationContext, "accessibility_service_connected")
+        // A service connect is the only trigger the boot repair listens to: the radio observers
+        // and the demand latch stay background-only and must never reach the display.
+        SelfArmBootRepairCoordinator.onAccessibilityServiceConnected(applicationContext)
         // If a manual pairing was awaiting the phone's arm when the ROM tore the service down,
         // the staged assets may have been lost with it — put them back so the phone can still read
         // them once it reconnects. Best-effort; a genuine terminal event clears the flag.
@@ -542,7 +547,9 @@ class RokidBusAccessibilityService : AccessibilityService() {
     }
 
     private fun startWifiEnable() {
-        if (wirelessBootstrapActive || setupWifiEnableActive || manualNavigationActive) {
+        if (wirelessBootstrapActive || setupWifiEnableActive || manualNavigationActive ||
+            repairWifiEnableActive
+        ) {
             GlassesHub.onWifiEnableAutomationFinished(false)
             return
         }
@@ -554,6 +561,39 @@ class RokidBusAccessibilityService : AccessibilityService() {
         }
         wifiEnableActive = true
         automator.start(SelfArmWirelessDebuggingAutomator.OperationMode.WIFI_ONLY)
+    }
+
+    /**
+     * The boot-repair Wi-Fi enable. Same WIFI_ONLY automation the camera flow uses, with its own
+     * completion so the repair coordinator hears the outcome instead of the hub's Wi-Fi
+     * ownership machinery. It yields to every flow the wearer can already see — setup, manual
+     * pairing, camera acquisition — because they all drive the one automator, and interleaving
+     * two runs leaves it serving whichever started last.
+     */
+    private fun startRepairWifiEnable(onFinished: (Boolean) -> Unit) {
+        if (wirelessBootstrapActive || setupWifiEnableActive || manualNavigationActive ||
+            wifiEnableActive || repairWifiEnableActive
+        ) {
+            onFinished(false)
+            return
+        }
+        val automator = wirelessDebuggingAutomator
+        if (automator == null) {
+            onFinished(false)
+            return
+        }
+        repairWifiEnableActive = true
+        repairWifiEnableCompletion = onFinished
+        automator.start(SelfArmWirelessDebuggingAutomator.OperationMode.WIFI_ONLY)
+    }
+
+    private fun finishRepairWifiEnableIfActive(success: Boolean) {
+        if (!repairWifiEnableActive) return
+        val completion = repairWifiEnableCompletion
+        repairWifiEnableActive = false
+        repairWifiEnableCompletion = null
+        wirelessDebuggingAutomator?.stop()
+        completion?.invoke(success)
     }
 
     private fun startSetupWifiEnable(sessionId: String, force: Boolean) {
@@ -692,6 +732,15 @@ class RokidBusAccessibilityService : AccessibilityService() {
     }
 
     internal fun onWifiEnableFinished(success: Boolean, sessionId: String) {
+        if (repairWifiEnableActive) {
+            // The automator already stopped itself for a finishing WIFI_ONLY run; only the
+            // completion hand-off remains.
+            val completion = repairWifiEnableCompletion
+            repairWifiEnableActive = false
+            repairWifiEnableCompletion = null
+            completion?.invoke(success)
+            return
+        }
         if (manualWifiEnableActive) {
             if (!SelfArmOnboardingStore.isCurrentSession(applicationContext, sessionId) ||
                 manualNavigationSessionId != sessionId
@@ -1038,6 +1087,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
     }
 
     private fun finishWifiEnableIfActive(success: Boolean) {
+        finishRepairWifiEnableIfActive(success)
         if (manualWifiEnableActive) {
             val sessionId = manualNavigationSessionId
             wirelessDebuggingAutomator?.stop()
@@ -1131,6 +1181,9 @@ class RokidBusAccessibilityService : AccessibilityService() {
         ) {
             return
         }
+        // The unconditional automator stop below would otherwise strand a live repair run with
+        // its completion never called; fail it honestly first.
+        finishRepairWifiEnableIfActive(false)
         wirelessDebuggingAutomator?.stop()
         developerOptionsEnabler?.stop()
         unregisterWifiResumeCallback()
@@ -1252,6 +1305,16 @@ class RokidBusAccessibilityService : AccessibilityService() {
         internal fun requestWifiEnable(context: Context): Boolean {
             val service = liveInstance ?: return false
             service.main.post(service::startWifiEnable)
+            return true
+        }
+
+        /**
+         * Called only by [SelfArmBootRepairCoordinator]. False means no connected service, so no
+         * automation can run at all; otherwise [onFinished] reports whether Wi-Fi came up.
+         */
+        internal fun requestRepairWifiEnable(onFinished: (Boolean) -> Unit): Boolean {
+            val service = liveInstance ?: return false
+            service.main.post { service.startRepairWifiEnable(onFinished) }
             return true
         }
 

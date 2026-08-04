@@ -28,9 +28,19 @@ import com.anezium.rokidbus.client.ui.BusTheme
 import com.anezium.rokidbus.phone.speech.HubSecretStore
 import com.anezium.rokidbus.phone.speech.SpeechReadiness
 import com.anezium.rokidbus.phone.speech.SpeechSettingsStore
+import com.anezium.rokidbus.shared.BusPaths
+import com.anezium.rokidbus.shared.GlassesRepairContract
 import com.anezium.rokidbus.shared.LinkStateBits
 
 private const val SETTINGS_TAG = "RokidNexusSettings"
+
+/**
+ * A repair with the radio down spends up to 45 s driving Settings, then arms over the network it
+ * just gained, then hands the radio back before answering. The budget covers that whole worst
+ * case, so a timeout genuinely means the glasses went silent.
+ */
+private const val REPAIR_REQUEST_TIMEOUT_MS = 150_000L
+private const val REPAIR_STATUS_LINGER_MS = 12_000L
 
 class SettingsActivity : Activity() {
     private val developerModeStore by lazy { DeveloperModeStore(this) }
@@ -43,6 +53,10 @@ class SettingsActivity : Activity() {
     private lateinit var logScroll: ScrollView
     private var speechValue: TextView? = null
     private var voiceValue: TextView? = null
+    private var repairValue: TextView? = null
+    private var repairStatus: TextView? = null
+    private var repairInFlight = false
+    private val repairStatusClear = Runnable { repairStatus?.visibility = View.GONE }
     private var hubUiClient: BusClient? = null
     private var lastLinkState = 0
     // State updates can land on a Binder thread, and touching the hierarchy from there leaves the
@@ -71,7 +85,9 @@ class SettingsActivity : Activity() {
         hubUiClient = BusClient(
             context = applicationContext,
             clientId = "settings-ui",
-            pathPrefixes = emptyList(),
+            // The repair reply is consumed by the request/reply correlation, but delivery still
+            // requires the prefix to be registered.
+            pathPrefixes = listOf(BusPaths.GLASSES_REPAIR_REPLY),
         ) { event -> handleHubEvent(event) }.also { it.connect() }
     }
 
@@ -164,6 +180,12 @@ class SettingsActivity : Activity() {
             addView(phoneBatteryBadgeRow(), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 10))
             addView(activityPresentationRow(), NexusUi.block())
+            addView(BusTheme.gap(this@SettingsActivity, 28))
+            addView(NexusUi.sectionRow(this@SettingsActivity, "Glasses maintenance"), NexusUi.block())
+            addView(BusTheme.gap(this@SettingsActivity, 12))
+            addView(glassesRepairToggleRow(), NexusUi.block())
+            addView(BusTheme.gap(this@SettingsActivity, 10))
+            addView(glassesRepairNowRow(), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 28))
             addView(NexusUi.sectionRow(this@SettingsActivity, "Advanced"), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 12))
@@ -561,6 +583,138 @@ class SettingsActivity : Activity() {
                 },
             )
         }
+
+    private fun glassesRepairToggleRow(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = NexusUi.bordered(this@SettingsActivity, NexusUi.PANEL, NexusUi.LINE, 15)
+            setPadding(
+                NexusUi.dp(this@SettingsActivity, 15),
+                NexusUi.dp(this@SettingsActivity, 10),
+                NexusUi.dp(this@SettingsActivity, 15),
+                NexusUi.dp(this@SettingsActivity, 10),
+            )
+            val store = GlassesRepairSettingsStore(this@SettingsActivity)
+            addView(
+                LinearLayout(this@SettingsActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(NexusUi.rowTitle(this@SettingsActivity, "Auto-repair at boot"))
+                    addView(BusTheme.gap(this@SettingsActivity, 3))
+                    addView(
+                        NexusUi.rowSub(
+                            this@SettingsActivity,
+                            "Settings may open briefly on the glasses after a restart",
+                        ),
+                    )
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            addView(
+                Switch(this@SettingsActivity).apply {
+                    isChecked = store.isAutoRepairEnabled()
+                    thumbTintList = ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(NexusUi.GREEN, NexusUi.INK3),
+                    )
+                    trackTintList = ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(NexusUi.GREEN_DIM, NexusUi.LINE),
+                    )
+                    setOnCheckedChangeListener { _, enabled ->
+                        store.setAutoRepairEnabled(enabled)
+                        BusHubService.onGlassesRepairSettingChanged()
+                    }
+                },
+            )
+        }
+
+    private fun glassesRepairNowRow(): LinearLayout {
+        val value = NexusUi.metaLabel(this, "Repair ›", NexusUi.GREEN)
+        repairValue = value
+        val status = NexusUi.rowSub(this, "").apply {
+            visibility = View.GONE
+            setPadding(0, NexusUi.dp(this@SettingsActivity, 6), 0, 0)
+        }
+        repairStatus = status
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = NexusUi.pressedBordered(this@SettingsActivity, NexusUi.PANEL, 15)
+            setPadding(
+                NexusUi.dp(this@SettingsActivity, 15),
+                NexusUi.dp(this@SettingsActivity, 14),
+                NexusUi.dp(this@SettingsActivity, 15),
+                NexusUi.dp(this@SettingsActivity, 14),
+            )
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { startGlassesRepair() }
+            addView(
+                LinearLayout(this@SettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(
+                        NexusUi.rowTitle(this@SettingsActivity, "Repair now"),
+                        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                    )
+                    addView(value)
+                },
+                NexusUi.block(),
+            )
+            addView(status, NexusUi.block())
+        }
+    }
+
+    private fun startGlassesRepair() {
+        if (repairInFlight) return
+        val client = hubUiClient ?: return
+        val transportBits = LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP
+        if (lastLinkState and transportBits == 0) {
+            showRepairStatus("The glasses are not connected.")
+            return
+        }
+        repairInFlight = true
+        repairValue?.text = "Working…"
+        showRepairStatus("Asking the glasses to check their helper…", autoClear = false)
+        client.request(
+            BusPaths.GLASSES_REPAIR_REQUEST,
+            GlassesRepairContract.requestToJson(),
+            timeoutMs = REPAIR_REQUEST_TIMEOUT_MS,
+        ) { result ->
+            if (isDestroyed || isFinishing) return@request
+            repairInFlight = false
+            repairValue?.text = "Repair ›"
+            val message = result.fold(
+                onSuccess = { payload ->
+                    repairStatusMessage(GlassesRepairContract.resultFromReply(payload))
+                },
+                onFailure = { "The glasses did not answer. Check the connection and try again." },
+            )
+            showRepairStatus(message)
+        }
+    }
+
+    private fun repairStatusMessage(result: String?): String = when (result) {
+        GlassesRepairContract.RESULT_REPAIRED ->
+            "Repaired. The glasses have their helper back."
+        GlassesRepairContract.RESULT_ALREADY_HEALTHY ->
+            "Nothing to repair — the helper is already in place."
+        GlassesRepairContract.RESULT_WIFI_UNAVAILABLE ->
+            "Could not turn on the glasses' Wi-Fi. Wake the glasses and try again."
+        GlassesRepairContract.RESULT_ARM_FAILED ->
+            "The glasses could not restore the helper. Try again, or redo the glasses setup."
+        GlassesRepairContract.RESULT_BUSY ->
+            "The glasses are busy with another repair or with setup. Try again in a moment."
+        else -> "The glasses sent an answer this version does not understand."
+    }
+
+    private fun showRepairStatus(message: String, autoClear: Boolean = true) {
+        val status = repairStatus ?: return
+        status.removeCallbacks(repairStatusClear)
+        status.text = message
+        status.visibility = View.VISIBLE
+        if (autoClear) status.postDelayed(repairStatusClear, REPAIR_STATUS_LINGER_MS)
+    }
 
     private fun speechRow(): LinearLayout =
         LinearLayout(this).apply {

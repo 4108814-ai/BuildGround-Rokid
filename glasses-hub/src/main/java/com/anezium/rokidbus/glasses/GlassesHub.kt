@@ -23,6 +23,7 @@ import com.anezium.rokidbus.shared.BusEnvelope
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.FrameProtocol
 import com.anezium.rokidbus.shared.GlassesHubCapabilitiesContract
+import com.anezium.rokidbus.shared.GlassesRepairContract
 import com.anezium.rokidbus.shared.GlyphContract
 import com.anezium.rokidbus.shared.ImageSurfaceContract
 import com.anezium.rokidbus.shared.LinkStateBits
@@ -207,6 +208,35 @@ object GlassesHub {
         if (envelope.path == BusPaths.GLASSES_ASSISTANT_DISMISS) {
             val serviceConnected = RokidBusAccessibilityService.requestNativeAssistantDismiss()
             log("native assistant dismiss armed serviceConnected=$serviceConnected")
+            return
+        }
+        if (envelope.path == BusPaths.GLASSES_REPAIR_CONFIG) {
+            val context = appContext
+            val enabled = GlassesRepairContract.autoRepairFromConfig(envelope.payload)
+            if (context == null || enabled == null) {
+                log("glassesRepairConfig ignored reason=invalid_payload_or_no_context")
+                return
+            }
+            SelfArmBootRepairStore.setAutoRepairEnabled(context, enabled)
+            log("glassesRepairConfig autoRepair=$enabled")
+            return
+        }
+        if (envelope.path == BusPaths.GLASSES_REPAIR_REQUEST) {
+            val context = appContext
+            if (context == null) {
+                sendRemote(errorEnvelope(envelope.id, "HUB_NOT_READY"))
+                return
+            }
+            SelfArmBootRepairCoordinator.runOwnerRepair(context) { result ->
+                val error = sendRemote(
+                    BusEnvelope(
+                        path = BusPaths.GLASSES_REPAIR_REPLY,
+                        id = envelope.id,
+                        payload = GlassesRepairContract.replyToJson(result),
+                    ),
+                )
+                log("glassesRepair result=$result replyError=${error ?: "none"}")
+            }
             return
         }
         MediaSyncEngine.trafficMonitor.note(envelope.path)

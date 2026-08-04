@@ -39,6 +39,7 @@ import com.anezium.rokidbus.shared.BusEnvelope
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.FrameProtocol
 import com.anezium.rokidbus.shared.GlassesHubCapabilitiesContract
+import com.anezium.rokidbus.shared.GlassesRepairContract
 import com.anezium.rokidbus.shared.ImageSurfaceContract
 import com.anezium.rokidbus.shared.SetupNoteContract
 import com.anezium.rokidbus.shared.ImageSurfaceMetadata
@@ -1263,6 +1264,9 @@ class BusHubService : Service() {
             if (::mediaSyncCoordinator.isInitialized) {
                 executor.execute { mediaSyncCoordinator.onLinkUp() }
             }
+            // The glasses persist the boot-repair switch, but a reinstall or a toggle flipped
+            // while the link was down leaves them stale; ride the same edge the consent does.
+            executor.execute { pushGlassesRepairConfig() }
             return
         }
         if (envelope.path == BusPaths.GLASSES_SETUP_NOTE) {
@@ -2238,9 +2242,23 @@ class BusHubService : Service() {
         path == BusPaths.GLASSES_SELFARM_MANUAL ||
             path == BusPaths.GLASSES_SETUP_NOTE ||
             path == BusPaths.GLASSES_SETUP_PAIRING_OFFER ||
-            path == BusPaths.GLASSES_SETUP_PAIRING_RESULT
+            path == BusPaths.GLASSES_SETUP_PAIRING_RESULT ||
+            path == BusPaths.GLASSES_REPAIR_CONFIG ||
+            path == BusPaths.GLASSES_REPAIR_REQUEST
 
     private fun handleGlassesControlRequest(envelope: BusEnvelope, replyBinder: IBinder?) {
+        if (envelope.path == BusPaths.GLASSES_REPAIR_CONFIG ||
+            envelope.path == BusPaths.GLASSES_REPAIR_REQUEST
+        ) {
+            // Pure forwards: the glasses answer a repair request on GLASSES_REPAIR_REPLY with the
+            // request's id, which the settings screen correlates itself. Only a transport failure
+            // is answered here, so "not connected" fails fast instead of eating the full timeout.
+            val error = sendRemote(envelope)
+            if (error != null) {
+                deliverError(replyBinder, envelope.id, error)
+            }
+            return
+        }
         if (envelope.path == BusPaths.GLASSES_SELFARM_MANUAL) {
             val action = envelope.payload.optString("action")
             if (GlassesManualControlAction.entries.none { it.wireValue == action }) {
@@ -4077,6 +4095,17 @@ class BusHubService : Service() {
         executor.execute { downloadAndInstallGlassesApp(operationId) }
     }
 
+    private fun pushGlassesRepairConfig() {
+        val enabled = GlassesRepairSettingsStore(applicationContext).isAutoRepairEnabled()
+        val error = sendRemote(
+            BusEnvelope(
+                path = BusPaths.GLASSES_REPAIR_CONFIG,
+                payload = GlassesRepairContract.configToJson(enabled),
+            ),
+        )
+        log("glassesRepairConfig push autoRepair=$enabled error=${error ?: "none"}")
+    }
+
     private fun sendManualSelfArmControl(
         requestId: String,
         action: GlassesManualControlAction,
@@ -5329,6 +5358,12 @@ class BusHubService : Service() {
 
         internal fun onActivityPresentationPreferenceChanged() {
             activeInstance?.announcePhoneCapabilities()
+        }
+
+        internal fun onGlassesRepairSettingChanged() {
+            activeInstance?.let { service ->
+                service.executor.execute { service.pushGlassesRepairConfig() }
+            }
         }
 
         internal fun availablePhoneTtsVoices(locale: Locale): List<PhoneTtsVoiceOption> =
