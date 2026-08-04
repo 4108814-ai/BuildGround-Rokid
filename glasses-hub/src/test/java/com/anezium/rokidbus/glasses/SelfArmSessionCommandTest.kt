@@ -127,6 +127,21 @@ class SelfArmSessionCommandTest {
         )
     }
 
+    @Test
+    fun armBridgeSentinelIsSurfacedIndependentlyOfSuccess() {
+        val bridgeUp = "ROKID_NEXUS_ARM_RESULT grant=1 a11y=1 service=1 watchdog=1 bridge=1 " +
+            "persist=-1 service_port=-1 legacy_tcp_disabled=1\n"
+        val bridgeDown = "ROKID_NEXUS_ARM_RESULT grant=1 a11y=1 service=1 watchdog=1 bridge=0 " +
+            "persist=-1 service_port=-1 legacy_tcp_disabled=1\n"
+
+        assertTrue(SelfArmSessionCommand.armBridgeRunning(bridgeUp))
+        assertFalse(SelfArmSessionCommand.armBridgeRunning(bridgeDown))
+        assertFalse(SelfArmSessionCommand.armBridgeRunning("no sentinel here"))
+        // The bridge never gates the arm; it is only reported.
+        assertTrue(SelfArmSessionCommand.armSucceeded(bridgeUp))
+        assertTrue(SelfArmSessionCommand.armSucceeded(bridgeDown))
+    }
+
     private companion object {
         const val PARITY_WATCHDOG = "#!/system/bin/sh\necho parity-watchdog\n"
         const val PARITY_BRIDGE = "#!/system/bin/sh\necho parity-bridge\n"

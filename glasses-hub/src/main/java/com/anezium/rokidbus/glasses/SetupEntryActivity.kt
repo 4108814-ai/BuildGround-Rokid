@@ -16,6 +16,9 @@ class SetupEntryActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val context = applicationContext
+        // "Start setup" landing here means the owner is at the setup screen, which is one of the
+        // bridge-liveness reset conditions.
+        AccessibilityRearmWatcher.onSetupScreenOpened()
         val snapshot = SelfArmOnboardingStore.snapshot(context)
 
         if (snapshot.accessibilityEnabled) {

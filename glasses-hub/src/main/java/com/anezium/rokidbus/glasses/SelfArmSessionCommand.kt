@@ -110,6 +110,14 @@ internal object SelfArmSessionCommand {
             values["watchdog"] == "1"
     }
 
+    /**
+     * The arm sentinel reports the bridge separately from success on purpose — a failed bridge
+     * start must not fail the arm — but the fact itself is measured every time and liveness needs
+     * it, so it is surfaced instead of discarded.
+     */
+    fun armBridgeRunning(output: String): Boolean =
+        sentinelValues(output, ARM_SENTINEL)?.get("bridge") == "1"
+
     private fun StringBuilder.appendCommonVariables() {
         appendLine("PKG='${SelfArmConstants.CLIENT_PACKAGE}'")
         appendLine("SVC='${SelfArmConstants.ACCESSIBILITY_SERVICE}'")

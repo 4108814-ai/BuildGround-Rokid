@@ -849,6 +849,8 @@ object GlassesHub {
 
     internal fun isCameraSessionActive(): Boolean = cameraSessionTracker.isActive()
 
+    internal fun isWifiHubOwned(): Boolean = wifiOwnership.isHubOwned()
+
     internal fun supportsPhoneAssistedSetup(): Boolean =
         supportsPhoneAssistedSetup(remotePhoneCapabilities.features)
 

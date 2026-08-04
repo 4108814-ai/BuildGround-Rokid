@@ -52,7 +52,7 @@ internal object MediaSyncEngine {
     @Volatile private var linkUp = false
     @Volatile private var cameraSessionActive = false
 
-    private var session: Session? = null
+    @Volatile private var session: Session? = null
     private var settlingFuture: ScheduledFuture<*>? = null
     private var deferredTrigger: MediaSyncTrigger? = null
     private var captureFuture: ScheduledFuture<*>? = null
@@ -218,6 +218,9 @@ internal object MediaSyncEngine {
     fun onTriggerRequest() {
         executor.execute { attempt(MediaSyncTrigger.MANUAL) }
     }
+
+    /** Gate for maintenance work that must stay off the link while a transfer is live. */
+    fun isSessionActive(): Boolean = session != null
 
     fun onLinkStateChanged(up: Boolean) {
         val changed = linkUp != up

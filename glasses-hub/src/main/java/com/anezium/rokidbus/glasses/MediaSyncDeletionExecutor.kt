@@ -65,10 +65,25 @@ class AndroidMediaSyncDeletionExecutor(
         file: File,
         fallback: MediaSyncDeletionOutcome,
     ): MediaSyncDeletionOutcome {
+        // A shell process cannot survive a reboot, so once the arm epoch says the device rebooted
+        // the submit can only burn its full response timeout per file — a twenty-photo sync would
+        // stall for minutes proving the same absence twenty times.
+        if (SelfArmBridgeLivenessStore.presumedDead(appContext)) {
+            SelfArmBridgeLivenessStore.noteBridgeDemandUnanswered()
+            logger("mediaSync delete bridge skipped name=$name reason=presumed_dead")
+            return fallback
+        }
         val deleted = runCatching { SelfArmCommandBridgeClient.deleteCapture(appContext, name) }
             .onFailure { logger("mediaSync delete bridge failed name=$name error=${it.message}") }
             .getOrDefault(false)
-        if (!deleted || file.exists()) return fallback
+        if (!deleted || file.exists()) {
+            // The one component that can delete this file did not deliver; remember the unmet
+            // demand so the re-arm watcher treats the next radio opportunity as a reason to
+            // revive the bridge.
+            SelfArmBridgeLivenessStore.noteBridgeDemandUnanswered()
+            logger("mediaSync delete bridge unanswered name=$name outcome=${fallback.wireValue}")
+            return fallback
+        }
         catalog.forget(name)
         logger("mediaSync delete name=$name via=bridge")
         return MediaSyncDeletionOutcome.DELETED

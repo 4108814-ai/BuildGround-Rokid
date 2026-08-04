@@ -73,7 +73,8 @@ internal class SelfArmLocalAdbBootstrapper(
             SelfArmOnboardingStore.recordNetworkPosture(appContext, result.posture, sessionId)
             Log.i(
                 TAG,
-                "self-pair bootstrap success port=${result.port} restartedAdbd=${result.restartedAdbd}",
+                "self-pair bootstrap success port=${result.port} " +
+                    "restartedAdbd=${result.restartedAdbd} bridge=${result.bridgeRunning}",
             )
             BootstrapResult(
                 pairHost = LOCALHOST,
@@ -208,7 +209,13 @@ internal class SelfArmLocalAdbBootstrapper(
                     awaitSafe = { SelfArmNetworkPostureVerifier.awaitSafe(appContext) },
                     log = { Log.i(TAG, it) },
                 ),
-            )
+            ).also { result ->
+                // Every successful arm — first bootstrap or maintenance re-arm — funnels through
+                // here, which makes this the one spot the arm epoch is always put on record. That
+                // epoch is the app's only readable proof of which boot the bridge was alive on:
+                // the bridge's own heartbeat file is shell-owned and invisible to the app.
+                SelfArmBridgeLivenessStore.recordArmed(appContext, result.port, result.bridgeRunning)
+            }
         }
 
         private fun openExactPairedSession(port: Int, probeMarker: String): SelfArmShellSession {
@@ -361,7 +368,11 @@ internal class SelfArmLocalAdbBootstrapper(
          * are enough: a transient network problem does not produce them, and waiting longer only
          * means more days of a unit that cannot be maintained.
          */
-        internal fun onSessionUnavailable(context: Context, throwable: Throwable?) {
+        internal fun onSessionUnavailable(
+            context: Context,
+            throwable: Throwable?,
+            mayRequestPairing: Boolean = true,
+        ) {
             if (!isCertificateRejection(throwable)) {
                 certificateRejections.set(0)
                 return
@@ -369,6 +380,14 @@ internal class SelfArmLocalAdbBootstrapper(
             val count = certificateRejections.incrementAndGet()
             Log.w(TAG, "paired TLS certificate rejected count=$count")
             if (count < CERTIFICATE_REJECTIONS_BEFORE_RESET) return
+            // Dropping the identity ends in accessibility automation driving Settings, which takes
+            // over whatever the wearer is looking at. A background liveness re-arm has no business
+            // doing that unannounced: the count is kept, so the next attempt the owner actually
+            // asked for escalates immediately.
+            if (!mayRequestPairing) {
+                Log.w(TAG, "paired TLS certificate rejected; deferring re-pairing to a foreground attempt")
+                return
+            }
             certificateRejections.set(0)
             resetPairingIdentity(context, "certificate_rejected")
         }

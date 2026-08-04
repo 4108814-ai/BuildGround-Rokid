@@ -26,6 +26,7 @@ internal data class SelfArmSequenceResult(
     val restartedAdbd: Boolean,
     val output: String,
     val posture: SelfArmNetworkPosture,
+    val bridgeRunning: Boolean,
 )
 
 internal class SelfArmSequenceException(
@@ -183,6 +184,7 @@ internal object SelfArmArmSequence {
                 restartedAdbd = restartedAdbd,
                 output = outputs.joinToString("\n"),
                 posture = posture,
+                bridgeRunning = SelfArmSessionCommand.armBridgeRunning(arm.output),
             )
         } catch (exception: SelfArmSequenceException) {
             throw exception

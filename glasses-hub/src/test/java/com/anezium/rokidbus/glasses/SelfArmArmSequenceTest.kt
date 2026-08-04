@@ -27,7 +27,34 @@ class SelfArmArmSequenceTest {
 
         assertFalse(result.restartedAdbd)
         assertEquals(37201, result.port)
+        assertTrue(result.bridgeRunning)
         assertEquals(listOf("prepare", "arm:start", "decision", "safe", "close:37201"), events)
+    }
+
+    @Test
+    fun bridgeThatFailedToStartIsSurfacedWithoutFailingTheArm() {
+        val events = mutableListOf<String>()
+        val session = FakeSession(
+            port = 37201,
+            transport = SelfArmShellTransport.PAIRED_TLS,
+            events = events,
+            armResult = ARM_BRIDGE_DOWN,
+        )
+
+        val result = SelfArmArmSequence.run(
+            initialSession = session,
+            watchdogScript = "script",
+            bridgeScript = "bridge",
+            restartWatchdog = false,
+            operations = operations(
+                posture = SAFE,
+                events = events,
+                reconnect = { _, _ -> error("reconnect should not run") },
+            ),
+        )
+
+        assertFalse(result.bridgeRunning)
+        assertEquals(37201, result.port)
     }
 
     @Test
@@ -322,6 +349,7 @@ class SelfArmArmSequenceTest {
         private val events: MutableList<String>,
         private val shellFailure: (String) -> IOException? = { null },
         private val commands: MutableList<String>? = null,
+        private val armResult: String = ARM_OK,
     ) : SelfArmShellSession {
         override fun shell(command: String): SelfArmShellResult {
             commands?.add(command)
@@ -331,10 +359,10 @@ class SelfArmArmSequenceTest {
                     events += "prepare"
                     if (command.contains("sh \"\$WATCHDOG\" start")) {
                         events += "arm:start"
-                        SelfArmShellResult(0, PREPARE_OK + ARM_OK)
+                        SelfArmShellResult(0, PREPARE_OK + armResult)
                     } else if (command.contains("sh \"\$WATCHDOG\" restart")) {
                         events += "arm:restart"
-                        SelfArmShellResult(0, PREPARE_OK + ARM_OK)
+                        SelfArmShellResult(0, PREPARE_OK + armResult)
                     } else {
                         SelfArmShellResult(0, PREPARE_OK)
                     }
@@ -345,11 +373,11 @@ class SelfArmArmSequenceTest {
                 }
                 command.contains("sh \"\$WATCHDOG\" restart") -> {
                     events += "arm:restart"
-                    SelfArmShellResult(0, ARM_OK)
+                    SelfArmShellResult(0, armResult)
                 }
                 command.contains("sh \"\$WATCHDOG\" start") -> {
                     events += "arm:start"
-                    SelfArmShellResult(0, ARM_OK)
+                    SelfArmShellResult(0, armResult)
                 }
                 else -> error("Unexpected command: $command")
             }
@@ -370,6 +398,9 @@ class SelfArmArmSequenceTest {
             "ROKID_NEXUS_ADBD_RESTART_RESULT scheduled=1 old_adbd_pid=101\n"
         const val ARM_OK =
             "ROKID_NEXUS_ARM_RESULT grant=1 a11y=1 service=1 watchdog=1 bridge=1 " +
+                "persist=-1 service_port=-1 legacy_tcp_disabled=1\n"
+        const val ARM_BRIDGE_DOWN =
+            "ROKID_NEXUS_ARM_RESULT grant=1 a11y=1 service=1 watchdog=1 bridge=0 " +
                 "persist=-1 service_port=-1 legacy_tcp_disabled=1\n"
     }
 }

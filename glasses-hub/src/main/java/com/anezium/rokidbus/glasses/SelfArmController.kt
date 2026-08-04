@@ -10,6 +10,9 @@ import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal object SelfArmController {
+    /** Marks a re-arm nobody asked for, so it can be held to what a background task may do. */
+    const val BRIDGE_LIVENESS_REASON_PREFIX = "bridge_liveness:"
+
     private const val ADB_PORT = 5555
     private const val WIFI_ENABLE_COMMAND = "svc wifi enable"
     private const val WIFI_DISABLE_COMMAND = "svc wifi disable"
@@ -18,13 +21,20 @@ internal object SelfArmController {
     private val idleCallbacksLock = Any()
     private val idleCallbacks = mutableListOf<() -> Unit>()
 
+    /**
+     * [restartWatchdog] false is for liveness-driven re-arms: the arm phase then issues `start`
+     * instead of `restart`, and both scripts treat `start` as "no-op when the running version
+     * matches, hand over when it does not" — so a healthy bridge is never killed just to prove it
+     * was alive.
+     */
     fun ensureWatchdog(
         context: Context,
         reason: String,
+        restartWatchdog: Boolean = true,
         onComplete: ((SelfArmWatchdogEnsureResult) -> Unit)? = null,
     ): Boolean = runAsync(context, reason) { appContext, sessionId ->
         val result = runCatching {
-            runSelfArm(appContext, reason, restartWatchdog = true, sessionId = sessionId)
+            runSelfArm(appContext, reason, restartWatchdog = restartWatchdog, sessionId = sessionId)
         }.onFailure {
             logError("Self-arm failed reason=$reason", it)
         }.getOrDefault(SelfArmWatchdogEnsureResult.FAILED)
@@ -252,7 +262,11 @@ internal object SelfArmController {
                 // A credential the daemon refuses never recovers on its own, and every later
                 // re-arm dies the same silent death. Let the bootstrapper drop it after a second
                 // refusal so setup can ask for a fresh pairing instead.
-                SelfArmLocalAdbBootstrapper.onSessionUnavailable(context, it)
+                SelfArmLocalAdbBootstrapper.onSessionUnavailable(
+                    context,
+                    it,
+                    mayRequestPairing = !reason.startsWith(BRIDGE_LIVENESS_REASON_PREFIX),
+                )
             }.getOrNull()
             if (initialTlsSession != null) {
                 return runSequence(
@@ -323,7 +337,8 @@ internal object SelfArmController {
         SelfArmOnboardingStore.recordNetworkPosture(context, result.posture, sessionId)
         log(
             "Self-arm ready reason=$reason directRepair=$repairedDirectly " +
-                "port=${result.port} restartedAdbd=${result.restartedAdbd}",
+                "port=${result.port} restartedAdbd=${result.restartedAdbd} " +
+                "bridge=${result.bridgeRunning}",
         )
         SelfArmWatchdogEnsureResult.READY
     }.onFailure {

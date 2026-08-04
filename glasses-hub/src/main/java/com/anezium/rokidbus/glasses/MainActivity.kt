@@ -91,6 +91,11 @@ class MainActivity : Activity() {
         SelfArmOnboardingStore.refreshNetworkPosture(applicationContext)
         RokidBusAccessibilityService.resumeSetupSessionIfNeeded(applicationContext)
         renderScreen()
+        // The completed launcher view is not a setup screen; only the onboarding view counts as
+        // the owner looking at setup, which resets the bridge-liveness attempt budget.
+        if (onboardingState.stage != SelfArmOnboardingState.Stage.COMPLETE) {
+            AccessibilityRearmWatcher.onSetupScreenOpened()
+        }
     }
 
     override fun onStop() {
