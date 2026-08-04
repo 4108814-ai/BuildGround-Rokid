@@ -540,6 +540,53 @@ class NoticeStateMachineTest {
         assertEquals(1, noticePageCount(lineCount = 8, firstPageLines = 8, followingPageLines = 8))
         assertEquals(3, noticePageCount(lineCount = 17, firstPageLines = 8, followingPageLines = 8))
         assertEquals(4, noticePageCount(lineCount = 20, firstPageLines = 3, followingPageLines = 8))
+        assertEquals(2, noticePageCount(lineCount = 17, firstPageLines = 14, followingPageLines = 14))
+        assertEquals(2, noticePageCount(lineCount = 20, firstPageLines = 9, followingPageLines = 14))
+    }
+
+    @Test
+    fun `height driven body capacity floors and clamps between eight and fourteen`() {
+        assertEquals(8, noticeBodyLineCapacity(availableBodyHeightPx = 79, measuredLineHeightPx = 10))
+        assertEquals(10, noticeBodyLineCapacity(availableBodyHeightPx = 109, measuredLineHeightPx = 10))
+        assertEquals(14, noticeBodyLineCapacity(availableBodyHeightPx = 150, measuredLineHeightPx = 10))
+    }
+
+    @Test
+    fun `image page spends five grown lines with a floor of three`() {
+        assertEquals(3, noticeFirstPageBodyLines(capacity = 8, hasImage = true))
+        assertEquals(9, noticeFirstPageBodyLines(capacity = 14, hasImage = true))
+        assertEquals(14, noticeFirstPageBodyLines(capacity = 14, hasImage = false))
+    }
+
+    @Test
+    fun `growth waits for long text and action rows retain legacy capacities`() {
+        assertEquals(
+            NoticePageCapacities(firstPageLines = 8, followingPageLines = 8),
+            noticePageCapacities(
+                lineCount = 8,
+                grownCapacity = 14,
+                hasImage = false,
+                actionCount = 0,
+            ),
+        )
+        assertEquals(
+            NoticePageCapacities(firstPageLines = 9, followingPageLines = 14),
+            noticePageCapacities(
+                lineCount = 20,
+                grownCapacity = 14,
+                hasImage = true,
+                actionCount = 1,
+            ),
+        )
+        assertEquals(
+            NoticePageCapacities(firstPageLines = 3, followingPageLines = 8),
+            noticePageCapacities(
+                lineCount = 20,
+                grownCapacity = 14,
+                hasImage = true,
+                actionCount = 2,
+            ),
+        )
     }
 
     @Test
@@ -605,6 +652,15 @@ class NoticeStateMachineTest {
                 lineCount = 20,
                 firstPageLines = 3,
                 followingPageLines = 8,
+            ),
+        )
+        assertEquals(
+            NoticePageWindow(9, 20),
+            noticePageWindow(
+                pageIndex = 1,
+                lineCount = 20,
+                firstPageLines = 9,
+                followingPageLines = 14,
             ),
         )
     }

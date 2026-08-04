@@ -124,6 +124,47 @@ internal data class NoticePageWindow(
     val lastLineExclusive: Int,
 )
 
+internal data class NoticePageCapacities(
+    val firstPageLines: Int,
+    val followingPageLines: Int,
+)
+
+internal const val MIN_BODY_LINES = 8
+internal const val MAX_GROWN_BODY_LINES = 14
+
+internal fun noticeBodyLineCapacity(
+    availableBodyHeightPx: Int,
+    measuredLineHeightPx: Int,
+): Int {
+    require(measuredLineHeightPx > 0)
+    return (availableBodyHeightPx.coerceAtLeast(0) / measuredLineHeightPx)
+        .coerceIn(MIN_BODY_LINES, MAX_GROWN_BODY_LINES)
+}
+
+internal fun noticeFirstPageBodyLines(capacity: Int, hasImage: Boolean): Int =
+    if (hasImage) {
+        (capacity - IMAGE_BODY_LINE_COST).coerceAtLeast(MIN_IMAGE_PAGE_BODY_LINES)
+    } else {
+        capacity
+    }
+
+internal fun noticePageCapacities(
+    lineCount: Int,
+    grownCapacity: Int,
+    hasImage: Boolean,
+    actionCount: Int,
+): NoticePageCapacities {
+    val capacity = if (actionCount <= 1 && lineCount > MIN_BODY_LINES) {
+        grownCapacity.coerceIn(MIN_BODY_LINES, MAX_GROWN_BODY_LINES)
+    } else {
+        MIN_BODY_LINES
+    }
+    return NoticePageCapacities(
+        firstPageLines = noticeFirstPageBodyLines(capacity, hasImage),
+        followingPageLines = capacity,
+    )
+}
+
 internal fun noticePageCount(
     lineCount: Int,
     firstPageLines: Int,
@@ -154,6 +195,9 @@ internal fun noticePageWindow(
         lastLineExclusive = (first + capacity).coerceAtMost(lineCount),
     )
 }
+
+private const val IMAGE_BODY_LINE_COST = 5
+private const val MIN_IMAGE_PAGE_BODY_LINES = 3
 
 /**
  * The exact text handed to the real [android.text.StaticLayout]. A body is

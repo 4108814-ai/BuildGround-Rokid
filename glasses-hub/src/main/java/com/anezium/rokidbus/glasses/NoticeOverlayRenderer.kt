@@ -188,11 +188,11 @@ object NoticeOverlayRenderer {
         private val title = row(bold = true, sizeSp = TITLE_SP, color = BusTheme.phosphor)
         private val image = NoticeImageView(context)
         private val body = NoticeBodyView(context) { count ->
+            if (measuredPageCount != count && noticeIdentity != null) {
+                pageCountReportPending = true
+            }
             measuredPageCount = count
             updateFooter()
-            noticeIdentity?.let { (surfaceId, seq) ->
-                pageCountChanged?.invoke(surfaceId, seq, count)
-            }
         }
         private val footer = row(bold = false, sizeSp = FOOTER_SP, color = BusTheme.muted)
         private val pageIndicator = row(
@@ -218,6 +218,10 @@ object NoticeOverlayRenderer {
         private var pluginFooter: String? = null
         private var renderedPageIndex = 0
         private var measuredPageCount = 1
+        private var pageableNotice = false
+        private var noticeHasImage = false
+        private var noticeActionCount = 0
+        private var pageCountReportPending = false
 
         init {
             orientation = VERTICAL
@@ -263,13 +267,48 @@ object NoticeOverlayRenderer {
         }
 
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-            // The band grows with its body, then stops: past this it stops being a
-            // glance and starts being a screen, which is a surface's job.
-            val ceiling = (resources.displayMetrics.heightPixels * MAX_HEIGHT_FRACTION).toInt()
-            super.onMeasure(
-                widthMeasureSpec,
-                MeasureSpec.makeMeasureSpec(ceiling, MeasureSpec.AT_MOST),
-            )
+            val heightFraction = if (pageableNotice) {
+                GROWN_HEIGHT_FRACTION
+            } else {
+                MAX_HEIGHT_FRACTION
+            }
+            val ceiling = (resources.displayMetrics.heightPixels * heightFraction).toInt()
+            val cappedHeightSpec = MeasureSpec.makeMeasureSpec(ceiling, MeasureSpec.AT_MOST)
+
+            if (!pageableNotice) {
+                super.onMeasure(widthMeasureSpec, cappedHeightSpec)
+                publishPageCount()
+                return
+            }
+
+            var remainingPasses = CAPACITY_MEASURE_PASSES
+            do {
+                super.onMeasure(widthMeasureSpec, cappedHeightSpec)
+                val lineCount = body.measuredLineCount
+                val lineHeight = body.measuredLineHeightPx
+                if (lineCount <= 0 || lineHeight <= 0) break
+
+                // The image has a stable five-line cost below. Remove its current
+                // measured contribution here so page one and later pages derive
+                // the same full-page capacity when the image appears/disappears.
+                val nonImageChromeHeight = measuredHeight - body.measuredHeight -
+                    visibleImageHeightWithMargin()
+                val availableBodyHeight = (ceiling - nonImageChromeHeight).coerceAtLeast(0)
+                val grownCapacity = noticeBodyLineCapacity(availableBodyHeight, lineHeight)
+                val capacities = noticePageCapacities(
+                    lineCount = lineCount,
+                    grownCapacity = grownCapacity,
+                    hasImage = noticeHasImage,
+                    actionCount = noticeActionCount,
+                )
+                if (!body.setPageCapacities(capacities)) break
+                remainingPasses -= 1
+            } while (remainingPasses > 0)
+
+            if (remainingPasses == 0) {
+                super.onMeasure(widthMeasureSpec, cappedHeightSpec)
+            }
+            publishPageCount()
         }
 
         /**
@@ -282,18 +321,29 @@ object NoticeOverlayRenderer {
             pluginFooter = notice.content.footer
             renderedPageIndex = notice.pageIndex
             measuredPageCount = notice.pageCount
+            pageCountReportPending = true
             renderTitle(notice.content.title, null)
             val hasImage = notice.imageBitmap?.takeUnless { it.isRecycled } != null
+            val paging = notice.content.actions.size <= 1
+            pageableNotice = paging
+            noticeHasImage = hasImage
+            noticeActionCount = notice.content.actions.size
             val drawsImage = hasImage && notice.pageIndex == 0
             image.render(notice.imageBitmap?.takeIf { drawsImage })
+            val capacities = noticePageCapacities(
+                lineCount = 0,
+                grownCapacity = MIN_BODY_LINES,
+                hasImage = hasImage,
+                actionCount = notice.content.actions.size,
+            )
             body.render(
                 text = noticeBodyText(notice.content),
                 pageIndex = notice.pageIndex,
-                firstPageLines = if (hasImage) IMAGE_PAGE_BODY_LINES else MAX_BODY_LINES,
+                capacities = capacities,
                 // The same test as NoticeState.isPaged: a row of two or more
                 // needs the directions to choose along; anything less leaves
                 // them free to turn pages.
-                paging = notice.content.actions.size <= 1,
+                paging = paging,
             )
             updateFooter()
             actions.render(
@@ -319,12 +369,16 @@ object NoticeOverlayRenderer {
             pluginFooter = footerText
             renderedPageIndex = 0
             measuredPageCount = 1
+            pageableNotice = false
+            noticeHasImage = false
+            noticeActionCount = actionChips.size
+            pageCountReportPending = false
             renderTitle(titleText, leadingGlyph)
             image.render(null)
             body.render(
                 text = bodyText,
                 pageIndex = 0,
-                firstPageLines = MAX_BODY_LINES,
+                capacities = NoticePageCapacities(MIN_BODY_LINES, MIN_BODY_LINES),
                 paging = false,
             )
             updateFooter()
@@ -356,6 +410,20 @@ object NoticeOverlayRenderer {
             footerRow.visibility = visibleIf(
                 !pluginFooter.isNullOrEmpty() || measuredPageCount > 1,
             )
+        }
+
+        private fun visibleImageHeightWithMargin(): Int {
+            if (image.visibility != View.VISIBLE) return 0
+            val margins = image.layoutParams as LayoutParams
+            return image.measuredHeight + margins.topMargin + margins.bottomMargin
+        }
+
+        private fun publishPageCount() {
+            if (!pageCountReportPending) return
+            pageCountReportPending = false
+            noticeIdentity?.let { (surfaceId, seq) ->
+                pageCountChanged?.invoke(surfaceId, seq, measuredPageCount)
+            }
         }
 
         private fun row(bold: Boolean, sizeSp: Float, color: Int) =
@@ -405,21 +473,32 @@ object NoticeOverlayRenderer {
         }
         private var text: String? = null
         private var pageIndex = 0
-        private var firstPageLines = MAX_BODY_LINES
+        private var capacities = NoticePageCapacities(MIN_BODY_LINES, MIN_BODY_LINES)
         private var paging = false
         private var layout: StaticLayout? = null
         private var window = NoticePageWindow(0, 0)
         private var reportedPageCount = 1
 
+        val measuredLineCount: Int
+            get() = if (visibility == View.VISIBLE) layout?.lineCount ?: 0 else 0
+
+        val measuredLineHeightPx: Int
+            get() {
+                val measured = layout
+                    ?.takeIf { visibility == View.VISIBLE && it.lineCount > 0 }
+                    ?: return 0
+                return measured.getLineTop(1) - measured.getLineTop(0)
+            }
+
         fun render(
             text: String?,
             pageIndex: Int,
-            firstPageLines: Int,
+            capacities: NoticePageCapacities,
             paging: Boolean,
         ) {
             this.text = text
             this.pageIndex = pageIndex
-            this.firstPageLines = firstPageLines
+            this.capacities = capacities
             this.paging = paging
             reportedPageCount = -1
             contentDescription = text.orEmpty()
@@ -448,12 +527,16 @@ object NoticeOverlayRenderer {
                 builder
                     .setEllipsize(TextUtils.TruncateAt.END)
                     .setEllipsizedWidth(width)
-                    .setMaxLines(firstPageLines)
+                    .setMaxLines(capacities.firstPageLines)
             }
             val measured = builder.build()
             layout = measured
             val count = if (paging) {
-                noticePageCount(measured.lineCount, firstPageLines, MAX_BODY_LINES)
+                noticePageCount(
+                    measured.lineCount,
+                    capacities.firstPageLines,
+                    capacities.followingPageLines,
+                )
             } else {
                 1
             }
@@ -462,8 +545,8 @@ object NoticeOverlayRenderer {
                 noticePageWindow(
                     pageIndex = pageIndex,
                     lineCount = measured.lineCount,
-                    firstPageLines = firstPageLines,
-                    followingPageLines = MAX_BODY_LINES,
+                    firstPageLines = capacities.firstPageLines,
+                    followingPageLines = capacities.followingPageLines,
                 )
             } else {
                 NoticePageWindow(0, measured.lineCount)
@@ -474,6 +557,13 @@ object NoticeOverlayRenderer {
                 width,
                 resolveSize(desiredHeight, heightMeasureSpec),
             )
+        }
+
+        fun setPageCapacities(next: NoticePageCapacities): Boolean {
+            if (capacities == next) return false
+            capacities = next
+            reportedPageCount = -1
+            return true
         }
 
         override fun onDraw(canvas: Canvas) {
@@ -496,18 +586,12 @@ object NoticeOverlayRenderer {
     private const val EDGE_MARGIN_DP = 12
     private const val BAND_WIDTH_FRACTION = 0.92f
 
-    // Sized against the wire rather than chosen for looks. At this width the
-    // optics carry ~34 monospace columns, so a page of eight lines holds more
-    // than the 240 characters a single-page notice can carry, and eight lines
-    // under a title and over a footer and an action row measure ~62% of the
-    // screen. Anything smaller ellipsized valid notices by construction: the
-    // band used to be a third shorter than what a plugin was allowed to send.
-    //
-    // A first-page image spends five of the eight; later pages recover the full
-    // reading window instead of paying for the picture on every one.
+    // Eight lines preserve the compact band exactly. Pageable long notices can
+    // grow to fourteen measured lines under the taller ceiling; an image still
+    // spends five lines on page one and later pages recover the full capacity.
     private const val MAX_HEIGHT_FRACTION = 0.65f
-    private const val MAX_BODY_LINES = 8
-    private const val IMAGE_PAGE_BODY_LINES = 3
+    private const val GROWN_HEIGHT_FRACTION = 0.92f
+    private const val CAPACITY_MEASURE_PASSES = 3
     private const val MAX_IMAGE_HEIGHT_PX = 150
     private const val TITLE_SP = 15f
     private const val BODY_SP = 12f
