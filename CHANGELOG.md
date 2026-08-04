@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.1.9
+
+- **The glasses repair their own helper after a restart.** The last release
+  fixed the folder that had silenced the privileged helper; this one fixes the
+  restart that kills it. Every reboot takes the helper down, and reviving it
+  needs the glasses' Wi-Fi — which this firmware boots with off. So now, about
+  twenty seconds after a restart, when the helper is missing, Settings opens
+  briefly on the glasses, turns Wi-Fi on, and gets out of the way. The repair
+  itself happens in the background, and once the helper is back the Wi-Fi is
+  switched off again through it: the glasses end up exactly as they booted,
+  minus the breakage. Measured on hardware, the whole thing takes about
+  fifteen seconds — and if no known network is in range, the radio simply
+  stays up and the repair completes on its own the first time one is.
+
+- **It runs under your standing consent, once per boot at most.** Nexus →
+  Settings → Glasses maintenance holds the switch — *Auto-repair at boot*, on
+  by default, remembered by the glasses themselves so it works with the phone
+  out of reach — and a *Repair now* button for everything else, which answers
+  plainly: repaired, nothing to repair, or could not turn the Wi-Fi on.
+
+- **Syncs stopped paying for a dead helper.** Deleting a capture through a
+  helper that was gone used to spend six seconds per file discovering the same
+  absence — a twenty-photo sync stalled for two minutes for nothing. The hub
+  now knows the helper did not survive the reboot and says so once, instead of
+  proving it file by file.
+
 ## 1.1.8
 
 - **Deleting a capture from the glasses after it syncs works again, and stays
