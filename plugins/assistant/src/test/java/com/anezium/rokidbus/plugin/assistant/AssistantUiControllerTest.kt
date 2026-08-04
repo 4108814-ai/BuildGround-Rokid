@@ -534,7 +534,7 @@ class AssistantUiControllerTest {
             advanceTimeBy(AssistantUiController.NOTICE_KEEPALIVE_INTERVAL_MS * 3)
             runCurrent()
             assertEquals(
-                List(3) { RenderCall.UpdateNotice("A long answer.") },
+                List(3) { RenderCall.UpdateNotice(lines = listOf("A long answer.")) },
                 renderer.calls,
             )
 
@@ -542,7 +542,10 @@ class AssistantUiControllerTest {
             renderer.calls.clear()
             renderer.updateTtls.clear()
             controller.onAnswerSpeechFinished()
-            assertEquals(listOf(RenderCall.UpdateNotice("A long answer.")), renderer.calls)
+            assertEquals(
+                listOf(RenderCall.UpdateNotice(lines = listOf("A long answer."))),
+                renderer.calls,
+            )
             assertEquals(
                 listOf<Long?>(AssistantUiController.ANSWER_SPOKEN_GRACE_MS),
                 renderer.updateTtls,
