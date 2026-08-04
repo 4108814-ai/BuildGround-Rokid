@@ -340,6 +340,66 @@ class AssistantUiControllerTest {
         }
 
     @Test
+    fun `a spoken answer stays up while the voice reads it`() =
+        runTest {
+            val renderer = FakeRenderer(supportsNotice = true)
+            val controller = controller(renderer)
+            controller.onOpen()
+            controller.cancelLauncherHint()
+            controller.showTransient("Thinking…")
+            controller.showAnswer("A long answer.", legacyCardLines = listOf("A long answer."))
+            renderer.calls.clear()
+
+            // The voice takes its time waking up, and the band must not spend its life waiting.
+            advanceTimeBy(AssistantUiController.NOTICE_KEEPALIVE_INTERVAL_MS * 2)
+            runCurrent()
+            assertTrue(renderer.calls.isEmpty())
+
+            controller.onAnswerSpeechStarted()
+            advanceTimeBy(AssistantUiController.NOTICE_KEEPALIVE_INTERVAL_MS * 3)
+            runCurrent()
+            assertEquals(
+                List(3) { RenderCall.UpdateNotice("A long answer.") },
+                renderer.calls,
+            )
+
+            // Once heard, the answer is owed a glance at its tail — not its full reading time.
+            renderer.calls.clear()
+            renderer.updateTtls.clear()
+            controller.onAnswerSpeechFinished()
+            assertEquals(listOf(RenderCall.UpdateNotice("A long answer.")), renderer.calls)
+            assertEquals(
+                listOf<Long?>(AssistantUiController.ANSWER_SPOKEN_GRACE_MS),
+                renderer.updateTtls,
+            )
+
+            // And the voice having stopped, nothing keeps holding the band open.
+            renderer.calls.clear()
+            advanceTimeBy(AssistantUiController.NOTICE_KEEPALIVE_INTERVAL_MS * 3)
+            runCurrent()
+            assertTrue(renderer.calls.isEmpty())
+            controller.onClose()
+        }
+
+    @Test
+    fun `a late utterance cannot hold open the state that replaced it`() =
+        runTest {
+            val renderer = FakeRenderer(supportsNotice = true)
+            val controller = controller(renderer)
+            controller.onOpen()
+            controller.cancelLauncherHint()
+            controller.showAnswer("First answer.", legacyCardLines = listOf("First answer."))
+
+            // The wearer has already asked something else by the time the old voice reports in.
+            controller.showTransient("Listening…")
+            renderer.calls.clear()
+            controller.onAnswerSpeechStarted()
+            controller.onAnswerSpeechFinished()
+            assertTrue(renderer.calls.isEmpty())
+            controller.onClose()
+        }
+
+    @Test
     fun `errors and user close stop the keepalive`() =
         runTest {
             val renderer = FakeRenderer(supportsNotice = true)
@@ -395,6 +455,9 @@ class AssistantUiControllerTest {
     ) : AssistantUiRenderer {
         val calls = mutableListOf<RenderCall>()
 
+        /** Kept beside [calls] so the existing call assertions stay about bodies alone. */
+        val updateTtls = mutableListOf<Long?>()
+
         override val supportsNoticeSurface: Boolean
             get() = supportsNotice
 
@@ -405,6 +468,7 @@ class AssistantUiControllerTest {
 
         override fun updateNotice(update: NexusNoticeUpdate): NexusSdkResult {
             calls += RenderCall.UpdateNotice(update.body)
+            updateTtls += update.ttlMs
             return NexusSdkResult.SENT
         }
 

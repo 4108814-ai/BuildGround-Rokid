@@ -320,6 +320,10 @@ internal class AssistantUiController(
         noticeStateVersion += 1
         noticeHideJob?.cancel()
         noticeHideJob = null
+        // Whatever the voice was reading belongs to the state we are leaving. Callers that own an
+        // answer claim it again right after; everyone else gets a clean slate, so a late utterance
+        // cannot hold open a band that has moved on.
+        spokenAnswerBody = null
         return noticeStateVersion
     }
 
