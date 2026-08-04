@@ -650,9 +650,9 @@ data class NexusNoticeImage(
  * one gesture of reply. Anything the wearer follows over minutes is not a
  * notice, and anything static that should simply stay put is a pin.
  *
- * [title] is capped at 32 trimmed characters, [body] at 1024, [footer] at 40,
+ * [title] is capped at 32 trimmed characters, [body] at 8192, [footer] at 40,
  * and at least one of title, body, or [lines] must survive trimming. Body and
- * lines are mutually exclusive. Up to 16 lines share the body's 1024-character
+ * lines are mutually exclusive. Up to 64 lines share the body's 8192-character
  * budget, including one separator per line. Newlines collapse to spaces inside
  * either representation; only the lines array asks the renderer for hard
  * breaks. When [ttlMs] is absent the hub derives one from the text length; an

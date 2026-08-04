@@ -7,10 +7,10 @@ internal object NexusAgentPolicy {
 
     const val NOTICE_BAND_RESPONSE_RULE =
         "Default to one or two short sentences. When the user asks for detail, an " +
-            "explanation, or a how-to, use up to 900 characters: the band paginates and " +
-            "the wearer turns pages at their own pace. Write short paragraphs, each on " +
-            "its own line. Plain text only, no markdown. A list is short lines starting " +
-            "with '- '."
+            "explanation, or a how-to, answer as fully as the question deserves: the " +
+            "band grows and paginates, and the wearer reads at their own pace. Write " +
+            "short paragraphs, each on its own line. Plain text only, no markdown. " +
+            "A list is short lines starting with '- '."
 
     fun buildSystemPrompt(
         customPrompt: String = "",

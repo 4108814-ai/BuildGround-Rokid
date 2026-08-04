@@ -10,6 +10,13 @@ import org.junit.Test
 
 class NoticeSurfaceContractTest {
     @Test
+    fun `v4 carries the grown-band text budgets`() {
+        assertEquals(4, NoticeSurfaceContract.VERSION)
+        assertEquals(8192, NoticeSurfaceContract.MAX_BODY_CHARS)
+        assertEquals(64, NoticeSurfaceContract.MAX_LINES)
+    }
+
+    @Test
     fun `trims text collapses newlines and derives ttl`() {
         val result = NoticeSurfaceContract.validateShow(
             JSONObject()
@@ -68,12 +75,12 @@ class NoticeSurfaceContractTest {
     }
 
     @Test
-    fun `accepts 1024 body characters and rejects 1025`() {
+    fun `accepts the body character budget and rejects one more`() {
         val accepted = NoticeSurfaceContract.validateShow(
-            showPayload().put("body", "x".repeat(1024)),
+            showPayload().put("body", "x".repeat(NoticeSurfaceContract.MAX_BODY_CHARS)),
         )
         val rejected = NoticeSurfaceContract.validateShow(
-            showPayload().put("body", "x".repeat(1025)),
+            showPayload().put("body", "x".repeat(NoticeSurfaceContract.MAX_BODY_CHARS + 1)),
         )
 
         assertTrue(accepted is NoticeSurfaceValidationResult.Valid)
@@ -81,7 +88,7 @@ class NoticeSurfaceContractTest {
     }
 
     @Test
-    fun `accepts sixteen lines and rejects a seventeenth before dropping empties`() {
+    fun `accepts the line budget and rejects one more before dropping empties`() {
         val accepted = NoticeSurfaceContract.validateShow(
             linesPayload(List(NoticeSurfaceContract.MAX_LINES) { "line $it" }),
         )
@@ -95,11 +102,12 @@ class NoticeSurfaceContractTest {
 
     @Test
     fun `lines share the body budget including one separator each`() {
+        val halfBudget = NoticeSurfaceContract.MAX_BODY_CHARS / 2
         val accepted = NoticeSurfaceContract.validateShow(
-            linesPayload(listOf("x".repeat(511), "y".repeat(511))),
+            linesPayload(listOf("x".repeat(halfBudget - 1), "y".repeat(halfBudget - 1))),
         )
         val rejected = NoticeSurfaceContract.validateShow(
-            linesPayload(listOf("x".repeat(512), "y".repeat(511))),
+            linesPayload(listOf("x".repeat(halfBudget), "y".repeat(halfBudget - 1))),
         )
 
         assertTrue(accepted is NoticeSurfaceValidationResult.Valid)
@@ -164,7 +172,10 @@ class NoticeSurfaceContractTest {
     fun `length derived ttl follows the reading rate and clamps`() {
         assertEquals(4_000L, NoticeSurfaceContract.derivedTtlMs(0))
         assertEquals(12_800L, NoticeSurfaceContract.derivedTtlMs(240))
-        assertEquals(45_000L, NoticeSurfaceContract.derivedTtlMs(1024))
+        assertEquals(
+            45_000L,
+            NoticeSurfaceContract.derivedTtlMs(NoticeSurfaceContract.MAX_BODY_CHARS),
+        )
     }
 
     @Test

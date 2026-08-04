@@ -13,10 +13,12 @@ class GlassesHubCapabilitiesContractTest {
         val capabilities = GlassesHubCapabilitiesContract.create(
             features = BusCapabilityBits.IMAGE_SURFACE or
                 BusCapabilityBits.PIN_SURFACE or
+                BusCapabilityBits.NOTICE_SURFACE or
                 BusCapabilityBits.ACTIVITY_SURFACE or
                 BusCapabilityBits.TTS,
             imageSurfaceVersion = ImageSurfaceContract.VERSION,
             pinSurfaceVersion = PinSurfaceContract.VERSION,
+            noticeSurfaceVersion = NoticeSurfaceContract.VERSION,
             activitySurfaceVersion = ActivitySurfaceContract.VERSION,
             maxImageBytes = ImageSurfaceContract.MAX_IMAGE_BYTES,
             versionName = " 1.0.1 ",
@@ -34,11 +36,13 @@ class GlassesHubCapabilitiesContractTest {
         assertEquals(
             BusCapabilityBits.IMAGE_SURFACE or
                 BusCapabilityBits.PIN_SURFACE or
+                BusCapabilityBits.NOTICE_SURFACE or
                 BusCapabilityBits.ACTIVITY_SURFACE or
                 BusCapabilityBits.TTS,
             parsed.features,
         )
         assertEquals(PinSurfaceContract.VERSION, parsed.pinSurfaceVersion)
+        assertEquals(NoticeSurfaceContract.VERSION, parsed.noticeSurfaceVersion)
         assertEquals(ActivitySurfaceContract.VERSION, parsed.activitySurfaceVersion)
         assertEquals(TtsContract.VERSION, parsed.ttsVersion)
         assertEquals(128, BusCapabilityBits.ACTIVITY_SURFACE)
@@ -74,6 +78,7 @@ class GlassesHubCapabilitiesContractTest {
         assertFalse(parsed.maintenanceReady)
         assertEquals(SetupStage.UNKNOWN, GlassesHubCapabilitiesContract.effectiveStage(parsed))
         assertEquals(0, parsed.pinSurfaceVersion)
+        assertEquals(0, parsed.noticeSurfaceVersion)
         assertEquals(0, parsed.activitySurfaceVersion)
         assertEquals(0, parsed.ttsVersion)
         assertFalse(versionlessPayload.has("versionName"))

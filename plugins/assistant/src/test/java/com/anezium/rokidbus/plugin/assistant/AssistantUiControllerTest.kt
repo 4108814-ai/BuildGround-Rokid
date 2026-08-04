@@ -328,6 +328,27 @@ class AssistantUiControllerTest {
         }
 
     @Test
+    fun `answer beyond the speech budget stays complete on the notice band`() =
+        runTest {
+            val renderer = FakeRenderer(supportsNotice = true)
+            val controller = controller(renderer)
+            controller.onOpen()
+            controller.cancelLauncherHint()
+            val answer = "A".repeat(1_200)
+
+            controller.showAnswer(
+                body = answer,
+                legacyCardLines = listOf("legacy answer"),
+            )
+
+            assertEquals(
+                listOf(answer),
+                (renderer.calls.single() as RenderCall.ShowNotice).lines,
+            )
+            controller.onClose()
+        }
+
+    @Test
     fun `answer lines truncate validly at line and character budgets`() =
         runTest {
             val renderer = FakeRenderer(supportsNotice = true)
@@ -344,8 +365,9 @@ class AssistantUiControllerTest {
             assertValidTruncatedLines(lineLimited)
 
             renderer.calls.clear()
+            val halfBudget = NoticeSurfaceContract.MAX_BODY_CHARS / 2
             controller.showAnswer(
-                body = "A".repeat(600) + "\n" + "B".repeat(600),
+                body = "A".repeat(halfBudget) + "\n" + "B".repeat(halfBudget),
                 legacyCardLines = listOf("legacy answer"),
             )
             val characterLimited = (renderer.calls.single() as RenderCall.UpdateNotice).lines

@@ -116,11 +116,13 @@ sealed interface NoticeSurfacePatchResult {
     data class Invalid(val reason: String) : NoticeSurfacePatchResult
 }
 
-/** Pure notice-surface v3 validation and normalization with no Android dependencies. */
+/** Pure notice-surface v4 validation and normalization with no Android dependencies. */
 object NoticeSurfaceContract {
     const val KIND = "notice"
 
     /**
+     * v4 is the band that grew into a reading surface — same fields, an
+     * eight-fold text budget, sized for the grown band rather than the glance.
      * v3 is the band that knows where a message ends: structured `lines`
      * beside the body. v2 was the paged band — a body four times longer than a
      * glance, an image in the envelope, and a patch that replaces a live notice
@@ -128,18 +130,16 @@ object NoticeSurfaceContract {
      *
      * The bump is what keeps an older pair honest, and the reasoning has not
      * changed since v2. Both sides gate the capability on an exact version
-     * match, so glasses still speaking v2 decline the capability outright and
-     * the plugin hears CAPABILITY_NOT_AVAILABLE. Left at 2 they would accept the
-     * handshake and then reject every `lines` payload in silence — it carries no
-     * `body`, so it fails the "title or body" rule — and a band that vanishes
-     * without a word reads to the wearer as a plugin that stopped talking.
+     * match, so glasses still speaking v3 decline the capability outright and
+     * the plugin hears CAPABILITY_NOT_AVAILABLE. Left at 3 they would accept the
+     * handshake and reject an answer past the old text ceiling instead.
      */
-    const val VERSION = 3
+    const val VERSION = 4
     const val LOCAL_SURFACE_ID = "notice"
 
     const val MAX_TITLE_CHARS = 32
-    const val MAX_BODY_CHARS = 1024
-    const val MAX_LINES = 16
+    const val MAX_BODY_CHARS = 8192
+    const val MAX_LINES = 64
     const val MAX_FOOTER_CHARS = 40
 
     /**
