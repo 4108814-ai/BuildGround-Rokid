@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.2.0
+
+- **A long text makes the notice grow.** The band across the top of the HUD
+  used to hold eight lines behind a fixed ceiling, whatever it was asked to
+  carry. Now it is sized by what it carries: a short notice stays the familiar
+  glance, and a long one grows in place — up to nearly the whole display, with
+  pages that deepen to fourteen lines when there is room for them. Reading
+  works exactly as before: swipe to turn, a page counter in the corner, and
+  the band staying up as long as you keep reading. Notices with answer buttons
+  keep their compact shape; choosing does not need a bigger band.
+
+- **The text budget finally matches the band.** A notice may now carry 8,192
+  characters — eight times the old ceiling — so a detailed answer or a long
+  message ends where it ends, not where the wire used to cut it. This is a
+  protocol change (notice v4): the phone and glasses halves of Nexus check
+  each other exactly, so update the app and let it bring the glasses along —
+  a mismatched pair simply declines the band rather than truncating in
+  silence.
+
+- **Assistant answers stop being told to be short.** With the band able to
+  hold a real explanation, the Assistant plugin (1.0.1) lets the model answer
+  as fully as the question deserves, in real paragraphs. Update the plugin
+  from the Store to get the longer answers.
+
 ## 1.1.9
 
 - **The glasses repair their own helper after a restart.** The last release
