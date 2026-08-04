@@ -150,6 +150,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
             image = image?.takeIf { currentClient.supportsImageSurface },
             wakeDisplay = true,
             backdrop = settings.noticeBackdrop(),
+            ttlMs = explicitNoticeTtlMs(settings.noticeDisplaySeconds()),
         )
         val result = if (notice.image != null && preview != null) {
             currentClient.showNotice(notice, preview.bytes)
@@ -540,12 +541,15 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         NexusSpeechStopReason.DENIED_INVALID -> "Invalid request"
     }
 
-    private companion object {
+    companion object {
         const val TAG = "NexusRelayNotice"
         const val PLUGIN_ID = "relay"
         const val SHOW_TIMEOUT_MS = 5_000L
         const val HIDE_FALLBACK_MS = 500L
         const val MIN_NOTICE_MESSAGE_INTERVAL_MS = 210L
+
+        fun explicitNoticeTtlMs(displaySeconds: Int): Long? =
+            if (displaySeconds == 0) null else displaySeconds * 1_000L
 
         /**
          * Neither of these is a refusal — both mean "not yet", and both are

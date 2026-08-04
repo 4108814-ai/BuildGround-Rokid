@@ -28,6 +28,17 @@ internal class RelaySettings(context: Context) {
             .apply()
     }
 
+    fun noticeDisplaySeconds(): Int =
+        coerceNoticeDisplaySeconds(
+            prefs.getInt(KEY_NOTICE_DISPLAY_SECONDS, DEFAULT_NOTICE_DISPLAY_SECONDS),
+        )
+
+    fun setNoticeDisplaySeconds(value: Int) {
+        prefs.edit()
+            .putInt(KEY_NOTICE_DISPLAY_SECONDS, coerceNoticeDisplaySeconds(value))
+            .apply()
+    }
+
     fun pauseWhilePhoneScreenOn(): Boolean =
         prefs.getBoolean(KEY_PAUSE_SCREEN_ON, DEFAULT_PAUSE_SCREEN_ON)
 
@@ -64,15 +75,35 @@ internal class RelaySettings(context: Context) {
         const val DEFAULT_MESSAGES_PER_THREAD = 20
         const val MIN_MESSAGES_PER_THREAD = 4
         const val MAX_MESSAGES_PER_THREAD = 40
+        const val DEFAULT_NOTICE_DISPLAY_SECONDS = 0
+        const val MIN_NOTICE_DISPLAY_SECONDS = 5
+        const val MAX_NOTICE_DISPLAY_SECONDS = 45
+        const val STEP_NOTICE_DISPLAY_SECONDS = 5
         const val DEFAULT_PAUSE_SCREEN_ON = false
         const val DEFAULT_CLEAR_AFTER_REPLY = true
         const val DEFAULT_NOTICE_BACKDROP = false
         const val DEFAULT_READ_ALOUD = false
 
+        fun coerceNoticeDisplaySeconds(value: Int): Int {
+            if (value == DEFAULT_NOTICE_DISPLAY_SECONDS) return DEFAULT_NOTICE_DISPLAY_SECONDS
+            val bounded = value.coerceIn(MIN_NOTICE_DISPLAY_SECONDS, MAX_NOTICE_DISPLAY_SECONDS)
+            return ((bounded + STEP_NOTICE_DISPLAY_SECONDS / 2) / STEP_NOTICE_DISPLAY_SECONDS) *
+                STEP_NOTICE_DISPLAY_SECONDS
+        }
+
+        fun stepNoticeDisplaySeconds(value: Int, steps: Int): Int {
+            val currentIndex = coerceNoticeDisplaySeconds(value) / STEP_NOTICE_DISPLAY_SECONDS
+            val maximumIndex = MAX_NOTICE_DISPLAY_SECONDS / STEP_NOTICE_DISPLAY_SECONDS
+            val nextIndex = (currentIndex.toLong() + steps)
+                .coerceIn(0L, maximumIndex.toLong())
+            return nextIndex.toInt() * STEP_NOTICE_DISPLAY_SECONDS
+        }
+
         private const val PREFS = "relay_settings"
         private const val KEY_ENABLED = "enabled"
         private const val KEY_IMAGE_PREVIEWS = "image_previews"
         private const val KEY_MESSAGES_PER_THREAD = "messages_per_thread"
+        private const val KEY_NOTICE_DISPLAY_SECONDS = "notice_display_seconds"
         private const val KEY_PAUSE_SCREEN_ON = "pause_screen_on"
         private const val KEY_CLEAR_AFTER_REPLY = "clear_after_reply"
         private const val KEY_NOTICE_BACKDROP = "notice_backdrop"

@@ -133,6 +133,8 @@ class RelaySettingsActivity : Activity() {
             NexusUi.block(),
         )
         content.addView(BusTheme.gap(this, 8))
+        content.addView(noticeDisplayTimeCard(), NexusUi.block())
+        content.addView(BusTheme.gap(this, 8))
         content.addView(
             switchCard(
                 "Read notifications aloud",
@@ -248,6 +250,34 @@ class RelaySettingsActivity : Activity() {
     private fun changeMessageLimit(delta: Int) {
         settings.setMessagesPerThread(settings.messagesPerThread() + delta)
         NotificationControl.refreshFromSettings()
+        render()
+    }
+
+    private fun noticeDisplayTimeCard(): LinearLayout = NexusUi.card(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        addView(
+            LinearLayout(this@RelaySettingsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(NexusUi.rowTitle(this@RelaySettingsActivity, "Message display time"))
+                addView(BusTheme.gap(this@RelaySettingsActivity, 4))
+                addView(NexusUi.rowSub(this@RelaySettingsActivity, "Auto scales with the message length"))
+            },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        addView(stepButton("−") { changeNoticeDisplayTime(-1) })
+        addView(NexusUi.rowValue(this@RelaySettingsActivity).apply {
+            val seconds = settings.noticeDisplaySeconds()
+            text = if (seconds == RelaySettings.DEFAULT_NOTICE_DISPLAY_SECONDS) "Auto" else "${seconds}s"
+            gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(NexusUi.dp(this@RelaySettingsActivity, 48), ViewGroup.LayoutParams.WRAP_CONTENT))
+        addView(stepButton("+") { changeNoticeDisplayTime(1) })
+    }
+
+    private fun changeNoticeDisplayTime(steps: Int) {
+        settings.setNoticeDisplaySeconds(
+            RelaySettings.stepNoticeDisplaySeconds(settings.noticeDisplaySeconds(), steps),
+        )
         render()
     }
 
