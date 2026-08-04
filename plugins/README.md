@@ -16,6 +16,8 @@ releases. The Gradle project names keep the historical `:plugin-<id>` form
 
 | Plugin | Id | What it does |
 |---|---|---|
+| [Assistant](assistant/) | `assistant` | Voice questions answered on the band and aloud, with a look through the glasses camera when asked |
+| [Relay](relay/) | `relay` | Phone notifications on the HUD, answered by voice, with an inbox for the rest |
 | [Feeds](../plugin-feeds/) | `feeds` | Bluesky and X timelines on the HUD |
 | [Lens](lens/) | `lens` | Live and frozen camera OCR with phone-side translation |
 | [Transit](transit/) | `transit` | Nearby stops, departures, and favourites |

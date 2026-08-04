@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://ko-fi.com/M8R61ZTXMI" target="_blank">
+  <a href="https://ko-fi.com/anezium" target="_blank">
     <img height="36" style="border:0px;height:36px;" src="https://storage.ko-fi.com/cdn/kofi4.png?v=6" border="0" alt="Buy Me a Coffee at ko-fi.com" />
   </a>
 </p>
@@ -29,12 +29,15 @@ APKs on the phone. Nothing is ever installed on the glasses again.
 
 Plugins stay isolated in their own processes, appear only after explicit user
 approval, and draw on the HUD through declarative surfaces — cards, synced
-timed lines, media decks, and real images.
+timed lines, media decks, and real images. They can also speak, listen, and see:
+speech in and out, and the glasses camera, are platform capabilities the wearer
+grants one at a time and can take back.
 
 ## Plugins
 
 | Plugin | What it puts on the HUD |
 |---|---|
+| **[Assistant](plugins/assistant/)** | Hold the touchpad and ask out loud: your words appear as you speak them, then the answer arrives on the band and in your ear — and it can look through the glasses camera to tell you what you are seeing. Runs on your own ChatGPT account |
 | **[Relay](plugins/relay/)** | Phone messages as a band over whatever you were looking at, answered out loud — plus an inbox for the ones you let go |
 | **[Lens](plugins/lens/)** | Google-Lens-style live translation: the glasses camera streams to the phone, ML Kit OCR + translation run there (offline), translated overlays come back in real time — plus a freeze mode for full-resolution stills |
 | **[Feeds](plugin-feeds/)** | Bluesky and X timelines — browse posts, open threads, and view the actual photos full-screen |
@@ -43,6 +46,17 @@ timed lines, media decks, and real images.
 | **[Media Deck](plugins/media/)** | Universal now-playing surface with album art and transport controls |
 | **[Photos Sync](plugins/photosync/)** | Not a HUD plugin: copies the photos and videos you shoot on the glasses into the phone gallery by itself, and gives you the switches for it |
 | **[Sample](plugins/sample/)** | Minimal copyable reference plugin |
+
+And two that are not in this repository at all, written by
+[beyondlevi](https://github.com/beyondlevi) against the same SDK:
+
+| Plugin | What it puts on the HUD |
+|---|---|
+| **[Lume](https://github.com/beyondlevi/lume-nexus)** | A wearable speed reader: text arrives one word at a time at a fixed point, 150–700 wpm, with long words and sentence endings held a little longer. Import a PDF or a text file on the phone, read hands-free with the R08 ring |
+| **[Shopping List](https://github.com/beyondlevi/nexus-shoplist)** | Your list on the HUD, ticked off with the ring, while you add to it on the phone — or paste a whole list and have every line become an item |
+
+They install and run exactly like the ones above, under the same grants and the
+same identity checks. Nothing in the platform is reserved for first-party code.
 
 All of them install from the in-app **Nexus Store**, backed by the public
 [RokidBrew-Registry](https://github.com/Anezium/RokidBrew-Registry) feed with
@@ -131,7 +145,7 @@ A plugin is a headless phone APK against the published SDK:
 repositories { maven("https://jitpack.io") }
 
 dependencies {
-    implementation("com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.11.0")
+    implementation("com.github.Anezium.Rokid-Nexus:bus-client:sdk-v0.13.0")
 }
 ```
 
@@ -146,8 +160,9 @@ registry ([plugins/README.md](plugins/README.md)).
 
 - `shared`: wire envelopes, paths, descriptors, capabilities, and route rules.
 - `bus-client`: the public Android SDK — `NexusPluginService`, lifecycle
-  callbacks, typed card/timed-lines/media/image surfaces, the NexusUi design
-  kit, and explicit hub targeting.
+  callbacks, typed card/timed-lines/media/image surfaces, notice bands and
+  activities, speech in and out, the NexusUi design kit, and explicit hub
+  targeting.
 - `phone-hub`: discovery, consent, identity enforcement, the Nexus Store, app
   self-update, and the Rokid link.
 - `glasses-hub`: the single HUD renderer/launcher anchor, the camera platform,

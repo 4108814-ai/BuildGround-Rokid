@@ -184,6 +184,12 @@ assistant" was a table row on this page, and it shipped as Assistant.
 Navigation is deliberately absent from Transit's row: it deserves a plugin of
 its own, below.
 
+Two plugins in the Store were written by someone else — [Lume](https://github.com/beyondlevi/lume-nexus),
+a wearable RSVP speed reader, and [Shopping List](https://github.com/beyondlevi/nexus-shoplist),
+a list ticked off with the R08 ring. They are not on this page because they are
+not mine to plan, which is the point: they install, are granted, and run exactly
+like the rows above.
+
 ### Next
 
 In order.

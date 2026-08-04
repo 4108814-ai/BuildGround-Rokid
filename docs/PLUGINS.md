@@ -7,8 +7,9 @@ discovers it, the user approves its capabilities once, and from then on it
 lives entirely inside Nexus — launched from the glasses launcher, configured
 from the phone hub, removable from its own settings screen or the Store.
 
-Feeds, Transit, Lyrics, Media Deck, Lens, and Photos Sync all ship this way as external
-headless APKs. The phone hub registry has no built-in plugins.
+Assistant, Relay, Feeds, Transit, Lyrics, Media Deck, Lens, and Photos Sync all ship
+this way as external headless APKs, and so do the plugins written outside this
+repository. The phone hub registry has no built-in plugins.
 
 The wire/SDK contract (artifact coordinates, service base class, payload
 limits, approval flow) is specified in [PLUGIN_SDK.md](PLUGIN_SDK.md); this
