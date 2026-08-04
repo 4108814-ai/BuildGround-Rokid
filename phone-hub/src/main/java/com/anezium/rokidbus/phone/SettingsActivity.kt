@@ -585,16 +585,8 @@ class SettingsActivity : Activity() {
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
             )
             addView(
-                Switch(this@SettingsActivity).apply {
+                NexusUi.switch(this@SettingsActivity).apply {
                     isChecked = store.isAutoRepairEnabled()
-                    thumbTintList = ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(NexusUi.GREEN, NexusUi.INK3),
-                    )
-                    trackTintList = ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(NexusUi.GREEN_DIM, NexusUi.LINE),
-                    )
                     setOnCheckedChangeListener { _, enabled ->
                         store.setAutoRepairEnabled(enabled)
                         BusHubService.onGlassesRepairSettingChanged()
