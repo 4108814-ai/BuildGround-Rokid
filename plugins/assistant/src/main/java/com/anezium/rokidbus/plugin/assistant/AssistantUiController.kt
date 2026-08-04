@@ -39,6 +39,9 @@ internal class AssistantUiController(
     private var transcriptUpdateJob: Job? = null
     private var keepaliveJob: Job? = null
     private var lastInFlightBody: String? = null
+
+    /** The answer the voice is about to read, kept so speech can hold its band open. */
+    private var spokenAnswerBody: String? = null
     private var pendingTranscriptBody: String? = null
     private var noticeStateVersion = 0L
     private var surfaceShown = false
@@ -166,6 +169,7 @@ internal class AssistantUiController(
         startNewState()
         if (useNoticeBand()) {
             val answer = truncateAnswerHead(body)
+            spokenAnswerBody = answer
             showOrUpdateNotice(answer, ttlMs = answerTtlMs(answer))
             return
         }
@@ -178,6 +182,33 @@ internal class AssistantUiController(
         if (result == NexusSdkResult.SENT) {
             answerCardStarted = true
         }
+    }
+
+    /**
+     * Speech is the honest clock for how long an answer needs to stay up. [answerTtlMs] can only
+     * guess it from the text, and the guess starts running the moment the answer renders — while
+     * the voice is still waking its engine and the audio link. A cold start therefore ate the
+     * band's life before the first word, and the wearer watched the answer vanish mid-sentence.
+     * So while it is actually being spoken the band is held open, and it gets its readable
+     * remainder once the voice stops.
+     */
+    fun onAnswerSpeechStarted() {
+        val body = spokenAnswerBody ?: return
+        if (!useNoticeBand() || !noticeShown) return
+        lastInFlightBody = body
+        startKeepalive()
+    }
+
+    fun onAnswerSpeechFinished() {
+        val body = spokenAnswerBody ?: return
+        spokenAnswerBody = null
+        stopKeepalive()
+        if (!useNoticeBand() || !noticeShown) return
+        // A glance, not a second reading: the wearer just heard the whole thing, so the band owes
+        // them only long enough to catch the tail. Handing back the length-based TTL here would
+        // pin a long answer on the display for another twenty seconds after the voice had moved
+        // on, which reads as the band being stuck.
+        showOrUpdateNotice(body, ttlMs = ANSWER_SPOKEN_GRACE_MS)
     }
 
     fun onSurfaceHidden() {
@@ -327,6 +358,9 @@ internal class AssistantUiController(
         const val ANSWER_TTL_PER_CHAR_MS = 75L
         const val ANSWER_TTL_MIN_MS = 8_000L
         const val ANSWER_TTL_MAX_MS = 20_000L
+
+        /** What an already-heard answer is worth on screen: a look at the tail, then gone. */
+        const val ANSWER_SPOKEN_GRACE_MS = 4_000L
         const val MAX_NOTICE_BODY_CHARS = 240
         const val TRANSCRIPT_TAIL_CHARS = 200
         const val LAUNCHER_HINT = "Press the assist button, then speak."

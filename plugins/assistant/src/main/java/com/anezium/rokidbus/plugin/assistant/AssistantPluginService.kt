@@ -119,10 +119,17 @@ class AssistantPluginService : NexusPluginService() {
         speak = ::speakAnswer,
     )
     private val ttsCallbacks = object : NexusTtsCallbacks {
-        override fun onTtsStarted(utteranceId: String) = Unit
+        // The band outlives the voice, never the other way round: only this utterance may hold it,
+        // so a stale one finishing cannot extend the answer that replaced it.
+        override fun onTtsStarted(utteranceId: String) {
+            if (utteranceId != activeTtsUtteranceId) return
+            uiController.onAnswerSpeechStarted()
+        }
 
         override fun onTtsDone(utteranceId: String, reason: NexusTtsDoneReason) {
-            if (utteranceId == activeTtsUtteranceId) activeTtsUtteranceId = null
+            if (utteranceId != activeTtsUtteranceId) return
+            activeTtsUtteranceId = null
+            uiController.onAnswerSpeechFinished()
         }
     }
     private val uiController = AssistantUiController(
