@@ -6,7 +6,11 @@ internal object NexusAgentPolicy {
             "Optimize every response for a small monochrome AR HUD."
 
     const val NOTICE_BAND_RESPONSE_RULE =
-        "Answer in at most two short sentences, under 200 characters. No markdown, no lists."
+        "Default to one or two short sentences. When the user asks for detail, an " +
+            "explanation, or a how-to, use up to 900 characters: the band paginates and " +
+            "the wearer turns pages at their own pace. Write short paragraphs, each on " +
+            "its own line. Plain text only, no markdown. A list is short lines starting " +
+            "with '- '."
 
     fun buildSystemPrompt(
         customPrompt: String = "",

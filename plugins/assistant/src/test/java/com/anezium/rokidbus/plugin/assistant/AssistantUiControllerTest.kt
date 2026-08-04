@@ -4,6 +4,7 @@ import com.anezium.rokidbus.client.plugin.NexusNotice
 import com.anezium.rokidbus.client.plugin.NexusNoticeCloseReason
 import com.anezium.rokidbus.client.plugin.NexusNoticeUpdate
 import com.anezium.rokidbus.client.plugin.NexusSdkResult
+import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -105,9 +106,7 @@ class AssistantUiControllerTest {
             runCurrent()
 
             val throttledBody = (renderer.calls.last() as RenderCall.UpdateNotice).body.orEmpty()
-            assertTrue(throttledBody.startsWith("${AssistantUiController.ELLIPSIS} "))
-            assertTrue(throttledBody.endsWith(finalTail))
-            assertTrue(throttledBody.length <= AssistantUiController.MAX_NOTICE_BODY_CHARS)
+            assertEquals("${AssistantUiController.ELLIPSIS} $finalTail", throttledBody)
             assertEquals(2, renderer.calls.size)
 
             controller.showTranscript("the trailing partial")
@@ -124,6 +123,29 @@ class AssistantUiControllerTest {
             advanceTimeBy(AssistantUiController.TRANSCRIPT_UPDATE_INTERVAL_MS)
             runCurrent()
             assertEquals(4, renderer.calls.size)
+            controller.onClose()
+        }
+
+    @Test
+    fun `transcript tail stays within its small window below the notice limit`() =
+        runTest {
+            val renderer = FakeRenderer(supportsNotice = true)
+            val controller = controller(renderer)
+            controller.onOpen()
+            controller.cancelLauncherHint()
+            controller.showTransient("Listeningâ€¦")
+            renderer.calls.clear()
+
+            val tail = "z".repeat(AssistantUiController.TRANSCRIPT_TAIL_CHARS)
+            val transcript = "discarded ".repeat(30) + tail
+            assertTrue(transcript.length < AssistantUiController.MAX_NOTICE_BODY_CHARS)
+
+            controller.showTranscript(transcript)
+
+            assertEquals(
+                listOf(RenderCall.UpdateNotice("${AssistantUiController.ELLIPSIS} $tail")),
+                renderer.calls,
+            )
             controller.onClose()
         }
 
@@ -262,10 +284,12 @@ class AssistantUiControllerTest {
             assertEquals(
                 listOf(
                     RenderCall.UpdateNotice(
-                        "A".repeat(AssistantUiController.MAX_NOTICE_BODY_CHARS - 1) +
-                            AssistantUiController.ELLIPSIS,
+                        lines = listOf(
+                            "A".repeat(AssistantUiController.MAX_NOTICE_BODY_CHARS - 2) +
+                                AssistantUiController.ELLIPSIS,
+                        ),
                     ),
-                    RenderCall.UpdateNotice("Final answer"),
+                    RenderCall.UpdateNotice(lines = listOf("Final answer")),
                 ),
                 renderer.calls,
             )
@@ -275,6 +299,135 @@ class AssistantUiControllerTest {
             advanceTimeBy(AssistantUiController.ERROR_NOTICE_DURATION_MS)
             runCurrent()
             assertTrue(renderer.calls.none { it == RenderCall.HideNotice })
+            controller.onClose()
+        }
+
+    @Test
+    fun `answer paragraphs become normalized notice lines`() =
+        runTest {
+            val renderer = FakeRenderer(supportsNotice = true)
+            val controller = controller(renderer)
+            controller.onOpen()
+            controller.cancelLauncherHint()
+
+            controller.showAnswer(
+                body = "a\n\nb\n\tc  ",
+                legacyCardLines = listOf("legacy answer"),
+            )
+
+            assertEquals(
+                listOf(
+                    RenderCall.ShowNotice(
+                        title = AssistantUiController.NOTICE_TITLE,
+                        lines = listOf("a", "b", "c"),
+                    ),
+                ),
+                renderer.calls,
+            )
+            controller.onClose()
+        }
+
+    @Test
+    fun `answer lines truncate validly at line and character budgets`() =
+        runTest {
+            val renderer = FakeRenderer(supportsNotice = true)
+            val controller = controller(renderer)
+            controller.onOpen()
+            controller.cancelLauncherHint()
+
+            controller.showAnswer(
+                body = (1..NoticeSurfaceContract.MAX_LINES + 1).joinToString("\n") { "line $it" },
+                legacyCardLines = listOf("legacy answer"),
+            )
+            val lineLimited = (renderer.calls.single() as RenderCall.ShowNotice).lines
+            assertEquals(NoticeSurfaceContract.MAX_LINES, lineLimited.size)
+            assertValidTruncatedLines(lineLimited)
+
+            renderer.calls.clear()
+            controller.showAnswer(
+                body = "A".repeat(600) + "\n" + "B".repeat(600),
+                legacyCardLines = listOf("legacy answer"),
+            )
+            val characterLimited = (renderer.calls.single() as RenderCall.UpdateNotice).lines
+            assertEquals(2, characterLimited.size)
+            assertValidTruncatedLines(characterLimited)
+            controller.onClose()
+        }
+
+    @Test
+    fun `single paragraph answer is cut validly with an ellipsis`() =
+        runTest {
+            val renderer = FakeRenderer(supportsNotice = true)
+            val controller = controller(renderer)
+            controller.onOpen()
+            controller.cancelLauncherHint()
+
+            controller.showAnswer(
+                body = "A".repeat(AssistantUiController.MAX_NOTICE_BODY_CHARS + 100),
+                legacyCardLines = listOf("legacy answer"),
+            )
+
+            val lines = (renderer.calls.single() as RenderCall.ShowNotice).lines
+            assertEquals(1, lines.size)
+            assertEquals(AssistantUiController.MAX_NOTICE_BODY_CHARS, lines.sumOf { it.length + 1 })
+            assertValidTruncatedLines(lines)
+            controller.onClose()
+        }
+
+    @Test
+    fun `notice updates transition between transient bodies and answer lines`() =
+        runTest {
+            val renderer = FakeRenderer(supportsNotice = true)
+            val controller = controller(renderer)
+            controller.onOpen()
+            controller.cancelLauncherHint()
+
+            controller.showTransient("Thinkingâ€¦")
+            controller.showAnswer(
+                body = "First paragraph\nSecond paragraph",
+                legacyCardLines = listOf("legacy answer"),
+            )
+            controller.showTransient("Searchingâ€¦")
+
+            assertEquals(
+                listOf(
+                    RenderCall.ShowNotice(
+                        title = AssistantUiController.NOTICE_TITLE,
+                        body = "Thinkingâ€¦",
+                    ),
+                    RenderCall.UpdateNotice(lines = listOf("First paragraph", "Second paragraph")),
+                    RenderCall.UpdateNotice(body = "Searchingâ€¦"),
+                ),
+                renderer.calls,
+            )
+            controller.onClose()
+        }
+
+    @Test
+    fun `spoken answer keepalive and grace remain lines updates`() =
+        runTest {
+            val renderer = FakeRenderer(supportsNotice = true)
+            val controller = controller(renderer)
+            controller.onOpen()
+            controller.cancelLauncherHint()
+            controller.showAnswer(
+                body = "First paragraph\nSecond paragraph",
+                legacyCardLines = listOf("legacy answer"),
+            )
+            renderer.calls.clear()
+
+            controller.onAnswerSpeechStarted()
+            advanceTimeBy(AssistantUiController.NOTICE_KEEPALIVE_INTERVAL_MS)
+            runCurrent()
+            controller.onAnswerSpeechFinished()
+
+            assertEquals(
+                listOf(
+                    RenderCall.UpdateNotice(lines = listOf("First paragraph", "Second paragraph")),
+                    RenderCall.UpdateNotice(lines = listOf("First paragraph", "Second paragraph")),
+                ),
+                renderer.calls,
+            )
             controller.onClose()
         }
 
@@ -431,14 +584,26 @@ class AssistantUiControllerTest {
             resetCapture = {},
         )
 
+    private fun assertValidTruncatedLines(lines: List<String>) {
+        assertTrue(lines.size <= NoticeSurfaceContract.MAX_LINES)
+        assertTrue(
+            lines.sumOf { it.length.toLong() + 1L } <= NoticeSurfaceContract.MAX_BODY_CHARS,
+        )
+        assertTrue(lines.last().endsWith(AssistantUiController.ELLIPSIS))
+        NexusNotice(title = AssistantUiController.NOTICE_TITLE, lines = lines)
+        NexusNoticeUpdate(lines = lines)
+    }
+
     private sealed interface RenderCall {
         data class ShowNotice(
             val title: String?,
-            val body: String?,
+            val body: String? = null,
+            val lines: List<String> = emptyList(),
         ) : RenderCall
 
         data class UpdateNotice(
-            val body: String?,
+            val body: String? = null,
+            val lines: List<String> = emptyList(),
         ) : RenderCall
 
         data object HideNotice : RenderCall
@@ -462,12 +627,12 @@ class AssistantUiControllerTest {
             get() = supportsNotice
 
         override fun showNotice(notice: NexusNotice): NexusSdkResult {
-            calls += RenderCall.ShowNotice(notice.title, notice.body)
+            calls += RenderCall.ShowNotice(notice.title, notice.body, notice.lines)
             return NexusSdkResult.SENT
         }
 
         override fun updateNotice(update: NexusNoticeUpdate): NexusSdkResult {
-            calls += RenderCall.UpdateNotice(update.body)
+            calls += RenderCall.UpdateNotice(update.body, update.lines)
             updateTtls += update.ttlMs
             return NexusSdkResult.SENT
         }

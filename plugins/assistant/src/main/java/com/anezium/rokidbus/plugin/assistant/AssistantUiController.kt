@@ -4,6 +4,7 @@ import com.anezium.rokidbus.client.plugin.NexusNotice
 import com.anezium.rokidbus.client.plugin.NexusNoticeCloseReason
 import com.anezium.rokidbus.client.plugin.NexusNoticeUpdate
 import com.anezium.rokidbus.client.plugin.NexusSdkResult
+import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -39,6 +40,7 @@ internal class AssistantUiController(
     private var transcriptUpdateJob: Job? = null
     private var keepaliveJob: Job? = null
     private var lastInFlightBody: String? = null
+    private var lastInFlightUsesLines = false
 
     /** The answer the voice is about to read, kept so speech can hold its band open. */
     private var spokenAnswerBody: String? = null
@@ -108,6 +110,7 @@ internal class AssistantUiController(
             // vanish under them. The keepalive resends the latest in-flight
             // body until a terminal state (answer, error, hide) takes over.
             lastInFlightBody = body
+            lastInFlightUsesLines = false
             showOrUpdateNotice(body)
             startKeepalive()
         } else {
@@ -168,9 +171,8 @@ internal class AssistantUiController(
         stopKeepalive()
         startNewState()
         if (useNoticeBand()) {
-            val answer = truncateAnswerHead(body)
-            spokenAnswerBody = answer
-            showOrUpdateNotice(answer, ttlMs = answerTtlMs(answer))
+            spokenAnswerBody = body
+            showOrUpdateAnswerNotice(body, ttlMs = answerTtlMs(body))
             return
         }
 
@@ -196,6 +198,7 @@ internal class AssistantUiController(
         val body = spokenAnswerBody ?: return
         if (!useNoticeBand() || !noticeShown) return
         lastInFlightBody = body
+        lastInFlightUsesLines = true
         startKeepalive()
     }
 
@@ -208,7 +211,7 @@ internal class AssistantUiController(
         // them only long enough to catch the tail. Handing back the length-based TTL here would
         // pin a long answer on the display for another twenty seconds after the voice had moved
         // on, which reads as the band being stuck.
-        showOrUpdateNotice(body, ttlMs = ANSWER_SPOKEN_GRACE_MS)
+        showOrUpdateAnswerNotice(body, ttlMs = ANSWER_SPOKEN_GRACE_MS)
     }
 
     fun onSurfaceHidden() {
@@ -252,6 +255,30 @@ internal class AssistantUiController(
         return false
     }
 
+    private fun showOrUpdateAnswerNotice(
+        body: String,
+        ttlMs: Long? = null,
+    ): Boolean {
+        val lines = truncateAnswerLines(body)
+        val result = if (noticeShown) {
+            renderer.updateNotice(NexusNoticeUpdate(lines = lines, ttlMs = ttlMs))
+        } else {
+            renderer.showNotice(
+                NexusNotice(
+                    title = NOTICE_TITLE,
+                    lines = lines,
+                    ttlMs = ttlMs,
+                ),
+            )
+        }
+        if (result == NexusSdkResult.SENT) {
+            noticeShown = true
+            return true
+        }
+        noticeShown = false
+        return false
+    }
+
     private fun hideNoticeIfShown() {
         stopKeepalive()
         if (!noticeShown) return
@@ -266,7 +293,11 @@ internal class AssistantUiController(
                 delay(keepaliveIntervalMs)
                 val body = lastInFlightBody
                 if (body == null || !noticeShown || !useNoticeBand()) break
-                showOrUpdateNotice(body)
+                if (lastInFlightUsesLines) {
+                    showOrUpdateAnswerNotice(body)
+                } else {
+                    showOrUpdateNotice(body)
+                }
             }
             keepaliveJob = null
         }
@@ -276,6 +307,7 @@ internal class AssistantUiController(
         keepaliveJob?.cancel()
         keepaliveJob = null
         lastInFlightBody = null
+        lastInFlightUsesLines = false
     }
 
     private fun renderPendingTranscript() {
@@ -283,6 +315,7 @@ internal class AssistantUiController(
         pendingTranscriptBody = null
         if (useNoticeBand()) {
             lastInFlightBody = body
+            lastInFlightUsesLines = false
             showOrUpdateNotice(body)
             startKeepalive()
         }
@@ -329,11 +362,45 @@ internal class AssistantUiController(
 
     private fun truncateTranscriptTail(text: String): String {
         val normalized = normalizeNoticeText(text)
-        if (normalized.length <= MAX_NOTICE_BODY_CHARS) return normalized
+        if (normalized.length <= TRANSCRIPT_TAIL_CHARS + ELLIPSIS.length + 1) return normalized
         return "$ELLIPSIS ${normalized.takeLast(TRANSCRIPT_TAIL_CHARS).trimStart()}"
     }
 
-    private fun truncateAnswerHead(text: String): String = truncateNoticeHead(text)
+    private fun truncateAnswerLines(text: String): List<String> {
+        val sourceLines = text
+            .split(Regex("\\n+"))
+            .map(::normalizeNoticeText)
+            .filter(String::isNotEmpty)
+            .ifEmpty { return listOf(ELLIPSIS) }
+        val keptLines = mutableListOf<String>()
+        var usedChars = 0
+        var consumedLines = 0
+
+        for (line in sourceLines) {
+            if (keptLines.size == NoticeSurfaceContract.MAX_LINES) break
+            val availableLineChars = MAX_NOTICE_BODY_CHARS - usedChars - 1
+            if (availableLineChars <= 0) break
+            if (line.length <= availableLineChars) {
+                keptLines += line
+                usedChars += line.length + 1
+                consumedLines += 1
+                continue
+            }
+
+            keptLines += line
+                .take(availableLineChars - ELLIPSIS.length)
+                .trimEnd() + ELLIPSIS
+            return keptLines
+        }
+
+        if (consumedLines < sourceLines.size) {
+            val lastLine = keptLines.last()
+            keptLines[keptLines.lastIndex] = lastLine
+                .take(lastLine.length - ELLIPSIS.length)
+                .trimEnd() + ELLIPSIS
+        }
+        return keptLines
+    }
 
     private fun truncateNoticeHead(text: String): String {
         val normalized = normalizeNoticeText(text).ifBlank { ELLIPSIS }
@@ -365,7 +432,7 @@ internal class AssistantUiController(
 
         /** What an already-heard answer is worth on screen: a look at the tail, then gone. */
         const val ANSWER_SPOKEN_GRACE_MS = 4_000L
-        const val MAX_NOTICE_BODY_CHARS = 240
+        const val MAX_NOTICE_BODY_CHARS = NoticeSurfaceContract.MAX_BODY_CHARS
         const val TRANSCRIPT_TAIL_CHARS = 200
         const val LAUNCHER_HINT = "Press the assist button, then speak."
         const val NOTICE_TITLE = "Assistant"
