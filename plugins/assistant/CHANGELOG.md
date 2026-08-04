@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.1
+
+- **Answers at full length.** The model is no longer told to stay under two
+  short sentences: ask for detail and it answers as fully as the question
+  deserves, in real paragraphs that the glasses render with hard line breaks
+  instead of one flattened run of text. The notice band on the glasses grows
+  and paginates to hold it — this needs Nexus 1.2.0 or later on both the
+  phone and the glasses.
+- While you dictate, the band keeps showing the tail of what it heard rather
+  than paginating your own words away mid-sentence.
+
 ## 1.0.0
 
 - First release: press the assist gesture, speak, and the answer streams onto
