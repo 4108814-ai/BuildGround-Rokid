@@ -372,6 +372,7 @@ export class CodexMonitor {
     this.socket = undefined;
     if (socket) {
       socket.removeAllListeners();
+      socket.on("error", () => undefined);
       socket.terminate();
     }
     this.rejectPendingRpc(new Error("Codex monitor stopped"));
@@ -443,8 +444,9 @@ export class CodexMonitor {
       }
       if (socket && !this.stopped) {
         await this.activate(socket);
-      } else {
-        (socket as WebSocket | undefined)?.terminate();
+      } else if (socket) {
+        socket.on("error", () => undefined);
+        socket.terminate();
       }
     } catch (error) {
       this.reportUnavailable(`Codex app-server connection failed: ${errorMessage(error)}`);
@@ -534,6 +536,10 @@ export class CodexMonitor {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         cleanup();
+        // Terminating a still-connecting socket emits 'error'; without a
+        // listener that brings the whole daemon down (seen live on a slow
+        // app-server bind).
+        socket.on("error", () => undefined);
         socket.terminate();
         reject(new Error("connection timed out"));
       }, this.options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
@@ -549,6 +555,7 @@ export class CodexMonitor {
       };
       const onError = (error: Error) => {
         cleanup();
+        socket.on("error", () => undefined);
         socket.terminate();
         reject(error);
       };
