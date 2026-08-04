@@ -40,6 +40,10 @@ const DEFAULT_START_TIMEOUT_MS = 5_000;
 const DEFAULT_RECONNECT_DELAY_MS = 3_000;
 const START_RETRY_MS = 150;
 const REFRESH_CONCURRENCY = 8;
+// The app-server only pushes thread/started for turns it hosts itself. Threads
+// born in a terminal (codex exec, the CLI) reach the store only when listed, so
+// the monitor re-lists on a slow clock and adopts what it has never seen.
+const DEFAULT_SWEEP_INTERVAL_MS = 60_000;
 
 export interface CodexAvailability {
   enabled: boolean;
@@ -115,6 +119,7 @@ export interface CodexMonitorOptions {
   requestTimeoutMs?: number;
   startTimeoutMs?: number;
   reconnectDelayMs?: number;
+  sweepIntervalMs?: number;
   now?: () => number;
   launch?: (port: number) => ChildProcess;
   terminate?: (child: ChildProcess) => Promise<void>;
@@ -324,6 +329,8 @@ export class CodexMonitor {
   private socket?: WebSocket;
   private ownedProcess?: ChildProcess;
   private reconnectTimer?: NodeJS.Timeout;
+  private sweepTimer?: NodeJS.Timeout;
+  private sweeping = false;
   private connecting = false;
   private stopped = true;
   private nextRequestId = 0;
@@ -356,6 +363,7 @@ export class CodexMonitor {
 
   async stop(): Promise<void> {
     this.stopped = true;
+    this.clearSweep();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
@@ -575,6 +583,45 @@ export class CodexMonitor {
       endpoint: this.endpoint(),
       sessions: this.threads.size,
     });
+    this.armSweep();
+  }
+
+  private armSweep(): void {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+    }
+    this.sweepTimer = setInterval(
+      () => void this.sweepNewThreads(),
+      this.options.sweepIntervalMs ?? DEFAULT_SWEEP_INTERVAL_MS,
+    );
+    this.sweepTimer.unref();
+  }
+
+  private clearSweep(): void {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = undefined;
+    }
+    this.sweeping = false;
+  }
+
+  private async sweepNewThreads(): Promise<void> {
+    if (this.stopped || this.sweeping || !this.socket) {
+      return;
+    }
+    this.sweeping = true;
+    try {
+      const listed = await this.listThreads();
+      const unseen = listed.filter((thread) => !this.threads.has(thread.id));
+      if (unseen.length > 0) {
+        this.options.logger.info("codex_sweep_adopted", { threads: unseen.length });
+        await inBatches(unseen, (thread) => this.resumeAndRefresh(thread.id));
+      }
+    } catch (error) {
+      this.options.logger.info("codex_sweep_failed", { reason: errorMessage(error) });
+    } finally {
+      this.sweeping = false;
+    }
   }
 
   private onSocketClosed(socket: WebSocket): void {
@@ -582,6 +629,7 @@ export class CodexMonitor {
       return;
     }
     this.socket = undefined;
+    this.clearSweep();
     this.rejectPendingRpc(new Error("Codex app-server connection closed"));
     this.resolveAllApprovals("codex_connection_closed");
     if (!this.stopped) {

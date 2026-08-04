@@ -127,6 +127,7 @@ function makeHarness(port, overrides = {}) {
     requestTimeoutMs: 1000,
     startTimeoutMs: 500,
     reconnectDelayMs: 20,
+    sweepIntervalMs: overrides.sweepIntervalMs,
     launch: overrides.launch ?? (() => {
       throw new Error("codex executable not found");
     }),
@@ -571,5 +572,62 @@ test("disabled Codex monitoring neither connects nor launches a process", async 
     await monitor.stop();
     approvals.dispose();
     store.dispose();
+  }
+});
+
+test("the periodic sweep adopts threads born outside the app-server connection", async () => {
+  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  await new Promise((resolve) => server.once("listening", resolve));
+  const port = server.address().port;
+  const threads = new Map([["thread-a", makeThread({ id: "thread-a" })]]);
+  server.on("connection", (socket) => {
+    socket.on("message", (raw) => {
+      const message = JSON.parse(raw.toString());
+      if (message.id === undefined) return;
+      let result;
+      switch (message.method) {
+        case "initialize":
+          result = { userAgent: "fake-codex" };
+          break;
+        case "thread/list":
+          result = { data: [...threads.values()], nextCursor: null, backwardsCursor: null };
+          break;
+        case "thread/resume":
+          result = {
+            thread: threads.get(message.params.threadId) ?? makeThread(),
+            model: "gpt-5",
+            modelProvider: "openai",
+            serviceTier: null,
+            cwd: "E:\work\sample",
+          };
+          break;
+        case "thread/read":
+          result = { thread: threads.get(message.params.threadId) ?? makeThread() };
+          break;
+        default:
+          return;
+      }
+      socket.send(JSON.stringify({ id: message.id, result }));
+    });
+  });
+  const { store, approvals, monitor } = makeHarness(port, { sweepIntervalMs: 40 });
+  try {
+    monitor.start();
+    await waitUntil(() => monitor.availability().available, "monitor did not connect");
+    assert.equal(store.get("thread-b"), undefined);
+
+    // A terminal-only run appears in storage without any server notification.
+    threads.set("thread-b", makeThread({ id: "thread-b", preview: "CLI run" }));
+    const adopted = await waitUntil(
+      () => store.get("thread-b"),
+      "sweep did not adopt the CLI thread",
+    );
+    assert.equal(adopted.provider, "codex");
+    assert.equal(adopted.title, "CLI run");
+  } finally {
+    await monitor.stop();
+    approvals.dispose();
+    store.dispose();
+    await closeServer(server);
   }
 });
