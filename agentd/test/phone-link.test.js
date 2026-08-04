@@ -88,6 +88,13 @@ async function closeServer(server, sockets) {
   await new Promise((resolve) => server.close(resolve));
 }
 
+// Teardown of the fake phone servers can race a in-flight frame promise; a
+// stray rejection then fails the whole file with no diagnostic at all. Keep
+// the noise visible in the output without letting it kill the process.
+process.on("unhandledRejection", (reason) => {
+  console.error("phone-link test unhandled rejection:", reason);
+});
+
 function createLink(overrides = {}) {
   const logs = loggerHarness();
   const store = new SessionStore(config, logs.logger);
@@ -96,6 +103,9 @@ function createLink(overrides = {}) {
     store,
     logger: logs.logger,
     detailProvider: async () => [],
+    // Never the real discovery port: announcing on 8793 makes any actual
+    // phone on the LAN answer mid-test and dial into the assertions.
+    discoveryPort: 48793,
     ...overrides,
   });
   return { link, store, logs };
@@ -139,7 +149,7 @@ test("static phone refusal backoff prevents an immediate redial", async () => {
     const lines = collectLines(socket);
     void lines.waitFor((frame) => frame.type === "hello").then(() => {
       socket.write('{"type":"hello_reject","v":1,"reason":"unknown_machine"}\n');
-    });
+    }).catch(() => undefined);
   });
   const port = await listen(server);
   let now = 20_000;

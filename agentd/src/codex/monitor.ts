@@ -710,6 +710,10 @@ export class CodexMonitor {
         sortKey: "recency_at",
         sortDirection: "desc",
         archived: false,
+        // Omitting this filter means "interactive sources only", which silently
+        // hides every `codex exec` run. Sub-agent workers stay out: they are
+        // internal machinery, not sessions the wearer supervises.
+        sourceKinds: ["cli", "vscode", "exec", "appServer", "unknown"],
       });
       for (const thread of response.data) {
         if (!seen.has(thread.id)) {

@@ -463,6 +463,7 @@ test("monitor caps discovery at the session cap and never requests an extra page
     assert.equal(listRequests[0].limit, MAX_CODEX_SESSIONS);
     assert.equal(listRequests.at(-1).limit, MAX_CODEX_SESSIONS - fakePageSize);
     assert.ok(listRequests.every((params) => params.sortKey === "recency_at"));
+    assert.ok(listRequests.every((params) => params.sourceKinds.includes("exec")));
   } finally {
     await monitor.stop();
     approvals.dispose();
