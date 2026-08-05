@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.2.1
+
+- **Spoken answers stop coming out of the phone.** Since 1.1.6, plugin speech
+  has been synthesized by the phone's own voice and carried to the glasses
+  over the regular Bluetooth audio link. When that link isn't there — media
+  audio disabled for the glasses, or the glasses simply not the phone's
+  active audio output — the answer used to play out loud on the phone's
+  speaker, with no way to redirect it. Now the hub checks where the sound
+  would actually land before speaking: if the only destination is the phone's
+  own speaker, the utterance goes to the glasses' built-in voice instead.
+  Earbuds keep their priority — if you have some in, answers stay in them.
+
+- **And you can pin speech to the glasses outright.** Settings → Voice gains
+  an Output choice: *Automatic* (the behavior above) or *Glasses only*, which
+  always uses the glasses' own voice — the one they share with Rokid's
+  assistant — and never opens the Bluetooth audio stream. A wearer who picks
+  it is never surprised by the phone speaking into the room: with the glasses
+  unreachable, an answer fails quietly rather than out loud. It also spares
+  you the glasses' music card, which likes to pop up when phone audio starts
+  streaming their way.
+
 ## 1.2.0
 
 - **A long text makes the notice grow.** The band across the top of the HUD
