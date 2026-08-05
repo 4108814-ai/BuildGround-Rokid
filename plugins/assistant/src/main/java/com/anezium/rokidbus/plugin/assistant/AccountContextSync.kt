@@ -86,9 +86,9 @@ class AccountContextSync internal constructor(
 
     private fun canSync(): Boolean = authStore.syncAccountContext() && hasChatGptOAuth()
 
-    private fun hasChatGptOAuth(): Boolean =
-        authStore.authMode() == CodexAuthStore.AUTH_MODE_CHATGPT &&
-            authStore.oauthTokens() != null
+    // The token is the sign-in. The legacy auth mode flips when an OpenAI key is
+    // pasted, which says nothing about whether the ChatGPT account is still here.
+    private fun hasChatGptOAuth(): Boolean = authStore.oauthTokens() != null
 
     companion object {
         const val SYNC_TTL_MS = 12L * 60L * 60L * 1_000L
@@ -106,9 +106,9 @@ internal fun combineAccountContextForPrompt(
 
 internal fun CodexAuthStore.combinedAssistantContextForPrompt(): String =
     combineAccountContextForPrompt(
-        syncEnabled = syncAccountContext() &&
-            authMode() == CodexAuthStore.AUTH_MODE_CHATGPT &&
-            oauthTokens() != null,
+        // Synced ChatGPT context rides along for every provider (owner decision
+        // 2026-08-05); the sync toggle is the single off switch.
+        syncEnabled = syncAccountContext() && oauthTokens() != null,
         syncedAccountContext = syncedAccountContext(),
         assistantMemory = assistantMemory(),
     )
