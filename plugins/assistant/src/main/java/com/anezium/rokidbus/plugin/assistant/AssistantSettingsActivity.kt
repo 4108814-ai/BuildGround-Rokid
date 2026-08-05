@@ -24,32 +24,52 @@ import com.anezium.rokidbus.client.ui.BusTheme
 import com.anezium.rokidbus.client.ui.NexusUi
 
 /**
- * Settings for the voice assistant: connect an account, pick the model, remove the plugin.
+ * Settings for the voice assistant: pick a provider, connect it, steer its model,
+ * shape the assistant, remove the plugin.
  *
- * The account block is the whole screen's centre of gravity — it is the only thing
- * standing between the assist button and an answer — so it renders one of three
- * states (nothing connected, ChatGPT account, pasted API key) plus an amber warning
- * for unexpected account connection failures.
+ * The provider list is the screen's centre of gravity — it is the only thing standing
+ * between the assist button and an answer. Everything the chosen provider needs lives
+ * in one config slot rebuilt on selection, so no section ever has to juggle another
+ * provider's visibility.
  */
 class AssistantSettingsActivity : Activity() {
     private val authStore by lazy { CodexAuthStore(applicationContext) }
+    private val threadStore by lazy { AssistantThreadStore(applicationContext) }
+    private val accountContextSync by lazy { AccountContextSync(applicationContext) }
 
-    private lateinit var accountCard: LinearLayout
-    private lateinit var accountActions: LinearLayout
-    private lateinit var modelSection: LinearLayout
-    private lateinit var reasoningSection: LinearLayout
-    private lateinit var apiKeyField: EditText
-    private lateinit var planModelSection: LinearLayout
+    private lateinit var providerConfigSlot: LinearLayout
     private lateinit var windowSection: LinearLayout
     private lateinit var memoryField: EditText
     private lateinit var memoryStatus: TextView
+    private lateinit var personaField: EditText
+    private lateinit var personaStatus: TextView
     private lateinit var conversationsSlot: LinearLayout
-    private val modelDots = mutableMapOf<String, View>()
-    private val modelNames = mutableMapOf<String, TextView>()
-    private val reasoningDots = mutableMapOf<String, View>()
-    private val reasoningNames = mutableMapOf<String, TextView>()
+    private lateinit var syncSection: LinearLayout
+    private lateinit var syncFooter: LinearLayout
+    private lateinit var memorySyncStatus: TextView
+    private lateinit var refreshButton: View
+
+    private val providerDots = mutableMapOf<String, View>()
+    private val providerNames = mutableMapOf<String, TextView>()
+    private val providerStatuses = mutableMapOf<String, TextView>()
+
+    // Views inside the provider config slot; they only exist for the provider that is
+    // currently built, and every rebuild starts them over.
+    private var apiKeyField: EditText? = null
+    private var modelField: EditText? = null
+    private var endpointField: EditText? = null
+    private var photosCapSection: LinearLayout? = null
     private val planModelDots = mutableMapOf<String, View>()
     private val planModelNames = mutableMapOf<String, TextView>()
+    private val reasoningDots = mutableMapOf<String, View>()
+    private val reasoningNames = mutableMapOf<String, TextView>()
+    private val apiModelDots = mutableMapOf<String, View>()
+    private val apiModelNames = mutableMapOf<String, TextView>()
+    private val effortDots = mutableMapOf<String, View>()
+    private val effortNames = mutableMapOf<String, TextView>()
+    private val photosCapDots = mutableMapOf<Boolean, View>()
+    private val photosCapNames = mutableMapOf<Boolean, TextView>()
+
     private val keepDots = mutableMapOf<Boolean, View>()
     private val keepNames = mutableMapOf<Boolean, TextView>()
     private val photosDots = mutableMapOf<Boolean, View>()
@@ -60,34 +80,31 @@ class AssistantSettingsActivity : Activity() {
     private val windowNames = mutableMapOf<Int, TextView>()
     private val syncDots = mutableMapOf<Boolean, View>()
     private val syncNames = mutableMapOf<Boolean, TextView>()
-    private lateinit var syncSection: LinearLayout
-    private lateinit var syncFooter: LinearLayout
-    private lateinit var memorySyncStatus: TextView
-    private lateinit var refreshButton: View
     @Volatile private var syncing = false
 
-    private val threadStore by lazy { AssistantThreadStore(applicationContext) }
-    private val accountContextSync by lazy { AccountContextSync(applicationContext) }
-
-    private enum class AccountMode { EMPTY, CHATGPT, API_KEY }
-
-    private data class AccountState(
-        val mode: AccountMode,
-        val title: String,
-        val detail: String,
-        val statusLabel: String?,
-        val statusColor: Int,
-        val ready: Boolean,
-        val warning: String?,
-    )
-
+    private data class ProviderEntry(val id: String, val title: String, val caption: String)
     private data class ModelChoice(val id: String, val title: String, val caption: String)
     private data class ReasoningChoice(val id: String, val title: String, val hint: String? = null)
 
-    private val modelChoices = listOf(
-        ModelChoice(OpenAiApiClient.DEFAULT_MODEL_ID, "GPT-4o mini", "Faster, and cheaper to run"),
-        ModelChoice(MODEL_SMARTER, "GPT-4o", "Smarter, costs more per question"),
+    /**
+     * ChatGPT leads because a plan needs no key, then the pay-per-token providers in
+     * the order a wearer is likely to hold a key for, and Custom last as the escape
+     * hatch for everything the catalog does not name.
+     */
+    private val providerEntries = listOf(
+        ProviderEntry(
+            CodexAuthStore.CHATGPT_PROVIDER_ID,
+            "ChatGPT",
+            "Sign in with your ChatGPT plan",
+        ),
+        ProviderEntry(ProviderCatalog.openAi.id, "OpenAI", "Pay-as-you-go API key"),
+        ProviderEntry(ProviderCatalog.openRouter.id, "OpenRouter", "One key, many models"),
+        ProviderEntry(ProviderCatalog.minimax.id, "MiniMax", "Coding Plan or API key"),
+        ProviderEntry(ProviderCatalog.deepSeek.id, "DeepSeek", "Chat and Reasoner models"),
+        ProviderEntry(ProviderCatalog.zai.id, "GLM (Z.ai)", "Zhipu's GLM models"),
+        ProviderEntry(ProviderCatalog.custom.id, "Custom", "Any OpenAI-compatible server"),
     )
+
     /**
      * The GPT-5.6 family, ordered the way a wearer picks: fastest first, because the
      * glasses are a voice surface and most questions are quick ones. Captions follow
@@ -127,65 +144,43 @@ class AssistantSettingsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         // The ChatGPT flow leaves for the browser and comes back through its own
-        // activity, so the account state is only ever trustworthy on resume.
-        renderAccount()
-        renderModelSelection()
-        renderReasoningSelection()
-        renderPlanModelSelection()
+        // activity, so provider state is only ever trustworthy on resume.
+        renderProviderList()
+        rebuildProviderConfig()
         renderConversationSettings()
+        renderPersona()
         renderMemory()
     }
 
     private fun buildUi() {
         window.statusBarColor = NexusUi.BG
         window.navigationBarColor = NexusUi.BG
-        accountCard = NexusUi.card(this)
-        accountActions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
         val content = NexusUi.contentColumn(this).apply {
             addView(
                 NexusUi.cardBody(
                     this@AssistantSettingsActivity,
                     "Hold the assist button on your glasses and ask out loud. The answer " +
-                        "streams onto the HUD, riding your ChatGPT plan or your own " +
-                        "OpenAI API key -- whichever is connected below.",
+                        "streams onto the HUD, riding your ChatGPT plan or any AI " +
+                        "provider you connect below.",
                 ),
                 NexusUi.block(),
             )
             addView(BusTheme.gap(this@AssistantSettingsActivity, 18))
-            addView(NexusUi.sectionRow(this@AssistantSettingsActivity, "Account"), NexusUi.block())
+            addView(NexusUi.sectionRow(this@AssistantSettingsActivity, "Provider"), NexusUi.block())
             addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
-            addView(accountCard, NexusUi.block())
+            addView(providerCard(), NexusUi.block())
+            providerConfigSlot = LinearLayout(this@AssistantSettingsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            addView(providerConfigSlot, NexusUi.block())
+            addView(BusTheme.gap(this@AssistantSettingsActivity, 28))
+            addView(
+                NexusUi.sectionRow(this@AssistantSettingsActivity, "Personality"),
+                NexusUi.block(),
+            )
             addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
-            addView(accountActions, NexusUi.block())
-            addView(BusTheme.gap(this@AssistantSettingsActivity, 22))
-            addView(NexusUi.sectionRow(this@AssistantSettingsActivity, "Or use an API key"), NexusUi.block())
-            addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
-            addView(apiKeyCard(), NexusUi.block())
-            modelSection = LinearLayout(this@AssistantSettingsActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(BusTheme.gap(this@AssistantSettingsActivity, 22))
-                addView(NexusUi.sectionRow(this@AssistantSettingsActivity, "Model"), NexusUi.block())
-                addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
-                addView(modelCard(), NexusUi.block())
-            }
-            addView(modelSection, NexusUi.block())
-            planModelSection = LinearLayout(this@AssistantSettingsActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(BusTheme.gap(this@AssistantSettingsActivity, 22))
-                addView(NexusUi.sectionRow(this@AssistantSettingsActivity, "Model"), NexusUi.block())
-                addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
-                addView(planModelCard(), NexusUi.block())
-            }
-            addView(planModelSection, NexusUi.block())
-            reasoningSection = LinearLayout(this@AssistantSettingsActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(BusTheme.gap(this@AssistantSettingsActivity, 22))
-                addView(NexusUi.sectionRow(this@AssistantSettingsActivity, "Reasoning"), NexusUi.block())
-                addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
-                addView(reasoningCard(), NexusUi.block())
-            }
-            addView(reasoningSection, NexusUi.block())
+            addView(personaCard(), NexusUi.block())
             addView(BusTheme.gap(this@AssistantSettingsActivity, 28))
             addView(
                 NexusUi.sectionRow(this@AssistantSettingsActivity, "Conversation"),
@@ -267,129 +262,235 @@ class AssistantSettingsActivity : Activity() {
             )
         }
         setContentView(root)
-        renderAccount()
-        renderModelSelection()
-        renderReasoningSelection()
-        renderPlanModelSelection()
+        renderProviderList()
+        rebuildProviderConfig()
         renderConversationSettings()
+        renderPersona()
         renderMemory()
     }
 
-    private fun accountState(): AccountState {
-        val ready = authStore.hasUsableAuth()
-        val warning = if (authStore.isConsumerChatGptAccount()) {
-            null
+    // ------------------------------------------------------------------ providers
+
+    private fun selectedProvider(): String =
+        authStore.selectedProviderId() ?: when (authStore.authMode()) {
+            CodexAuthStore.AUTH_MODE_CHATGPT -> CodexAuthStore.CHATGPT_PROVIDER_ID
+            else -> ProviderCatalog.openAi.id
+        }
+
+    private fun providerReady(id: String): Boolean =
+        if (id == CodexAuthStore.CHATGPT_PROVIDER_ID) {
+            authStore.oauthTokens() != null
         } else {
-            authStore.apiKeyExchangeError()
+            !authStore.providerApiKey(id).isNullOrBlank() &&
+                (id != ProviderCatalog.custom.id || authStore.providerBaseUrl(id).isNotBlank())
         }
-        val label = authStore.accountLabel()
-        val mode = when (authStore.authMode()) {
-            CodexAuthStore.AUTH_MODE_CHATGPT -> AccountMode.CHATGPT
-            CodexAuthStore.AUTH_MODE_API_KEY -> AccountMode.API_KEY
-            else -> if (ready) AccountMode.API_KEY else AccountMode.EMPTY
+
+    private fun providerCard(): LinearLayout =
+        NexusUi.card(this).apply {
+            providerEntries.forEachIndexed { index, entry ->
+                if (index > 0) addView(NexusUi.divider(this@AssistantSettingsActivity))
+                addView(providerRow(entry), NexusUi.block())
+            }
         }
-        return when (mode) {
-            AccountMode.EMPTY -> AccountState(
-                mode = mode,
-                title = "Not connected",
-                detail = "Sign in to start asking questions",
-                statusLabel = null,
-                statusColor = NexusUi.INK3,
-                ready = false,
-                warning = null,
+
+    private fun providerRow(entry: ProviderEntry): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Use ${entry.title}"
+            background = NexusUi.pressed(this@AssistantSettingsActivity, Color.TRANSPARENT, 10)
+            setPadding(
+                0,
+                NexusUi.dp(this@AssistantSettingsActivity, 4),
+                0,
+                NexusUi.dp(this@AssistantSettingsActivity, 4),
             )
-            AccountMode.CHATGPT -> AccountState(
-                mode = mode,
-                title = label ?: "ChatGPT account",
-                detail = chatGptDetail(),
-                statusLabel = if (ready) "Connected" else "Action needed",
-                statusColor = if (ready) NexusUi.GREEN else NexusUi.AMBER,
-                ready = ready,
-                // A stored exchange error goes quiet once a usable key exists: the
-                // failure was a later refresh, and the assistant still answers.
-                warning = if (ready) {
-                    null
-                } else {
-                    warning ?: "This account has not returned an OpenAI API key yet."
+            setOnClickListener { selectProvider(entry.id) }
+            addView(
+                LinearLayout(this@AssistantSettingsActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(
+                        NexusUi.rowLabel(this@AssistantSettingsActivity, entry.title).also {
+                            providerNames[entry.id] = it
+                        },
+                        NexusUi.block(),
+                    )
+                    addView(
+                        NexusUi.rowSub(this@AssistantSettingsActivity, entry.caption),
+                        NexusUi.block(),
+                    )
                 },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
             )
-            AccountMode.API_KEY -> AccountState(
-                mode = mode,
-                title = label ?: "OpenAI API key",
-                detail = if (ready) "Key stored on this phone" else "Key could not be read",
-                statusLabel = if (ready) "Connected" else "Action needed",
-                statusColor = if (ready) NexusUi.GREEN else NexusUi.AMBER,
-                ready = ready,
-                warning = if (ready) null else "Paste your OpenAI API key again to reconnect.",
+            addView(
+                NexusUi.metaLabel(this@AssistantSettingsActivity, "", NexusUi.GREEN).also {
+                    providerStatuses[entry.id] = it
+                },
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { marginEnd = NexusUi.dp(this@AssistantSettingsActivity, 12) },
             )
+            addView(
+                NexusUi.dot(this@AssistantSettingsActivity).also { providerDots[entry.id] = it },
+                LinearLayout.LayoutParams(
+                    NexusUi.dp(this@AssistantSettingsActivity, 8),
+                    NexusUi.dp(this@AssistantSettingsActivity, 8),
+                ),
+            )
+        }
+
+    private fun selectProvider(id: String) {
+        if (id == selectedProvider()) return
+        authStore.setSelectedProviderId(id)
+        renderProviderList()
+        rebuildProviderConfig()
+    }
+
+    private fun renderProviderList() {
+        val selected = selectedProvider()
+        providerEntries.forEach { entry ->
+            val isSelected = entry.id == selected
+            providerDots[entry.id]?.let {
+                NexusUi.setDotColor(it, if (isSelected) NexusUi.GREEN else NexusUi.INK4)
+            }
+            providerNames[entry.id]?.setTextColor(if (isSelected) NexusUi.INK else NexusUi.INK2)
+            providerStatuses[entry.id]?.text = if (providerReady(entry.id)) "Ready" else ""
         }
     }
 
-    private fun chatGptDetail(): String {
-        val plan = authStore.oauthTokens()?.planType?.trim()?.takeIf(String::isNotEmpty)
-        val planLabel = plan?.replaceFirstChar { it.uppercaseChar() }
-        return if (planLabel == null) "Signed in with ChatGPT" else "Signed in with ChatGPT · $planLabel"
+    /**
+     * Everything below the provider list belongs to the selected provider alone, so it
+     * is rebuilt from scratch on every selection change instead of toggling seven
+     * sections' visibility against each other.
+     */
+    private fun rebuildProviderConfig() {
+        apiKeyField = null
+        modelField = null
+        endpointField = null
+        photosCapSection = null
+        planModelDots.clear(); planModelNames.clear()
+        reasoningDots.clear(); reasoningNames.clear()
+        apiModelDots.clear(); apiModelNames.clear()
+        effortDots.clear(); effortNames.clear()
+        photosCapDots.clear(); photosCapNames.clear()
+
+        providerConfigSlot.removeAllViews()
+        val selected = selectedProvider()
+        if (selected == CodexAuthStore.CHATGPT_PROVIDER_ID) {
+            buildChatGptConfig(providerConfigSlot)
+        } else {
+            ProviderCatalog.preset(selected)?.let { preset ->
+                buildApiProviderConfig(providerConfigSlot, preset)
+            }
+        }
     }
 
-    private fun renderAccount() {
-        val state = accountState()
+    // ------------------------------------------------------------------ ChatGPT config
 
-        accountCard.removeAllViews()
-        accountCard.addView(
-            LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
+    private fun buildChatGptConfig(slot: LinearLayout) {
+        val tokens = authStore.oauthTokens()
+        val signedIn = tokens != null
+
+        slot.addView(BusTheme.gap(this, 18))
+        slot.addView(
+            NexusUi.card(this).apply {
                 addView(
-                    NexusUi.rowTitle(this@AssistantSettingsActivity, state.title),
-                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                        marginEnd = NexusUi.dp(this@AssistantSettingsActivity, 12)
+                    LinearLayout(this@AssistantSettingsActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(
+                            NexusUi.rowTitle(
+                                this@AssistantSettingsActivity,
+                                if (signedIn) {
+                                    authStore.accountLabel() ?: "ChatGPT account"
+                                } else {
+                                    "Not connected"
+                                },
+                            ),
+                            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                                .apply {
+                                    marginEnd = NexusUi.dp(this@AssistantSettingsActivity, 12)
+                                },
+                        )
+                        if (signedIn) {
+                            addView(
+                                NexusUi.metaLabel(
+                                    this@AssistantSettingsActivity,
+                                    "Connected",
+                                    NexusUi.GREEN,
+                                ),
+                            )
+                        }
                     },
+                    NexusUi.block(),
                 )
-                state.statusLabel?.let { label ->
-                    addView(NexusUi.metaLabel(this@AssistantSettingsActivity, label, state.statusColor))
+                addView(BusTheme.gap(this@AssistantSettingsActivity, 5))
+                addView(
+                    NexusUi.rowSub(
+                        this@AssistantSettingsActivity,
+                        if (signedIn) chatGptDetail(tokens) else "Sign in to start asking questions",
+                    ),
+                    NexusUi.block(),
+                )
+                chatGptWarning()?.let { message ->
+                    addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
+                    addView(warningRow(message), NexusUi.block())
                 }
             },
             NexusUi.block(),
         )
-        accountCard.addView(BusTheme.gap(this, 5))
-        accountCard.addView(NexusUi.rowSub(this, state.detail), NexusUi.block())
-        state.warning?.let { message ->
-            accountCard.addView(BusTheme.gap(this, 12))
-            accountCard.addView(warningRow(message), NexusUi.block())
-        }
-
-        accountActions.removeAllViews()
-        val signInLabel = if (state.mode == AccountMode.CHATGPT && state.ready) {
-            "Sign in again"
-        } else {
-            "Sign in with ChatGPT"
-        }
+        slot.addView(BusTheme.gap(this, 12))
         // Solid accent only while the assistant cannot answer; once it works the
         // sign-in path steps back to an outline so nothing shouts for no reason.
-        val signInButton = if (state.ready) {
-            NexusUi.outlinePillButton(this, signInLabel)
+        val signInButton = if (signedIn) {
+            NexusUi.outlinePillButton(this, "Sign in again")
         } else {
-            NexusUi.pillButton(this, signInLabel)
+            NexusUi.pillButton(this, "Sign in with ChatGPT")
         }
-        accountActions.addView(
-            signInButton.apply { setOnClickListener { startSignIn() } },
+        slot.addView(
+            signInButton.apply {
+                setOnClickListener {
+                    startActivity(CodexChatGptSignInActivity.createIntent(this@AssistantSettingsActivity))
+                }
+            },
             NexusUi.block(),
         )
-        if (state.mode != AccountMode.EMPTY) {
-            accountActions.addView(BusTheme.gap(this, 10))
-            accountActions.addView(
+        if (signedIn) {
+            slot.addView(BusTheme.gap(this, 10))
+            slot.addView(
                 NexusUi.pillButton(this, "Disconnect", danger = true).apply {
-                    setOnClickListener { confirmDisconnect() }
+                    setOnClickListener { confirmChatGptDisconnect() }
                 },
                 NexusUi.block(),
             )
+            slot.addView(BusTheme.gap(this, 22))
+            slot.addView(NexusUi.sectionRow(this, "Model"), NexusUi.block())
+            slot.addView(BusTheme.gap(this, 12))
+            slot.addView(planModelCard(), NexusUi.block())
+            slot.addView(BusTheme.gap(this, 22))
+            slot.addView(NexusUi.sectionRow(this, "Reasoning"), NexusUi.block())
+            slot.addView(BusTheme.gap(this, 12))
+            slot.addView(reasoningCard(), NexusUi.block())
+            renderPlanModelSelection()
+            renderReasoningSelection()
         }
-        // Each path has its own model list: the GPT-4o picker steers an API key, the
-        // GPT-5.6 family steers a ChatGPT plan. Only one can be true at a time.
-        val onPlan = state.mode == AccountMode.CHATGPT
-        modelSection.visibility = if (onPlan) View.GONE else View.VISIBLE
-        planModelSection.visibility = if (onPlan) View.VISIBLE else View.GONE
-        reasoningSection.visibility = if (onPlan) View.VISIBLE else View.GONE
+    }
+
+    private fun chatGptDetail(tokens: CodexChatGptOAuthTokenBundle?): String {
+        val plan = tokens?.planType?.trim()?.takeIf(String::isNotEmpty)
+        val planLabel = plan?.replaceFirstChar { it.uppercaseChar() }
+        return if (planLabel == null) "Signed in with ChatGPT" else "Signed in with ChatGPT · $planLabel"
+    }
+
+    /** The exchange warning only matters while signed in but without a usable key. */
+    private fun chatGptWarning(): String? {
+        if (authStore.oauthTokens() == null) return null
+        if (authStore.hasApiKey()) return null
+        if (authStore.isConsumerChatGptAccount()) return null
+        return authStore.apiKeyExchangeError()
     }
 
     private fun warningRow(message: String): LinearLayout =
@@ -419,253 +520,6 @@ class AssistantSettingsActivity : Activity() {
                 NexusUi.block(),
             )
         }
-
-    private fun startSignIn() {
-        startActivity(CodexChatGptSignInActivity.createIntent(this))
-    }
-
-    private fun apiKeyCard(): LinearLayout =
-        NexusUi.card(this).apply {
-            addView(
-                LinearLayout(this@AssistantSettingsActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    addView(
-                        NexusUi.rowLabel(this@AssistantSettingsActivity, "OpenAI API key"),
-                        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-                    )
-                    addView(NexusUi.rowSub(this@AssistantSettingsActivity, "platform.openai.com"))
-                },
-                NexusUi.block(),
-            )
-            addView(BusTheme.gap(this@AssistantSettingsActivity, 6))
-
-            apiKeyField = keyField()
-            var revealed = false
-            val revealButton = NexusUi.textButton(this@AssistantSettingsActivity, "Show").apply {
-                contentDescription = "Show OpenAI API key"
-                setOnClickListener {
-                    revealed = !revealed
-                    apiKeyField.transformationMethod = if (revealed) {
-                        null
-                    } else {
-                        PasswordTransformationMethod.getInstance()
-                    }
-                    apiKeyField.setSelection(apiKeyField.text.length)
-                    text = if (revealed) "Hide" else "Show"
-                    contentDescription = if (revealed) "Hide OpenAI API key" else "Show OpenAI API key"
-                }
-            }
-            addView(
-                LinearLayout(this@AssistantSettingsActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    addView(
-                        apiKeyField,
-                        LinearLayout.LayoutParams(0, NexusUi.dp(this@AssistantSettingsActivity, 52), 1f),
-                    )
-                    addView(
-                        revealButton,
-                        LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
-                        ).apply { marginStart = NexusUi.dp(this@AssistantSettingsActivity, 6) },
-                    )
-                },
-                NexusUi.block(),
-            )
-            addView(BusTheme.gap(this@AssistantSettingsActivity, 4))
-            addView(
-                LinearLayout(this@AssistantSettingsActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    addView(
-                        NexusUi.rowSub(
-                            this@AssistantSettingsActivity,
-                            "Stays encrypted on this phone",
-                        ),
-                        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-                    )
-                    addView(
-                        NexusUi.textButton(this@AssistantSettingsActivity, "Save").apply {
-                            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                            setOnClickListener { saveApiKey() }
-                        },
-                    )
-                },
-                NexusUi.block(),
-            )
-        }
-
-    private fun keyField(): EditText =
-        NexusUi.field(this, "Paste your key").apply {
-            // Only mirror back a key the owner pasted here; an OAuth-issued key is
-            // never surfaced as if it were something they typed.
-            if (authStore.authMode() == CodexAuthStore.AUTH_MODE_API_KEY) {
-                setText(authStore.apiKey().orEmpty())
-            }
-            textSize = 14f
-            isSingleLine = true
-            inputType = InputType.TYPE_CLASS_TEXT or
-                InputType.TYPE_TEXT_VARIATION_PASSWORD or
-                InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            transformationMethod = PasswordTransformationMethod.getInstance()
-            typeface = Typeface.MONOSPACE
-            gravity = Gravity.CENTER_VERTICAL
-            imeOptions = EditorInfo.IME_ACTION_DONE
-            // Sink the field below the card so it reads as an input, not a flat row.
-            background = NexusUi.bordered(this@AssistantSettingsActivity, NexusUi.BG, NexusUi.LINE, 12)
-            setOnEditorActionListener { _, actionId, _ ->
-                if (actionId == EditorInfo.IME_ACTION_DONE) {
-                    saveApiKey()
-                    true
-                } else {
-                    false
-                }
-            }
-        }
-
-    private fun saveApiKey() {
-        val key = apiKeyField.text.toString().trim()
-        if (key.isEmpty()) {
-            toast("Paste an OpenAI API key first.")
-            return
-        }
-        // Keep whichever model is selected; saveApiKey() otherwise resets it.
-        val saved = runCatching { authStore.saveApiKey(key, authStore.model()) }.isSuccess
-        if (!saved) {
-            toast("That key could not be saved.")
-            return
-        }
-        hideKeyboard()
-        renderAccount()
-        renderModelSelection()
-        toast("API key saved.")
-    }
-
-    private fun modelCard(): LinearLayout =
-        NexusUi.card(this).apply {
-            modelChoices.forEachIndexed { index, choice ->
-                if (index > 0) addView(NexusUi.divider(this@AssistantSettingsActivity))
-                addView(modelRow(choice), NexusUi.block())
-            }
-        }
-
-    private fun modelRow(choice: ModelChoice): LinearLayout =
-        LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            isClickable = true
-            isFocusable = true
-            contentDescription = "Use ${choice.title}"
-            background = NexusUi.pressed(this@AssistantSettingsActivity, Color.TRANSPARENT, 10)
-            setPadding(
-                0,
-                NexusUi.dp(this@AssistantSettingsActivity, 4),
-                0,
-                NexusUi.dp(this@AssistantSettingsActivity, 4),
-            )
-            setOnClickListener { selectModel(choice.id) }
-            addView(
-                LinearLayout(this@AssistantSettingsActivity).apply {
-                    orientation = LinearLayout.VERTICAL
-                    addView(
-                        NexusUi.rowLabel(this@AssistantSettingsActivity, choice.title).also {
-                            modelNames[choice.id] = it
-                        },
-                        NexusUi.block(),
-                    )
-                    addView(NexusUi.rowSub(this@AssistantSettingsActivity, choice.caption), NexusUi.block())
-                },
-                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-            )
-            addView(
-                NexusUi.dot(this@AssistantSettingsActivity).also { modelDots[choice.id] = it },
-                LinearLayout.LayoutParams(
-                    NexusUi.dp(this@AssistantSettingsActivity, 8),
-                    NexusUi.dp(this@AssistantSettingsActivity, 8),
-                ),
-            )
-        }
-
-    private fun selectModel(model: String) {
-        authStore.setModel(model)
-        renderModelSelection()
-    }
-
-    private fun renderModelSelection() {
-        val selected = authStore.model()
-        modelDots.forEach { (model, dotView) ->
-            NexusUi.setDotColor(dotView, if (model == selected) NexusUi.GREEN else NexusUi.INK4)
-        }
-        modelNames.forEach { (model, nameView) ->
-            nameView.setTextColor(if (model == selected) NexusUi.INK else NexusUi.INK2)
-        }
-    }
-
-    private fun reasoningCard(): LinearLayout =
-        NexusUi.card(this).apply {
-            reasoningChoices.forEachIndexed { index, choice ->
-                if (index > 0) addView(NexusUi.divider(this@AssistantSettingsActivity))
-                addView(reasoningRow(choice), NexusUi.block())
-            }
-        }
-
-    private fun reasoningRow(choice: ReasoningChoice): LinearLayout =
-        LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            isClickable = true
-            isFocusable = true
-            contentDescription = "Use ${choice.title} reasoning"
-            background = NexusUi.pressed(this@AssistantSettingsActivity, Color.TRANSPARENT, 10)
-            setPadding(
-                0,
-                NexusUi.dp(this@AssistantSettingsActivity, 4),
-                0,
-                NexusUi.dp(this@AssistantSettingsActivity, 4),
-            )
-            setOnClickListener { selectReasoningEffort(choice.id) }
-            addView(
-                NexusUi.rowLabel(this@AssistantSettingsActivity, choice.title).also {
-                    reasoningNames[choice.id] = it
-                },
-                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-            )
-            choice.hint?.let { hint ->
-                addView(
-                    NexusUi.rowSub(this@AssistantSettingsActivity, hint),
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ).apply {
-                        marginEnd = NexusUi.dp(this@AssistantSettingsActivity, 12)
-                    },
-                )
-            }
-            addView(
-                NexusUi.dot(this@AssistantSettingsActivity).also { reasoningDots[choice.id] = it },
-                LinearLayout.LayoutParams(
-                    NexusUi.dp(this@AssistantSettingsActivity, 8),
-                    NexusUi.dp(this@AssistantSettingsActivity, 8),
-                ),
-            )
-        }
-
-    private fun selectReasoningEffort(effort: String) {
-        authStore.setChatGptReasoningEffort(effort)
-        renderReasoningSelection()
-    }
-
-    private fun renderReasoningSelection() {
-        val selected = authStore.chatGptReasoningEffort()
-        reasoningDots.forEach { (effort, dotView) ->
-            NexusUi.setDotColor(dotView, if (effort == selected) NexusUi.GREEN else NexusUi.INK4)
-        }
-        reasoningNames.forEach { (effort, nameView) ->
-            nameView.setTextColor(if (effort == selected) NexusUi.INK else NexusUi.INK2)
-        }
-    }
 
     private fun planModelCard(): LinearLayout =
         NexusUi.card(this).apply {
@@ -697,6 +551,625 @@ class AssistantSettingsActivity : Activity() {
             nameView.setTextColor(if (id == selected) NexusUi.INK else NexusUi.INK2)
         }
     }
+
+    private fun reasoningCard(): LinearLayout =
+        NexusUi.card(this).apply {
+            reasoningChoices.forEachIndexed { index, choice ->
+                if (index > 0) addView(NexusUi.divider(this@AssistantSettingsActivity))
+                addView(
+                    pickerRow(
+                        title = choice.title,
+                        hint = choice.hint,
+                        description = "Use ${choice.title} reasoning",
+                        onClick = {
+                            authStore.setChatGptReasoningEffort(choice.id)
+                            renderReasoningSelection()
+                        },
+                        nameSink = { reasoningNames[choice.id] = it },
+                        dotSink = { reasoningDots[choice.id] = it },
+                    ),
+                    NexusUi.block(),
+                )
+            }
+        }
+
+    private fun renderReasoningSelection() {
+        val selected = authStore.chatGptReasoningEffort()
+        reasoningDots.forEach { (effort, dotView) ->
+            NexusUi.setDotColor(dotView, if (effort == selected) NexusUi.GREEN else NexusUi.INK4)
+        }
+        reasoningNames.forEach { (effort, nameView) ->
+            nameView.setTextColor(if (effort == selected) NexusUi.INK else NexusUi.INK2)
+        }
+    }
+
+    private fun confirmChatGptDisconnect() {
+        confirmDialog(
+            title = "Disconnect account",
+            body = "The account, its key, and the synced memories are removed from " +
+                "this phone. Keys you saved for other providers stay.",
+            confirmLabel = "Disconnect",
+        ) {
+            authStore.clearChatGptAuth()
+            renderProviderList()
+            rebuildProviderConfig()
+            renderMemory()
+            toast("Disconnected.")
+        }
+    }
+
+    // ------------------------------------------------------------------ API provider config
+
+    private fun buildApiProviderConfig(slot: LinearLayout, preset: ProviderPreset) {
+        val isCustom = preset.id == ProviderCatalog.custom.id
+        slot.addView(BusTheme.gap(this, 18))
+        if (isCustom) {
+            // A custom server has no home until the endpoint is set; ask for it first.
+            slot.addView(endpointCard(preset), NexusUi.block())
+            slot.addView(BusTheme.gap(this, 12))
+        }
+        slot.addView(apiKeyCard(preset), NexusUi.block())
+
+        slot.addView(BusTheme.gap(this, 22))
+        slot.addView(NexusUi.sectionRow(this, "Model"), NexusUi.block())
+        slot.addView(BusTheme.gap(this, 12))
+        slot.addView(apiModelCard(preset), NexusUi.block())
+
+        photosCapSection = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(BusTheme.gap(this@AssistantSettingsActivity, 18))
+            addView(
+                NexusUi.sectionRow(this@AssistantSettingsActivity, "Photos"),
+                NexusUi.block(),
+            )
+            addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
+            addView(photosCapCard(preset), NexusUi.block())
+        }
+        slot.addView(photosCapSection, NexusUi.block())
+
+        if (preset.supportedEfforts.isNotEmpty()) {
+            slot.addView(BusTheme.gap(this, 22))
+            slot.addView(NexusUi.sectionRow(this, "Reasoning"), NexusUi.block())
+            slot.addView(BusTheme.gap(this, 12))
+            slot.addView(effortCard(preset), NexusUi.block())
+            renderEffortSelection(preset)
+        }
+
+        if (!isCustom) {
+            slot.addView(BusTheme.gap(this, 12))
+            slot.addView(endpointCard(preset), NexusUi.block())
+        }
+        renderApiModelSelection(preset)
+    }
+
+    private fun apiKeyCard(preset: ProviderPreset): LinearLayout =
+        NexusUi.card(this).apply {
+            val hasKey = !authStore.providerApiKey(preset.id).isNullOrBlank()
+            addView(
+                LinearLayout(this@AssistantSettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(
+                        NexusUi.rowLabel(
+                            this@AssistantSettingsActivity,
+                            "${preset.displayName} API key",
+                        ),
+                        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                    )
+                    endpointHost(preset)?.let { host ->
+                        addView(NexusUi.rowSub(this@AssistantSettingsActivity, host))
+                    }
+                },
+                NexusUi.block(),
+            )
+            addView(BusTheme.gap(this@AssistantSettingsActivity, 6))
+
+            val field = keyField(preset)
+            apiKeyField = field
+            var revealed = false
+            val revealButton = NexusUi.textButton(this@AssistantSettingsActivity, "Show").apply {
+                contentDescription = "Show ${preset.displayName} API key"
+                setOnClickListener {
+                    revealed = !revealed
+                    field.transformationMethod = if (revealed) {
+                        null
+                    } else {
+                        PasswordTransformationMethod.getInstance()
+                    }
+                    field.setSelection(field.text.length)
+                    text = if (revealed) "Hide" else "Show"
+                    contentDescription = if (revealed) {
+                        "Hide ${preset.displayName} API key"
+                    } else {
+                        "Show ${preset.displayName} API key"
+                    }
+                }
+            }
+            addView(
+                LinearLayout(this@AssistantSettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(
+                        field,
+                        LinearLayout.LayoutParams(0, NexusUi.dp(this@AssistantSettingsActivity, 52), 1f),
+                    )
+                    addView(
+                        revealButton,
+                        LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ).apply { marginStart = NexusUi.dp(this@AssistantSettingsActivity, 6) },
+                    )
+                },
+                NexusUi.block(),
+            )
+            addView(BusTheme.gap(this@AssistantSettingsActivity, 4))
+            addView(
+                LinearLayout(this@AssistantSettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(
+                        NexusUi.rowSub(
+                            this@AssistantSettingsActivity,
+                            "Stays encrypted on this phone",
+                        ),
+                        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                    )
+                    if (hasKey) {
+                        addView(
+                            NexusUi.textButton(
+                                this@AssistantSettingsActivity,
+                                "Forget",
+                                danger = true,
+                            ).apply {
+                                contentDescription = "Forget ${preset.displayName} API key"
+                                setOnClickListener { forgetApiKey(preset) }
+                            },
+                        )
+                    }
+                    addView(
+                        NexusUi.textButton(this@AssistantSettingsActivity, "Save").apply {
+                            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                            setOnClickListener { saveApiKey(preset) }
+                        },
+                    )
+                },
+                NexusUi.block(),
+            )
+        }
+
+    private fun keyField(preset: ProviderPreset): EditText =
+        NexusUi.field(this, preset.keyHint.ifBlank { "Paste your key" }).apply {
+            setText(authStore.providerApiKey(preset.id).orEmpty())
+            textSize = 14f
+            isSingleLine = true
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_VARIATION_PASSWORD or
+                InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            transformationMethod = PasswordTransformationMethod.getInstance()
+            typeface = Typeface.MONOSPACE
+            gravity = Gravity.CENTER_VERTICAL
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            // Sink the field below the card so it reads as an input, not a flat row.
+            background = NexusUi.bordered(this@AssistantSettingsActivity, NexusUi.BG, NexusUi.LINE, 12)
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_DONE) {
+                    saveApiKey(preset)
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+
+    private fun saveApiKey(preset: ProviderPreset) {
+        val field = apiKeyField ?: return
+        val key = field.text.toString().trim()
+        if (key.isEmpty()) {
+            toast("Paste a ${preset.displayName} API key first.")
+            return
+        }
+        val saved = runCatching {
+            if (preset.id == ProviderCatalog.openAi.id) {
+                // The legacy path keeps the account label and the Whisper fallback fed.
+                authStore.saveApiKey(key, authStore.providerModel(preset.id))
+            } else {
+                authStore.saveProviderApiKey(preset.id, key)
+            }
+        }.isSuccess
+        if (!saved) {
+            toast("That key could not be saved.")
+            return
+        }
+        hideKeyboard(field)
+        renderProviderList()
+        rebuildProviderConfig()
+        toast("${preset.displayName} key saved.")
+    }
+
+    private fun forgetApiKey(preset: ProviderPreset) {
+        confirmDialog(
+            title = "Forget key",
+            body = "The ${preset.displayName} key is removed from this phone. " +
+                "The assistant stops answering through ${preset.displayName} until " +
+                "you paste it again.",
+            confirmLabel = "Forget",
+        ) {
+            authStore.clearProviderApiKey(preset.id)
+            renderProviderList()
+            rebuildProviderConfig()
+            toast("Key removed.")
+        }
+    }
+
+    private fun apiModelCard(preset: ProviderPreset): LinearLayout =
+        NexusUi.card(this).apply {
+            preset.suggestedModels.forEachIndexed { index, model ->
+                if (index > 0) addView(NexusUi.divider(this@AssistantSettingsActivity))
+                addView(
+                    pickerRow(
+                        title = model.title,
+                        caption = model.caption.takeIf(String::isNotBlank),
+                        description = "Use ${model.title}",
+                        onClick = { selectSuggestedModel(preset, model) },
+                        nameSink = { apiModelNames[model.id] = it },
+                        dotSink = { apiModelDots[model.id] = it },
+                    ),
+                    NexusUi.block(),
+                )
+            }
+            if (preset.suggestedModels.isNotEmpty()) {
+                addView(NexusUi.divider(this@AssistantSettingsActivity))
+            }
+            addView(
+                NexusUi.rowSub(
+                    this@AssistantSettingsActivity,
+                    if (preset.suggestedModels.isEmpty()) {
+                        "The model id your server answers to"
+                    } else {
+                        "Or any ${preset.displayName} model id"
+                    },
+                ),
+                NexusUi.block(),
+            )
+            addView(BusTheme.gap(this@AssistantSettingsActivity, 6))
+            val field = modelInputField(preset)
+            modelField = field
+            addView(
+                LinearLayout(this@AssistantSettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(
+                        field,
+                        LinearLayout.LayoutParams(0, NexusUi.dp(this@AssistantSettingsActivity, 46), 1f),
+                    )
+                    addView(
+                        NexusUi.textButton(this@AssistantSettingsActivity, "Use").apply {
+                            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                            contentDescription = "Use the typed model"
+                            setOnClickListener { saveTypedModel(preset) }
+                        },
+                        LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ).apply { marginStart = NexusUi.dp(this@AssistantSettingsActivity, 6) },
+                    )
+                },
+                NexusUi.block(),
+            )
+        }
+
+    private fun modelInputField(preset: ProviderPreset): EditText =
+        NexusUi.field(this, preset.defaultModel.ifBlank { "model-id" }).apply {
+            val current = authStore.providerModel(preset.id)
+            if (preset.suggestedModels.none { it.id == current }) setText(current)
+            textSize = 14f
+            isSingleLine = true
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            typeface = Typeface.MONOSPACE
+            gravity = Gravity.CENTER_VERTICAL
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            background = NexusUi.bordered(this@AssistantSettingsActivity, NexusUi.BG, NexusUi.LINE, 12)
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_DONE) {
+                    saveTypedModel(preset)
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+
+    private fun selectSuggestedModel(preset: ProviderPreset, model: SuggestedModel) {
+        authStore.setProviderModel(preset.id, model.id)
+        // A fresh model means yesterday's photo answer no longer applies.
+        authStore.clearProviderModelSupportsPhotosOverride(preset.id)
+        modelField?.setText("")
+        renderApiModelSelection(preset)
+    }
+
+    private fun saveTypedModel(preset: ProviderPreset) {
+        val field = modelField ?: return
+        val typed = field.text.toString().trim()
+        if (typed.isEmpty()) {
+            toast("Type a model id first.")
+            return
+        }
+        authStore.setProviderModel(preset.id, typed)
+        authStore.clearProviderModelSupportsPhotosOverride(preset.id)
+        hideKeyboard(field)
+        renderApiModelSelection(preset)
+        toast("Using $typed.")
+    }
+
+    private fun renderApiModelSelection(preset: ProviderPreset) {
+        val current = authStore.providerModel(preset.id)
+        val suggested = preset.suggestedModels.any { it.id == current }
+        apiModelDots.forEach { (id, dotView) ->
+            NexusUi.setDotColor(dotView, if (id == current) NexusUi.GREEN else NexusUi.INK4)
+        }
+        apiModelNames.forEach { (id, nameView) ->
+            nameView.setTextColor(if (id == current) NexusUi.INK else NexusUi.INK2)
+        }
+        // A model the catalog knows carries its own photo answer; only a typed one
+        // needs the wearer to say whether it can see.
+        photosCapSection?.visibility = if (suggested) View.GONE else View.VISIBLE
+        if (!suggested) renderPhotosCapSelection(preset)
+    }
+
+    private fun photosCapCard(preset: ProviderPreset): LinearLayout =
+        NexusUi.card(this).apply {
+            addView(
+                pickerRow(
+                    title = "Can see photos",
+                    hint = "photos ride along",
+                    description = "The model can see photos",
+                    onClick = {
+                        authStore.setProviderModelSupportsPhotos(preset.id, true)
+                        renderPhotosCapSelection(preset)
+                    },
+                    nameSink = { photosCapNames[true] = it },
+                    dotSink = { photosCapDots[true] = it },
+                ),
+                NexusUi.block(),
+            )
+            addView(NexusUi.divider(this@AssistantSettingsActivity))
+            addView(
+                pickerRow(
+                    title = "Text only",
+                    hint = "photos are left out",
+                    description = "The model cannot see photos",
+                    onClick = {
+                        authStore.setProviderModelSupportsPhotos(preset.id, false)
+                        renderPhotosCapSelection(preset)
+                    },
+                    nameSink = { photosCapNames[false] = it },
+                    dotSink = { photosCapDots[false] = it },
+                ),
+                NexusUi.block(),
+            )
+        }
+
+    private fun renderPhotosCapSelection(preset: ProviderPreset) {
+        val canSee = authStore.providerModelSupportsPhotos(preset.id)
+        photosCapDots.forEach { (value, dotView) ->
+            NexusUi.setDotColor(dotView, if (value == canSee) NexusUi.GREEN else NexusUi.INK4)
+        }
+        photosCapNames.forEach { (value, nameView) ->
+            nameView.setTextColor(if (value == canSee) NexusUi.INK else NexusUi.INK2)
+        }
+    }
+
+    private fun effortCard(preset: ProviderPreset): LinearLayout =
+        NexusUi.card(this).apply {
+            val choices = listOf("" to "None") + preset.supportedEfforts.map { effort ->
+                effort to effort.replaceFirstChar { it.uppercaseChar() }
+            }
+            choices.forEachIndexed { index, (effort, title) ->
+                if (index > 0) addView(NexusUi.divider(this@AssistantSettingsActivity))
+                addView(
+                    pickerRow(
+                        title = title,
+                        hint = if (effort.isEmpty()) "fastest" else null,
+                        description = "Use $title reasoning",
+                        onClick = {
+                            authStore.setProviderEffort(preset.id, effort)
+                            renderEffortSelection(preset)
+                        },
+                        nameSink = { effortNames[effort] = it },
+                        dotSink = { effortDots[effort] = it },
+                    ),
+                    NexusUi.block(),
+                )
+            }
+        }
+
+    private fun renderEffortSelection(preset: ProviderPreset) {
+        val selected = authStore.providerEffort(preset.id)
+        effortDots.forEach { (effort, dotView) ->
+            NexusUi.setDotColor(dotView, if (effort == selected) NexusUi.GREEN else NexusUi.INK4)
+        }
+        effortNames.forEach { (effort, nameView) ->
+            nameView.setTextColor(if (effort == selected) NexusUi.INK else NexusUi.INK2)
+        }
+    }
+
+    private fun endpointCard(preset: ProviderPreset): LinearLayout =
+        NexusUi.card(this).apply {
+            addView(
+                NexusUi.rowLabel(this@AssistantSettingsActivity, "Endpoint"),
+                NexusUi.block(),
+            )
+            addView(BusTheme.gap(this@AssistantSettingsActivity, 2))
+            addView(
+                NexusUi.rowSub(
+                    this@AssistantSettingsActivity,
+                    if (preset.id == ProviderCatalog.custom.id) {
+                        "The /v1 root of your OpenAI-compatible server"
+                    } else {
+                        "Only change this if your plan answers on a different server"
+                    },
+                ),
+                NexusUi.block(),
+            )
+            addView(BusTheme.gap(this@AssistantSettingsActivity, 6))
+            val field = endpointField(preset)
+            endpointField = field
+            addView(
+                LinearLayout(this@AssistantSettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(
+                        field,
+                        LinearLayout.LayoutParams(0, NexusUi.dp(this@AssistantSettingsActivity, 46), 1f),
+                    )
+                    addView(
+                        NexusUi.textButton(this@AssistantSettingsActivity, "Save").apply {
+                            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                            contentDescription = "Save the endpoint"
+                            setOnClickListener { saveEndpoint(preset) }
+                        },
+                        LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ).apply { marginStart = NexusUi.dp(this@AssistantSettingsActivity, 6) },
+                    )
+                },
+                NexusUi.block(),
+            )
+        }
+
+    private fun endpointField(preset: ProviderPreset): EditText =
+        NexusUi.field(
+            this,
+            preset.defaultBaseUrl.ifBlank { "https://your-server.example/v1" },
+        ).apply {
+            setText(authStore.providerBaseUrl(preset.id))
+            textSize = 14f
+            isSingleLine = true
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_VARIATION_URI or
+                InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            typeface = Typeface.MONOSPACE
+            gravity = Gravity.CENTER_VERTICAL
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            background = NexusUi.bordered(this@AssistantSettingsActivity, NexusUi.BG, NexusUi.LINE, 12)
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_DONE) {
+                    saveEndpoint(preset)
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+
+    private fun saveEndpoint(preset: ProviderPreset) {
+        val field = endpointField ?: return
+        val url = field.text.toString().trim()
+        if (url.isNotEmpty() && !url.startsWith("http://") && !url.startsWith("https://")) {
+            toast("An endpoint starts with https://")
+            return
+        }
+        authStore.setProviderBaseUrl(preset.id, url)
+        hideKeyboard(field)
+        renderProviderList()
+        rebuildProviderConfig()
+        toast(
+            when {
+                url.isNotEmpty() -> "Endpoint saved."
+                preset.defaultBaseUrl.isNotEmpty() -> "Back to the standard endpoint."
+                else -> "Endpoint cleared."
+            },
+        )
+    }
+
+    private fun endpointHost(preset: ProviderPreset): String? =
+        authStore.providerBaseUrl(preset.id)
+            .removePrefix("https://")
+            .removePrefix("http://")
+            .substringBefore('/')
+            .takeIf(String::isNotBlank)
+
+    // ------------------------------------------------------------------ personality
+
+    private fun personaCard(): LinearLayout =
+        NexusUi.card(this).apply {
+            addView(
+                NexusUi.cardBody(
+                    this@AssistantSettingsActivity,
+                    "Standing instructions for the assistant -- a persona, a tone, " +
+                        "rules to follow. The HUD formatting rules stay on regardless.",
+                ),
+                NexusUi.block(),
+            )
+            addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
+            personaField = NexusUi.field(
+                this@AssistantSettingsActivity,
+                "You are…",
+            ).apply {
+                setSingleLine(false)
+                inputType = InputType.TYPE_CLASS_TEXT or
+                    InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                    InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                imeOptions = EditorInfo.IME_ACTION_NONE
+                gravity = Gravity.TOP or Gravity.START
+                minHeight = NexusUi.dp(this@AssistantSettingsActivity, 108)
+                setPadding(
+                    NexusUi.dp(this@AssistantSettingsActivity, 16),
+                    NexusUi.dp(this@AssistantSettingsActivity, 14),
+                    NexusUi.dp(this@AssistantSettingsActivity, 16),
+                    NexusUi.dp(this@AssistantSettingsActivity, 14),
+                )
+            }
+            addView(personaField, NexusUi.block())
+            addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
+            personaStatus = NexusUi.rowSub(this@AssistantSettingsActivity, "")
+            addView(
+                LinearLayout(this@AssistantSettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(
+                        personaStatus,
+                        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                    )
+                    addView(
+                        NexusUi.textButton(this@AssistantSettingsActivity, "Save").apply {
+                            setOnClickListener { savePersona() }
+                        },
+                    )
+                },
+                NexusUi.block(),
+            )
+        }
+
+    private fun savePersona() {
+        authStore.setCustomSystemPrompt(personaField.text?.toString().orEmpty())
+        hideKeyboard(personaField)
+        renderPersona()
+        toast(
+            if (authStore.customSystemPrompt().isBlank()) {
+                "Back to the standard assistant."
+            } else {
+                "Personality saved."
+            },
+        )
+    }
+
+    private fun renderPersona() {
+        val stored = authStore.customSystemPrompt()
+        if (personaField.text?.toString().orEmpty() != stored) {
+            personaField.setText(stored)
+        }
+        personaStatus.text = when {
+            stored.isBlank() -> "Using the standard assistant"
+            stored.length >= CodexAuthStore.MAX_CUSTOM_SYSTEM_PROMPT_CHARS ->
+                "Saved, trimmed to ${CodexAuthStore.MAX_CUSTOM_SYSTEM_PROMPT_CHARS} characters"
+            else -> "Saved, ${stored.length} characters"
+        }
+    }
+
+    // ------------------------------------------------------------------ conversation
 
     private fun keepCard(): LinearLayout =
         NexusUi.card(this).apply {
@@ -940,6 +1413,8 @@ class AssistantSettingsActivity : Activity() {
         else -> "$count saved on this phone"
     }
 
+    // ------------------------------------------------------------------ memory
+
     private fun syncCard(): LinearLayout =
         NexusUi.card(this).apply {
             addView(syncRow(true, "On", "memories + custom instructions"), NexusUi.block())
@@ -988,7 +1463,7 @@ class AssistantSettingsActivity : Activity() {
 
     private fun refreshNow() {
         if (syncing) return
-        if (authStore.authMode() != CodexAuthStore.AUTH_MODE_CHATGPT) {
+        if (authStore.oauthTokens() == null) {
             toast("Connect a ChatGPT account first.")
             return
         }
@@ -1073,9 +1548,7 @@ class AssistantSettingsActivity : Activity() {
     private fun saveMemory() {
         val pasted = memoryField.text?.toString().orEmpty()
         authStore.setAssistantMemory(pasted)
-        val manager = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
-        manager?.hideSoftInputFromWindow(memoryField.windowToken, 0)
-        memoryField.clearFocus()
+        hideKeyboard(memoryField)
         renderMemory()
         toast(if (authStore.assistantMemory().isBlank()) "Notes cleared." else "Notes saved.")
     }
@@ -1092,7 +1565,7 @@ class AssistantSettingsActivity : Activity() {
             else -> "Saved, ${stored.length} characters"
         }
 
-        val chatGpt = authStore.authMode() == CodexAuthStore.AUTH_MODE_CHATGPT
+        val chatGpt = authStore.oauthTokens() != null
         syncSection.visibility = if (chatGpt) View.VISIBLE else View.GONE
         if (!chatGpt) return
 
@@ -1127,7 +1600,14 @@ class AssistantSettingsActivity : Activity() {
         }
     }
 
-    private fun confirmDisconnect() {
+    // ------------------------------------------------------------------ shared chrome
+
+    private fun confirmDialog(
+        title: String,
+        body: String,
+        confirmLabel: String,
+        onConfirm: () -> Unit,
+    ) {
         val dialog = Dialog(this)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
         val panel = LinearLayout(this).apply {
@@ -1144,16 +1624,9 @@ class AssistantSettingsActivity : Activity() {
                 NexusUi.dp(this@AssistantSettingsActivity, 18),
                 NexusUi.dp(this@AssistantSettingsActivity, 14),
             )
-            addView(NexusUi.cardTitle(this@AssistantSettingsActivity, "Disconnect account"))
+            addView(NexusUi.cardTitle(this@AssistantSettingsActivity, title))
             addView(BusTheme.gap(this@AssistantSettingsActivity, 6))
-            addView(
-                NexusUi.cardBody(
-                    this@AssistantSettingsActivity,
-                    "The account and any saved key are removed from this phone. " +
-                        "The assistant stops answering until you connect again.",
-                ),
-                NexusUi.block(),
-            )
+            addView(NexusUi.cardBody(this@AssistantSettingsActivity, body), NexusUi.block())
             addView(BusTheme.gap(this@AssistantSettingsActivity, 14))
             addView(
                 LinearLayout(this@AssistantSettingsActivity).apply {
@@ -1164,10 +1637,14 @@ class AssistantSettingsActivity : Activity() {
                         },
                     )
                     addView(
-                        NexusUi.textButton(this@AssistantSettingsActivity, "Disconnect", danger = true).apply {
+                        NexusUi.textButton(
+                            this@AssistantSettingsActivity,
+                            confirmLabel,
+                            danger = true,
+                        ).apply {
                             setOnClickListener {
                                 dialog.dismiss()
-                                disconnect()
+                                onConfirm()
                             }
                         },
                     )
@@ -1184,15 +1661,6 @@ class AssistantSettingsActivity : Activity() {
         )
     }
 
-    private fun disconnect() {
-        authStore.clear()
-        apiKeyField.setText("")
-        renderAccount()
-        renderModelSelection()
-        renderReasoningSelection()
-        toast("Disconnected.")
-    }
-
     private fun uninstallCard(): LinearLayout =
         NexusUi.uninstallCard(this, "Assistant") {
             startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:$packageName")))
@@ -1204,17 +1672,13 @@ class AssistantSettingsActivity : Activity() {
             .orEmpty()
             .ifBlank { "1.0.0" }
 
-    private fun hideKeyboard() {
+    private fun hideKeyboard(field: EditText) {
         val manager = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
-        manager?.hideSoftInputFromWindow(apiKeyField.windowToken, 0)
-        apiKeyField.clearFocus()
+        manager?.hideSoftInputFromWindow(field.windowToken, 0)
+        field.clearFocus()
     }
 
     private fun toast(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-    }
-
-    private companion object {
-        const val MODEL_SMARTER = "gpt-4o"
     }
 }

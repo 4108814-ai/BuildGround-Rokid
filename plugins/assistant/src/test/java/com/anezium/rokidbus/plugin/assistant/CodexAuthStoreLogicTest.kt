@@ -307,6 +307,42 @@ class CodexAuthStoreLogicTest {
         assertEquals("none", store.chatGptReasoningEffort())
     }
 
+    @Test
+    fun forgettingOneProvidersKeyLeavesTheOthersAlone() {
+        val store = testStore(FakeSharedPreferences())
+        store.saveProviderApiKey(ProviderCatalog.minimax.id, "minimax-key")
+        store.saveProviderApiKey(ProviderCatalog.deepSeek.id, "deepseek-key")
+
+        store.clearProviderApiKey(ProviderCatalog.minimax.id)
+
+        assertEquals(null, store.providerApiKey(ProviderCatalog.minimax.id))
+        assertEquals("deepseek-key", store.providerApiKey(ProviderCatalog.deepSeek.id))
+    }
+
+    @Test
+    fun chatGptDisconnectKeepsOtherProvidersKeysAndDropsChatGptSelection() {
+        val prefs = FakeSharedPreferences(
+            mapOf(
+                "auth_mode" to CodexAuthStore.AUTH_MODE_CHATGPT,
+                "api_key" to "exchanged-openai-key",
+                "oauth_tokens" to "not-json-but-present",
+                "account_label" to "someone@example.com",
+            ),
+        )
+        val store = testStore(prefs)
+        store.saveProviderApiKey(ProviderCatalog.minimax.id, "minimax-key")
+        assertEquals(CodexAuthStore.CHATGPT_PROVIDER_ID, store.selectedProviderId())
+
+        store.clearChatGptAuth()
+
+        assertEquals(null, store.selectedProviderId())
+        assertEquals(null, store.oauthTokens())
+        assertEquals(null, store.accountLabel())
+        // The exchanged key leaves with the account it came from.
+        assertEquals(null, store.apiKey())
+        assertEquals("minimax-key", store.providerApiKey(ProviderCatalog.minimax.id))
+    }
+
     private fun testStore(prefs: FakeSharedPreferences): CodexAuthStore = CodexAuthStore(
         prefs = prefs,
         encryptSecret = { value -> "encrypted:$value" },

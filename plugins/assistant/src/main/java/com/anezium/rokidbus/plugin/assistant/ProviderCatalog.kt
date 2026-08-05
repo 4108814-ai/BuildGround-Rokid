@@ -52,7 +52,7 @@ object ProviderCatalog {
             SuggestedModel(
                 id = "openrouter/auto",
                 title = "Auto",
-                caption = "Automatically select a model",
+                caption = "Picks a model per question",
                 vision = false,
             ),
         ),
@@ -73,7 +73,7 @@ object ProviderCatalog {
             SuggestedModel(
                 id = "MiniMax-M3",
                 title = "MiniMax M3",
-                caption = "",
+                caption = "Flagship, and it sees photos",
                 vision = true,
             ),
         ),
@@ -91,13 +91,13 @@ object ProviderCatalog {
             SuggestedModel(
                 id = "deepseek-chat",
                 title = "DeepSeek Chat",
-                caption = "",
+                caption = "Fast general answers",
                 vision = false,
             ),
             SuggestedModel(
                 id = "deepseek-reasoner",
                 title = "DeepSeek Reasoner",
-                caption = "",
+                caption = "Thinks before answering",
                 vision = false,
             ),
         ),
@@ -115,7 +115,7 @@ object ProviderCatalog {
             SuggestedModel(
                 id = "glm-4.6",
                 title = "GLM 4.6",
-                caption = "",
+                caption = "Zhipu's flagship",
                 vision = false,
             ),
         ),

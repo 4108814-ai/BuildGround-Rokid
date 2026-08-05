@@ -90,6 +90,36 @@ class CodexAuthStore internal constructor(
             .apply()
     }
 
+    fun clearProviderApiKey(id: String) {
+        requireProviderPreset(id)
+        ensureProviderMigration()
+        val editor = prefs.edit().remove(providerKey(KEY_PROVIDER_API_KEY_PREFIX, id))
+        // The legacy slot doubles as the OpenAI key, so forgetting OpenAI clears both.
+        if (id == ProviderCatalog.openAi.id) editor.remove(KEY_API_KEY)
+        editor.apply()
+    }
+
+    /**
+     * Signing out of ChatGPT removes the account and everything that arrived with it —
+     * tokens, the exchanged key, the synced memories — but never another provider's key.
+     */
+    fun clearChatGptAuth() {
+        ensureProviderMigration()
+        val editor = prefs.edit()
+            .remove(KEY_OAUTH_TOKENS)
+            .remove(KEY_API_KEY)
+            .remove(KEY_ACCOUNT_LABEL)
+            .remove(KEY_AUTH_MODE)
+            .remove(KEY_API_KEY_EXCHANGE_ERROR)
+            .remove(KEY_CONSUMER_ACCOUNT_NO_API_ORG)
+            .remove(KEY_SYNCED_ACCOUNT_CONTEXT)
+            .remove(KEY_ACCOUNT_CONTEXT_SYNCED_AT)
+        if (prefs.getString(KEY_SELECTED_PROVIDER_ID, null) == CHATGPT_PROVIDER_ID) {
+            editor.remove(KEY_SELECTED_PROVIDER_ID)
+        }
+        editor.apply()
+    }
+
     fun providerModel(id: String): String {
         val preset = requireProviderPreset(id)
         ensureProviderMigration()
