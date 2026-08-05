@@ -1,6 +1,6 @@
 # Changelog — Transit
 
-## Unreleased
+## 1.0.4
 
 - Add realtime ETAs for Hong Kong KMB, Citybus, and green-minibus stops, with automatic fallback to Transitous schedules.
 
