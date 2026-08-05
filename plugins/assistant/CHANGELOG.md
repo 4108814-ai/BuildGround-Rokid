@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.1.0
+
+- **Choose who answers.** Settings now opens on a provider list: your ChatGPT
+  plan, an OpenAI key, OpenRouter, MiniMax (a Coding Plan key works as-is),
+  DeepSeek, GLM (Z.ai), or any OpenAI-compatible server of your own. Each
+  provider keeps its own key — encrypted on the phone — its own model choice,
+  and its own endpoint, so switching is one tap, not a re-setup.
+- **Any model id.** Pick from the suggestions or type the exact model your
+  provider serves. For a model the app does not know, say whether it can see
+  photos; photo questions are handled gracefully either way.
+- **Give it a personality.** A new Personality box holds standing instructions
+  — a persona, a tone, house rules — layered under the HUD formatting rules.
+- Your notes and synced ChatGPT memories keep riding along with every question,
+  whichever provider answers; the Memory toggle remains the single off switch.
+- Signing out of ChatGPT no longer forgets the keys you saved for other
+  providers.
+
 ## 1.0.1
 
 - **Answers at full length.** The model is no longer told to stay under two
