@@ -37,7 +37,7 @@ grants one at a time and can take back.
 
 | Plugin | What it puts on the HUD |
 |---|---|
-| **[Assistant](plugins/assistant/)** | Hold the touchpad and ask out loud: your words appear as you speak them, then the answer arrives on the band and in your ear — and it can look through the glasses camera to tell you what you are seeing. Runs on your own ChatGPT account |
+| **[Assistant](plugins/assistant/)** | Hold the touchpad and ask out loud: your words appear as you speak them, then the answer arrives on the band and in your ear — and it can look through the glasses camera to tell you what you are seeing. Runs on your own ChatGPT plan, or any AI provider you bring a key for — OpenAI, OpenRouter, MiniMax, DeepSeek, GLM, or your own server |
 | **[Relay](plugins/relay/)** | Phone messages as a band over whatever you were looking at, answered out loud — plus an inbox for the ones you let go |
 | **[Lens](plugins/lens/)** | Google-Lens-style live translation: the glasses camera streams to the phone, ML Kit OCR + translation run there (offline), translated overlays come back in real time — plus a freeze mode for full-resolution stills |
 | **[Feeds](plugin-feeds/)** | Bluesky and X timelines — browse posts, open threads, and view the actual photos full-screen |
