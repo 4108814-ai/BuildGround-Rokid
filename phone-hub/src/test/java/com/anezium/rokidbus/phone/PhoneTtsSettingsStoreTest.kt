@@ -38,11 +38,41 @@ class PhoneTtsSettingsStoreTest {
         assertNull(PhoneTtsSettingsStore(context).voiceName())
     }
 
+    @Test
+    fun `output mode defaults and persists glasses only`() {
+        clearPreferences()
+        val store = PhoneTtsSettingsStore(context)
+
+        assertEquals(PhoneTtsOutputMode.AUTO, store.outputMode())
+        store.setOutputMode(PhoneTtsOutputMode.GLASSES_ONLY)
+        assertEquals(
+            PhoneTtsOutputMode.GLASSES_ONLY,
+            PhoneTtsSettingsStore(context).outputMode(),
+        )
+        assertEquals(
+            "glasses",
+            context.getSharedPreferences(NexusPhoneState.PREFS, Context.MODE_PRIVATE)
+                .getString(PhoneTtsSettingsStore.KEY_OUTPUT_MODE, null),
+        )
+    }
+
+    @Test
+    fun `unknown output mode defaults to automatic`() {
+        clearPreferences()
+        context.getSharedPreferences(NexusPhoneState.PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(PhoneTtsSettingsStore.KEY_OUTPUT_MODE, "future_mode")
+            .commit()
+
+        assertEquals(PhoneTtsOutputMode.AUTO, PhoneTtsSettingsStore(context).outputMode())
+    }
+
     private fun clearPreferences() {
         context.getSharedPreferences(NexusPhoneState.PREFS, Context.MODE_PRIVATE)
             .edit()
             .remove(PhoneTtsSettingsStore.KEY_SPEECH_RATE)
             .remove(PhoneTtsSettingsStore.KEY_VOICE_NAME)
+            .remove(PhoneTtsSettingsStore.KEY_OUTPUT_MODE)
             .commit()
     }
 }

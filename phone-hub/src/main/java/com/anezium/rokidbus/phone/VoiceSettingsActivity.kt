@@ -20,11 +20,17 @@ import java.util.Locale
  * The speaking is done by the phone's own engine, so the voice and the speed are ours to
  * set per sentence — unlike the glasses' engine, whose voice and rate are device-wide
  * properties shared with Rokid's own assistant and therefore left alone.
+ *
+ * Automatic follows the phone's audio route unless that route is its own speaker, when
+ * the glasses take over. Glasses only always uses the glasses' device-wide voice and rate.
  */
 class VoiceSettingsActivity : Activity() {
     private val voiceSettings by lazy { PhoneTtsSettingsStore(this) }
 
+    private lateinit var introCard: TextView
     private lateinit var headerMeta: TextView
+    private lateinit var outputHost: LinearLayout
+    private lateinit var phoneSettingsHost: LinearLayout
     private lateinit var speedHost: LinearLayout
     private lateinit var voiceListHost: LinearLayout
 
@@ -45,30 +51,31 @@ class VoiceSettingsActivity : Activity() {
         window.statusBarColor = NexusUi.BG
         window.navigationBarColor = NexusUi.BG
 
+        introCard = NexusUi.cardBody(this, "")
         headerMeta = NexusUi.metaLabel(this, "", NexusUi.GREEN_DIM)
+        outputHost = host()
         speedHost = host()
         voiceListHost = host()
 
-        val content = NexusUi.contentColumn(this).apply {
-            addView(
-                NexusUi.cardBody(
-                    this@VoiceSettingsActivity,
-                    "Answers are spoken by your phone, so they come out wherever your " +
-                        "audio is going -- the glasses, or your earbuds if you have some in.",
-                ),
-                NexusUi.block(),
-            )
-            addView(BusTheme.gap(this@VoiceSettingsActivity, 22))
+        phoneSettingsHost = host().apply {
             addView(sectionHeaderRow("Speed", headerMeta), NexusUi.block())
             addView(BusTheme.gap(this@VoiceSettingsActivity, 12))
             addView(speedHost, NexusUi.block())
             addView(BusTheme.gap(this@VoiceSettingsActivity, 26))
             addView(
-                sectionHeaderRow("Voice", NexusUi.metaLabel(this@VoiceSettingsActivity, "", NexusUi.INK4)),
+                sectionHeaderRow(
+                    "Voice",
+                    NexusUi.metaLabel(this@VoiceSettingsActivity, "", NexusUi.INK4),
+                ),
                 NexusUi.block(),
             )
             addView(BusTheme.gap(this@VoiceSettingsActivity, 12))
-            addView(NexusUi.card(this@VoiceSettingsActivity).apply { addView(voiceListHost, NexusUi.block()) }, NexusUi.block())
+            addView(
+                NexusUi.card(this@VoiceSettingsActivity).apply {
+                    addView(voiceListHost, NexusUi.block())
+                },
+                NexusUi.block(),
+            )
             addView(BusTheme.gap(this@VoiceSettingsActivity, 14))
             addView(
                 NexusUi.textButton(this@VoiceSettingsActivity, "Hear it").apply {
@@ -76,6 +83,27 @@ class VoiceSettingsActivity : Activity() {
                 },
                 NexusUi.block(),
             )
+        }
+
+        val content = NexusUi.contentColumn(this).apply {
+            addView(introCard, NexusUi.block())
+            addView(BusTheme.gap(this@VoiceSettingsActivity, 22))
+            addView(
+                sectionHeaderRow(
+                    "Output",
+                    NexusUi.metaLabel(this@VoiceSettingsActivity, "", NexusUi.INK4),
+                ),
+                NexusUi.block(),
+            )
+            addView(BusTheme.gap(this@VoiceSettingsActivity, 12))
+            addView(
+                NexusUi.card(this@VoiceSettingsActivity).apply {
+                    addView(outputHost, NexusUi.block())
+                },
+                NexusUi.block(),
+            )
+            addView(BusTheme.gap(this@VoiceSettingsActivity, 26))
+            addView(phoneSettingsHost, NexusUi.block())
         }
 
         val scroll = ScrollView(this).apply {
@@ -169,6 +197,35 @@ class VoiceSettingsActivity : Activity() {
         }
 
     private fun render() {
+        val outputMode = voiceSettings.outputMode()
+        introCard.text = when (outputMode) {
+            PhoneTtsOutputMode.AUTO ->
+                "Answers are spoken by your phone, so they follow your audio -- the glasses, " +
+                    "or your earbuds if you have some in. If the sound would land on the " +
+                    "phone's own speaker, the glasses speak instead."
+            PhoneTtsOutputMode.GLASSES_ONLY ->
+                "Answers are spoken by the glasses themselves, with the voice and speed " +
+                    "they share with Rokid's own assistant."
+        }
+        outputHost.removeAllViews()
+        outputHost.addView(
+            selectableRow("Automatic", null, outputMode == PhoneTtsOutputMode.AUTO) {
+                voiceSettings.setOutputMode(PhoneTtsOutputMode.AUTO)
+                render()
+            },
+            NexusUi.block(),
+        )
+        outputHost.addView(
+            selectableRow("Glasses only", null, outputMode == PhoneTtsOutputMode.GLASSES_ONLY) {
+                voiceSettings.setOutputMode(PhoneTtsOutputMode.GLASSES_ONLY)
+                render()
+            },
+            NexusUi.block(),
+        )
+        phoneSettingsHost.visibility =
+            if (outputMode == PhoneTtsOutputMode.AUTO) View.VISIBLE else View.GONE
+        if (outputMode == PhoneTtsOutputMode.GLASSES_ONLY) return
+
         val rate = voiceSettings.speechRate()
         headerMeta.text = formatRate(rate)
 
@@ -195,15 +252,25 @@ class VoiceSettingsActivity : Activity() {
             return
         }
         val selected = voiceSettings.voiceName()
-        voiceListHost.addView(voiceRow(null, "Default", null, selected == null), NexusUi.block())
+        voiceListHost.addView(
+            selectableRow("Default", null, selected == null) {
+                voiceSettings.setVoiceName(null)
+                render()
+                hearSample()
+            },
+            NexusUi.block(),
+        )
         voices.forEachIndexed { index, option ->
             voiceListHost.addView(
-                voiceRow(
-                    option.name,
+                selectableRow(
                     "Voice ${index + 1}",
                     if (option.needsNetwork) "needs network" else "on device",
                     selected == option.name,
-                ),
+                ) {
+                    voiceSettings.setVoiceName(option.name)
+                    render()
+                    hearSample()
+                },
                 NexusUi.block(),
             )
         }
@@ -250,11 +317,11 @@ class VoiceSettingsActivity : Activity() {
             }
         }
 
-    private fun voiceRow(
-        name: String?,
+    private fun selectableRow(
         label: String,
         badge: String?,
         selected: Boolean,
+        onClick: () -> Unit,
     ): LinearLayout {
         val dot = NexusUi.dot(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -277,9 +344,7 @@ class VoiceSettingsActivity : Activity() {
                 NexusUi.dp(this@VoiceSettingsActivity, 7),
             )
             setOnClickListener {
-                voiceSettings.setVoiceName(name)
-                render()
-                hearSample()
+                onClick()
             }
             addView(
                 NexusUi.rowTitle(this@VoiceSettingsActivity, label).apply {

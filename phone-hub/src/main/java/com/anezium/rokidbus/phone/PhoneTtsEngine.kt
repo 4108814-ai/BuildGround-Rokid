@@ -18,6 +18,18 @@ data class PhoneTtsVoiceOption(
     val needsNetwork: Boolean,
 )
 
+internal fun phoneTtsAudioAttributes(): AudioAttributes {
+    val usage = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        AudioAttributes.USAGE_ASSISTANT
+    } else {
+        AudioAttributes.USAGE_MEDIA
+    }
+    return AudioAttributes.Builder()
+        .setUsage(usage)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build()
+}
+
 internal enum class PhoneTtsSpeakResult {
     ACCEPTED,
     ENGINE_UNAVAILABLE,
@@ -391,16 +403,7 @@ internal class PhoneTtsEngine private constructor(
             return
         }
         val configured = runCatching {
-            val usage = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                AudioAttributes.USAGE_ASSISTANT
-            } else {
-                AudioAttributes.USAGE_MEDIA
-            }
-            val attributes = AudioAttributes.Builder()
-                .setUsage(usage)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                .build()
-            current.setAudioAttributes(attributes) != TextToSpeech.ERROR &&
+            current.setAudioAttributes(phoneTtsAudioAttributes()) != TextToSpeech.ERROR &&
                 current.setOnUtteranceProgressListener(progressListener) != TextToSpeech.ERROR
         }.getOrDefault(false)
         if (!configured) {

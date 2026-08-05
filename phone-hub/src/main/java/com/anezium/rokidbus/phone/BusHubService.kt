@@ -633,6 +633,8 @@ class BusHubService : Service() {
         super.onCreate()
         NexusPhoneState.restore(applicationContext)
         activeInstance = this
+        val phoneTtsSettings = PhoneTtsSettingsStore(applicationContext)
+        val phoneSpeakerRouteProbe = PhoneSpeakerRouteProbe(applicationContext)
         phoneTtsDispatcher = PhoneTtsDispatcher(
             playback = PhoneTtsPlayback(
                 output = PhoneTtsEngine(applicationContext, ::log),
@@ -641,6 +643,8 @@ class BusHubService : Service() {
             ),
             forwardToGlasses = ::sendRemote,
             emitDone = ::emitPhoneTtsDone,
+            outputMode = phoneTtsSettings::outputMode,
+            phoneWouldUseOwnSpeaker = phoneSpeakerRouteProbe::wouldUseOwnSpeaker,
         )
         manualPairingEngine = GlassesManualPairingEngine.create(
             context = applicationContext,

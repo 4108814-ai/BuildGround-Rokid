@@ -117,6 +117,8 @@ internal class PhoneTtsDispatcher(
     private val playback: PhoneTtsPlayback,
     private val forwardToGlasses: (BusEnvelope) -> String?,
     private val emitDone: (TtsDoneEvent) -> Unit,
+    private val outputMode: () -> PhoneTtsOutputMode = { PhoneTtsOutputMode.AUTO },
+    private val phoneWouldUseOwnSpeaker: () -> Boolean = { false },
 ) {
     private data class RemoteUtterance(val ownerPluginId: String, val utteranceId: String)
 
@@ -141,7 +143,9 @@ internal class PhoneTtsDispatcher(
 
     fun initialize() = synchronized(dispatchLock) { playback.initialize() }
 
-    fun prewarm(): Boolean = synchronized(dispatchLock) { playback.prewarm() }
+    fun prewarm(): Boolean = synchronized(dispatchLock) {
+        if (outputMode() == PhoneTtsOutputMode.GLASSES_ONLY) false else playback.prewarm()
+    }
 
     fun availableVoices(locale: Locale): List<PhoneTtsVoiceOption> =
         synchronized(dispatchLock) { playback.availableVoices(locale) }
@@ -178,6 +182,26 @@ internal class PhoneTtsDispatcher(
         val request = when (val validation = TtsContract.validateSpeak(envelope.payload, requireOwner = true)) {
             is TtsValidationResult.Valid -> validation.value
             is TtsValidationResult.Invalid -> return PhoneTtsDispatchResult.Invalid(validation.reason)
+        }
+        if (outputMode() == PhoneTtsOutputMode.GLASSES_ONLY) {
+            val key = RemoteUtterance(checkNotNull(request.ownerPluginId), request.utteranceId)
+            synchronized(remoteLock) {
+                remoteInFlight[key] = remoteInFlight.getOrDefault(key, 0) + 1
+            }
+            val error = forwardToGlasses(envelope)
+            if (error != null) synchronized(remoteLock) { decrementRemote(key) }
+            return PhoneTtsDispatchResult.Forwarded(error)
+        }
+        if (!hasRemoteInFlight() && playback.isReady && phoneWouldUseOwnSpeaker()) {
+            val key = RemoteUtterance(checkNotNull(request.ownerPluginId), request.utteranceId)
+            synchronized(remoteLock) {
+                remoteInFlight[key] = remoteInFlight.getOrDefault(key, 0) + 1
+            }
+            val error = forwardToGlasses(envelope)
+            if (error == null) return PhoneTtsDispatchResult.Forwarded(null)
+            synchronized(remoteLock) { decrementRemote(key) }
+            if (playback.speak(request)) return PhoneTtsDispatchResult.PhoneHandled
+            return PhoneTtsDispatchResult.Forwarded(error)
         }
         if (!hasRemoteInFlight() && playback.isReady && playback.speak(request)) {
             return PhoneTtsDispatchResult.PhoneHandled

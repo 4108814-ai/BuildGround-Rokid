@@ -2,6 +2,17 @@ package com.anezium.rokidbus.phone
 
 import android.content.Context
 
+enum class PhoneTtsOutputMode(internal val storedValue: String) {
+    AUTO("auto"),
+    GLASSES_ONLY("glasses"),
+    ;
+
+    internal companion object {
+        fun fromStoredValue(value: String?): PhoneTtsOutputMode =
+            entries.firstOrNull { it.storedValue == value } ?: AUTO
+    }
+}
+
 class PhoneTtsSettingsStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(
         NexusPhoneState.PREFS,
@@ -24,6 +35,14 @@ class PhoneTtsSettingsStore(context: Context) {
         editor.apply()
     }
 
+    fun outputMode(): PhoneTtsOutputMode = PhoneTtsOutputMode.fromStoredValue(
+        preferences.getString(KEY_OUTPUT_MODE, null),
+    )
+
+    fun setOutputMode(mode: PhoneTtsOutputMode) {
+        preferences.edit().putString(KEY_OUTPUT_MODE, mode.storedValue).apply()
+    }
+
     private fun normalizeRate(rate: Float): Float =
         if (rate.isFinite()) rate.coerceIn(MIN_SPEECH_RATE, MAX_SPEECH_RATE) else DEFAULT_SPEECH_RATE
 
@@ -33,5 +52,6 @@ class PhoneTtsSettingsStore(context: Context) {
         const val MAX_SPEECH_RATE = 2.0f
         const val KEY_SPEECH_RATE = "phone_tts_speech_rate"
         const val KEY_VOICE_NAME = "phone_tts_voice_name"
+        const val KEY_OUTPUT_MODE = "phone_tts_output_mode"
     }
 }
