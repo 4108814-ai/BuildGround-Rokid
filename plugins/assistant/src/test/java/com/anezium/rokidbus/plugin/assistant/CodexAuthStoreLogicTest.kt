@@ -20,6 +20,7 @@ class CodexAuthStoreLogicTest {
         assertTrue(store.syncAccountContext())
         assertEquals("", store.syncedAccountContext())
         assertEquals(0L, store.accountContextSyncedAtMs())
+        assertEquals("", store.customSystemPrompt())
     }
 
     @Test
@@ -57,6 +58,130 @@ class CodexAuthStoreLogicTest {
 
         assertEquals(CodexAuthStore.MAX_ASSISTANT_MEMORY_CHARS, store.assistantMemory().length)
         assertEquals("x".repeat(CodexAuthStore.MAX_ASSISTANT_MEMORY_CHARS), store.assistantMemory())
+    }
+
+    @Test
+    fun customSystemPromptTrimsAndTruncatesToMaximumLength() {
+        val store = CodexAuthStore(FakeSharedPreferences())
+        val oversized = " \n" +
+            "x".repeat(CodexAuthStore.MAX_CUSTOM_SYSTEM_PROMPT_CHARS + 25) +
+            "\t "
+
+        store.setCustomSystemPrompt(oversized)
+
+        assertEquals(CodexAuthStore.MAX_CUSTOM_SYSTEM_PROMPT_CHARS, store.customSystemPrompt().length)
+        assertEquals(
+            "x".repeat(CodexAuthStore.MAX_CUSTOM_SYSTEM_PROMPT_CHARS),
+            store.customSystemPrompt(),
+        )
+    }
+
+    @Test
+    fun migratesLegacyApiKeyModeToOpenAiProvider() {
+        val store = testStore(
+            FakeSharedPreferences(
+                mapOf(
+                    "auth_mode" to CodexAuthStore.AUTH_MODE_API_KEY,
+                    "api_key" to "legacy-openai-key",
+                    "model" to "vendor/free-text-model",
+                ),
+            ),
+        )
+
+        assertEquals(ProviderCatalog.openAi.id, store.selectedProviderId())
+        assertEquals("legacy-openai-key", store.providerApiKey(ProviderCatalog.openAi.id))
+        assertEquals("vendor/free-text-model", store.providerModel(ProviderCatalog.openAi.id))
+        assertEquals("vendor/free-text-model", store.model())
+    }
+
+    @Test
+    fun migratesLegacyChatGptModeAndKeepsLegacyOpenAiKeyReadable() {
+        val store = testStore(
+            FakeSharedPreferences(
+                mapOf(
+                    "auth_mode" to CodexAuthStore.AUTH_MODE_CHATGPT,
+                    "api_key" to "exchanged-openai-key",
+                ),
+            ),
+        )
+
+        assertEquals(CodexAuthStore.CHATGPT_PROVIDER_ID, store.selectedProviderId())
+        assertEquals("exchanged-openai-key", store.apiKey())
+        assertEquals("exchanged-openai-key", store.providerApiKey(ProviderCatalog.openAi.id))
+    }
+
+    @Test
+    fun migrationDoesNotOverwriteProviderSettingsAlreadyWritten() {
+        val store = testStore(
+            FakeSharedPreferences(
+                mapOf(
+                    "auth_mode" to CodexAuthStore.AUTH_MODE_API_KEY,
+                    "selected_provider_id" to ProviderCatalog.minimax.id,
+                    "api_key" to "legacy-openai-key",
+                    "api_key.openai" to "provider-openai-key",
+                    "model" to "legacy-model",
+                    "model.openai" to "provider-model",
+                ),
+            ),
+        )
+
+        assertEquals(ProviderCatalog.minimax.id, store.selectedProviderId())
+        assertEquals("provider-openai-key", store.providerApiKey(ProviderCatalog.openAi.id))
+        assertEquals("provider-model", store.providerModel(ProviderCatalog.openAi.id))
+    }
+
+    @Test
+    fun providerApiKeysAreIsolatedAndLegacyAccessorStaysOpenAiOnly() {
+        val store = testStore(FakeSharedPreferences())
+
+        store.saveProviderApiKey(ProviderCatalog.openAi.id, "openai-key")
+        store.saveProviderApiKey(ProviderCatalog.minimax.id, "minimax-key")
+
+        assertEquals("openai-key", store.providerApiKey(ProviderCatalog.openAi.id))
+        assertEquals("minimax-key", store.providerApiKey(ProviderCatalog.minimax.id))
+        assertEquals("openai-key", store.apiKey())
+    }
+
+    @Test
+    fun selectedProviderAndPerProviderValuesRoundTrip() {
+        val store = testStore(FakeSharedPreferences())
+
+        store.setSelectedProviderId(ProviderCatalog.openRouter.id)
+        store.setProviderModel(ProviderCatalog.openRouter.id, " company/free-text ")
+        store.setProviderBaseUrl(ProviderCatalog.openRouter.id, " https://gateway.test/v1/ ")
+        store.setProviderEffort(ProviderCatalog.openRouter.id, "medium")
+
+        assertEquals(ProviderCatalog.openRouter.id, store.selectedProviderId())
+        assertEquals("company/free-text", store.providerModel(ProviderCatalog.openRouter.id))
+        assertEquals("https://gateway.test/v1/", store.providerBaseUrl(ProviderCatalog.openRouter.id))
+        assertEquals("medium", store.providerEffort(ProviderCatalog.openRouter.id))
+    }
+
+    @Test
+    fun providerVisionDefaultsFromCatalogAndCanBeOverridden() {
+        val store = testStore(FakeSharedPreferences())
+
+        assertTrue(store.providerModelSupportsPhotos(ProviderCatalog.openAi.id))
+        store.setProviderModel(ProviderCatalog.openAi.id, "free-text")
+        assertFalse(store.providerModelSupportsPhotos(ProviderCatalog.openAi.id))
+        store.setProviderModelSupportsPhotos(ProviderCatalog.openAi.id, true)
+        assertTrue(store.providerModelSupportsPhotos(ProviderCatalog.openAi.id))
+    }
+
+    @Test
+    fun providerReadinessUsesSelectedKeyAndRequiresCustomBaseUrl() {
+        val store = testStore(FakeSharedPreferences())
+        store.saveProviderApiKey(ProviderCatalog.minimax.id, "minimax-key")
+        store.setSelectedProviderId(ProviderCatalog.minimax.id)
+
+        assertTrue(store.hasUsableAuth())
+
+        store.saveProviderApiKey(ProviderCatalog.custom.id, "custom-key")
+        store.setSelectedProviderId(ProviderCatalog.custom.id)
+        assertFalse(store.hasUsableAuth())
+
+        store.setProviderBaseUrl(ProviderCatalog.custom.id, "https://custom.test/v1")
+        assertTrue(store.hasUsableAuth())
     }
 
     @Test
@@ -182,8 +307,16 @@ class CodexAuthStoreLogicTest {
         assertEquals("none", store.chatGptReasoningEffort())
     }
 
-    private class FakeSharedPreferences : SharedPreferences {
-        private val values = mutableMapOf<String, Any?>()
+    private fun testStore(prefs: FakeSharedPreferences): CodexAuthStore = CodexAuthStore(
+        prefs = prefs,
+        encryptSecret = { value -> "encrypted:$value" },
+        decryptSecret = { value -> value.removePrefix("encrypted:") },
+    )
+
+    private class FakeSharedPreferences(
+        initialValues: Map<String, Any?> = emptyMap(),
+    ) : SharedPreferences {
+        private val values = initialValues.toMutableMap()
 
         override fun getAll(): MutableMap<String, *> = values.toMutableMap()
 

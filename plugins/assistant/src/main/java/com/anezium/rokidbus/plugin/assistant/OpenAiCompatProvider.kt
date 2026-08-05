@@ -16,33 +16,43 @@ import java.net.URL
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-class OpenRouterApiClient(
-    private val apiKeyProvider: () -> String?,
-    private val baseUrlProvider: () -> String = { DEFAULT_BASE_URL },
-) {
-    private val activeConnections = ConcurrentHashMap<String, HttpURLConnection>()
-
+interface OpenAiCompatChatClient {
     fun streamChat(
         request: ChatRequest,
         modelId: String,
         requestId: String = request.requestId,
+    ): Flow<String>
+
+    fun cancel(requestId: String)
+}
+
+class OpenAiCompatApiClient(
+    private val preset: ProviderPreset,
+    private val apiKeyProvider: () -> String?,
+    private val baseUrlProvider: () -> String = { preset.defaultBaseUrl },
+    private val effortProvider: () -> String = { "" },
+) : OpenAiCompatChatClient {
+    private val activeConnections = ConcurrentHashMap<String, HttpURLConnection>()
+
+    override fun streamChat(
+        request: ChatRequest,
+        modelId: String,
+        requestId: String,
     ): Flow<String> = flow {
         val connection = openConnection().apply {
             doOutput = true
             setRequestProperty("Accept", "text/event-stream")
-            val body = JSONObject()
-                .put("model", modelId.trim().ifBlank { DEFAULT_MODEL_ID })
-                .put("stream", true)
-                .put("messages", request.toChatCompletionMessages())
             outputStream.use { output ->
-                output.write(body.toString().toByteArray(Charsets.UTF_8))
+                output.write(requestBody(request, modelId).toString().toByteArray(Charsets.UTF_8))
             }
         }
         activeConnections.put(requestId, connection)?.disconnect()
         try {
             val status = connection.responseCode
             if (status !in 200..299) {
-                throw IllegalStateException("OpenRouter chat failed ($status): ${connection.safeErrorBody()}")
+                throw IllegalStateException(
+                    "${preset.displayName} chat failed ($status): ${connection.safeErrorBody()}",
+                )
             }
             readSse(connection) { event ->
                 when (event) {
@@ -61,22 +71,39 @@ class OpenRouterApiClient(
         }
     }.flowOn(Dispatchers.IO)
 
-    fun cancel(requestId: String) {
+    override fun cancel(requestId: String) {
         activeConnections.remove(requestId)?.disconnect()
     }
 
-    private fun openConnection(): HttpURLConnection {
-        val baseUrl = baseUrlProvider().trim().trimEnd('/').ifBlank { DEFAULT_BASE_URL }
-        return (URL("$baseUrl/chat/completions").openConnection() as HttpURLConnection).apply {
+    internal fun endpointUrl(): String {
+        val baseUrl = baseUrlProvider().trim().trimEnd('/')
+        check(baseUrl.isNotEmpty()) { "${preset.displayName} base URL is not configured." }
+        return "$baseUrl/chat/completions"
+    }
+
+    internal fun requestBody(request: ChatRequest, modelId: String): JSONObject =
+        JSONObject()
+            .put("model", modelId)
+            .put("stream", true)
+            .put("messages", request.toChatCompletionMessages())
+            .apply {
+                val effort = effortProvider().trim()
+                if (effort in preset.supportedEfforts) {
+                    put("reasoning", JSONObject().put("effort", effort))
+                }
+            }
+
+    private fun openConnection(): HttpURLConnection =
+        (URL(endpointUrl()).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 20_000
             readTimeout = 120_000
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Authorization", "Bearer ${apiKeyProvider().orEmpty()}")
-            setRequestProperty("HTTP-Referer", "https://github.com/Anezium/Rokid-Nexus")
-            setRequestProperty("X-Title", "Rokid Nexus Assistant")
+            preset.extraHeaders.forEach { (name, value) ->
+                setRequestProperty(name, value)
+            }
         }
-    }
 
     private suspend fun readSse(
         connection: HttpURLConnection,
@@ -104,33 +131,30 @@ class OpenRouterApiClient(
             if (data.isNotEmpty()) consume(OpenAiChatSseParser.parseData(data.toString()))
         }
     }
-
-    companion object {
-        const val DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
-        const val DEFAULT_MODEL_ID = "openrouter/auto"
-    }
 }
 
-class OpenRouterProvider(
-    private val apiClient: OpenRouterApiClient,
+class OpenAiCompatProvider internal constructor(
+    private val preset: ProviderPreset,
+    private val apiClient: OpenAiCompatChatClient,
     private val apiKeyConfigured: () -> Boolean,
-    private val modelProvider: () -> String = { OpenRouterApiClient.DEFAULT_MODEL_ID },
+    private val modelProvider: () -> String = { preset.defaultModel },
+    private val supportsVision: () -> Boolean,
 ) : AiProvider {
-    override val id: String = ID
-    override val displayName: String = "OpenRouter"
+    override val id: String = preset.id
+    override val displayName: String = preset.displayName
 
     override fun streamEvents(request: ChatRequest): Flow<AiProviderEvent> = flow {
         val messageId = UUID.randomUUID().toString()
         emit(AiProviderEvent.Started(messageId))
         if (!apiKeyConfigured()) {
-            emit(AiProviderEvent.Failed("OpenRouter API key is not configured."))
+            emit(AiProviderEvent.Failed("${preset.displayName} API key is not configured."))
             return@flow
         }
 
         val response = StringBuilder()
         try {
             apiClient.streamChat(
-                request = request,
+                request = request.forVisionSupport(supportsVision()),
                 modelId = request.model ?: modelProvider(),
                 requestId = request.requestId,
             ).collect { delta ->
@@ -141,7 +165,15 @@ class OpenRouterProvider(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
-            emit(AiProviderEvent.Failed(error.conciseProviderMessage("OpenRouter request failed.")))
+            val detail = error.conciseProviderMessage("Request failed.")
+            val message = if (detail.contains(preset.displayName, ignoreCase = true)) {
+                detail
+            } else {
+                "${preset.displayName} request failed: $detail".take(240)
+            }
+            emit(
+                AiProviderEvent.Failed(message),
+            )
             return@flow
         }
         emit(
@@ -158,8 +190,24 @@ class OpenRouterProvider(
     override suspend fun cancel(requestId: String) {
         apiClient.cancel(requestId)
     }
-
-    companion object {
-        const val ID = "openrouter"
-    }
 }
+
+internal fun ChatRequest.forVisionSupport(supportsVision: Boolean): ChatRequest {
+    if (supportsVision) return this
+    val hadCurrentPhoto = photos.any { photo -> !photo.isOmittedHistoryPhoto() }
+    val textOnlyUserText = if (hadCurrentPhoto) {
+        listOf(userText, PHOTO_UNSUPPORTED_NOTE)
+            .filter(String::isNotBlank)
+            .joinToString("\n\n")
+    } else {
+        userText
+    }
+    return copy(
+        userText = textOnlyUserText,
+        history = history.map { message -> message.copy(photos = emptyList()) },
+        photos = emptyList(),
+    )
+}
+
+internal const val PHOTO_UNSUPPORTED_NOTE =
+    "[A photo was attached, but the selected model cannot view images.]"

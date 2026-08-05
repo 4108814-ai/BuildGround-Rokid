@@ -59,13 +59,26 @@ class AssistantPluginService : NexusPluginService() {
     private val accountContextSync by lazy { AccountContextSync(applicationContext) }
     private val threadStore by lazy { AssistantThreadStore(applicationContext) }
     private val conversationThreading by lazy { AssistantConversationThreading(threadStore) }
-    private val openAiClient by lazy { OpenAiApiClient(authStore::apiKey) }
-    private val openAiProvider by lazy {
-        OpenAiProvider(
-            apiClient = openAiClient,
-            apiKeyConfigured = authStore::hasApiKey,
-            modelProvider = authStore::model,
-        )
+    private val openAiCompatClients by lazy {
+        ProviderCatalog.presets.associate { preset ->
+            preset.id to OpenAiCompatApiClient(
+                preset = preset,
+                apiKeyProvider = { authStore.providerApiKey(preset.id) },
+                baseUrlProvider = { authStore.providerBaseUrl(preset.id) },
+                effortProvider = { authStore.providerEffort(preset.id) },
+            )
+        }
+    }
+    private val openAiCompatProviders by lazy {
+        ProviderCatalog.presets.map { preset ->
+            OpenAiCompatProvider(
+                preset = preset,
+                apiClient = checkNotNull(openAiCompatClients[preset.id]),
+                apiKeyConfigured = { !authStore.providerApiKey(preset.id).isNullOrBlank() },
+                modelProvider = { authStore.providerModel(preset.id) },
+                supportsVision = { authStore.providerModelSupportsPhotos(preset.id) },
+            )
+        }
     }
     private val chatGptCodexClient by lazy {
         ChatGptCodexApiClient(
@@ -86,8 +99,8 @@ class AssistantPluginService : NexusPluginService() {
     }
     private val providerRouter by lazy {
         ProviderRouter(
-            providers = listOf(openAiProvider, chatGptCodexProvider),
-            defaultProviderId = OpenAiProvider.ID,
+            providers = listOf(chatGptCodexProvider) + openAiCompatProviders,
+            defaultProviderId = ProviderCatalog.openAi.id,
         )
     }
     private val transcriber by lazy { OpenAiTranscriber(authStore::apiKey) }
@@ -477,6 +490,7 @@ class AssistantPluginService : NexusPluginService() {
 
     private suspend fun streamAssistantAnswer(transcript: String) {
         val noticeBandMode = uiController.isNoticeBandMode
+        val providerId = selectedProviderId()
         uiController.showTransient("Thinking…")
         val keepConversation = authStore.keepConversation()
         val keepPhotosInConversations = authStore.keepPhotosInConversations()
@@ -492,13 +506,14 @@ class AssistantPluginService : NexusPluginService() {
         val request = ChatRequest(
             userText = transcript,
             systemPrompt = NexusAgentPolicy.buildSystemPrompt(
+                customPrompt = authStore.customSystemPrompt(),
                 noticeBand = noticeBandMode,
                 memory = authStore.combinedAssistantContextForPrompt(),
             ),
             history = conversationContext.history,
-            model = when (authStore.authMode()) {
-                CodexAuthStore.AUTH_MODE_CHATGPT -> authStore.chatGptModel()
-                else -> authStore.model()
+            model = when (providerId) {
+                ChatGptCodexProvider.ID -> authStore.chatGptModel()
+                else -> authStore.providerModel(providerId)
             },
         )
         currentRequestId = request.requestId
@@ -511,10 +526,6 @@ class AssistantPluginService : NexusPluginService() {
         var completed = false
         var failed = false
         var finalAnswer: String? = null
-        val providerId = when (authStore.authMode()) {
-            CodexAuthStore.AUTH_MODE_CHATGPT -> ChatGptCodexProvider.ID
-            else -> OpenAiProvider.ID
-        }
         try {
             providerRouter.providerFor(providerId).streamEvents(request).collect { event ->
                 when (event) {
@@ -622,6 +633,9 @@ class AssistantPluginService : NexusPluginService() {
         }
 
         if (!isValidTakePhotoCall(call)) return error(TOOL_ERROR_INVALID_CALL)
+        if (!providerSupportsPhotos(selectedProviderId())) {
+            return error(TOOL_ERROR_CAPTURE_FAILED)
+        }
         val generation = currentAssistantGeneration
             ?: return error(TOOL_ERROR_CANCELLED)
         if (
@@ -927,7 +941,7 @@ class AssistantPluginService : NexusPluginService() {
         snapshotSession = null
         activeSnapshot?.cancel()
         currentRequestId?.let { requestId ->
-            openAiClient.cancel(requestId)
+            openAiCompatClients.values.forEach { client -> client.cancel(requestId) }
             chatGptCodexClient.cancel(requestId)
         }
         currentRequestId = null
@@ -978,6 +992,15 @@ class AssistantPluginService : NexusPluginService() {
         audioFormat = null
         pcmBuffer = ByteArrayOutputStream()
     }
+
+    private fun selectedProviderId(): String =
+        authStore.selectedProviderId() ?: when (authStore.authMode()) {
+            CodexAuthStore.AUTH_MODE_CHATGPT -> ChatGptCodexProvider.ID
+            else -> ProviderCatalog.openAi.id
+        }
+
+    private fun providerSupportsPhotos(providerId: String): Boolean =
+        providerId == ChatGptCodexProvider.ID || authStore.providerModelSupportsPhotos(providerId)
 
     private companion object {
         const val TAG = "NexusAssistant"
