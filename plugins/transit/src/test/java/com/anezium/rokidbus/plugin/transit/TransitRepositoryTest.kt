@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 import java.time.Instant
 
 class TransitRepositoryTest {
@@ -193,4 +194,60 @@ class TransitRepositoryTest {
         assertEquals("", matches[1].city)
         assertEquals(UNKNOWN_DISTANCE_METERS, matches[0].stop.distanceMeters)
     }
+
+    @Test
+    fun departures_returnsKmbRealtimeOverlay() {
+        val repository = TransitRepository(
+            baseUrl = "https://transit.test",
+            http = { url ->
+                when {
+                    url.startsWith("https://transit.test/stoptimes") -> scheduledDeparturesJson()
+                    "/kmb/stop-eta/610F9B32EEAE091D" in url ->
+                        """
+                            {"type":"StopETA","version":"1.0","data":[
+                              {"co":"KMB","route":"42A","dir":"I","dest_en":"TSING YI",
+                               "eta_seq":1,"eta":"2026-08-05T19:12:27+08:00","rmk_en":""}
+                            ]}
+                        """.trimIndent()
+                    else -> error("Unexpected URL: $url")
+                }
+            },
+        )
+
+        val departures = repository.departures("hk-Hong-Kong-Transit_KMB-610F9B32EEAE091D")
+
+        assertEquals(1, departures.size)
+        assertEquals("42A", departures.single().routeShortName)
+        assertEquals("Tsing Yi", departures.single().headsign)
+        assertEquals(Instant.parse("2026-08-05T11:12:27Z"), departures.single().departure)
+    }
+
+    @Test
+    fun departures_fallsBackToScheduledListWhenRealtimeFetchThrows() {
+        val repository = TransitRepository(
+            baseUrl = "https://transit.test",
+            http = { url ->
+                if (url.startsWith("https://transit.test/stoptimes")) {
+                    scheduledDeparturesJson()
+                } else {
+                    throw IOException("Realtime unavailable")
+                }
+            },
+        )
+
+        val departures = repository.departures("hk-Hong-Kong-Transit_KMB-610F9B32EEAE091D")
+
+        assertEquals(1, departures.size)
+        assertEquals("S1", departures.single().routeShortName)
+        assertEquals("Scheduled destination", departures.single().headsign)
+        assertEquals(Instant.parse("2026-08-05T11:30:00Z"), departures.single().departure)
+    }
+
+    private fun scheduledDeparturesJson() =
+        """
+            {"stopTimes":[
+              {"place":{"departure":"2026-08-05T11:30:00Z","scheduledDeparture":"2026-08-05T11:30:00Z"},
+               "mode":"BUS","routeShortName":"S1","headsign":"Scheduled destination","cancelled":false}
+            ]}
+        """.trimIndent()
 }

@@ -1,5 +1,9 @@
 # Changelog — Transit
 
+## Unreleased
+
+- Add realtime ETAs for Hong Kong KMB, Citybus, and green-minibus stops, with automatic fallback to Transitous schedules.
+
 ## 1.0.3
 
 - Android 11 support: the plugin now installs on Android 11 (API 30) phones.

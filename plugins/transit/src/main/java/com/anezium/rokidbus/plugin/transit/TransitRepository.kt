@@ -10,9 +10,10 @@ import java.time.Instant
 
 class TransitRepository(
     private val baseUrl: String = "https://api.transitous.org/api/v1",
+    private val http: (String) -> String = ::getWithRetry,
 ) : TransitRepositorySource {
     override fun nearbyStops(location: TransitCoordinate): List<TransitStop> {
-        val json = get(
+        val json = http(
             "$baseUrl/reverse-geocode?place=${location.lat},${location.lon}&type=STOP",
         )
         return parseStops(json, location)
@@ -20,43 +21,16 @@ class TransitRepository(
 
     override fun departures(stopId: String): List<TransitDeparture> {
         val encodedStopId = URLEncoder.encode(stopId, Charsets.UTF_8.name())
-        return parseDepartures(get("$baseUrl/stoptimes?stopId=$encodedStopId&n=12"))
+        val scheduled = parseDepartures(http("$baseUrl/stoptimes?stopId=$encodedStopId&n=12"))
+        val realtime = runCatching {
+            HkRealtimeEta(http).overlay(stopId, scheduled)
+        }.getOrNull()
+        return realtime ?: scheduled
     }
 
     override fun searchStops(query: String): List<TransitStopMatch> {
         val encodedQuery = URLEncoder.encode(query, Charsets.UTF_8.name())
-        return parseStopMatches(get("$baseUrl/geocode?text=$encodedQuery&type=STOP")).take(MAX_SEARCH_RESULTS)
-    }
-
-    private fun get(urlText: String): String {
-        var lastFailure: Throwable? = null
-        repeat(2) { attempt ->
-            try {
-                return getOnce(urlText)
-            } catch (t: Throwable) {
-                lastFailure = t
-                if (attempt == 0) Thread.sleep(750L)
-            }
-        }
-        throw IOException(lastFailure?.message ?: "Transitous request failed", lastFailure)
-    }
-
-    private fun getOnce(urlText: String): String {
-        val connection = (URL(urlText).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 10_000
-            readTimeout = 10_000
-            requestMethod = "GET"
-            setRequestProperty("User-Agent", USER_AGENT)
-        }
-        return try {
-            val status = connection.responseCode
-            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-            val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-            if (status !in 200..299) throw IOException("HTTP $status: ${body.take(120)}")
-            body
-        } finally {
-            connection.disconnect()
-        }
+        return parseStopMatches(http("$baseUrl/geocode?text=$encodedQuery&type=STOP")).take(MAX_SEARCH_RESULTS)
     }
 
     companion object {
@@ -184,5 +158,36 @@ class TransitRepository(
         }
 
         private const val MAX_SEARCH_RESULTS = 8
+    }
+}
+
+private fun getWithRetry(urlText: String): String {
+    var lastFailure: Throwable? = null
+    repeat(2) { attempt ->
+        try {
+            return getOnce(urlText)
+        } catch (t: Throwable) {
+            lastFailure = t
+            if (attempt == 0) Thread.sleep(750L)
+        }
+    }
+    throw IOException(lastFailure?.message ?: "Transitous request failed", lastFailure)
+}
+
+private fun getOnce(urlText: String): String {
+    val connection = (URL(urlText).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 10_000
+        readTimeout = 10_000
+        requestMethod = "GET"
+        setRequestProperty("User-Agent", TransitRepository.USER_AGENT)
+    }
+    return try {
+        val status = connection.responseCode
+        val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+        val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+        if (status !in 200..299) throw IOException("HTTP $status: ${body.take(120)}")
+        body
+    } finally {
+        connection.disconnect()
     }
 }
