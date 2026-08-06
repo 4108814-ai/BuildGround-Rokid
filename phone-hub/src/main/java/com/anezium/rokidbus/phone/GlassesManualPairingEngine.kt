@@ -174,14 +174,37 @@ internal class GlassesManualPairingEngine(
     fun submit(host: String, pairPort: Int, code: String): Boolean {
         val cleanHost = host.trim()
         var ephemeralCode = code.trim()
-        if (state != GlassesManualPairingState.WAITING_FOR_CODE ||
-            cleanHost.isBlank() || cleanHost.length > 255 ||
+        if (cleanHost.isBlank() || cleanHost.length > 255 ||
             pairPort !in 1..65535 || !PAIRING_CODE.matches(ephemeralCode)
         ) {
             ephemeralCode = ""
             return false
         }
-        val attempt = synchronized(lock) { generation }
+        val attempt = synchronized(lock) {
+            when (state) {
+                GlassesManualPairingState.IDLE -> {
+                    // The typed form is the recourse when automation never ran, so IDLE is a
+                    // legitimate starting state. Keep the glasses-reported port to avoid mDNS.
+                    generation += 1L
+                    activeWork?.cancel()
+                    activeWork = null
+                    controlAckTimeout?.cancel()
+                    controlAckTimeout = null
+                    pendingControl = null
+                    confirmationTimeout?.cancel()
+                    confirmationTimeout = null
+                    awaitingGlassesConfirmation = false
+                    awaitGlassesConfirmationForAttempt = true
+                    generation
+                }
+                GlassesManualPairingState.WAITING_FOR_CODE -> generation
+                else -> null
+            }
+        }
+        if (attempt == null) {
+            ephemeralCode = ""
+            return false
+        }
         transition(attempt, GlassesManualPairingState.PAIRING)
         val task = worker.submit {
             var stage = WorkStage.PAIRING

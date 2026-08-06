@@ -146,6 +146,7 @@
     <string name="guided_error_code_format">The pairing code is 6 digits.</string>
 
     <string name="guided_error_link_down">Lost the link to the glasses. Reconnect, then try again.</string>
+    <string name="guided_error_pair_refused">The pairing request could not be started. Check that your phone is connected to the glasses, then try again.</string>
     <string name="guided_error_rejected">The glasses refused that step.</string>
     <string name="guided_error_timeout">The glasses did not answer in time.</string>
     <string name="guided_error_pairing_refused">The pairing code was not accepted. Read it again from the lens.</string>

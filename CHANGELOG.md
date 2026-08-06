@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **The typed pairing form works again.** On the Manual setup screen, entering
+  the glasses' IP address, port and pairing code and pressing Pair used to do
+  nothing at all — no error, no progress. The form was only wired up for a
+  state the wizard never actually reached, so every attempt was silently
+  refused. Typed pairing now starts from wherever the wizard is, and when a
+  request genuinely cannot be sent, the screen says so instead of staying
+  quiet. It also keeps using the connect port the glasses last reported, so
+  pairing no longer depends on network discovery that many routers block.
+
 ## 1.2.1
 
 - **Spoken answers stop coming out of the phone.** Since 1.1.6, plugin speech

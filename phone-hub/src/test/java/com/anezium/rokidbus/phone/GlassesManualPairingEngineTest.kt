@@ -10,6 +10,80 @@ import java.io.IOException
 
 class GlassesManualPairingEngineTest {
     @Test
+    fun submitFromIdleStartsPairingWithoutAnIntermediateWaitingState() {
+        val fixture = fixture()
+        val states = mutableListOf<GlassesManualPairingState>()
+        fixture.engine.observe(states::add)
+
+        assertTrue(fixture.engine.submit(HOST, PAIR_PORT, CODE))
+
+        assertEquals(GlassesManualPairingState.ARMING, fixture.engine.state)
+        assertEquals(
+            listOf(
+                GlassesManualPairingState.IDLE,
+                GlassesManualPairingState.PAIRING,
+                GlassesManualPairingState.CONNECTING,
+                GlassesManualPairingState.ARMING,
+            ),
+            states,
+        )
+    }
+
+    @Test
+    fun submitFromIdlePreservesTheGlassesReportedConnectPort() {
+        val backend = FakeBackend()
+        val fixture = fixture(backend)
+
+        fixture.engine.onGlassesConnectPort(CONNECT_PORT)
+        assertTrue(fixture.engine.submit(HOST, PAIR_PORT, CODE))
+
+        assertEquals(
+            listOf(GlassesManualAdbEndpoint(HOST, CONNECT_PORT)),
+            backend.connectedEndpoints,
+        )
+        assertEquals(0, backend.discoverConnectEndpointCalls)
+    }
+
+    @Test
+    fun invalidSubmitDoesNotChangeIdleOrWaitingState() {
+        val fixture = fixture()
+        val states = mutableListOf<GlassesManualPairingState>()
+        fixture.engine.observe(states::add)
+
+        assertFalse(fixture.engine.submit(" ", PAIR_PORT, CODE))
+        assertFalse(fixture.engine.submit("a".repeat(256), PAIR_PORT, CODE))
+        assertFalse(fixture.engine.submit(HOST, 0, CODE))
+        assertFalse(fixture.engine.submit(HOST, 65536, CODE))
+        assertFalse(fixture.engine.submit(HOST, PAIR_PORT, "12345"))
+        assertEquals(GlassesManualPairingState.IDLE, fixture.engine.state)
+        assertEquals(listOf(GlassesManualPairingState.IDLE), states)
+
+        fixture.engine.start()
+        assertFalse(fixture.engine.submit(HOST, PAIR_PORT, "not-a-code"))
+        assertEquals(GlassesManualPairingState.WAITING_FOR_CODE, fixture.engine.state)
+        assertEquals(
+            listOf(
+                GlassesManualPairingState.IDLE,
+                GlassesManualPairingState.WAITING_FOR_CODE,
+            ),
+            states,
+        )
+    }
+
+    @Test
+    fun submitFromIdleWaitsForGlassesConfirmationBeforeDone() {
+        val fixture = fixture()
+
+        assertTrue(fixture.engine.submit(HOST, PAIR_PORT, CODE))
+
+        assertEquals(GlassesManualPairingState.ARMING, fixture.engine.state)
+        fixture.engine.onGlassesSetupReported(false)
+        assertEquals(GlassesManualPairingState.ARMING, fixture.engine.state)
+        fixture.engine.onGlassesSetupReported(true)
+        assertEquals(GlassesManualPairingState.DONE, fixture.engine.state)
+    }
+
+    @Test
     fun happyPathWaitsForGlassesConfirmationBeforeDone() {
         val fixture = fixture()
         val states = mutableListOf<GlassesManualPairingState>()
@@ -88,6 +162,30 @@ class GlassesManualPairingEngineTest {
 
         assertEquals(GlassesManualPairingState.DONE, fixture.engine.state)
         assertTrue(fixture.control.actions.isEmpty())
+    }
+
+    @Test
+    fun submitFromDoneOrErrorIsRefusedWithoutTransition() {
+        val doneFixture = fixture()
+        doneFixture.engine.start(awaitGlassesConfirmation = false)
+        assertTrue(doneFixture.engine.submit(HOST, PAIR_PORT, CODE))
+        assertEquals(GlassesManualPairingState.DONE, doneFixture.engine.state)
+        val doneStates = mutableListOf<GlassesManualPairingState>()
+        doneFixture.engine.observe(doneStates::add)
+
+        assertFalse(doneFixture.engine.submit(HOST, PAIR_PORT, CODE))
+        assertEquals(listOf(GlassesManualPairingState.DONE), doneStates)
+
+        val errorFixture = fixture(FakeBackend(pairFailure = IOException("pairing failed")))
+        errorFixture.engine.start()
+        assertTrue(errorFixture.engine.submit(HOST, PAIR_PORT, CODE))
+        val error = errorFixture.engine.state as GlassesManualPairingState.ERROR
+        val errorStates = mutableListOf<GlassesManualPairingState>()
+        errorFixture.engine.observe(errorStates::add)
+
+        assertFalse(errorFixture.engine.submit(HOST, PAIR_PORT, CODE))
+        assertEquals(error, errorFixture.engine.state)
+        assertEquals(listOf(error), errorStates)
     }
 
     @Test
@@ -310,14 +408,22 @@ class GlassesManualPairingEngineTest {
         private val pairFailure: Throwable? = null,
         private val armFailure: Throwable? = null,
     ) : GlassesManualPairingBackend {
+        var discoverConnectEndpointCalls = 0
+        val connectedEndpoints = mutableListOf<GlassesManualAdbEndpoint>()
+
         override fun pair(host: String, pairPort: Int, code: String) {
             pairFailure?.let { throw it }
         }
 
-        override fun discoverConnectEndpoint(dialogHost: String): GlassesManualAdbEndpoint =
-            GlassesManualAdbEndpoint(dialogHost, CONNECT_PORT)
+        override fun discoverConnectEndpoint(dialogHost: String): GlassesManualAdbEndpoint {
+            discoverConnectEndpointCalls += 1
+            return GlassesManualAdbEndpoint(dialogHost, CONNECT_PORT)
+        }
 
-        override fun connect(endpoint: GlassesManualAdbEndpoint): ManualAdbSession = FakeSession
+        override fun connect(endpoint: GlassesManualAdbEndpoint): ManualAdbSession {
+            connectedEndpoints += endpoint
+            return FakeSession
+        }
 
         override fun arm(session: ManualAdbSession, dialogHost: String) {
             armFailure?.let { throw it }

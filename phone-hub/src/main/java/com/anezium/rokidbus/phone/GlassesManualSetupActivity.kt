@@ -598,7 +598,24 @@ class GlassesManualSetupActivity : Activity() {
                     return@primary
                 }
                 hideKeyboard()
-                engine?.submit(endpoint.host, endpoint.port, code.code)
+                val live = engine
+                if (live == null || !live.submit(endpoint.host, endpoint.port, code.code)) {
+                    SetupJournal.record(
+                        context = this@GlassesManualSetupActivity,
+                        fromGlasses = false,
+                        code = "manual_pair_refused",
+                        detail = if (live == null) "hub not attached" else "engine declined",
+                    )
+                    inlineStatus = getString(R.string.guided_error_pair_refused)
+                    inlineIsError = true
+                    rerenderCurrent()
+                } else {
+                    SetupJournal.record(
+                        this@GlassesManualSetupActivity,
+                        fromGlasses = false,
+                        code = "manual_pair_submitted",
+                    )
+                }
             },
         )
     }
