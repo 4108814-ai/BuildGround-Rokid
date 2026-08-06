@@ -94,11 +94,12 @@ wearer's mouth and put words on their display, but it could not say anything.
 `tts` is the other half — a capability, granted per plugin and revocable like
 the rest, that reads text aloud on the glasses.
 
-The engine is the one already inside the glasses, the same neural voice the
-Rokid assistant uses. Nothing is sent anywhere, nothing needs a network, and it
-works with the phone in a pocket. Voice and speed stay in the wearer's assistant
-settings: they are one choice for everything that speaks on the device, so no
-plugin — and not the hub either — may change them.
+The speech is synthesized by the phone, with a voice and a speed the wearer
+picks once in Settings → Voice, and carried over the Bluetooth audio the
+glasses already wear — earbuds, if any are in, keep priority. The phone's own
+loudspeaker never plays a word: when no ear is available the answer stays on
+the display instead. Voice and speed are one choice for everything that
+speaks, so no plugin — and not the hub either — may change them per utterance.
 
 Reading and dictating share one pair of ears, so opening the microphone
 silences whatever is being spoken. Otherwise the glasses record their own voice

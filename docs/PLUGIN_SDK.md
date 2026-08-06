@@ -1023,28 +1023,32 @@ afterwards — the same budget a notice body gets, so whatever you can show you
 can also read out. Treat it as a ceiling rather than a target: a
 maximum-length utterance talks at the wearer for about a minute.
 
-There is one renderer slot on the glasses. Calling `speak` again preempts the
-current utterance, whose callback receives `PREEMPTED`. `stop()` addresses only
-the session's current utterance and completes it with `STOPPED`; `close()` also
-stops current speech and finishes any tracked callback exactly once. Natural
-completion is `COMPLETED`. If the glasses renderer is absent, cannot bind, or
-restarts during the utterance, the result is `UNAVAILABLE`. `CANCELLED` means
-the platform stopped the utterance because something needed the glasses
+There is one voice. Calling `speak` again preempts the current utterance,
+whose callback receives `PREEMPTED`. `stop()` addresses only the session's
+current utterance and completes it with `STOPPED`; `close()` also stops
+current speech and finishes any tracked callback exactly once. Natural
+completion is `COMPLETED`. `UNAVAILABLE` means the utterance could not be
+spoken: the phone's speech engine failed, or the sound had no safe place to
+play — speech only ever goes to the glasses or to earbuds, never to the
+phone's own speaker, and an utterance that finds neither within a few seconds
+is dropped rather than played out loud into the room. `CANCELLED` means the
+platform stopped the utterance because something needed the glasses
 microphone. It will not resume when the microphone is released; call `speak`
 again if you still want it said.
 
 Speak and stop share a five-commands-per-second budget, enforced both in the
 SDK and in the hub. `INVALID_PAYLOAD` means the text or id did not survive
-validation before anything was sent, `TTS_RATE_LIMITED` means the budget is
-spent, and `CAPABILITY_NOT_AVAILABLE` means the grant is fine but nothing can
-speak right now — no glasses, or no renderer on them. A missing grant is a
-different answer, `CAPABILITY_REQUIRED_TTS`, so a capability you forgot to
-request never looks like hardware that failed.
+validation before anything was sent, and `TTS_RATE_LIMITED` means the budget
+is spent. `CAPABILITY_NOT_AVAILABLE` no longer occurs on current hubs —
+speech does not depend on the glasses being reachable — but hubs older than
+1.2.3 still answer it when no glasses renderer is available, so keep handling
+it. A missing grant is a different answer, `CAPABILITY_REQUIRED_TTS`, so a
+capability you forgot to request never looks like hardware that failed.
 
-Speech uses the voice and speed already configured on the glasses, in the
-Rokid assistant's own settings. Plugins cannot read or change them, and
-neither can the hub: they are the wearer's choice for every voice on the
-device, not a per-plugin one.
+Speech uses the phone's own voice, at the voice and speed the wearer picked
+in the hub's Settings → Voice screen. Plugins cannot read or change them, and
+neither can a single utterance: they are the wearer's choice for everything
+that speaks, not a per-plugin one.
 
 ## 4. Approve and debug
 

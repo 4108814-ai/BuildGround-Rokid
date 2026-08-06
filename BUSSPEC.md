@@ -1604,10 +1604,15 @@ Pending until the user re-approves it.
 
 ## TTS protocol v1
 
-Text-to-speech is a separate capability whose renderer lives behind the
-glasses hub. A plugin requests `tts` and may receive `/tts/started` and
-`/tts/done`; both command paths require an approved `tts` grant and an attached
-glasses hub that advertises `ttsVersion:1`.
+Text-to-speech is a separate capability whose renderer is the phone's own
+speech engine: the hub synthesizes every utterance with the voice and speed
+the wearer picked in Settings → Voice, and the sound reaches the wearer over
+the Bluetooth audio route — the glasses' link, or earbuds if any are in. The
+phone's own loudspeaker never plays speech; when no external ear is available
+the hub waits a few seconds for the audio link to wake, then drops the
+utterance with an `UNAVAILABLE` done event rather than talking into the room.
+A plugin requests `tts` and may receive `/tts/started` and `/tts/done`; both
+command paths require an approved `tts` grant.
 
 The plugin sends JSON with no binary attachment:
 
@@ -1626,58 +1631,58 @@ The plugin sends JSON with no binary attachment:
   owned IDs have no effect.
 
 The phone validates and normalizes each command, injects the verified
-`ownerPluginId`, and routes it to the active glasses transport. A plugin never
-supplies or controls that owner. The glasses hub assigns a separate private
-UUID when calling the ROM engine, so a plugin utterance ID can never address
-another plugin's engine request.
+`ownerPluginId`, and dispatches it to its own engine under a private engine
+ID, so a plugin utterance ID can never address another plugin's engine
+request. A plugin never supplies or controls that owner.
 
 `/tts/cancel` is an empty phone-hub-to-glasses-hub command and is neither a
-plugin send path nor a plugin receive prefix. The phone sends it only after an
-audio lease is granted, because otherwise the open glasses microphone would
-hear the glasses' own speech and feed it into dictation.
+plugin send path nor a plugin receive prefix. Current phones no longer send
+it — speech no longer plays on the glasses' engine — but the glasses hub
+keeps honoring it from older phones. The phone-local equivalent still holds:
+an audio-lease grant silences current speech, because an open microphone
+would hear the voice and feed it into dictation.
 
-The glasses send owner-scoped events back through the phone. The phone removes
-the routing owner and delivers each event only to the live callback binder for
-that approved plugin:
+The phone produces owner-scoped events and delivers each one only to the live
+callback binder for that approved plugin:
 
 - `/tts/started` payload `{"utteranceId":"<opaque>"}`.
 - `/tts/done` payload
   `{"utteranceId":"<opaque>","reason":"COMPLETED"}`. Reason is exactly
   `COMPLETED`, `STOPPED`, `PREEMPTED`, `CANCELLED`, or `UNAVAILABLE`.
 
-Every accepted speak produces exactly one `/tts/done`, including a request for
-which the ROM service cannot be bound or dies during playback. A new accepted
-speak while one is current reports `PREEMPTED` for the old utterance; the ROM
-engine itself performs the corresponding single-slot preemption. A successful
-owner stop reports `STOPPED`. Normal ROM completion reports `COMPLETED`.
-An audio-lease grant reports `CANCELLED` for the current utterance: the platform
-needed the microphone, so the utterance is discarded rather than paused and
-releasing the lease does not resume it.
-Terminal events produced during a transient phone-link loss remain queued on
-the glasses and are retried in order when either control transport reconnects.
+Every accepted speak produces exactly one `/tts/done`, including a request
+the phone engine cannot render or that dies during playback. A new accepted
+speak while one is current reports `PREEMPTED` for the old utterance; the
+engine holds a single slot. A successful owner stop reports `STOPPED`. Normal
+completion reports `COMPLETED`. An utterance that never finds a safe audio
+route reports `UNAVAILABLE`. An audio-lease grant reports `CANCELLED` for the
+current utterance: the platform needed the microphone, so the utterance is
+discarded rather than paused and releasing the lease does not resume it.
 
-The glasses hub binds lazily to
-`com.rokid.os.sprite.assistserver/com.rokid.os.sprite.tts.TtsService` with action
-`com.rokid.os.sprite.tts.TTS_SERVICE`. Package visibility for that service is a
-required part of the glasses manifest. The hub does not call `updateTtsParam`,
-change voice or speed, or write system properties; those settings belong to
-the device assistant.
+The glasses hub still carries its own renderer — a lazy binding to
+`com.rokid.os.sprite.assistserver/com.rokid.os.sprite.tts.TtsService` with
+action `com.rokid.os.sprite.tts.TTS_SERVICE`, package visibility for which is
+a required part of the glasses manifest — but current phones never use it:
+its voice only really speaks English and Chinese and spells everything else
+out. It remains for older phone hubs that still forward speech. That hub does
+not call `updateTtsParam`, change voice or speed, or write system properties;
+those settings belong to the device assistant.
 
 Speak and stop share a per-plugin budget of five commands in any one-second
 window. Invalid shapes, binary payloads, overlong ids, or invalid normalized
 text return `INVALID_TTS`; budget exhaustion returns `TTS_RATE_LIMITED`. A
 plugin whose `tts` grant is missing or not yet approved is denied
 `CAPABILITY_REQUIRED_TTS`, exactly as every other capability answers, so a
-forgotten grant never reads as broken hardware. `CAPABILITY_NOT_AVAILABLE` is
-reserved for the case where the grant is in order but nothing can speak: no
-glasses attached, no renderer advertised, or the link dropped under the
-command.
+forgotten grant never reads as broken hardware. `CAPABILITY_NOT_AVAILABLE` no
+longer occurs on current hubs — speaking does not require the glasses — but
+phones older than 1.2.3 still answer it when no glasses renderer is
+available, so clients keep handling it.
 
 TTS is additive and the plugin API remains version 3; there is no AIDL change.
-The glasses capability bit is `512`, and the capabilities payload carries
-`ttsVersion`. The phone routes on the advertised renderer rather than on the
-ROM implementation behind it, which is what leaves room for speech to be
-produced somewhere else later without a plugin noticing.
+The glasses capability bit is `512`, and the capabilities payload still
+carries `ttsVersion`, which current phones ignore: the contract always
+promised speech could be produced somewhere else without a plugin noticing,
+and since 1.2.3 it is — on the phone, unconditionally.
 
 ## Appendix: historical protocol versions
 
