@@ -50,6 +50,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
     private var surface: NexusSurface? = null
     private var listRenderGeneration = 0L
     private var pendingListLayoutListener: View.OnLayoutChangeListener? = null
+    private var insetUnsubscribe: (() -> Unit)? = null
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -118,10 +119,23 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         requestFocus()
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        insetUnsubscribe?.invoke()
+        insetUnsubscribe = HudTopInset.observe(context, ::applyHudTopInset)
+    }
+
     override fun onDetachedFromWindow() {
+        insetUnsubscribe?.invoke()
+        insetUnsubscribe = null
         removeCallbacks(ticker)
         invalidatePendingListLayout()
         super.onDetachedFromWindow()
+    }
+
+    private fun applyHudTopInset(value: Int) {
+        setPadding(px(18), px(16 + HudTopInset.sanitize(value)), px(18), px(12))
+        requestLayout()
     }
 
     private fun renderNow(surface: NexusSurface) {

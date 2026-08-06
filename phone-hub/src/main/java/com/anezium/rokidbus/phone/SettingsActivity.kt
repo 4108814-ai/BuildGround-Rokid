@@ -18,6 +18,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -31,6 +32,7 @@ import com.anezium.rokidbus.phone.speech.SpeechSettingsStore
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.GlassesRepairContract
 import com.anezium.rokidbus.shared.LinkStateBits
+import com.anezium.rokidbus.shared.PhoneHubCapabilitiesContract
 
 private const val SETTINGS_TAG = "RokidNexusSettings"
 
@@ -180,6 +182,8 @@ class SettingsActivity : Activity() {
             addView(phoneBatteryBadgeRow(), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 10))
             addView(activityPresentationRow(), NexusUi.block())
+            addView(BusTheme.gap(this@SettingsActivity, 10))
+            addView(hudPositionRow(), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 28))
             addView(NexusUi.sectionRow(this@SettingsActivity, "Glasses maintenance"), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 12))
@@ -581,6 +585,52 @@ class SettingsActivity : Activity() {
                         BusHubService.onActivityPresentationPreferenceChanged()
                     }
                 },
+            )
+        }
+
+    private fun hudPositionRow(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = NexusUi.bordered(this@SettingsActivity, NexusUi.PANEL, NexusUi.LINE, 15)
+            setPadding(
+                NexusUi.dp(this@SettingsActivity, 15),
+                NexusUi.dp(this@SettingsActivity, 10),
+                NexusUi.dp(this@SettingsActivity, 15),
+                NexusUi.dp(this@SettingsActivity, 10),
+            )
+            val store = PhoneHudPositionStore(this@SettingsActivity)
+            val value = NexusUi.rowSub(
+                this@SettingsActivity,
+                "${store.hudTopInsetDp()} dp from top",
+            )
+            addView(NexusUi.rowTitle(this@SettingsActivity, "Glasses display position"))
+            addView(BusTheme.gap(this@SettingsActivity, 3))
+            addView(value)
+            addView(
+                SeekBar(this@SettingsActivity).apply {
+                    max = PhoneHubCapabilitiesContract.MAX_HUD_TOP_INSET_DP
+                    progress = store.hudTopInsetDp()
+                    setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                        override fun onProgressChanged(
+                            seekBar: SeekBar?,
+                            progress: Int,
+                            fromUser: Boolean,
+                        ) {
+                            if (!fromUser) return
+                            store.setHudTopInsetDp(progress)
+                            value.text = "$progress dp from top"
+                            BusHubService.onHudPositionPreferenceChanged()
+                        }
+
+                        override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+
+                        override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+                    })
+                },
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
             )
         }
 

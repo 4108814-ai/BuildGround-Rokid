@@ -552,6 +552,24 @@ class NoticeStateMachineTest {
     }
 
     @Test
+    fun `band height ceiling loses the full nonzero top inset`() {
+        val baseline = noticeBandHeightCeiling(
+            displayHeightPx = 640,
+            heightFraction = 0.92f,
+            topInsetPx = 0,
+        )
+
+        assertEquals(
+            baseline - 100,
+            noticeBandHeightCeiling(
+                displayHeightPx = 640,
+                heightFraction = 0.92f,
+                topInsetPx = 100,
+            ),
+        )
+    }
+
+    @Test
     fun `image page spends five grown lines with a floor of three`() {
         assertEquals(3, noticeFirstPageBodyLines(capacity = 8, hasImage = true))
         assertEquals(9, noticeFirstPageBodyLines(capacity = 14, hasImage = true))

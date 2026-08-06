@@ -5035,6 +5035,7 @@ class BusHubService : Service() {
             cameraConsumerName = cameraConsumerReadiness.resolveApproved()?.descriptor?.displayName,
             activityAlwaysExpanded =
                 PhoneActivityPresentationSettings(this).isAlwaysExpanded(),
+            hudTopInsetDp = PhoneHudPositionStore(this).hudTopInsetDp(),
         )
         if (announced == lastAnnouncedPhoneCapabilities) return
         val envelope = BusEnvelope(
@@ -5320,6 +5321,10 @@ class BusHubService : Service() {
         }
 
         internal fun onActivityPresentationPreferenceChanged() {
+            activeInstance?.announcePhoneCapabilities()
+        }
+
+        internal fun onHudPositionPreferenceChanged() {
             activeInstance?.announcePhoneCapabilities()
         }
 

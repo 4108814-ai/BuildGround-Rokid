@@ -25,6 +25,12 @@ import com.anezium.rokidbus.client.ui.BusTheme
 internal fun noticeBackdropAlpha(fadeAlpha: Float, backdrop: Boolean): Float =
     if (backdrop) fadeAlpha else 0f
 
+internal fun noticeBandHeightCeiling(
+    displayHeightPx: Int,
+    heightFraction: Float,
+    topInsetPx: Int,
+): Int = ((displayHeightPx * heightFraction).toInt() - topInsetPx).coerceAtLeast(0)
+
 /**
  * The notice band: a transient panel across the top that arrives, says its
  * piece, and leaves.
@@ -48,8 +54,10 @@ object NoticeOverlayRenderer {
     private var scrim: View? = null
     private var band: NoticeBandView? = null
     private var unsubscribe: (() -> Unit)? = null
+    private var insetUnsubscribe: (() -> Unit)? = null
     private var bandHeightPx = 0
     private var backdrop = false
+    private var hudTopInsetDp = 0
 
     private val slide = HudMotionValue(0f) { offset -> band?.translationY = offset }
     private val fade = HudMotionValue(0f) { alpha ->
@@ -60,6 +68,8 @@ object NoticeOverlayRenderer {
     fun onServiceConnected(service: AccessibilityService) {
         this.service = service
         windowManager = service.getSystemService(WindowManager::class.java)
+        insetUnsubscribe?.invoke()
+        insetUnsubscribe = HudTopInset.observe(service, ::applyHudTopInset)
         unsubscribe?.invoke()
         unsubscribe = NoticeController.observe(::render)
     }
@@ -68,6 +78,8 @@ object NoticeOverlayRenderer {
         if (this.service !== service) return
         unsubscribe?.invoke()
         unsubscribe = null
+        insetUnsubscribe?.invoke()
+        insetUnsubscribe = null
         teardown()
         this.service = null
         windowManager = null
@@ -135,7 +147,9 @@ object NoticeOverlayRenderer {
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
-        val view = NoticeBandView(service, NoticeController::setPageCount)
+        val view = NoticeBandView(service, NoticeController::setPageCount).apply {
+            setHudTopInsetDp(hudTopInsetDp)
+        }
         val metrics = service.resources.displayMetrics
         root.addView(
             view,
@@ -144,7 +158,7 @@ object NoticeOverlayRenderer {
                 FrameLayout.LayoutParams.WRAP_CONTENT,
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                topMargin = BusTheme.dp(service, EDGE_MARGIN_DP)
+                topMargin = BusTheme.dp(service, EDGE_MARGIN_DP + hudTopInsetDp)
             },
         )
         if (runCatching { manager.addView(root, params(service)) }.isFailure) {
@@ -157,6 +171,17 @@ object NoticeOverlayRenderer {
         view.alpha = 0f
         fade.snapTo(0f)
         return view
+    }
+
+    private fun applyHudTopInset(value: Int) {
+        hudTopInsetDp = HudTopInset.sanitize(value)
+        band?.let { currentBand ->
+            currentBand.setHudTopInsetDp(hudTopInsetDp)
+            val layout = currentBand.layoutParams as? FrameLayout.LayoutParams ?: return@let
+            layout.topMargin = BusTheme.dp(currentBand.context, EDGE_MARGIN_DP + hudTopInsetDp)
+            currentBand.layoutParams = layout
+        }
+        container?.requestLayout()
     }
 
     private fun params(context: Context) = WindowManager.LayoutParams(
@@ -222,6 +247,7 @@ object NoticeOverlayRenderer {
         private var noticeHasImage = false
         private var noticeActionCount = 0
         private var pageCountReportPending = false
+        private var hudTopInsetPx = 0
 
         init {
             orientation = VERTICAL
@@ -272,7 +298,11 @@ object NoticeOverlayRenderer {
             } else {
                 MAX_HEIGHT_FRACTION
             }
-            val ceiling = (resources.displayMetrics.heightPixels * heightFraction).toInt()
+            val ceiling = noticeBandHeightCeiling(
+                displayHeightPx = resources.displayMetrics.heightPixels,
+                heightFraction = heightFraction,
+                topInsetPx = hudTopInsetPx,
+            )
             val cappedHeightSpec = MeasureSpec.makeMeasureSpec(ceiling, MeasureSpec.AT_MOST)
 
             if (!pageableNotice) {
@@ -309,6 +339,13 @@ object NoticeOverlayRenderer {
                 super.onMeasure(widthMeasureSpec, cappedHeightSpec)
             }
             publishPageCount()
+        }
+
+        fun setHudTopInsetDp(value: Int) {
+            val next = BusTheme.dp(context, HudTopInset.sanitize(value))
+            if (hudTopInsetPx == next) return
+            hudTopInsetPx = next
+            requestLayout()
         }
 
         /**

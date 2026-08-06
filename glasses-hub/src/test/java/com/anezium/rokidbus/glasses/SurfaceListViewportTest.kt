@@ -75,6 +75,20 @@ class SurfaceListViewportTest {
         )
     }
 
+    @Test
+    fun `a reduced available height recomputes the measured row window`() {
+        val heights = List(6) { 20 }
+
+        assertEquals(
+            SurfaceListWindow(2, 5, 2, 1),
+            viewport(heights, height = 80, selected = 3),
+        )
+        assertEquals(
+            SurfaceListWindow(3, 5, 3, 1),
+            viewport(heights, height = 60, selected = 3),
+        )
+    }
+
     private fun viewport(
         heights: List<Int>,
         height: Int,

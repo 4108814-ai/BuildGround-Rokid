@@ -43,6 +43,7 @@ class MainActivity : Activity() {
         detail = "",
     )
     private var unsubscribeLauncher: (() -> Unit)? = null
+    private var insetUnsubscribe: (() -> Unit)? = null
     private var onboardingReceiverRegistered = false
     private var confirmationShownForSession = ""
     private val swipeDedupe = DpadPairDedupe()
@@ -59,6 +60,7 @@ class MainActivity : Activity() {
         buildUi()
         requestBluetoothConnectIfNeeded()
         GlassesHub.start(applicationContext)
+        insetUnsubscribe = HudTopInset.observe(this, ::applyHudTopInset)
         unsubscribeLauncher = GlassesHub.observeLauncher { entries ->
             // The hub notifies listeners from the CXR receive thread. Touching views off the main
             // thread throws (swallowed by the hub's runCatching), so a launcher list that arrives
@@ -109,6 +111,8 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         unsubscribeLauncher?.invoke()
         unsubscribeLauncher = null
+        insetUnsubscribe?.invoke()
+        insetUnsubscribe = null
         super.onDestroy()
     }
 
@@ -268,6 +272,15 @@ class MainActivity : Activity() {
         })
         renderScreen()
         renderLauncher()
+    }
+
+    private fun applyHudTopInset(value: Int) {
+        val inset = HudTopInset.sanitize(value)
+        launcherView.setPadding(dp(22), dp(20 + inset), dp(22), dp(16))
+        onboardingView.setPadding(dp(24), dp(28 + inset), dp(24), dp(22))
+        launcherView.requestLayout()
+        onboardingView.requestLayout()
+        launcherViewport.post { scrollToSelected() }
     }
 
     private fun renderScreen() {

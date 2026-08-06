@@ -35,20 +35,26 @@ object LauncherOverlayRenderer {
     private var windowManager: WindowManager? = null
     private var root: LauncherOverlayRoot? = null
     private var unsubscribeLauncher: (() -> Unit)? = null
+    private var insetUnsubscribe: (() -> Unit)? = null
     private var launcherEntries: List<GlassesHub.LauncherEntry> = emptyList()
     private var selectedIndex = 0
     private val swipeDedupe = DpadPairDedupe()
     private val main = Handler(Looper.getMainLooper())
     private val ringTapPolicy = RingTapPolicy()
     private val ringTapExpiry = Runnable(::resolveRingTaps)
+    private var hudTopInsetDp = 0
 
     fun onServiceConnected(service: AccessibilityService) {
         this.service = service
         windowManager = service.getSystemService(WindowManager::class.java)
+        insetUnsubscribe?.invoke()
+        insetUnsubscribe = HudTopInset.observe(service, ::applyHudTopInset)
     }
 
     fun onServiceDestroyed(service: AccessibilityService) {
         if (this.service === service) {
+            insetUnsubscribe?.invoke()
+            insetUnsubscribe = null
             hide()
             this.service = null
             windowManager = null
@@ -68,6 +74,7 @@ object LauncherOverlayRenderer {
         GlassesHub.start(activeService.applicationContext)
         val manager = windowManager ?: activeService.getSystemService(WindowManager::class.java) ?: return false
         val currentRoot = root ?: LauncherOverlayRoot(activeService).also { next ->
+            next.setHudTopInsetDp(hudTopInsetDp)
             root = next
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
@@ -93,6 +100,11 @@ object LauncherOverlayRenderer {
         RingFocusBroadcastCoordinator.setLauncherShown(activeService.applicationContext, shown = true)
         ActivityController.onLauncherVisibilityChanged()
         return true
+    }
+
+    private fun applyHudTopInset(value: Int) {
+        hudTopInsetDp = HudTopInset.sanitize(value)
+        root?.setHudTopInsetDp(hudTopInsetDp)
     }
 
     fun hide() {
@@ -205,6 +217,10 @@ object LauncherOverlayRenderer {
             menu.render(entries, selectedIndex)
         }
 
+        fun setHudTopInsetDp(value: Int) {
+            menu.setHudTopInsetDp(value)
+        }
+
         override fun dispatchKeyEvent(event: KeyEvent): Boolean {
             if (LauncherOverlayRenderer.handleKeyEvent(event)) return true
             return super.dispatchKeyEvent(event)
@@ -285,6 +301,11 @@ object LauncherOverlayRenderer {
                     row.requestRectangleOnScreen(Rect(0, 0, row.width, row.height), true)
                 }
             }
+        }
+
+        fun setHudTopInsetDp(value: Int) {
+            setPadding(dp(18), dp(16 + HudTopInset.sanitize(value)), dp(18), dp(12))
+            requestLayout()
         }
 
         private fun pluginRow(

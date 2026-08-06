@@ -23,10 +23,15 @@ object PinOverlayRenderer {
     private var root: PinPanelView? = null
     private var params: WindowManager.LayoutParams? = null
     private var unsubscribe: (() -> Unit)? = null
+    private var insetUnsubscribe: (() -> Unit)? = null
+    private var position: PinSurfacePosition? = null
+    private var hudTopInsetDp = 0
 
     fun onServiceConnected(service: AccessibilityService) {
         this.service = service
         windowManager = service.getSystemService(WindowManager::class.java)
+        insetUnsubscribe?.invoke()
+        insetUnsubscribe = HudTopInset.observe(service, ::applyHudTopInset)
         unsubscribe?.invoke()
         unsubscribe = PinController.observe(::render)
     }
@@ -35,6 +40,8 @@ object PinOverlayRenderer {
         if (this.service !== service) return
         unsubscribe?.invoke()
         unsubscribe = null
+        insetUnsubscribe?.invoke()
+        insetUnsubscribe = null
         hide()
         this.service = null
         windowManager = null
@@ -59,6 +66,7 @@ object PinOverlayRenderer {
         val manager = windowManager
             ?: activeService.getSystemService(WindowManager::class.java)
             ?: return
+        position = pin.content.position
         val currentRoot = root ?: PinPanelView(activeService).also { next ->
             val nextParams = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -81,11 +89,24 @@ object PinOverlayRenderer {
     }
 
     private fun hide() {
-        val currentRoot = root ?: return
-        runCatching { windowManager?.removeView(currentRoot) }
-        currentRoot.render(null)
+        val currentRoot = root
+        if (currentRoot != null) {
+            runCatching { windowManager?.removeView(currentRoot) }
+            currentRoot.render(null)
+        }
         root = null
         params = null
+        position = null
+    }
+
+    private fun applyHudTopInset(value: Int) {
+        hudTopInsetDp = HudTopInset.sanitize(value)
+        val activeService = service ?: return
+        val currentRoot = root ?: return
+        val currentParams = params ?: return
+        val currentPosition = position ?: return
+        applyPosition(currentParams, currentPosition, activeService)
+        runCatching { windowManager?.updateViewLayout(currentRoot, currentParams) }
     }
 
     private fun applyPosition(
@@ -100,7 +121,17 @@ object PinOverlayRenderer {
             PinSurfacePosition.BOTTOM_RIGHT -> Gravity.BOTTOM or Gravity.END
         }
         params.x = BusTheme.dp(context, EDGE_MARGIN_DP)
-        params.y = BusTheme.dp(context, EDGE_MARGIN_DP)
+        params.y = BusTheme.dp(
+            context,
+            EDGE_MARGIN_DP + if (
+                position == PinSurfacePosition.TOP_LEFT ||
+                position == PinSurfacePosition.TOP_RIGHT
+            ) {
+                hudTopInsetDp
+            } else {
+                0
+            },
+        )
     }
 
     /**

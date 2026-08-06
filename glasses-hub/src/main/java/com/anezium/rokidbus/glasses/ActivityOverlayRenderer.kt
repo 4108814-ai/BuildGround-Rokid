@@ -44,16 +44,20 @@ internal object ActivityOverlayRenderer {
     private var root: FrameLayout? = null
     private var flareBand: NoticeOverlayRenderer.NoticeBandView? = null
     private var unsubscribe: (() -> Unit)? = null
+    private var insetUnsubscribe: (() -> Unit)? = null
     private val nodes = linkedMapOf<String, ActivityNode>()
     private val processedMotionTokens = mutableMapOf<String, Long>()
     private var flareGeneration = 0L
     private var flareCollapse: Runnable? = null
     private var activeFlare: FlareSession? = null
     private var latestState = ActivityRenderState()
+    private var hudTopInsetDp = 0
 
     fun onServiceConnected(service: AccessibilityService) {
         this.service = service
         windowManager = service.getSystemService(WindowManager::class.java)
+        insetUnsubscribe?.invoke()
+        insetUnsubscribe = HudTopInset.observe(service, ::applyHudTopInset)
         unsubscribe?.invoke()
         unsubscribe = ActivityController.observe(::render)
     }
@@ -62,6 +66,8 @@ internal object ActivityOverlayRenderer {
         if (this.service !== service) return
         unsubscribe?.invoke()
         unsubscribe = null
+        insetUnsubscribe?.invoke()
+        insetUnsubscribe = null
         teardown()
         processedMotionTokens.clear()
         this.service = null
@@ -229,6 +235,7 @@ internal object ActivityOverlayRenderer {
         val nextBand = NoticeOverlayRenderer.NoticeBandView(service).apply {
             visibility = View.GONE
             alpha = 0f
+            setHudTopInsetDp(hudTopInsetDp)
         }
         nextRoot.addView(
             nextBand,
@@ -237,7 +244,7 @@ internal object ActivityOverlayRenderer {
                 FrameLayout.LayoutParams.WRAP_CONTENT,
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                topMargin = dp(service, EDGE_MARGIN_DP)
+                topMargin = dp(service, EDGE_MARGIN_DP + hudTopInsetDp)
             },
         )
         if (runCatching { manager.addView(nextRoot, params()) }.isFailure) {
@@ -248,6 +255,29 @@ internal object ActivityOverlayRenderer {
         flareBand = nextBand
         HudOverlayStack.reassert()
         return nextRoot
+    }
+
+    private fun applyHudTopInset(value: Int) {
+        hudTopInsetDp = HudTopInset.sanitize(value)
+        flareBand?.let { band ->
+            band.setHudTopInsetDp(hudTopInsetDp)
+            val layout = band.layoutParams as? FrameLayout.LayoutParams ?: return@let
+            layout.topMargin = dp(band.context, EDGE_MARGIN_DP + hudTopInsetDp)
+            band.layoutParams = layout
+        }
+        nodes.values.forEach { node ->
+            val layout = node.layoutParams as? FrameLayout.LayoutParams ?: return@forEach
+            val edge = dp(node.context, EDGE_MARGIN_DP)
+            layout.topMargin = if (
+                layout.gravity and Gravity.VERTICAL_GRAVITY_MASK == Gravity.TOP
+            ) {
+                dp(node.context, EDGE_MARGIN_DP + hudTopInsetDp)
+            } else {
+                edge
+            }
+            node.layoutParams = layout
+        }
+        root?.requestLayout()
     }
 
     private fun startFlare(item: ActivityRenderItem, node: ActivityNode) {
@@ -424,7 +454,14 @@ internal object ActivityOverlayRenderer {
             PinSurfacePosition.BOTTOM_RIGHT -> Gravity.BOTTOM or Gravity.END
         }
         val edge = dp(context, EDGE_MARGIN_DP)
-        setMargins(edge, edge, edge, edge)
+        val top = if (
+            corner == PinSurfacePosition.TOP_LEFT || corner == PinSurfacePosition.TOP_RIGHT
+        ) {
+            dp(context, EDGE_MARGIN_DP + hudTopInsetDp)
+        } else {
+            edge
+        }
+        setMargins(edge, top, edge, edge)
     }
 
     private class ActivityNode(context: Context) : FrameLayout(context) {
