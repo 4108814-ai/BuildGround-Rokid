@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.2.3
+
+- **Spoken answers always use your phone's voice now.** The glasses' built-in
+  voice, which previous releases fell back to whenever the phone's speech had
+  no safe place to play, turned out to be the mystery behind several reports:
+  it only really speaks English and Chinese, spells anything else out letter
+  by letter, and reads numbers strangely enough that an English time was
+  heard as "answering in Chinese". That fallback is gone. Every spoken answer
+  is synthesized by the phone, with the voice and speed you picked, and plays
+  through your glasses or earbuds. When the Bluetooth audio link has dozed
+  off, the answer now waits a few seconds for it to wake instead of grabbing
+  the nearest bad voice — and if no ear ever becomes available, it stays
+  unspoken: the text is on the display either way, and silence beats speech
+  you cannot understand. The phone's own speaker still never plays a word.
+
+- **The Output setting is retired.** *Automatic* versus *Glasses only* was a
+  choice between two workarounds for that fallback. With the glasses' voice
+  out of the picture there is nothing left to choose: the Voice screen now
+  simply shows the speed, the voices, and where the sound will go.
+
 ## 1.2.2
 
 - **The typed pairing form works again.** On the Manual setup screen, entering
