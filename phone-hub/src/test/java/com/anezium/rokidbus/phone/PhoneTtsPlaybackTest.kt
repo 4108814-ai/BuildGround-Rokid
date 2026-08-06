@@ -194,6 +194,7 @@ class PhoneTtsPlaybackTest {
     fun `AUTO with an external route is handled by the phone`() {
         val output = FakePhoneTtsOutput(ready = true)
         val forwarded = mutableListOf<BusEnvelope>()
+        val logs = mutableListOf<String>()
         val dispatcher = PhoneTtsDispatcher(
             playback = playback(output, mutableListOf()),
             forwardToGlasses = { envelope ->
@@ -202,7 +203,8 @@ class PhoneTtsPlaybackTest {
             },
             emitDone = {},
             outputMode = { PhoneTtsOutputMode.AUTO },
-            phoneWouldUseOwnSpeaker = { false },
+            phoneRoute = { PhoneTtsRoute.EXTERNAL_SINK },
+            logger = logs::add,
         )
 
         assertEquals(
@@ -213,6 +215,10 @@ class PhoneTtsPlaybackTest {
         assertEquals(listOf("engine-1"), output.spokenIds)
         assertEquals(0, output.initializeCount)
         assertTrue(forwarded.isEmpty())
+        assertEquals(
+            listOf("phone TTS dispatch classification=EXTERNAL_SINK route=phone"),
+            logs,
+        )
     }
 
     @Test
@@ -227,7 +233,7 @@ class PhoneTtsPlaybackTest {
             },
             emitDone = {},
             outputMode = { PhoneTtsOutputMode.AUTO },
-            phoneWouldUseOwnSpeaker = { false },
+            phoneRoute = { PhoneTtsRoute.EXTERNAL_SINK },
         )
         dispatcher.dispatch(routedSpeak("alpha", "u1", "hello"))
 
@@ -238,6 +244,37 @@ class PhoneTtsPlaybackTest {
 
         assertEquals(1, output.stopCount)
         assertTrue(forwarded.isEmpty())
+    }
+
+    @Test
+    fun `AUTO with the glasses audio link forwards without touching playback`() {
+        val output = FakePhoneTtsOutput(ready = true)
+        val forwarded = mutableListOf<BusEnvelope>()
+        val logs = mutableListOf<String>()
+        val dispatcher = PhoneTtsDispatcher(
+            playback = playback(output, mutableListOf()),
+            forwardToGlasses = { envelope ->
+                forwarded += envelope
+                null
+            },
+            emitDone = {},
+            outputMode = { PhoneTtsOutputMode.AUTO },
+            phoneRoute = { PhoneTtsRoute.GLASSES_LINK },
+            logger = logs::add,
+        )
+        val envelope = routedSpeak("alpha", "u1", "hello")
+
+        assertEquals(PhoneTtsDispatchResult.Forwarded(null), dispatcher.dispatch(envelope))
+
+        assertEquals(listOf(envelope), forwarded)
+        assertTrue(output.spokenIds.isEmpty())
+        assertEquals(
+            listOf(
+                "phone TTS dispatch classification=GLASSES_LINK " +
+                    "route=glasses reason=classified",
+            ),
+            logs,
+        )
     }
 
     @Test
@@ -252,7 +289,7 @@ class PhoneTtsPlaybackTest {
             },
             emitDone = {},
             outputMode = { PhoneTtsOutputMode.AUTO },
-            phoneWouldUseOwnSpeaker = { true },
+            phoneRoute = { PhoneTtsRoute.PHONE_SPEAKER },
         )
         val envelope = routedSpeak("alpha", "u1", "hello")
         val stopEnvelope = routedStop("alpha", "u1")
@@ -267,33 +304,95 @@ class PhoneTtsPlaybackTest {
     }
 
     @Test
-    fun `AUTO forward error falls back to phone and clears remote bookkeeping`() {
+    fun `AUTO forward error surfaces the error without falling back to phone`() {
         val output = FakePhoneTtsOutput(ready = true)
+        val done = mutableListOf<TtsDoneEvent>()
         val forwarded = mutableListOf<BusEnvelope>()
-        var wouldUseOwnSpeaker = true
+        var route = PhoneTtsRoute.PHONE_SPEAKER
         val dispatcher = PhoneTtsDispatcher(
-            playback = playback(output, mutableListOf()),
+            playback = playback(output, done),
             forwardToGlasses = { envelope ->
                 forwarded += envelope
                 "link_down"
             },
-            emitDone = {},
+            emitDone = done::add,
             outputMode = { PhoneTtsOutputMode.AUTO },
-            phoneWouldUseOwnSpeaker = { wouldUseOwnSpeaker },
+            phoneRoute = { route },
         )
 
         assertEquals(
-            PhoneTtsDispatchResult.PhoneHandled,
+            PhoneTtsDispatchResult.Forwarded("link_down"),
             dispatcher.dispatch(routedSpeak("alpha", "u1", "one")),
         )
-        wouldUseOwnSpeaker = false
+        route = PhoneTtsRoute.EXTERNAL_SINK
         assertEquals(
             PhoneTtsDispatchResult.PhoneHandled,
             dispatcher.dispatch(routedSpeak("beta", "u2", "two")),
         )
 
         assertEquals(listOf("u1"), forwarded.map { it.payload.getString("utteranceId") })
+        assertEquals(listOf("engine-1"), output.spokenIds)
+        // The rejected dispatch is the plugin's terminal signal; a done event on top
+        // would report the same utterance twice.
+        assertTrue(done.isEmpty())
+    }
+
+    @Test
+    fun `async phone failure re-forwards once and leaves completion to glasses`() {
+        val output = FakePhoneTtsOutput(ready = true)
+        val done = mutableListOf<TtsDoneEvent>()
+        val forwarded = mutableListOf<BusEnvelope>()
+        val dispatcher = PhoneTtsDispatcher(
+            playback = playback(output, done),
+            forwardToGlasses = { envelope ->
+                forwarded += envelope
+                null
+            },
+            emitDone = done::add,
+            phoneRoute = { PhoneTtsRoute.EXTERNAL_SINK },
+        )
+        val envelope = routedSpeak("alpha", "u1", "hello")
+
+        assertEquals(PhoneTtsDispatchResult.PhoneHandled, dispatcher.dispatch(envelope))
+        output.unavailable()
+        output.unavailable()
+
+        assertEquals(listOf(envelope), forwarded)
+        assertTrue(done.isEmpty())
+
+        dispatcher.onRemoteDone("alpha", "u1")
+        assertEquals(
+            PhoneTtsDispatchResult.PhoneHandled,
+            dispatcher.dispatch(routedSpeak("beta", "u2", "next")),
+        )
         assertEquals(listOf("engine-1", "engine-2"), output.spokenIds)
+    }
+
+    @Test
+    fun `async phone stop with failed re-forward emits unavailable once`() {
+        val output = FakePhoneTtsOutput(ready = true)
+        val done = mutableListOf<TtsDoneEvent>()
+        val forwarded = mutableListOf<BusEnvelope>()
+        val dispatcher = PhoneTtsDispatcher(
+            playback = playback(output, done),
+            forwardToGlasses = { envelope ->
+                forwarded += envelope
+                "link_down"
+            },
+            emitDone = done::add,
+            phoneRoute = { PhoneTtsRoute.EXTERNAL_SINK },
+        )
+        val envelope = routedSpeak("alpha", "u1", "hello")
+        dispatcher.dispatch(envelope)
+
+        output.stopped()
+        output.stopped()
+
+        assertEquals(listOf(envelope), forwarded)
+        assertEquals(
+            listOf(TtsDoneEvent("alpha", "u1", TtsDoneReason.UNAVAILABLE)),
+            done,
+        )
     }
 
     @Test
@@ -308,7 +407,7 @@ class PhoneTtsPlaybackTest {
             },
             emitDone = {},
             outputMode = { PhoneTtsOutputMode.GLASSES_ONLY },
-            phoneWouldUseOwnSpeaker = { error("route probe must not run") },
+            phoneRoute = { error("route probe must not run") },
         )
         val envelope = routedSpeak("alpha", "u1", "hello")
         val stopEnvelope = routedStop("alpha", "u1")
@@ -325,10 +424,11 @@ class PhoneTtsPlaybackTest {
     @Test
     fun `GLASSES_ONLY forward error does not fall back to phone playback`() {
         val output = FakePhoneTtsOutput(ready = true)
+        val done = mutableListOf<TtsDoneEvent>()
         val dispatcher = PhoneTtsDispatcher(
-            playback = playback(output, mutableListOf()),
+            playback = playback(output, done),
             forwardToGlasses = { "link_down" },
-            emitDone = {},
+            emitDone = done::add,
             outputMode = { PhoneTtsOutputMode.GLASSES_ONLY },
         )
 
@@ -339,6 +439,7 @@ class PhoneTtsPlaybackTest {
 
         assertEquals(0, output.initializeCount)
         assertTrue(output.spokenIds.isEmpty())
+        assertTrue(done.isEmpty())
     }
 
     @Test

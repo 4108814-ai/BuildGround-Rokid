@@ -634,7 +634,9 @@ class BusHubService : Service() {
         NexusPhoneState.restore(applicationContext)
         activeInstance = this
         val phoneTtsSettings = PhoneTtsSettingsStore(applicationContext)
-        val phoneSpeakerRouteProbe = PhoneSpeakerRouteProbe(applicationContext)
+        val phoneSpeakerRouteProbe = PhoneSpeakerRouteProbe(applicationContext) {
+            prefs().getString(PREF_LAST_GLASSES_ADDRESS, null)
+        }
         phoneTtsDispatcher = PhoneTtsDispatcher(
             playback = PhoneTtsPlayback(
                 output = PhoneTtsEngine(applicationContext, ::log),
@@ -644,7 +646,8 @@ class BusHubService : Service() {
             forwardToGlasses = ::sendRemote,
             emitDone = ::emitPhoneTtsDone,
             outputMode = phoneTtsSettings::outputMode,
-            phoneWouldUseOwnSpeaker = phoneSpeakerRouteProbe::wouldUseOwnSpeaker,
+            phoneRoute = phoneSpeakerRouteProbe::classifyRoute,
+            logger = ::log,
         )
         manualPairingEngine = GlassesManualPairingEngine.create(
             context = applicationContext,

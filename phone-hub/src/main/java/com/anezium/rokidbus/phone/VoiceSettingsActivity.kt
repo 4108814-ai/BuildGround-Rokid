@@ -21,8 +21,8 @@ import java.util.Locale
  * set per sentence — unlike the glasses' engine, whose voice and rate are device-wide
  * properties shared with Rokid's own assistant and therefore left alone.
  *
- * Automatic follows the phone's audio route unless that route is its own speaker, when
- * the glasses take over. Glasses only always uses the glasses' device-wide voice and rate.
+ * Automatic uses a non-glasses external audio route when one is active; otherwise the
+ * glasses take over. Glasses only always uses the glasses' device-wide voice and rate.
  */
 class VoiceSettingsActivity : Activity() {
     private val voiceSettings by lazy { PhoneTtsSettingsStore(this) }
@@ -200,9 +200,8 @@ class VoiceSettingsActivity : Activity() {
         val outputMode = voiceSettings.outputMode()
         introCard.text = when (outputMode) {
             PhoneTtsOutputMode.AUTO ->
-                "Answers are spoken by your phone, so they follow your audio -- the glasses, " +
-                    "or your earbuds if you have some in. If the sound would land on the " +
-                    "phone's own speaker, the glasses speak instead."
+                "Answers play through your earbuds or whatever else is plugged in; " +
+                    "with nothing connected, the glasses speak. Never the phone's own speaker."
             PhoneTtsOutputMode.GLASSES_ONLY ->
                 "Answers are spoken by the glasses themselves, with the voice and speed " +
                     "they share with Rokid's own assistant."
