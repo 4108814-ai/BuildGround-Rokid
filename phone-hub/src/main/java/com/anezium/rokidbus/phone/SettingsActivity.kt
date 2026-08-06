@@ -53,6 +53,7 @@ class SettingsActivity : Activity() {
     private lateinit var logScroll: ScrollView
     private var speechValue: TextView? = null
     private var voiceValue: TextView? = null
+    private var displayValue: TextView? = null
     private var repairValue: TextView? = null
     private var repairStatus: TextView? = null
     private var repairInFlight = false
@@ -112,7 +113,11 @@ class SettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // These rows summarize state owned by sub-screens, so they can go stale while
+        // this activity sits behind one.
         renderSpeechRow()
+        renderVoiceRow()
+        renderDisplayRow()
         resumeRecoveredNexusUpdateInstall()
         if (lastLinkState and LinkStateBits.CXR_CONTROL_UP != 0) {
             BusHubService.queryGlassesApp(this)
@@ -161,7 +166,17 @@ class SettingsActivity : Activity() {
             addView(connectionCard(), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 10))
             addView(authorizeRow(), NexusUi.block())
+            addView(BusTheme.gap(this@SettingsActivity, 28))
+            addView(NexusUi.sectionRow(this@SettingsActivity, "Glasses"), NexusUi.block())
+            addView(BusTheme.gap(this@SettingsActivity, 12))
+            addView(displayRow(), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 10))
+            addView(speechRow(), NexusUi.block())
+            addView(BusTheme.gap(this@SettingsActivity, 10))
+            addView(voiceRow(), NexusUi.block())
+            addView(BusTheme.gap(this@SettingsActivity, 28))
+            addView(NexusUi.sectionRow(this@SettingsActivity, "Plugins"), NexusUi.block())
+            addView(BusTheme.gap(this@SettingsActivity, 12))
             addView(
                 actionRow(
                     title = "Plugin access",
@@ -172,18 +187,8 @@ class SettingsActivity : Activity() {
                 },
                 NexusUi.block(),
             )
-            addView(BusTheme.gap(this@SettingsActivity, 10))
-            addView(speechRow(), NexusUi.block())
-            addView(BusTheme.gap(this@SettingsActivity, 10))
-            addView(voiceRow(), NexusUi.block())
-            addView(BusTheme.gap(this@SettingsActivity, 10))
-            addView(phoneBatteryBadgeRow(), NexusUi.block())
-            addView(BusTheme.gap(this@SettingsActivity, 10))
-            addView(activityPresentationRow(), NexusUi.block())
-            addView(BusTheme.gap(this@SettingsActivity, 10))
-            addView(hudPositionRow(), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 28))
-            addView(NexusUi.sectionRow(this@SettingsActivity, "Glasses maintenance"), NexusUi.block())
+            addView(NexusUi.sectionRow(this@SettingsActivity, "Maintenance"), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 12))
             addView(glassesRepairToggleRow(), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 10))
@@ -192,8 +197,8 @@ class SettingsActivity : Activity() {
             addView(NexusUi.sectionRow(this@SettingsActivity, "Advanced"), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 12))
             addView(developerModeRow(), NexusUi.block())
-            addView(BusTheme.gap(this@SettingsActivity, 10))
             if (developerModeStore.isEnabled()) {
+                addView(BusTheme.gap(this@SettingsActivity, 10))
                 addView(
                     actionRow(
                         title = "Bus inspector",
@@ -218,14 +223,14 @@ class SettingsActivity : Activity() {
                     NexusUi.block(),
                 )
                 addView(BusTheme.gap(this@SettingsActivity, 10))
+                addView(
+                    logScroll,
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        NexusUi.dp(this@SettingsActivity, 190),
+                    ),
+                )
             }
-            addView(
-                logScroll,
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    NexusUi.dp(this@SettingsActivity, 190),
-                ),
-            )
             addView(BusTheme.gap(this@SettingsActivity, 28))
             addView(NexusUi.sectionRow(this@SettingsActivity, "About"), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 12))
@@ -499,173 +504,39 @@ class SettingsActivity : Activity() {
             )
         }
 
-    private fun phoneBatteryBadgeRow(): LinearLayout =
+    /** Navigation into the display sub-screen; the label mirrors the position mode. */
+    private fun displayRow(): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = NexusUi.bordered(this@SettingsActivity, NexusUi.PANEL, NexusUi.LINE, 15)
+            background = NexusUi.pressedBordered(this@SettingsActivity, NexusUi.PANEL, 15)
             setPadding(
                 NexusUi.dp(this@SettingsActivity, 15),
-                NexusUi.dp(this@SettingsActivity, 10),
+                NexusUi.dp(this@SettingsActivity, 14),
                 NexusUi.dp(this@SettingsActivity, 15),
-                NexusUi.dp(this@SettingsActivity, 10),
+                NexusUi.dp(this@SettingsActivity, 14),
             )
-            val store = PhoneBatteryBadgeStore(this@SettingsActivity)
-            addView(
-                LinearLayout(this@SettingsActivity).apply {
-                    orientation = LinearLayout.VERTICAL
-                    addView(NexusUi.rowTitle(this@SettingsActivity, "Phone battery on glasses"))
-                    addView(BusTheme.gap(this@SettingsActivity, 3))
-                    addView(
-                        NexusUi.rowSub(
-                            this@SettingsActivity,
-                            "Charge chip beside the clock in the status row",
-                        ),
-                    )
-                },
-                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-            )
-            addView(
-                Switch(this@SettingsActivity).apply {
-                    isChecked = store.isEnabled()
-                    thumbTintList = ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(NexusUi.GREEN, NexusUi.INK3),
-                    )
-                    trackTintList = ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(NexusUi.GREEN_DIM, NexusUi.LINE),
-                    )
-                    setOnCheckedChangeListener { _, enabled -> store.setEnabled(enabled) }
-                },
-            )
-        }
-
-    private fun activityPresentationRow(): LinearLayout =
-        LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = NexusUi.bordered(this@SettingsActivity, NexusUi.PANEL, NexusUi.LINE, 15)
-            setPadding(
-                NexusUi.dp(this@SettingsActivity, 15),
-                NexusUi.dp(this@SettingsActivity, 10),
-                NexusUi.dp(this@SettingsActivity, 15),
-                NexusUi.dp(this@SettingsActivity, 10),
-            )
-            val settings = PhoneActivityPresentationSettings(this@SettingsActivity)
-            addView(
-                LinearLayout(this@SettingsActivity).apply {
-                    orientation = LinearLayout.VERTICAL
-                    addView(NexusUi.rowTitle(this@SettingsActivity, "Keep activities expanded"))
-                    addView(BusTheme.gap(this@SettingsActivity, 3))
-                    addView(
-                        NexusUi.rowSub(
-                            this@SettingsActivity,
-                            "Keep the primary activity panel open on glasses",
-                        ),
-                    )
-                },
-                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-            )
-            addView(
-                Switch(this@SettingsActivity).apply {
-                    isChecked = settings.isAlwaysExpanded()
-                    thumbTintList = ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(NexusUi.GREEN, NexusUi.INK3),
-                    )
-                    trackTintList = ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(NexusUi.GREEN_DIM, NexusUi.LINE),
-                    )
-                    setOnCheckedChangeListener { _, enabled ->
-                        settings.setAlwaysExpanded(enabled)
-                        BusHubService.onActivityPresentationPreferenceChanged()
-                    }
-                },
-            )
-        }
-
-    private fun hudPositionRow(): LinearLayout =
-        LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = NexusUi.bordered(this@SettingsActivity, NexusUi.PANEL, NexusUi.LINE, 15)
-            setPadding(
-                NexusUi.dp(this@SettingsActivity, 15),
-                NexusUi.dp(this@SettingsActivity, 10),
-                NexusUi.dp(this@SettingsActivity, 15),
-                NexusUi.dp(this@SettingsActivity, 10),
-            )
-            val store = PhoneHudPositionStore(this@SettingsActivity)
-            val followGlasses = store.hudPositionAuto()
-            val preview = HudPositionPreviewView(this@SettingsActivity).apply {
-                insetDp = store.hudTopInsetDp()
-                dragEnabled = !followGlasses
-                onInsetCommitted = { value ->
-                    store.setHudTopInsetDp(value)
-                    BusHubService.onHudPositionPreferenceChanged()
-                }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                startActivity(
+                    Intent(this@SettingsActivity, GlassesDisplaySettingsActivity::class.java),
+                )
             }
-            addView(NexusUi.rowTitle(this@SettingsActivity, "Glasses display position"))
-            addView(BusTheme.gap(this@SettingsActivity, 3))
             addView(
-                NexusUi.rowSub(
-                    this@SettingsActivity,
-                    "Follow the Hi Rokid screen or set a manual position",
-                ),
+                NexusUi.rowTitle(this@SettingsActivity, "Display"),
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
             )
-            addView(BusTheme.gap(this@SettingsActivity, 8))
-            addView(
-                LinearLayout(this@SettingsActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    addView(
-                        NexusUi.rowTitle(this@SettingsActivity, "Follow glasses position"),
-                        LinearLayout.LayoutParams(
-                            0,
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
-                            1f,
-                        ),
-                    )
-                    addView(
-                        Switch(this@SettingsActivity).apply {
-                            isChecked = followGlasses
-                            thumbTintList = ColorStateList(
-                                arrayOf(
-                                    intArrayOf(android.R.attr.state_checked),
-                                    intArrayOf(),
-                                ),
-                                intArrayOf(NexusUi.GREEN, NexusUi.INK3),
-                            )
-                            trackTintList = ColorStateList(
-                                arrayOf(
-                                    intArrayOf(android.R.attr.state_checked),
-                                    intArrayOf(),
-                                ),
-                                intArrayOf(NexusUi.GREEN_DIM, NexusUi.LINE),
-                            )
-                            setOnCheckedChangeListener { _, enabled ->
-                                store.setHudPositionAuto(enabled)
-                                preview.dragEnabled = !enabled
-                                BusHubService.onHudPositionPreferenceChanged()
-                            }
-                        },
-                    )
-                },
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ),
-            )
-            addView(BusTheme.gap(this@SettingsActivity, 8))
-            addView(
-                preview,
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ),
-            )
+            displayValue = NexusUi.metaLabel(this@SettingsActivity, "", NexusUi.GREEN)
+            addView(displayValue)
+            renderDisplayRow()
         }
+
+    private fun renderDisplayRow() {
+        val value = displayValue ?: return
+        val auto = PhoneHudPositionStore(this).hudPositionAuto()
+        value.text = if (auto) "AUTO ›" else "MANUAL ›"
+    }
 
     private fun glassesRepairToggleRow(): LinearLayout =
         LinearLayout(this).apply {
