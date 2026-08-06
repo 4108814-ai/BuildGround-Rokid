@@ -113,6 +113,8 @@ internal object TtsController {
         mainHandler.post(::flushDoneEvents)
     }
 
+    internal fun isUtteranceActive(): Boolean = playback.current() != null
+
     @Suppress("DEPRECATION")
     fun isServiceAvailable(context: Context): Boolean = runCatching {
         context.packageManager.resolveService(serviceIntent(), PackageManager.MATCH_ALL) != null

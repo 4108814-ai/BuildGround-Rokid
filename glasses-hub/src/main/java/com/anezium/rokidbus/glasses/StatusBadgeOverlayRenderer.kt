@@ -52,7 +52,8 @@ import com.anezium.rokidbus.shared.PhoneBatteryContract
  *
  * ## What is read from the ROM, and why neither read can race
  *
- * One tree walk, three answers, all from the same node so they cannot disagree.
+ * One tree walk answers the badge questions and identifies the top package,
+ * all from the same node so they cannot disagree.
  *
  * **Is the launcher on top** — the only genuinely live question, and an event is
  * exactly what answers it.
@@ -251,11 +252,13 @@ internal object StatusBadgeOverlayRenderer {
         params = null
     }
 
-    private data class LauncherRead(
+    internal data class LauncherRead(
         val launcherOnTop: Boolean,
         val rowCenterY: Int?,
         val clusterRightX: Int?,
         val weatherVisible: Boolean,
+        val topPackageName: String?,
+        val topWindowReadable: Boolean,
     )
 
     private val nothing = LauncherRead(
@@ -263,17 +266,20 @@ internal object StatusBadgeOverlayRenderer {
         rowCenterY = null,
         clusterRightX = null,
         weatherVisible = false,
+        topPackageName = null,
+        topWindowReadable = false,
     )
 
     /**
-     * One tree walk answers all three questions: is the launcher on top, where is
-     * its status row, and how far right its clock-and-weather cluster reaches.
+     * One tree walk identifies the top package and answers the badge questions:
+     * is the launcher on top, where is its status row, and how far right its
+     * clock-and-weather cluster reaches.
      * They come from the same node, so they can never disagree with each other.
      *
      * No [AccessibilityNodeInfo] escapes this function — everything it opens is
      * released before it returns, and callers get plain values.
      */
-    private fun readLauncher(service: AccessibilityService): LauncherRead {
+    internal fun readLauncher(service: AccessibilityService): LauncherRead {
         val windows = runCatching { service.windows }.getOrNull() ?: return nothing
         val metrics = service.resources.displayMetrics
         val screenArea = metrics.widthPixels.toLong() * metrics.heightPixels.toLong()
@@ -295,7 +301,18 @@ internal object StatusBadgeOverlayRenderer {
 
         val node = runCatching { topWindow?.root }.getOrNull() ?: return nothing
         return try {
-            if (!ROKID_LAUNCHER_PACKAGE.contentEquals(node.packageName ?: "")) return nothing
+            val topPackageName = node.packageName?.toString()?.takeIf(String::isNotBlank)
+                ?: return nothing
+            if (topPackageName != ROKID_LAUNCHER_PACKAGE) {
+                return LauncherRead(
+                    launcherOnTop = false,
+                    rowCenterY = null,
+                    clusterRightX = null,
+                    weatherVisible = false,
+                    topPackageName = topPackageName,
+                    topWindowReadable = true,
+                )
+            }
             // The rightmost visible edge of the left cluster. Known view ids, no
             // tree walk and no tolerance constants — unlike the right-hand radio
             // cluster, the left one is a fixed set of named views, which is part
@@ -314,6 +331,8 @@ internal object StatusBadgeOverlayRenderer {
                 rowCenterY = boundsOf(node, STATUS_POWER_VIEW_ID)?.centerY(),
                 clusterRightX = clusterRight,
                 weatherVisible = weatherVisible,
+                topPackageName = topPackageName,
+                topWindowReadable = true,
             )
         } finally {
             recycle(node)
