@@ -10,7 +10,7 @@ SEENFILE="$BASE/$NAME.seen"
 PENDING_DISABLE="$BASE/$NAME.pending-disable"
 CHANNEL="/sdcard/Android/data/com.anezium.rokidbus.glasses/files/cmd_bridge"
 DOORBELL="$CHANNEL/doorbell"
-VERSION="2026-08-04.1"
+VERSION="2026-08-06.1"
 CAPTURE_DIR="/sdcard/DCIM/Camera"
 SCRIPT_PATH="$BASE/$NAME.sh"
 PACKAGE="com.anezium.rokidbus.glasses"
@@ -21,7 +21,8 @@ PLACEHOLDER="__ROKID_NEXUS_BRIDGE_""SECRET_HEX__"
 SELF_UPDATE_INTERVAL=300
 SELF_UPDATE_SETTLE=3
 SECRET="__ROKID_NEXUS_BRIDGE_SECRET_HEX__"
-POLL_INTERVAL=1
+MAINTENANCE_INTERVAL=30
+FALLBACK_POLL_INTERVAL=1
 DISABLE_DELAY=2
 MAX_REQUEST_BYTES=512
 
@@ -392,19 +393,51 @@ process_requests() {
   done
 }
 
-wait_for_doorbell_or_poll() {
-  if ! prepare_channel; then
-    sleep "$POLL_INTERVAL"
-    return
+write_heartbeat() {
+  echo "$(date '+%s')" > "$HEARTBEAT"
+}
+
+run_maintenance_if_due() {
+  maintenance_now="$SECONDS"
+  if [ "$((maintenance_now - last_heartbeat))" -ge "$MAINTENANCE_INTERVAL" ]; then
+    write_heartbeat
+    last_heartbeat="$maintenance_now"
   fi
-  (
-    sleep "$POLL_INTERVAL"
-    printf 'poll\n' > "$DOORBELL" 2>/dev/null
-  ) &
-  timer_pid="$!"
-  IFS= read -r ignored < "$DOORBELL" 2>/dev/null || sleep "$POLL_INTERVAL"
-  kill "$timer_pid" 2>/dev/null || true
-  wait "$timer_pid" 2>/dev/null || true
+  if [ "$((maintenance_now - last_update_check))" -ge "$SELF_UPDATE_INTERVAL" ]; then
+    last_update_check="$maintenance_now"
+    self_update_if_needed
+  fi
+}
+
+serve_channel() {
+  # fd 3 is opened read/write by the function call so opening the FIFO cannot block waiting for
+  # an external writer. Keeping its read side open makes every non-blocking app doorbell succeed.
+  process_requests
+  while [ -d "$CHANNEL" ] && [ -p "$DOORBELL" ]; do
+    wait_timeout="$((MAINTENANCE_INTERVAL - (SECONDS - last_heartbeat)))"
+    if [ "$wait_timeout" -le 0 ]; then
+      run_maintenance_if_due
+      continue
+    fi
+    wait_started="$SECONDS"
+    if IFS= read -r -t "$wait_timeout" ignored <&3; then
+      process_requests
+      continue
+    fi
+
+    process_requests
+    if [ ! -d "$CHANNEL" ] || [ ! -p "$DOORBELL" ]; then
+      return 1
+    fi
+    # SECONDS is a truncated integer, so a full read timeout can measure one second short of
+    # wait_timeout; only a wake clearly earlier than that is a broken read worth abandoning.
+    wait_elapsed="$((SECONDS - wait_started))"
+    if [ "$wait_elapsed" -lt "$((wait_timeout - 1))" ]; then
+      return 1
+    fi
+    run_maintenance_if_due
+  done
+  return 1
 }
 
 cleanup_loop() {
@@ -488,23 +521,23 @@ loop_forever() {
   fi
   echo "$$" > "$PIDFILE"
   echo "$VERSION" > "$VERSIONFILE"
-  log_line "bridge loop started pid=$$ pollInterval=$POLL_INTERVAL"
+  log_line "bridge loop started pid=$$ waitTimeout=$MAINTENANCE_INTERVAL fallbackPollInterval=$FALLBACK_POLL_INTERVAL"
   trap 'cleanup_loop; exit 0' INT TERM EXIT
-  last_update_check="$(date '+%s')"
+  last_heartbeat="$SECONDS"
+  last_update_check="$SECONDS"
+  write_heartbeat
   while true; do
-    now="$(date '+%s')"
-    echo "$now" > "$HEARTBEAT"
+    if prepare_channel; then
+      # The redirection persists for the whole healthy serving loop and closes automatically when
+      # a channel/FIFO error returns us to the degraded retry path.
+      serve_channel 3<> "$DOORBELL"
+    fi
+
+    # A missing or unopenable FIFO is the only polling mode. Requests are still authoritative,
+    # and opening the permanent reader on the next pass closes the scan-to-wait race.
     process_requests
-    case "$now" in
-      *[!0-9]*|"") ;;
-      *)
-        if [ "$((now - last_update_check))" -ge "$SELF_UPDATE_INTERVAL" ]; then
-          last_update_check="$now"
-          self_update_if_needed
-        fi
-        ;;
-    esac
-    wait_for_doorbell_or_poll
+    sleep "$FALLBACK_POLL_INTERVAL"
+    run_maintenance_if_due
   done
 }
 
