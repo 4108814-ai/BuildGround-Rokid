@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.2
 
 - **The typed pairing form works again.** On the Manual setup screen, entering
   the glasses' IP address, port and pairing code and pressing Pair used to do

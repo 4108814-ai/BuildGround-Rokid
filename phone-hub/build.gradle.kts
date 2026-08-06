@@ -12,8 +12,8 @@ android {
         applicationId = "com.anezium.rokidbus.phone"
         minSdk = 30
         targetSdk = 36
-        versionCode = 10201
-        versionName = "1.2.1"
+        versionCode = 10202
+        versionName = "1.2.2"
     }
 
     buildTypes {
