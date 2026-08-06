@@ -21,6 +21,9 @@ import com.anezium.rokidbus.shared.SetupStage
 class RokidBusAccessibilityService : AccessibilityService() {
     private val tripleTapDetector = TripleTapDetector()
     private val main = Handler(Looper.getMainLooper())
+    private val displayStandbyWatchdog by lazy(LazyThreadSafetyMode.NONE) {
+        DisplayStandbyWatchdog(this, main)
+    }
     private val tapExpiry = Runnable { flushPendingTaps() }
     // Keys whose DOWN we consumed. Their UP must be consumed too even if the
     // consumer vanished in between (selecting a launcher entry hides the
@@ -88,6 +91,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
         LauncherOverlayRenderer.onServiceConnected(this)
         StatusBadgeOverlayRenderer.onServiceConnected(this)
         GlassesHub.start(applicationContext)
+        displayStandbyWatchdog.start()
         AccessibilityRearmWatcher.start(applicationContext, "accessibility_service_connected")
         // A service connect is the only trigger the boot repair listens to: the radio observers
         // and the demand latch stay background-only and must never reach the display.
@@ -131,6 +135,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        displayStandbyWatchdog.noteAccessibilityEvent(event)
         AccessibilityWindowRoots.noteEvent(event, packageName)
         wirelessDebuggingAutomator?.onAccessibilityEvent(event)
         developerOptionsEnabler?.onAccessibilityEvent(event)
@@ -144,6 +149,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        displayStandbyWatchdog.noteKeyEvent(event)
         if (event.device?.name?.uppercase()?.contains("R08") == true) {
             return handleRingKeyEvent(event)
         }
@@ -353,6 +359,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         log("AccessibilityService destroyed")
+        displayStandbyWatchdog.stop()
         main.removeCallbacks(tapExpiry)
         wirelessDebuggingAutomator?.stop()
         developerOptionsEnabler?.stop()
@@ -1232,6 +1239,21 @@ class RokidBusAccessibilityService : AccessibilityService() {
 
         /** True while the AccessibilityService is connected and able to drive Settings. */
         internal fun isLive(): Boolean = liveInstance != null
+
+        internal fun isSetupAutomationActive(): Boolean {
+            val service = liveInstance ?: return false
+            return service.wirelessBootstrapActive ||
+                service.setupWifiEnableActive ||
+                service.wifiEnableActive ||
+                service.repairWifiEnableActive ||
+                service.manualWifiEnableActive ||
+                service.manualNavigationActive ||
+                service.manualWaitingForNetwork ||
+                service.pendingManualTarget != null ||
+                service.wifiResumeCallback != null ||
+                service.setupWifiFallbackRunnable != null ||
+                service.manualOpenVerifier != null
+        }
 
         /**
          * Called only by [GlassesHub] for the phone hub's capability-gated arm envelope. The

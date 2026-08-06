@@ -90,6 +90,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        resumedInstance = this
         SelfArmOnboardingStore.refreshNetworkPosture(applicationContext)
         RokidBusAccessibilityService.resumeSetupSessionIfNeeded(applicationContext)
         renderScreen()
@@ -98,6 +99,11 @@ class MainActivity : Activity() {
         if (onboardingState.stage != SelfArmOnboardingState.Stage.COMPLETE) {
             AccessibilityRearmWatcher.onSetupScreenOpened()
         }
+    }
+
+    override fun onPause() {
+        if (resumedInstance === this) resumedInstance = null
+        super.onPause()
     }
 
     override fun onStop() {
@@ -109,6 +115,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        if (resumedInstance === this) resumedInstance = null
         unsubscribeLauncher?.invoke()
         unsubscribeLauncher = null
         insetUnsubscribe?.invoke()
@@ -288,6 +295,7 @@ class MainActivity : Activity() {
         val snapshot = SelfArmOnboardingStore.snapshot(applicationContext)
         onboardingState = SelfArmOnboardingStateMachine.evaluate(snapshot)
         val complete = onboardingState.stage == SelfArmOnboardingState.Stage.COMPLETE
+        interactiveFlowActive = !complete
         if (complete) {
             // Land on a moment of confirmation rather than blinking straight to a plugin list:
             // the wearer just did the one thing we asked of them and deserves to see it took.
@@ -617,7 +625,15 @@ class MainActivity : Activity() {
     private fun dp(value: Int): Int =
         BusTheme.dp(this, value)
 
-    private companion object {
+    companion object {
+        @Volatile private var resumedInstance: MainActivity? = null
+        @Volatile private var interactiveFlowActive = true
+
+        internal fun isResumed(): Boolean = resumedInstance != null
+
+        internal fun isInteractiveFlowActive(): Boolean =
+            resumedInstance != null && interactiveFlowActive
+
         const val PLUGIN_ROW_HEIGHT_DP = 52
         const val PLUGIN_ROW_MARGIN_DP = 8
         /** Long enough to read four words, short enough that nobody waits on it. */

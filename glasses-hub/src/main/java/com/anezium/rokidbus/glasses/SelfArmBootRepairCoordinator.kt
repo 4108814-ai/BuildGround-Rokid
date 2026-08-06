@@ -49,6 +49,8 @@ internal object SelfArmBootRepairCoordinator {
         handler.post { startOwnerRepair(appContext, onResult) }
     }
 
+    internal fun isRepairRunning(): Boolean = repairRunning.get()
+
     private fun maybeRunBootRepair(context: Context) {
         val blocker = SelfArmBootRepairPolicy.bootAttemptBlocker(
             autoRepairEnabled = SelfArmBootRepairStore.isAutoRepairEnabled(context),
