@@ -1266,6 +1266,7 @@ class MainActivity : Activity() {
     private fun logLine(line: String) {
         if (line.isBlank()) return
         Log.i(TAG, line)
+        NexusPhoneState.recordLogLine(line)
         sendBroadcast(
             Intent(NexusPhoneState.ACTION_LOG)
                 .setPackage(packageName)

@@ -4555,6 +4555,7 @@ class BusHubService : Service() {
 
     private fun broadcastGlassesAppState(state: GlassesAppInstallState) {
         val updateState = glassesAppUpdateState
+        NexusPhoneState.recordLogLine(glassesAppStatusLine(state))
         val intent = Intent(ACTION_LOG)
             .setPackage(packageName)
             .putExtra("line", glassesAppStatusLine(state))
@@ -5299,6 +5300,7 @@ class BusHubService : Service() {
 
     private fun log(message: String) {
         Log.i(TAG, message)
+        NexusPhoneState.recordLogLine(message)
         sendBroadcast(Intent(ACTION_LOG).setPackage(packageName).putExtra("line", message))
     }
 

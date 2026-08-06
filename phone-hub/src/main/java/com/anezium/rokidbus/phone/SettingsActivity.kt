@@ -49,8 +49,6 @@ class SettingsActivity : Activity() {
     private lateinit var cxrValue: TextView
     private lateinit var sppValue: TextView
     private lateinit var bondValue: TextView
-    private lateinit var logView: TextView
-    private lateinit var logScroll: ScrollView
     private var speechValue: TextView? = null
     private var voiceValue: TextView? = null
     private var displayValue: TextView? = null
@@ -72,10 +70,11 @@ class SettingsActivity : Activity() {
     }
     private val updateStateListener: () -> Unit = renderDispatcher::requestRender
 
+    // The console moved to its own screen, but the same broadcast still carries the glasses
+    // app install state this screen renders in its update section.
     private val logReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             NexusPhoneState.updateGlassesAppInstallState(intent)
-            appendLog(intent.getStringExtra("line").orEmpty())
         }
     }
 
@@ -155,8 +154,6 @@ class SettingsActivity : Activity() {
         cxrValue = NexusUi.rowValue(this)
         sppValue = NexusUi.rowValue(this)
         bondValue = NexusUi.rowValue(this)
-        logView = TextView(this)
-        logScroll = NexusUi.console(this, logView)
         updateSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
         val content = NexusUi.contentColumn(this).apply {
@@ -193,6 +190,17 @@ class SettingsActivity : Activity() {
             addView(glassesRepairToggleRow(), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 10))
             addView(glassesRepairNowRow(), NexusUi.block())
+            addView(BusTheme.gap(this@SettingsActivity, 10))
+            addView(
+                actionRow(
+                    title = "Console",
+                    value = "Open",
+                    danger = false,
+                ) {
+                    startActivity(Intent(this@SettingsActivity, ConsoleActivity::class.java))
+                },
+                NexusUi.block(),
+            )
             addView(BusTheme.gap(this@SettingsActivity, 28))
             addView(NexusUi.sectionRow(this@SettingsActivity, "Advanced"), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 12))
@@ -221,14 +229,6 @@ class SettingsActivity : Activity() {
                         )
                     },
                     NexusUi.block(),
-                )
-                addView(BusTheme.gap(this@SettingsActivity, 10))
-                addView(
-                    logScroll,
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        NexusUi.dp(this@SettingsActivity, 190),
-                    ),
                 )
             }
             addView(BusTheme.gap(this@SettingsActivity, 28))
@@ -826,12 +826,11 @@ class SettingsActivity : Activity() {
     private fun logLine(line: String) {
         if (line.isBlank()) return
         Log.i(SETTINGS_TAG, line)
-        appendLog(line)
-    }
-
-    private fun appendLog(line: String) {
-        if (line.isBlank()) return
-        logView.append(line + "\n")
-        logScroll.post { logScroll.fullScroll(ScrollView.FOCUS_DOWN) }
+        NexusPhoneState.recordLogLine(line)
+        sendBroadcast(
+            Intent(NexusPhoneState.ACTION_LOG)
+                .setPackage(packageName)
+                .putExtra("line", line),
+        )
     }
 }

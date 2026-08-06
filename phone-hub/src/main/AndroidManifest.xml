@@ -72,6 +72,11 @@
             android:parentActivityName=".SettingsActivity" />
 
         <activity
+            android:name=".ConsoleActivity"
+            android:exported="false"
+            android:parentActivityName=".SettingsActivity" />
+
+        <activity
             android:name=".GlassesDisplaySettingsActivity"
             android:exported="false"
             android:parentActivityName=".SettingsActivity" />

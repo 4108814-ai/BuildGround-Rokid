@@ -102,6 +102,25 @@ internal object NexusPhoneState {
         notifyListeners()
     }
 
+    /**
+     * The log lines are broadcast, so any screen that isn't open when a line fires never sees
+     * it. This backlog is what lets the console show what happened before it was opened —
+     * everything since the process started, capped so a chatty hub can't grow it forever.
+     */
+    private const val LOG_BACKLOG_CAPACITY = 400
+    private val logBacklogLock = Any()
+    private val logBacklog = ArrayDeque<String>()
+
+    fun recordLogLine(line: String) {
+        if (line.isBlank()) return
+        synchronized(logBacklogLock) {
+            logBacklog.addLast(line)
+            while (logBacklog.size > LOG_BACKLOG_CAPACITY) logBacklog.removeFirst()
+        }
+    }
+
+    fun logBacklog(): List<String> = synchronized(logBacklogLock) { logBacklog.toList() }
+
     @Volatile private var appContext: Context? = null
     private val listeners = CopyOnWriteArraySet<() -> Unit>()
 
