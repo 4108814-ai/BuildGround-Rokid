@@ -69,11 +69,24 @@ object GlassesHub {
     private val registrations = CopyOnWriteArrayList<Registration>()
     private val launcherListeners = CopyOnWriteArrayList<(List<LauncherEntry>) -> Unit>()
     private val pluginGlyphCache = PluginGlyphCache()
-    private val wifiOwnership = GlassesWifiOwnership()
+    @Volatile private var wifiOwnership: GlassesWifiOwnership? = null
     // A lambda, not a method reference: the :camera process also loads this object, and a
     // reference would drag MediaSyncEngine's class init (and its executor thread) in with it.
     private val cameraSessionTracker = CameraSessionTracker { active ->
         MediaSyncEngine.onCameraSessionChanged(active)
+        appContext?.let { context ->
+            wifiRequestExecutor.execute {
+                if (active) {
+                    cancelPendingWifiDisable("camera_session_opened")
+                } else {
+                    reconcileWifiOwnership(
+                        context = context,
+                        trigger = "camera_session_closed",
+                        cameraGraceRequested = true,
+                    )
+                }
+            }
+        }
     }
     private val autoEnrollAttempted = AtomicBoolean(false)
     private val wifiEnableA11yInFlight = AtomicBoolean(false)
@@ -112,7 +125,7 @@ object GlassesHub {
         }
 
         override fun unregister(cb: IBusCallback) {
-            removeRegistrationsByBinder(cb.asBinder())
+            removeRegistrationsByBinder(cb.asBinder(), "client_unregister")
         }
 
         override fun send(path: String, id: String, payload: ByteArray) {
@@ -138,7 +151,15 @@ object GlassesHub {
     }
 
     fun start(context: Context) {
-        appContext = context.applicationContext
+        val applicationContext = context.applicationContext
+        appContext = applicationContext
+        if (wifiOwnership == null) {
+            synchronized(this) {
+                if (wifiOwnership == null) {
+                    wifiOwnership = GlassesWifiOwnership(GlassesWifiLeaseStore(applicationContext))
+                }
+            }
+        }
         if (started.compareAndSet(false, true)) {
             log("Glasses hub starting")
             SppServerManager.ensureStarted(context.applicationContext)
@@ -149,6 +170,7 @@ object GlassesHub {
             // launcher's boot auto-open — making this the reliable re-arm hook.
             AccessibilityRearmWatcher.start(context.applicationContext, "hub_start")
             MediaSyncEngine.start(context.applicationContext)
+            requestWifiOwnershipReconciliation(applicationContext, "hub_start")
         }
     }
 
@@ -513,12 +535,13 @@ object GlassesHub {
                 return
             }
             if (envelope.payload.optString("action") == "join") {
+                val sessionId = envelope.payload.optString("sessionId")
                 val ssid = envelope.payload.optString("ssid")
                 val passphrase = envelope.payload.optString("passphrase")
                 val security = WifiConnectSecurity.fromCommandKeyword(
                     envelope.payload.optString("security", WifiConnectSecurity.WPA2.commandKeyword),
                 )
-                if (ssid.isBlank() || ssid.length > 128 || security == null ||
+                if (sessionId.isBlank() || ssid.isBlank() || ssid.length > 128 || security == null ||
                     !security.isValidPassphrase(passphrase)
                 ) {
                     log("glassesWifiJoin rejected reason=invalid_payload")
@@ -531,9 +554,8 @@ object GlassesHub {
                 }
                 wifiRequestExecutor.execute {
                     wifiEnableReleasePending.set(false)
-                    wifiDisableFuture?.cancel(false)
-                    wifiDisableFuture = null
-                    handleGlassesWifiRequest(context, true)
+                    cancelPendingWifiDisable("camera_join")
+                    handleGlassesWifiRequest(context, sessionId)
                     val applied = runCatching {
                         SelfArmCommandBridgeClient.connectWifiNetwork(
                             context,
@@ -550,24 +572,35 @@ object GlassesHub {
                 return
             }
             val rawEnabled = envelope.payload.opt("enabled")
+            val sessionId = envelope.payload.optString("sessionId")
             if (rawEnabled !is Boolean) {
                 log("glassesWifiRequest rejected reason=invalid_payload")
                 return
             }
             val context = appContext
             if (context == null) {
-                log("glassesWifiRequest enabled=$rawEnabled hubOwned=${wifiOwnership.isHubOwned()} applied=false")
+                log(
+                    "glassesWifiRequest enabled=$rawEnabled " +
+                        "hubOwned=${wifiOwnership?.isHubOwned() == true} applied=false",
+                )
                 return
             }
             wifiRequestExecutor.execute {
                 if (rawEnabled) {
+                    if (sessionId.isBlank()) {
+                        log("glassesWifiRequest enabled=true rejected reason=missing_session_id")
+                        return@execute
+                    }
                     wifiEnableReleasePending.set(false)
-                    wifiDisableFuture?.cancel(false)
-                    wifiDisableFuture = null
-                    handleGlassesWifiRequest(context, true)
+                    cancelPendingWifiDisable("camera_request")
+                    handleGlassesWifiRequest(context, sessionId)
                 } else {
                     if (!deferWifiDisableUntilAccessibilityEnableCompletes()) {
-                        scheduleGlassesWifiDisable(context)
+                        reconcileWifiOwnership(
+                            context = context,
+                            trigger = "camera_release",
+                            cameraGraceRequested = true,
+                        )
                     }
                 }
             }
@@ -739,7 +772,9 @@ object GlassesHub {
     ): Boolean {
         removeRegistrationsByBinder(callback.asBinder())
         val callbackBinder = callback.asBinder()
-        val deathRecipient = IBinder.DeathRecipient { removeRegistrationsByBinder(callbackBinder) }
+        val deathRecipient = IBinder.DeathRecipient {
+            removeRegistrationsByBinder(callbackBinder, "binder_death")
+        }
         if (runCatching { callbackBinder.linkToDeath(deathRecipient, 0) }.isFailure) return false
         registrations += Registration(
             clientId,
@@ -755,13 +790,28 @@ object GlassesHub {
         return true
     }
 
-    private fun removeRegistrationsByBinder(callbackBinder: IBinder) {
-        registrations.filter { it.callbackBinder == callbackBinder }.forEach(::removeRegistration)
+    private fun removeRegistrationsByBinder(callbackBinder: IBinder, reason: String = "replacement") {
+        registrations.filter { it.callbackBinder == callbackBinder }.forEach { registration ->
+            removeRegistration(registration, reason)
+        }
     }
 
-    private fun removeRegistration(registration: Registration) {
+    private fun removeRegistration(registration: Registration, reason: String = "callback_failure") {
         if (!registrations.remove(registration)) return
         runCatching { registration.callbackBinder.unlinkToDeath(registration.deathRecipient, 0) }
+        if (registration.clientId == CAMERA_CLIENT_ID) {
+            val reset = cameraSessionTracker.reset()
+            appContext?.let { context ->
+                wifiRequestExecutor.execute {
+                    reconcileWifiOwnership(
+                        context = context,
+                        trigger = "camera_${reason}",
+                        cameraGraceRequested = true,
+                    )
+                }
+            }
+            log("camera client disconnected reason=$reason trackerReset=$reset")
+        }
     }
 
     private fun isDebuggableBuild(): Boolean =
@@ -879,7 +929,11 @@ object GlassesHub {
 
     internal fun isCameraSessionActive(): Boolean = cameraSessionTracker.isActive()
 
-    internal fun isWifiHubOwned(): Boolean = wifiOwnership.isHubOwned()
+    internal fun isWifiHubOwned(): Boolean {
+        val context = appContext ?: return wifiOwnership?.isHubOwned() == true
+        return wifiOwnership?.isHubOwned() == true ||
+            SelfArmSetupWifiOwnershipStore.isNexusOwned(context)
+    }
 
     internal fun supportsPhoneAssistedSetup(): Boolean =
         supportsPhoneAssistedSetup(remotePhoneCapabilities.features)
@@ -914,6 +968,18 @@ object GlassesHub {
      */
     internal fun resetCameraSession() {
         if (cameraSessionTracker.reset()) log("camera session reset: :camera process is gone")
+    }
+
+    internal fun requestWifiOwnershipReconciliation(context: Context, trigger: String) {
+        val applicationContext = context.applicationContext
+        wifiRequestExecutor.execute {
+            reconcileWifiOwnership(applicationContext, trigger, cameraGraceRequested = false)
+        }
+    }
+
+    internal fun onSetupSessionTerminal(context: Context, sessionId: String) {
+        SelfArmSetupWifiOwnershipStore.discardUnissued(context, sessionId)
+        requestWifiOwnershipReconciliation(context, "setup_terminal:$sessionId")
     }
 
     private fun updateRemotePhoneCapabilities(payload: JSONObject) {
@@ -985,60 +1051,68 @@ object GlassesHub {
             PackageManager.SIGNATURE_MATCH
     }
 
-    private fun scheduleGlassesWifiDisable(context: Context) {
-        if (!wifiOwnership.isHubOwned() || wifiDisableFuture != null) {
-            log("glassesWifiGrace scheduled=false hubOwned=${wifiOwnership.isHubOwned()}")
+    private fun scheduleGlassesWifiDisable(context: Context, trigger: String) {
+        if (wifiDisableFuture != null) {
+            log("glassesWifiGrace scheduled=false trigger=$trigger reason=already_pending")
             return
         }
-        log("glassesWifiGrace scheduled=true delayMs=$WIFI_DISABLE_GRACE_MS")
+        log("glassesWifiGrace scheduled=true trigger=$trigger delayMs=$WIFI_DISABLE_GRACE_MS")
         wifiDisableFuture = wifiRequestExecutor.schedule(
             {
                 wifiDisableFuture = null
-                handleGlassesWifiRequest(context, false)
+                reconcileWifiOwnership(
+                    context = context,
+                    trigger = "${trigger}_grace_elapsed",
+                    cameraGraceRequested = false,
+                    cameraGraceSatisfied = true,
+                )
             },
             WIFI_DISABLE_GRACE_MS,
             TimeUnit.MILLISECONDS,
         )
     }
 
-    private fun handleGlassesWifiRequest(context: Context, enabled: Boolean) {
+    private fun cancelPendingWifiDisable(trigger: String) {
+        val cancelled = wifiDisableFuture?.cancel(false) == true
+        wifiDisableFuture = null
+        if (cancelled) log("glassesWifiGrace cancelled trigger=$trigger")
+    }
+
+    private fun handleGlassesWifiRequest(context: Context, sessionId: String) {
         val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         if (wifiManager == null) {
-            log("glassesWifiRequest enabled=$enabled hubOwned=${wifiOwnership.isHubOwned()} applied=false")
+            log("glassesWifiRequest enabled=true hubOwned=${wifiOwnership?.isHubOwned() == true} applied=false")
             return
         }
         val wifiCurrentlyEnabled = runCatching { wifiManager.isWifiEnabled }
             .onFailure { logError("glassesWifiRequest state read failed", it) }
             .getOrNull()
         if (wifiCurrentlyEnabled == null) {
-            log("glassesWifiRequest enabled=$enabled hubOwned=${wifiOwnership.isHubOwned()} applied=false")
+            log("glassesWifiRequest enabled=true hubOwned=${wifiOwnership?.isHubOwned() == true} applied=false")
             return
         }
-        if (wifiCurrentlyEnabled && wifiEnableA11yInFlight.getAndSet(false)) {
-            wifiOwnership.markEnabledByHub()
-            log("glassesWifi a11y enable observed=true")
-        }
-        val result = wifiOwnership.handleRequest(
-            enabled = enabled,
+        val ownership = wifiOwnership ?: return
+        val result = ownership.acquire(
+            sessionId = sessionId,
             wifiCurrentlyEnabled = wifiCurrentlyEnabled,
-            setWifiEnabled = { requested ->
-                val applied = runCatching { SelfArmCommandBridgeClient.setWifiEnabled(context, requested) }
+            requestWifiEnable = {
+                val applied = runCatching { SelfArmCommandBridgeClient.setWifiEnabled(context, true) }
                     .onFailure { logError("glassesWifiRequest bridge failed", it) }
                     .getOrDefault(false)
                 // Camera-owned Wi-Fi acquisition must not start the onboarding-only
                 // wireless-debugging bootstrap; it gets only the Wi-Fi toggle mode.
-                if (requested && !applied) attemptWifiAccessibilityEnable(context)
-                applied
+                applied || attemptWifiAccessibilityEnable(context)
             },
         )
-        log("glassesWifiRequest enabled=$enabled hubOwned=${result.hubOwned} applied=${result.applied}")
+        log("glassesWifiRequest enabled=true hubOwned=${result.hubOwned} applied=${result.applied}")
     }
 
-    private fun attemptWifiAccessibilityEnable(context: Context) {
+    private fun attemptWifiAccessibilityEnable(context: Context): Boolean {
         val attempted = wifiEnableA11yInFlight.compareAndSet(false, true)
         val serviceConnected = attempted && RokidBusAccessibilityService.requestWifiEnable(context)
         if (attempted && !serviceConnected) wifiEnableA11yInFlight.set(false)
         log("glassesWifi a11y-enable attempted=$attempted serviceConnected=$serviceConnected")
+        return serviceConnected
     }
 
     private fun deferWifiDisableUntilAccessibilityEnableCompletes(): Boolean {
@@ -1054,16 +1128,121 @@ object GlassesHub {
     internal fun onWifiEnableAutomationFinished(enabled: Boolean) {
         val requested = wifiEnableA11yInFlight.getAndSet(false)
         val releasePending = wifiEnableReleasePending.getAndSet(false)
-        if (enabled && requested) wifiOwnership.markEnabledByHub()
+        if (!enabled) {
+            appContext?.let { context ->
+                requestWifiOwnershipReconciliation(context, "camera_a11y_enable_failed")
+            }
+        }
         if (enabled && requested && releasePending) {
             appContext?.let { context ->
-                wifiRequestExecutor.execute { scheduleGlassesWifiDisable(context) }
+                wifiRequestExecutor.execute {
+                    reconcileWifiOwnership(
+                        context = context,
+                        trigger = "camera_release_after_a11y_enable",
+                        cameraGraceRequested = true,
+                    )
+                }
             }
         }
         log(
             "glassesWifi a11y-enable completed requested=$requested " +
                 "enabled=$enabled releasePending=$releasePending",
         )
+    }
+
+    private fun reconcileWifiOwnership(
+        context: Context,
+        trigger: String,
+        cameraGraceRequested: Boolean,
+        cameraGraceSatisfied: Boolean = false,
+    ) {
+        val ownership = wifiOwnership ?: return
+        val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        val wifiEnabled = wifiManager?.let { manager ->
+            runCatching { manager.isWifiEnabled }
+                .onFailure { logError("glassesWifi reconcile state read failed", it) }
+                .getOrNull()
+        }
+        val setupEnableRequestActive =
+            SelfArmSetupWifiOwnershipStore.isEnableRequestInFlight(context)
+        if (wifiEnabled == false) {
+            val cameraEnableRequestActive =
+                ownership.isEnableRequestPossiblyInFlight() ||
+                    wifiEnableA11yInFlight.get() ||
+                    cameraSessionTracker.isActive()
+            if (setupEnableRequestActive || cameraEnableRequestActive) {
+                log(
+                    "glassesWifi reconcile trigger=$trigger action=none " +
+                        "setupEnableRequestActive=$setupEnableRequestActive " +
+                        "cameraEnableRequestActive=$cameraEnableRequestActive",
+                )
+                return
+            }
+            cancelPendingWifiDisable("radio_observed_off")
+            ownership.observeRadioState(wifiEnabled = false)
+            SelfArmSetupWifiOwnershipStore.clearAfterRadioDisabled(context)
+            log("glassesWifi reconcile trigger=$trigger result=already_off")
+            return
+        }
+        val action = WifiOwnershipReconciliationPolicy.decide(
+            cameraLeaseOwned = ownership.isHubOwned(),
+            setupWifiOwned = SelfArmSetupWifiOwnershipStore.isNexusOwned(context),
+            cameraSessionActive = cameraSessionTracker.isActive(),
+            setupSessionActive = SelfArmOnboardingStore.isWifiStillNeededBySetup(context),
+            mediaSyncSessionActive = MediaSyncEngine.isSessionActive(),
+            selfArmOperationActive = SelfArmController.isOperationRunning(),
+            setupEnableRequestActive = setupEnableRequestActive,
+            cameraGraceRequested = cameraGraceRequested,
+            cameraGracePending = wifiDisableFuture != null,
+            cameraGraceSatisfied = cameraGraceSatisfied,
+        )
+        when (action) {
+            WifiOwnershipReconciliationAction.NONE ->
+                log("glassesWifi reconcile trigger=$trigger action=none")
+            WifiOwnershipReconciliationAction.SCHEDULE_CAMERA_GRACE ->
+                scheduleGlassesWifiDisable(context, trigger)
+            WifiOwnershipReconciliationAction.DISABLE_NOW ->
+                disableWifiOwnedByNexus(context, ownership, wifiManager, trigger)
+        }
+    }
+
+    private fun disableWifiOwnedByNexus(
+        context: Context,
+        ownership: GlassesWifiOwnership,
+        wifiManager: WifiManager?,
+        trigger: String,
+    ) {
+        if (wifiManager == null) {
+            log("glassesWifi disable trigger=$trigger observedOff=false reason=no_wifi_manager")
+            return
+        }
+        val viaBridge = runCatching { SelfArmCommandBridgeClient.setWifiEnabled(context, false) }
+            .onFailure { logError("glassesWifi disable bridge call failed", it) }
+            .getOrDefault(false)
+        val fallbackApplied = !viaBridge && SelfArmController.setWifiEnabled(context, false)
+        val observedOff = awaitWifiDisabled(wifiManager)
+        if (observedOff) {
+            ownership.observeRadioState(wifiEnabled = false)
+            SelfArmSetupWifiOwnershipStore.clearAfterRadioDisabled(context)
+        }
+        log(
+            "glassesWifi disable trigger=$trigger viaBridge=$viaBridge " +
+                "fallbackApplied=$fallbackApplied observedOff=$observedOff",
+        )
+    }
+
+    private fun awaitWifiDisabled(wifiManager: WifiManager): Boolean {
+        val deadline = System.nanoTime() + WIFI_DISABLE_OBSERVE_TIMEOUT_MS * 1_000_000L
+        while (System.nanoTime() < deadline) {
+            if (runCatching { !wifiManager.isWifiEnabled }.getOrDefault(false)) return true
+            try {
+                Thread.sleep(WIFI_STATE_POLL_MS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return false
+            }
+        }
+        return runCatching { !wifiManager.isWifiEnabled }.getOrDefault(false)
     }
 
     private fun attemptWifiAutoEnroll(context: Context) {
@@ -1078,8 +1257,11 @@ object GlassesHub {
     }
 
     private const val WIFI_DISABLE_GRACE_MS = 40_000L
+    private const val WIFI_DISABLE_OBSERVE_TIMEOUT_MS = 3_000L
+    private const val WIFI_STATE_POLL_MS = 50L
     private const val SETUP_CAPABILITIES_DEBOUNCE_MS = 250L
     /** Long enough to read a code and type it on the phone; short enough to never strand the screen. */
     private const val MANUAL_SETUP_SCREEN_TIMEOUT_MS = 5 * 60_000L
     private const val CAMERA_LAUNCHER_ID = "camera"
+    private const val CAMERA_CLIENT_ID = "glasses-camera-domain"
 }

@@ -206,7 +206,10 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
 
     private fun handleBusEvent(event: BusEvent) {
         when (event) {
-            is BusEvent.LinkState -> refreshAvailability()
+            is BusEvent.LinkState -> {
+                refreshAvailability()
+                sessionId?.let(::publishCameraSessionOpened)
+            }
             is BusEvent.Message -> when (event.path) {
                 BusPaths.CAMERA_OVERLAY -> handleOverlay(event.payload)
                 BusPaths.CAMERA_FREEZE_RESULT -> handleFreezeResult(event.payload)
@@ -256,21 +259,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         if (sessionId == null) {
             sessionStartedAtMs = SystemClock.elapsedRealtime()
             sessionId = UUID.randomUUID().toString()
-            busClient?.send(
-                BusPaths.CAMERA_SESSION_STATE,
-                JSONObject()
-                    .put("sessionId", sessionId)
-                    .put("state", "opened")
-                    .put(
-                        "config",
-                        JSONObject()
-                            .put("width", streamPlan?.rasterSize?.width ?: CameraH264Streamer.PREFERRED_RASTER_SIZE.width)
-                            .put("height", streamPlan?.rasterSize?.height ?: CameraH264Streamer.PREFERRED_RASTER_SIZE.height)
-                            .put("fps", CameraH264Streamer.FPS)
-                            .put("protocolVersion", CameraLinkProtocol.VERSION),
-                    ),
-            )
-            requestGlassesWifi(true)
+            publishCameraSessionOpened(sessionId.orEmpty())
         }
         if (cameraLink == null) {
             val startupMode = CameraLinkStartupModePolicy.select(busClient?.capabilities() ?: 0)
@@ -301,8 +290,8 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         stopStreamer()
         cameraLink?.close()
         cameraLink = null
-        requestGlassesWifi(false)
         val closingSession = sessionId
+        requestGlassesWifi(false, closingSession)
         sessionId = null
         sessionStartedAtMs = 0L
         if (sendClosed && closingSession != null) {
@@ -482,8 +471,32 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
         log("cameraLinkStage stage=offer_sent#$offerNumber elapsedMs=$elapsedMs")
     }
 
-    private fun requestGlassesWifi(enabled: Boolean) {
-        busClient?.send(BusPaths.GLASSES_WIFI_REQUEST, JSONObject().put("enabled", enabled))
+    private fun publishCameraSessionOpened(activeSessionId: String) {
+        if (activeSessionId.isBlank()) return
+        busClient?.send(
+            BusPaths.CAMERA_SESSION_STATE,
+            JSONObject()
+                .put("sessionId", activeSessionId)
+                .put("state", "opened")
+                .put(
+                    "config",
+                    JSONObject()
+                        .put("width", streamPlan?.rasterSize?.width ?: CameraH264Streamer.PREFERRED_RASTER_SIZE.width)
+                        .put("height", streamPlan?.rasterSize?.height ?: CameraH264Streamer.PREFERRED_RASTER_SIZE.height)
+                        .put("fps", CameraH264Streamer.FPS)
+                        .put("protocolVersion", CameraLinkProtocol.VERSION),
+                ),
+        )
+        requestGlassesWifi(true, activeSessionId)
+    }
+
+    private fun requestGlassesWifi(enabled: Boolean, activeSessionId: String?) {
+        busClient?.send(
+            BusPaths.GLASSES_WIFI_REQUEST,
+            JSONObject()
+                .put("enabled", enabled)
+                .putOpt("sessionId", activeSessionId),
+        )
     }
 
     private fun handleReverseLinkOffer(payload: JSONObject) {
@@ -501,6 +514,7 @@ class CameraActivity : Activity(), TextureView.SurfaceTextureListener {
             BusPaths.GLASSES_WIFI_REQUEST,
             JSONObject()
                 .put("action", "join")
+                .put("sessionId", offer.sessionId)
                 .put("ssid", offer.ssid)
                 .put("passphrase", offer.passphrase)
                 .put("security", security.commandKeyword),

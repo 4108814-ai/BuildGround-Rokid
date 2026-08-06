@@ -136,6 +136,7 @@ internal object AccessibilityRearmWatcher {
             if (result == SelfArmWatchdogEnsureResult.READY) bridgeLivenessPolicy.reset()
             log("Watchdog ensure finished reason=$reason result=$result retryScheduled=$shouldSchedule")
             if (shouldSchedule) postWatchdogRetry(context, "deferred_reachability")
+            GlassesHub.requestWifiOwnershipReconciliation(context, "watchdog_ensure_finished")
             onComplete?.invoke()
         }
     }

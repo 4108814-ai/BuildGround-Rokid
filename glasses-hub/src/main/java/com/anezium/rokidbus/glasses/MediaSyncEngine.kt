@@ -155,6 +155,13 @@ internal object MediaSyncEngine {
                         logSync("camera session stale during safety scan; releasing")
                         GlassesHub.resetCameraSession()
                     }
+                    // The camera lease is durable even when the in-memory session edge was lost.
+                    // Sweep it independently so a crashed camera or restarted hub cannot strand
+                    // a Nexus-owned radio merely because there is no tracker flag left to reset.
+                    GlassesHub.requestWifiOwnershipReconciliation(
+                        context,
+                        "media_sync_safety_scan",
+                    )
                     if (!MediaSyncSafetyScanPolicy.shouldScan(
                             mode = mode,
                             charging = isCharging(context),
