@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.4
+
+- **The display now follows your screen position.** The Hi Rokid app lets you
+  raise or lower the glasses' virtual screen, and Rokid's own interface moves
+  with it — but Nexus kept drawing everything at the top of the panel. If you
+  keep your screen low, that put the notification window and every other Nexus
+  surface out of comfortable view (thanks for the report!). The glasses now
+  detect where your screen sits and move everything Nexus draws — notifications,
+  assistant answers, plugin displays, the launcher — to meet it. There is
+  nothing to set up: adjust the screen in Hi Rokid and Nexus follows along.
+
+- **Prefer to place it yourself?** Settings → *Glasses display position* has a
+  switch to turn the automatic following off, and a small mock of the glasses
+  screen you can drag to pin the display exactly where you want it.
+
 ## 1.2.3
 
 - **Spoken answers always use your phone's voice now.** The glasses' built-in
