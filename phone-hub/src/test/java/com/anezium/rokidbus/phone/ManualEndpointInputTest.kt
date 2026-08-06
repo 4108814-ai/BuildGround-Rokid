@@ -77,4 +77,19 @@ class ManualEndpointInputTest {
             ManualEndpointInput.parseCode("12345a"),
         )
     }
+
+    @Test
+    fun `only ascii digits count, in the code and in the port`() {
+        // Char.isDigit() (and Integer.parseInt) accept any Unicode decimal digit, but the pairing
+        // engine and adbd are ASCII-only; letting these through here surfaces as a baffling
+        // refusal a screen later instead of a format error under the field.
+        assertEquals(
+            ManualEndpointInput.Code.Invalid(ManualEndpointInput.CodeError.FORMAT),
+            ManualEndpointInput.parseCode("١٢٣٤٥٦"),
+        )
+        assertEquals(
+            ManualEndpointInput.Endpoint.Invalid(ManualEndpointInput.EndpointError.PORT),
+            ManualEndpointInput.parseEndpoint("192.168.1.20:٣٧١٣٥"),
+        )
+    }
 }

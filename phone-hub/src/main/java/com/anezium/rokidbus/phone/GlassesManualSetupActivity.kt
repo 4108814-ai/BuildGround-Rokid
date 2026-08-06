@@ -58,6 +58,11 @@ class GlassesManualSetupActivity : Activity() {
     private var inlineStatus: String? = null
     private var inlineIsError = false
     private var commandPending = false
+
+    // The engine renders through a posted handler, so between an accepted submit and the PAIRING
+    // redraw the form is still on screen; a second tap in that window would be refused by the
+    // engine and misreported as a failure while the pairing is actually running.
+    private var pairSubmitInFlight = false
     private var lastState: GlassesManualPairingState = GlassesManualPairingState.IDLE
 
     // The preflight is drawn from what the lens has reported, so it has to redraw when that
@@ -186,6 +191,7 @@ class GlassesManualSetupActivity : Activity() {
 
     private fun render(state: GlassesManualPairingState) {
         lastState = state
+        pairSubmitInFlight = false
         val key = stateKey(state)
         // WAITING_FOR_CODE can re-emit; don't rebuild the form under the user's fingers.
         if (key == renderedStateKey && state is GlassesManualPairingState.WAITING_FOR_CODE) return
@@ -598,8 +604,11 @@ class GlassesManualSetupActivity : Activity() {
                     return@primary
                 }
                 hideKeyboard()
+                if (pairSubmitInFlight) return@primary
                 val live = engine
-                if (live == null || !live.submit(endpoint.host, endpoint.port, code.code)) {
+                if (live == null ||
+                    !live.submit(endpoint.host, endpoint.port, code.code, allowStartFromIdle = true)
+                ) {
                     SetupJournal.record(
                         context = this@GlassesManualSetupActivity,
                         fromGlasses = false,
@@ -610,6 +619,7 @@ class GlassesManualSetupActivity : Activity() {
                     inlineIsError = true
                     rerenderCurrent()
                 } else {
+                    pairSubmitInFlight = true
                     SetupJournal.record(
                         this@GlassesManualSetupActivity,
                         fromGlasses = false,

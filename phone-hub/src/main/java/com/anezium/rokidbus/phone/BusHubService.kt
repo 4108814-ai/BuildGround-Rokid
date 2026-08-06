@@ -4282,7 +4282,6 @@ class BusHubService : Service() {
 
     private fun handleManualSelfArmResponse(envelope: BusEnvelope): Boolean {
         if (!::manualPairingEngine.isInitialized) return false
-        manualPairingEngine.onGlassesConnectPort(envelope.payload.optInt("connectPort"))
         val errorCode = when (envelope.path) {
             BusPaths.GLASSES_SELFARM_MANUAL_REPLY -> if (
                 envelope.payload.optBoolean("accepted", false)
@@ -4296,6 +4295,10 @@ class BusHubService : Service() {
         }
         val requestId = envelope.payload.optString("forId", envelope.id).ifBlank { envelope.id }
         if (!manualPairingEngine.onManualControlResponse(requestId, errorCode)) return false
+        // Only a reply that matched the live request may teach the engine a connect port. A stale
+        // ack straggling in after a cancel used to re-plant its (possibly obsolete) port, and a
+        // later typed pairing would then skip discovery and dial the wrong door.
+        manualPairingEngine.onGlassesConnectPort(envelope.payload.optInt("connectPort"))
         recordRemoteRoute(
             envelope,
             if (errorCode == null) PluginBusJournal.Verdict.OK else PluginBusJournal.Verdict.REJECTED,

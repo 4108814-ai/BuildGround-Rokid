@@ -6,6 +6,7 @@ import java.io.Closeable
 import java.io.IOException
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.UUID
 
@@ -171,7 +172,12 @@ internal class GlassesManualPairingEngine(
         return true
     }
 
-    fun submit(host: String, pairPort: Int, code: String): Boolean {
+    fun submit(
+        host: String,
+        pairPort: Int,
+        code: String,
+        allowStartFromIdle: Boolean = false,
+    ): Boolean {
         val cleanHost = host.trim()
         var ephemeralCode = code.trim()
         if (cleanHost.isBlank() || cleanHost.length > 255 ||
@@ -183,19 +189,29 @@ internal class GlassesManualPairingEngine(
         val attempt = synchronized(lock) {
             when (state) {
                 GlassesManualPairingState.IDLE -> {
-                    // The typed form is the recourse when automation never ran, so IDLE is a
-                    // legitimate starting state. Keep the glasses-reported port to avoid mDNS.
-                    generation += 1L
-                    activeWork?.cancel()
-                    activeWork = null
-                    controlAckTimeout?.cancel()
-                    controlAckTimeout = null
-                    pendingControl = null
-                    confirmationTimeout?.cancel()
-                    confirmationTimeout = null
-                    awaitingGlassesConfirmation = false
-                    awaitGlassesConfirmationForAttempt = true
-                    generation
+                    // The typed form is the recourse when automation never ran, so for it IDLE is
+                    // a legitimate starting state — but only the wizard opts in. For every other
+                    // caller IDLE keeps meaning "no authorized attempt": the phone-assisted path
+                    // must not resurrect an offer that a cancel() already tore down.
+                    if (!allowStartFromIdle) {
+                        null
+                    } else {
+                        // Same reset as start(), except the glasses-reported connect port is
+                        // kept: every manual-navigation ack carries it, and wiping it would
+                        // force the mDNS discovery fallback that dies on multicast-blocking
+                        // routers.
+                        generation += 1L
+                        activeWork?.cancel()
+                        activeWork = null
+                        controlAckTimeout?.cancel()
+                        controlAckTimeout = null
+                        pendingControl = null
+                        confirmationTimeout?.cancel()
+                        confirmationTimeout = null
+                        awaitingGlassesConfirmation = false
+                        awaitGlassesConfirmationForAttempt = true
+                        generation
+                    }
                 }
                 GlassesManualPairingState.WAITING_FOR_CODE -> generation
                 else -> null
@@ -206,7 +222,7 @@ internal class GlassesManualPairingEngine(
             return false
         }
         transition(attempt, GlassesManualPairingState.PAIRING)
-        val task = worker.submit {
+        return runAttempt(attempt) {
             var stage = WorkStage.PAIRING
             var session: ManualAdbSession? = null
             try {
@@ -217,7 +233,7 @@ internal class GlassesManualPairingEngine(
                     // captured reference is cleared immediately after the sole pairing call.
                     ephemeralCode = ""
                 }
-                if (!isCurrent(attempt)) return@submit
+                if (!isCurrent(attempt)) return@runAttempt
 
                 stage = WorkStage.CONNECTING
                 transition(attempt, GlassesManualPairingState.CONNECTING)
@@ -231,7 +247,7 @@ internal class GlassesManualPairingEngine(
                 if (!isCurrent(attempt)) {
                     session.close()
                     session = null
-                    return@submit
+                    return@runAttempt
                 }
 
                 stage = WorkStage.ARMING
@@ -239,7 +255,7 @@ internal class GlassesManualPairingEngine(
                 val armSession = session
                 session = null // The arm runner owns transport cleanup, including reconnects.
                 backend.arm(armSession, cleanHost)
-                if (!isCurrent(attempt)) return@submit
+                if (!isCurrent(attempt)) return@runAttempt
                 if (shouldAwaitGlassesConfirmation(attempt)) {
                     awaitGlassesConfirmation(attempt)
                 } else {
@@ -250,6 +266,21 @@ internal class GlassesManualPairingEngine(
                 runCatching { session?.close() }
                 fail(attempt, userMessage(stage), failure)
             }
+        }
+    }
+
+    /**
+     * Hands the pairing work to the executor without letting a dead engine crash the caller. A
+     * surviving activity can still hold this engine after close() shut the executor down; before
+     * IDLE submissions were accepted that call could never happen, now it must fail as an attempt,
+     * not as an uncaught RejectedExecutionException on the UI thread.
+     */
+    private fun runAttempt(attempt: Long, work: () -> Unit): Boolean {
+        val task = try {
+            worker.submit(work)
+        } catch (rejected: RejectedExecutionException) {
+            fail(attempt, userMessage(WorkStage.PAIRING), rejected)
+            return true
         }
         synchronized(lock) {
             if (attempt == generation) activeWork = task else task.cancel()
