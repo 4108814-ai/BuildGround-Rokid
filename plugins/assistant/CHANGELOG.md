@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.0
+
+- **Every provider can look now.** Photo questions were a ChatGPT-only power;
+  API providers were told they could look and could only pretend. Now a
+  vision-capable model on MiniMax, OpenRouter, GLM, DeepSeek, or your own
+  server takes a real photo through the glasses camera — same one-photo-per-
+  question rule, same privacy: never saved to the glasses' gallery.
+- A model that cannot see images is now told so and answers honestly, instead
+  of inventing tool-call syntax in the middle of its reply. Set the "can see
+  photos" switch for your model in the provider's settings to enable the
+  camera.
+- A server that does not understand tools is retried once without them, so
+  plain custom endpoints keep answering as before.
+
 ## 1.1.1
 
 - **No more thinking out loud.** Models that reason inline — MiniMax, GLM,
