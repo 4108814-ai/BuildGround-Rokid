@@ -15,22 +15,16 @@ import com.anezium.rokidbus.client.ui.NexusUi
 import java.util.Locale
 
 /**
- * How the glasses answer out loud, as opposed to how they listen, which is Speech.
+ * How Nexus answers out loud, as opposed to how it listens, which is Speech.
  *
- * The speaking is done by the phone's own engine, so the voice and the speed are ours to
- * set per sentence — unlike the glasses' engine, whose voice and rate are device-wide
- * properties shared with Rokid's own assistant and therefore left alone.
- *
- * Automatic uses a non-glasses external audio route when one is active; otherwise the
- * glasses take over. Glasses only always uses the glasses' device-wide voice and rate.
+ * The phone owns synthesis so the chosen voice and speed stay consistent whichever safe
+ * listening device is active.
  */
 class VoiceSettingsActivity : Activity() {
     private val voiceSettings by lazy { PhoneTtsSettingsStore(this) }
 
     private lateinit var introCard: TextView
     private lateinit var headerMeta: TextView
-    private lateinit var outputHost: LinearLayout
-    private lateinit var phoneSettingsHost: LinearLayout
     private lateinit var speedHost: LinearLayout
     private lateinit var voiceListHost: LinearLayout
 
@@ -53,11 +47,10 @@ class VoiceSettingsActivity : Activity() {
 
         introCard = NexusUi.cardBody(this, "")
         headerMeta = NexusUi.metaLabel(this, "", NexusUi.GREEN_DIM)
-        outputHost = host()
         speedHost = host()
         voiceListHost = host()
 
-        phoneSettingsHost = host().apply {
+        val phoneSettingsHost = host().apply {
             addView(sectionHeaderRow("Speed", headerMeta), NexusUi.block())
             addView(BusTheme.gap(this@VoiceSettingsActivity, 12))
             addView(speedHost, NexusUi.block())
@@ -88,21 +81,6 @@ class VoiceSettingsActivity : Activity() {
         val content = NexusUi.contentColumn(this).apply {
             addView(introCard, NexusUi.block())
             addView(BusTheme.gap(this@VoiceSettingsActivity, 22))
-            addView(
-                sectionHeaderRow(
-                    "Output",
-                    NexusUi.metaLabel(this@VoiceSettingsActivity, "", NexusUi.INK4),
-                ),
-                NexusUi.block(),
-            )
-            addView(BusTheme.gap(this@VoiceSettingsActivity, 12))
-            addView(
-                NexusUi.card(this@VoiceSettingsActivity).apply {
-                    addView(outputHost, NexusUi.block())
-                },
-                NexusUi.block(),
-            )
-            addView(BusTheme.gap(this@VoiceSettingsActivity, 26))
             addView(phoneSettingsHost, NexusUi.block())
         }
 
@@ -197,33 +175,9 @@ class VoiceSettingsActivity : Activity() {
         }
 
     private fun render() {
-        val outputMode = voiceSettings.outputMode()
-        introCard.text = when (outputMode) {
-            PhoneTtsOutputMode.AUTO ->
-                "Answers play through your earbuds or whatever else is plugged in; " +
-                    "with nothing connected, the glasses speak. Never the phone's own speaker."
-            PhoneTtsOutputMode.GLASSES_ONLY ->
-                "Answers are spoken by the glasses themselves, with the voice and speed " +
-                    "they share with Rokid's own assistant."
-        }
-        outputHost.removeAllViews()
-        outputHost.addView(
-            selectableRow("Automatic", null, outputMode == PhoneTtsOutputMode.AUTO) {
-                voiceSettings.setOutputMode(PhoneTtsOutputMode.AUTO)
-                render()
-            },
-            NexusUi.block(),
-        )
-        outputHost.addView(
-            selectableRow("Glasses only", null, outputMode == PhoneTtsOutputMode.GLASSES_ONLY) {
-                voiceSettings.setOutputMode(PhoneTtsOutputMode.GLASSES_ONLY)
-                render()
-            },
-            NexusUi.block(),
-        )
-        phoneSettingsHost.visibility =
-            if (outputMode == PhoneTtsOutputMode.AUTO) View.VISIBLE else View.GONE
-        if (outputMode == PhoneTtsOutputMode.GLASSES_ONLY) return
+        introCard.text =
+            "Answers use your phone's voice and play through your glasses or earbuds. " +
+                "If neither can play them, nothing is spoken — never the phone's own speaker."
 
         val rate = voiceSettings.speechRate()
         headerMeta.text = formatRate(rate)

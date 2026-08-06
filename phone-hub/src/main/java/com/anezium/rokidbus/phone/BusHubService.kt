@@ -291,7 +291,6 @@ class BusHubService : Service() {
     @Volatile private var remotePinSurfaceVersion = 0
     @Volatile private var remoteNoticeSurfaceVersion = 0
     @Volatile private var remoteActivitySurfaceVersion = 0
-    @Volatile private var remoteTtsVersion = 0
     @Volatile private var remoteMaxImageBytes = 0
     @Volatile private var remoteGlassesVersionName: String? = null
     @Volatile private var remoteGlassesSetupComplete = false
@@ -633,7 +632,6 @@ class BusHubService : Service() {
         super.onCreate()
         NexusPhoneState.restore(applicationContext)
         activeInstance = this
-        val phoneTtsSettings = PhoneTtsSettingsStore(applicationContext)
         val phoneSpeakerRouteProbe = PhoneSpeakerRouteProbe(applicationContext) {
             prefs().getString(PREF_LAST_GLASSES_ADDRESS, null)
         }
@@ -643,12 +641,11 @@ class BusHubService : Service() {
                 emitStarted = ::emitPhoneTtsStarted,
                 emitDone = ::emitPhoneTtsDone,
             ),
-            forwardToGlasses = ::sendRemote,
             emitDone = ::emitPhoneTtsDone,
-            outputMode = phoneTtsSettings::outputMode,
             phoneRoute = phoneSpeakerRouteProbe::classifyRoute,
             logger = ::log,
         )
+        phoneTtsDispatcher.initialize()
         manualPairingEngine = GlassesManualPairingEngine.create(
             context = applicationContext,
             control = GlassesManualControlSender(::sendManualSelfArmControl),
@@ -1305,11 +1302,6 @@ class BusHubService : Service() {
             cameraCompanionController.onRemoteEnvelope(envelope)
         ) {
             recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
-            return
-        }
-        if (envelope.path == BusPaths.TTS_STARTED || envelope.path == BusPaths.TTS_DONE) {
-            recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
-            handleTtsEvent(envelope, fromGlasses = true)
             return
         }
         if (::pluginRegistry.isInitialized && pluginRegistry.handleRemote(envelope)) return
@@ -2493,23 +2485,6 @@ class BusHubService : Service() {
                         sender,
                         PluginBusJournal.Verdict.OK,
                     )
-                    is PhoneTtsDispatchResult.Forwarded -> {
-                        if (dispatch.error == null) {
-                            recordLocalRoute(
-                                forwarded,
-                                senderUid,
-                                sender,
-                                PluginBusJournal.Verdict.OK,
-                            )
-                        } else {
-                            rejectTts(
-                                envelope,
-                                senderUid,
-                                sender,
-                                TtsContract.ERROR_CAPABILITY_NOT_AVAILABLE,
-                            )
-                        }
-                    }
                     is PhoneTtsDispatchResult.Invalid ->
                         rejectTts(envelope, senderUid, sender, dispatch.error)
                 }
@@ -2527,7 +2502,7 @@ class BusHubService : Service() {
         deliverError(sender.replyBinder, envelope.id, code)
     }
 
-    private fun handleTtsEvent(envelope: BusEnvelope, fromGlasses: Boolean) {
+    private fun handleTtsEvent(envelope: BusEnvelope) {
         if (envelope.binary != null) {
             log("tts event ignored path=${envelope.path} reason=${TtsContract.ERROR_INVALID_TTS}")
             return
@@ -2549,9 +2524,6 @@ class BusHubService : Service() {
         }
         val (request, reason) = routed
         val ownerPluginId = request.ownerPluginId ?: return
-        if (fromGlasses && reason != null && ::phoneTtsDispatcher.isInitialized) {
-            phoneTtsDispatcher.onRemoteDone(ownerPluginId, request.utteranceId)
-        }
         val registration = registrations.firstOrNull { registration ->
             registration.principal?.descriptor?.id == ownerPluginId &&
                 PluginCapability.TTS in registration.grantedCapabilities
@@ -2575,7 +2547,6 @@ class BusHubService : Service() {
                 path = BusPaths.TTS_STARTED,
                 payload = TtsContract.startedPayload(ownerPluginId, utteranceId),
             ),
-            fromGlasses = false,
         )
     }
 
@@ -2589,7 +2560,6 @@ class BusHubService : Service() {
                     event.reason,
                 ),
             ),
-            fromGlasses = false,
         )
     }
 
@@ -3381,7 +3351,7 @@ class BusHubService : Service() {
                 return@post
             }
 
-            silenceGlassesSpeechForMicrophone()
+            silenceSpeechForMicrophone()
             replyToAudioRequest(
                 envelope,
                 replyRemote,
@@ -3434,7 +3404,7 @@ class BusHubService : Service() {
                     InternalAudioAcquireResult.NO_LINK
                 }
             } else {
-                silenceGlassesSpeechForMicrophone()
+                silenceSpeechForMicrophone()
                 InternalAudioAcquireResult.OK
             }
         }
@@ -3446,23 +3416,16 @@ class BusHubService : Service() {
     }
 
     /**
-     * Silences phone and glasses TTS the moment the microphone opens, whoever opened it.
+     * Silences TTS the moment the microphone opens, whoever opened it.
      *
      * Speech and dictation share one pair of ears: left running, the glasses
-     * record their own voice into what the wearer is saying. Every path that
+     * record the phone voice into what the wearer is saying. Every path that
      * grants the microphone calls this — the plugin-facing lease and the hub's
      * own internal one, which is the one dictation actually uses. Cancelled
      * speech never resumes; a plugin that still wants it said, says it again.
      */
-    private fun silenceGlassesSpeechForMicrophone() {
-        val error = if (::phoneTtsDispatcher.isInitialized) {
-            phoneTtsDispatcher.cancelForMicrophone()
-        } else {
-            sendRemote(BusEnvelope(path = BusPaths.TTS_CANCEL))
-        }
-        error?.let {
-            log("TTS cancel on microphone open failed code=$error")
-        }
+    private fun silenceSpeechForMicrophone() {
+        if (::phoneTtsDispatcher.isInitialized) phoneTtsDispatcher.cancelForMicrophone()
         if (::phoneTtsDispatcher.isInitialized) phoneTtsDispatcher.prewarm()
     }
 
@@ -5023,9 +4986,7 @@ class BusHubService : Service() {
         }
         if (state and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) == 0) {
             if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.onLinkLost()
-            if (::phoneTtsDispatcher.isInitialized) phoneTtsDispatcher.onLinkLost()
             remoteImageSurfaceVersion = 0
-            remoteTtsVersion = 0
             remoteMaxImageBytes = 0
             // remotePinSurfaceVersion and remoteActivitySurfaceVersion deliberately survive,
             // for the same reason as the setup state below: support is a property of the
@@ -5126,9 +5087,7 @@ class BusHubService : Service() {
         if (remoteActivitySurfaceVersion == ActivitySurfaceContract.VERSION) {
             capabilities = capabilities or BusCapabilityBits.ACTIVITY_SURFACE
         }
-        if (PhoneTtsCapabilityPolicy.isAvailable(remoteTtsVersion, linkState())) {
-            capabilities = capabilities or BusCapabilityBits.TTS
-        }
+        capabilities = capabilities or BusCapabilityBits.TTS
         // Unconditional: this build can always take a pairing offer off the glasses. Gating it on
         // link or session state would make the glasses read "no phone help available" during the
         // exact window where the offer is about to be sent.
@@ -5172,14 +5131,9 @@ class BusHubService : Service() {
         val activitySupported = advertised.protocolVersion == GlassesHubCapabilitiesContract.VERSION &&
             advertised.features and BusCapabilityBits.ACTIVITY_SURFACE != 0 &&
             advertised.activitySurfaceVersion == ActivitySurfaceContract.VERSION
-        val ttsSupported = advertised.protocolVersion == GlassesHubCapabilitiesContract.VERSION &&
-            advertised.features and BusCapabilityBits.TTS != 0 &&
-            advertised.ttsVersion == TtsContract.VERSION
         remotePinSurfaceVersion = if (pinSupported) PinSurfaceContract.VERSION else 0
         remoteNoticeSurfaceVersion = if (noticeSupported) NoticeSurfaceContract.VERSION else 0
         remoteActivitySurfaceVersion = if (activitySupported) ActivitySurfaceContract.VERSION else 0
-        remoteTtsVersion = if (ttsSupported) TtsContract.VERSION else 0
-        if (ttsSupported && ::phoneTtsDispatcher.isInitialized) phoneTtsDispatcher.initialize()
         remoteMaxImageBytes = if (imageSupported) advertised.maxImageBytes else 0
         updateRemoteGlassesAppState(
             advertised.versionName,
@@ -5216,7 +5170,6 @@ class BusHubService : Service() {
             "renderer capabilities image=$imageSupported pin=$pinSupported " +
                 "notice=${advertised.features and BusCapabilityBits.NOTICE_SURFACE != 0} " +
                 "activity=$activitySupported " +
-                "tts=$ttsSupported " +
                 "maxImageBytes=$remoteMaxImageBytes",
         )
         // Link bits may be unchanged; repeat the callback so clients refresh capabilities().

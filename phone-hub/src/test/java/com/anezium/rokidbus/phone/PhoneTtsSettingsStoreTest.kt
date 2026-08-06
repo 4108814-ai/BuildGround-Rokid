@@ -39,32 +39,18 @@ class PhoneTtsSettingsStoreTest {
     }
 
     @Test
-    fun `output mode defaults and persists glasses only`() {
-        clearPreferences()
-        val store = PhoneTtsSettingsStore(context)
-
-        assertEquals(PhoneTtsOutputMode.AUTO, store.outputMode())
-        store.setOutputMode(PhoneTtsOutputMode.GLASSES_ONLY)
-        assertEquals(
-            PhoneTtsOutputMode.GLASSES_ONLY,
-            PhoneTtsSettingsStore(context).outputMode(),
-        )
-        assertEquals(
-            "glasses",
-            context.getSharedPreferences(NexusPhoneState.PREFS, Context.MODE_PRIVATE)
-                .getString(PhoneTtsSettingsStore.KEY_OUTPUT_MODE, null),
-        )
-    }
-
-    @Test
-    fun `unknown output mode defaults to automatic`() {
+    fun `stored glasses only mode is ignored`() {
         clearPreferences()
         context.getSharedPreferences(NexusPhoneState.PREFS, Context.MODE_PRIVATE)
             .edit()
-            .putString(PhoneTtsSettingsStore.KEY_OUTPUT_MODE, "future_mode")
+            .putString(LEGACY_OUTPUT_MODE_KEY, "glasses")
             .commit()
 
-        assertEquals(PhoneTtsOutputMode.AUTO, PhoneTtsSettingsStore(context).outputMode())
+        val store = PhoneTtsSettingsStore(context)
+
+        assertEquals(PhoneTtsSettingsStore.DEFAULT_SPEECH_RATE, store.speechRate())
+        store.setVoiceName("engine.voice.id")
+        assertEquals("engine.voice.id", PhoneTtsSettingsStore(context).voiceName())
     }
 
     private fun clearPreferences() {
@@ -72,7 +58,11 @@ class PhoneTtsSettingsStoreTest {
             .edit()
             .remove(PhoneTtsSettingsStore.KEY_SPEECH_RATE)
             .remove(PhoneTtsSettingsStore.KEY_VOICE_NAME)
-            .remove(PhoneTtsSettingsStore.KEY_OUTPUT_MODE)
+            .remove(LEGACY_OUTPUT_MODE_KEY)
             .commit()
+    }
+
+    private companion object {
+        const val LEGACY_OUTPUT_MODE_KEY = "phone_tts_output_mode"
     }
 }

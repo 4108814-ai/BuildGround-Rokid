@@ -1,7 +1,6 @@
 package com.anezium.rokidbus.phone
 
 import com.anezium.rokidbus.shared.BusPaths
-import com.anezium.rokidbus.shared.LinkStateBits
 import com.anezium.rokidbus.shared.TtsContract
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -81,21 +80,4 @@ class PhoneTtsRequestGateTest {
         )
     }
 
-    @Test
-    fun `capability requires matching protocol and a live control transport`() {
-        assertFalse(PhoneTtsCapabilityPolicy.isAvailable(TtsContract.VERSION, 0))
-        assertFalse(PhoneTtsCapabilityPolicy.isAvailable(0, LinkStateBits.CXR_CONTROL_UP))
-        assertTrue(
-            PhoneTtsCapabilityPolicy.isAvailable(
-                TtsContract.VERSION,
-                LinkStateBits.CXR_CONTROL_UP,
-            ),
-        )
-        assertTrue(
-            PhoneTtsCapabilityPolicy.isAvailable(
-                TtsContract.VERSION,
-                LinkStateBits.SPP_DATA_UP,
-            ),
-        )
-    }
 }

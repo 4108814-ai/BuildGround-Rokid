@@ -1,7 +1,6 @@
 package com.anezium.rokidbus.phone
 
 import com.anezium.rokidbus.shared.BusPaths
-import com.anezium.rokidbus.shared.LinkStateBits
 import com.anezium.rokidbus.shared.TtsContract
 import com.anezium.rokidbus.shared.TtsValidationResult
 import org.json.JSONObject
@@ -62,10 +61,4 @@ internal class PhoneTtsRequestGate(
     private companion object {
         const val RATE_WINDOW_MS = 1_000L
     }
-}
-
-internal object PhoneTtsCapabilityPolicy {
-    fun isAvailable(ttsVersion: Int, linkState: Int): Boolean =
-        ttsVersion == TtsContract.VERSION &&
-            linkState and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) != 0
 }

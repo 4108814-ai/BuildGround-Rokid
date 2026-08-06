@@ -1,5 +1,8 @@
 package com.anezium.rokidbus.phone
 
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import com.anezium.rokidbus.shared.BusEnvelope
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.TtsContract
@@ -21,8 +24,7 @@ internal class PhoneTtsPlayback(
 ) : PhoneTtsOutput.Listener {
     private val lock = Any()
     private val state = TtsPlaybackState()
-    private var activeRecoveryEnvelope: BusEnvelope? = null
-    private var recoverUnexpectedFailure: (BusEnvelope) -> Boolean = { false }
+    private var reportUnexpectedFailure: (TtsDoneEvent) -> Unit = {}
 
     init {
         output.setListener(this)
@@ -46,20 +48,16 @@ internal class PhoneTtsPlayback(
         output.speakSample(text, locale)
     }
 
-    fun setUnexpectedFailureHandler(handler: (BusEnvelope) -> Boolean) = synchronized(lock) {
-        recoverUnexpectedFailure = handler
+    fun setUnexpectedFailureHandler(handler: (TtsDoneEvent) -> Unit) = synchronized(lock) {
+        reportUnexpectedFailure = handler
     }
 
-    fun speak(
-        request: TtsSpeakRequest,
-        recoveryEnvelope: BusEnvelope? = null,
-    ): Boolean = synchronized(lock) {
+    fun speak(request: TtsSpeakRequest): Boolean = synchronized(lock) {
         if (!output.isReady) return@synchronized false
         val ownerPluginId = request.ownerPluginId ?: return@synchronized false
         val accepted =
             state.accept(ownerPluginId, request.utteranceId, engineId(), request.text)
         accepted.preempted?.let(emitDone)
-        activeRecoveryEnvelope = recoveryEnvelope
         val locale = request.lang?.let(Locale::forLanguageTag) ?: defaultLocale()
         val result = output.speak(
             accepted.active.engineId,
@@ -68,10 +66,7 @@ internal class PhoneTtsPlayback(
         )
         if (result != PhoneTtsSpeakResult.ACCEPTED) {
             output.stop()
-            state.unavailable(accepted.active.engineId)?.let { event ->
-                activeRecoveryEnvelope = null
-                emitDone(event)
-            }
+            state.unavailable(accepted.active.engineId)?.let(::emitUnexpectedFailure)
         }
         true
     }
@@ -82,7 +77,6 @@ internal class PhoneTtsPlayback(
             state.requestStop(ownerPluginId, request.utteranceId)
                 ?: return@synchronized false
         val event = state.stopped(stopping.engineId)
-        if (event != null) activeRecoveryEnvelope = null
         output.stop()
         event?.let(emitDone)
         true
@@ -91,7 +85,6 @@ internal class PhoneTtsPlayback(
     fun cancel(reason: TtsDoneReason) = synchronized(lock) {
         val stopping = state.cancelCurrent(reason) ?: return@synchronized
         val event = state.stopped(stopping.engineId)
-        if (event != null) activeRecoveryEnvelope = null
         output.stop()
         event?.let(emitDone)
     }
@@ -99,7 +92,6 @@ internal class PhoneTtsPlayback(
     fun shutdown() = synchronized(lock) {
         val stopping = state.cancelCurrent(TtsDoneReason.CANCELLED)
         val event = stopping?.let { state.stopped(it.engineId) }
-        if (event != null) activeRecoveryEnvelope = null
         if (stopping != null) output.stop()
         event?.let(emitDone)
         output.shutdown()
@@ -111,9 +103,7 @@ internal class PhoneTtsPlayback(
     }
 
     override fun onDone(utteranceId: String) {
-        synchronized(lock) {
-            state.stopped(utteranceId)?.also { activeRecoveryEnvelope = null }
-        }?.let(emitDone)
+        synchronized(lock) { state.stopped(utteranceId) }?.let(emitDone)
     }
 
     override fun onUnavailable(utteranceId: String) {
@@ -125,41 +115,49 @@ internal class PhoneTtsPlayback(
     }
 
     private fun handleUnexpectedFailure(utteranceId: String) {
-        val failure = synchronized(lock) {
-            val event = state.unavailable(utteranceId) ?: return
-            val envelope = activeRecoveryEnvelope
-            activeRecoveryEnvelope = null
-            Triple(event, envelope, recoverUnexpectedFailure)
-        }
-        val recovered = failure.second?.let { envelope ->
-            runCatching { failure.third(envelope) }.getOrDefault(false)
-        } == true
-        if (!recovered) emitDone(failure.first)
+        synchronized(lock) { state.unavailable(utteranceId) }
+            ?.let(::emitUnexpectedFailure)
+    }
+
+    private fun emitUnexpectedFailure(event: TtsDoneEvent) {
+        runCatching { reportUnexpectedFailure(event) }
+        emitDone(event)
     }
 }
 
 internal sealed interface PhoneTtsDispatchResult {
     data object PhoneHandled : PhoneTtsDispatchResult
-    data class Forwarded(val error: String?) : PhoneTtsDispatchResult
     data class Invalid(val error: String) : PhoneTtsDispatchResult
 }
 
 internal class PhoneTtsDispatcher(
     private val playback: PhoneTtsPlayback,
-    private val forwardToGlasses: (BusEnvelope) -> String?,
     private val emitDone: (TtsDoneEvent) -> Unit,
-    private val outputMode: () -> PhoneTtsOutputMode = { PhoneTtsOutputMode.AUTO },
     private val phoneRoute: () -> PhoneTtsRoute = { PhoneTtsRoute.EXTERNAL_SINK },
     private val logger: (String) -> Unit = {},
+    private val nowMs: () -> Long = SystemClock::elapsedRealtime,
+    private val scheduleAfter: (delayMs: Long, action: () -> Unit) -> Boolean = { delay, action ->
+        Handler(Looper.getMainLooper()).postDelayed(Runnable(action), delay)
+    },
 ) {
-    private data class RemoteUtterance(val ownerPluginId: String, val utteranceId: String)
+    private data class PendingSpeak(
+        val request: TtsSpeakRequest,
+        val deadlineMs: Long,
+    )
 
-    private val remoteLock = Any()
     private val dispatchLock = Any()
-    private val remoteInFlight = mutableMapOf<RemoteUtterance, Int>()
+    private val pendingSpeaks = ArrayDeque<PendingSpeak>()
+    private var routeCheckScheduled = false
+    private var routeCheckGeneration = 0L
+    private var shutdown = false
 
     init {
-        playback.setUnexpectedFailureHandler(::recoverPhoneFailureOnGlasses)
+        playback.setUnexpectedFailureHandler { event ->
+            logger(
+                "phone TTS dispatch classification=ASYNC_PHONE_FAILURE " +
+                    "route=dropped reason=phone_unavailable id=${event.utteranceId}",
+            )
+        }
     }
 
     fun dispatch(envelope: BusEnvelope): PhoneTtsDispatchResult = synchronized(dispatchLock) {
@@ -170,146 +168,203 @@ internal class PhoneTtsDispatcher(
         }
     }
 
-    fun onRemoteDone(ownerPluginId: String, utteranceId: String) {
-        val key = RemoteUtterance(ownerPluginId, utteranceId)
-        synchronized(dispatchLock) {
-            synchronized(remoteLock) { decrementRemote(key) }
-        }
-    }
-
     fun initialize() = synchronized(dispatchLock) { playback.initialize() }
 
-    fun prewarm(): Boolean = synchronized(dispatchLock) {
-        if (outputMode() == PhoneTtsOutputMode.GLASSES_ONLY) false else playback.prewarm()
-    }
+    fun prewarm(): Boolean = synchronized(dispatchLock) { playback.prewarm() }
 
     fun availableVoices(locale: Locale): List<PhoneTtsVoiceOption> =
         synchronized(dispatchLock) { playback.availableVoices(locale) }
 
     fun speakSample(text: String, locale: Locale): Boolean = synchronized(dispatchLock) {
-        if (hasRemoteInFlight()) return@synchronized false
-        playback.speakSample(text, locale)
-    }
-
-    /**
-     * A forwarded utterance is only cleared by the glasses reporting it done, so a link
-     * that drops mid-sentence would otherwise strand it: the phone engine would stay
-     * disabled for the rest of the process and every later sentence would keep being sent
-     * to glasses that are no longer listening. Retire them here, and give their owners the
-     * terminal event the contract promises them.
-     */
-    fun onLinkLost() = synchronized(dispatchLock) {
-        val stranded = synchronized(remoteLock) {
-            remoteInFlight.keys.toList().also { remoteInFlight.clear() }
-        }
-        stranded.forEach {
-            emitDone(TtsDoneEvent(it.ownerPluginId, it.utteranceId, TtsDoneReason.UNAVAILABLE))
+        if (pendingSpeaks.isNotEmpty()) return@synchronized false
+        when (phoneRoute()) {
+            PhoneTtsRoute.PHONE_SPEAKER -> {
+                playback.prewarm()
+                false
+            }
+            PhoneTtsRoute.GLASSES_LINK -> {
+                playback.prewarm()
+                playback.speakSample(text, locale)
+            }
+            PhoneTtsRoute.EXTERNAL_SINK -> playback.speakSample(text, locale)
         }
     }
 
-    fun cancelForMicrophone(): String? = synchronized(dispatchLock) {
+    fun cancelForMicrophone() = synchronized(dispatchLock) {
         playback.cancel(TtsDoneReason.CANCELLED)
-        forwardToGlasses(BusEnvelope(path = BusPaths.TTS_CANCEL))
+        retirePending(TtsDoneReason.CANCELLED)
     }
 
-    fun shutdown() = synchronized(dispatchLock) { playback.shutdown() }
+    fun shutdown() = synchronized(dispatchLock) {
+        shutdown = true
+        retirePending(TtsDoneReason.CANCELLED)
+        playback.shutdown()
+    }
 
     private fun dispatchSpeak(envelope: BusEnvelope): PhoneTtsDispatchResult {
-        val request = when (val validation = TtsContract.validateSpeak(envelope.payload, requireOwner = true)) {
+        val request = when (
+            val validation = TtsContract.validateSpeak(envelope.payload, requireOwner = true)
+        ) {
             is TtsValidationResult.Valid -> validation.value
-            is TtsValidationResult.Invalid -> return PhoneTtsDispatchResult.Invalid(validation.reason)
-        }
-        if (outputMode() == PhoneTtsOutputMode.GLASSES_ONLY) {
-            logger("phone TTS dispatch classification=NOT_PROBED route=glasses mode=GLASSES_ONLY")
-            val key = RemoteUtterance(checkNotNull(request.ownerPluginId), request.utteranceId)
-            synchronized(remoteLock) {
-                remoteInFlight[key] = remoteInFlight.getOrDefault(key, 0) + 1
-            }
-            val error = forwardToGlasses(envelope)
-            if (error != null) synchronized(remoteLock) { decrementRemote(key) }
-            return PhoneTtsDispatchResult.Forwarded(error)
+            is TtsValidationResult.Invalid ->
+                return PhoneTtsDispatchResult.Invalid(validation.reason)
         }
         val classification = phoneRoute()
-        if (
-            !hasRemoteInFlight() &&
-            playback.isReady &&
-            classification == PhoneTtsRoute.EXTERNAL_SINK
-        ) {
-            if (playback.speak(request, recoveryEnvelope = envelope)) {
+        if (pendingSpeaks.isNotEmpty()) {
+            enqueue(request)
+            logger("phone TTS dispatch classification=$classification route=queued reason=ear_wait")
+            return PhoneTtsDispatchResult.PhoneHandled
+        }
+        if (classification != PhoneTtsRoute.PHONE_SPEAKER && playback.isReady) {
+            if (classification == PhoneTtsRoute.GLASSES_LINK) playback.prewarm()
+            if (playback.speak(request)) {
                 logger("phone TTS dispatch classification=$classification route=phone")
                 return PhoneTtsDispatchResult.PhoneHandled
             }
         }
-        val glassesReason = when {
-            classification != PhoneTtsRoute.EXTERNAL_SINK -> "classified"
-            hasRemoteInFlight() -> "remote_in_flight"
-            else -> "phone_unavailable"
-        }
-        logger(
-            "phone TTS dispatch classification=$classification " +
-                "route=glasses reason=$glassesReason",
-        )
-        if (classification == PhoneTtsRoute.EXTERNAL_SINK && !playback.isReady) {
-            playback.initialize()
-        }
-        return forwardAutoToGlasses(envelope, request, emitUnavailableOnError = false)
+        if (!playback.isReady) playback.initialize()
+        enqueue(request)
+        if (classification == PhoneTtsRoute.PHONE_SPEAKER) playback.prewarm()
+        logger("phone TTS dispatch classification=$classification route=waiting")
+        return PhoneTtsDispatchResult.PhoneHandled
     }
-
-    /**
-     * A dispatch-time forward failure surfaces to the plugin as a rejected speak request,
-     * so emitting a done event as well would signal the same utterance twice. The async
-     * recovery path has no request left to reject — there the done event is the only
-     * terminal signal, hence [emitUnavailableOnError].
-     */
-    private fun forwardAutoToGlasses(
-        envelope: BusEnvelope,
-        request: TtsSpeakRequest,
-        emitUnavailableOnError: Boolean,
-    ): PhoneTtsDispatchResult.Forwarded {
-        val key = RemoteUtterance(checkNotNull(request.ownerPluginId), request.utteranceId)
-        synchronized(remoteLock) {
-            remoteInFlight[key] = remoteInFlight.getOrDefault(key, 0) + 1
-        }
-        val error = forwardToGlasses(envelope)
-        if (error != null) {
-            synchronized(remoteLock) { decrementRemote(key) }
-            if (emitUnavailableOnError) {
-                emitDone(TtsDoneEvent(key.ownerPluginId, key.utteranceId, TtsDoneReason.UNAVAILABLE))
-            }
-        }
-        return PhoneTtsDispatchResult.Forwarded(error)
-    }
-
-    private fun recoverPhoneFailureOnGlasses(envelope: BusEnvelope): Boolean =
-        synchronized(dispatchLock) {
-            val request = when (
-                val validation = TtsContract.validateSpeak(envelope.payload, requireOwner = true)
-            ) {
-                is TtsValidationResult.Valid -> validation.value
-                is TtsValidationResult.Invalid -> return@synchronized false
-            }
-            logger("phone TTS dispatch classification=ASYNC_PHONE_FAILURE route=glasses")
-            forwardAutoToGlasses(envelope, request, emitUnavailableOnError = true)
-            true
-        }
 
     private fun dispatchStop(envelope: BusEnvelope): PhoneTtsDispatchResult {
-        val request = when (val validation = TtsContract.validateStop(envelope.payload, requireOwner = true)) {
+        val request = when (
+            val validation = TtsContract.validateStop(envelope.payload, requireOwner = true)
+        ) {
             is TtsValidationResult.Valid -> validation.value
-            is TtsValidationResult.Invalid -> return PhoneTtsDispatchResult.Invalid(validation.reason)
+            is TtsValidationResult.Invalid ->
+                return PhoneTtsDispatchResult.Invalid(validation.reason)
         }
-        if (!hasRemoteInFlight() && playback.stop(request)) {
+        val pending = pendingSpeaks.firstOrNull { queued ->
+            queued.request.ownerPluginId == request.ownerPluginId &&
+                queued.request.utteranceId == request.utteranceId
+        }
+        if (pending != null) {
+            pendingSpeaks.remove(pending)
+            emitDone(
+                TtsDoneEvent(
+                    checkNotNull(request.ownerPluginId),
+                    request.utteranceId,
+                    TtsDoneReason.STOPPED,
+                ),
+            )
+            if (pendingSpeaks.isEmpty()) cancelRouteCheck()
             return PhoneTtsDispatchResult.PhoneHandled
         }
-        return PhoneTtsDispatchResult.Forwarded(forwardToGlasses(envelope))
+        playback.stop(request)
+        return PhoneTtsDispatchResult.PhoneHandled
     }
 
-    private fun hasRemoteInFlight(): Boolean = synchronized(remoteLock) {
-        remoteInFlight.isNotEmpty()
+    private fun enqueue(request: TtsSpeakRequest) {
+        pendingSpeaks.addLast(PendingSpeak(request, nowMs() + ROUTE_WAIT_BUDGET_MS))
+        scheduleRouteCheck()
     }
 
-    private fun decrementRemote(key: RemoteUtterance) {
-        val count = remoteInFlight[key] ?: return
-        if (count <= 1) remoteInFlight.remove(key) else remoteInFlight[key] = count - 1
+    private fun scheduleRouteCheck(delayMs: Long = ROUTE_REPROBE_INTERVAL_MS) {
+        if (routeCheckScheduled || pendingSpeaks.isEmpty() || shutdown) return
+        routeCheckScheduled = true
+        val generation = ++routeCheckGeneration
+        val scheduled = scheduleAfter(delayMs) {
+            synchronized(dispatchLock) {
+                if (!routeCheckScheduled || routeCheckGeneration != generation) {
+                    return@synchronized
+                }
+                routeCheckScheduled = false
+                processPendingSpeaks()
+            }
+        }
+        if (!scheduled) {
+            routeCheckScheduled = false
+            dropAllPending("scheduler_unavailable")
+        }
+    }
+
+    private fun processPendingSpeaks() {
+        while (pendingSpeaks.isNotEmpty()) {
+            val pending = pendingSpeaks.first()
+            val classification = phoneRoute()
+            val now = nowMs()
+            if (classification == PhoneTtsRoute.PHONE_SPEAKER) {
+                if (now >= pending.deadlineMs) {
+                    pendingSpeaks.removeFirst()
+                    drop(pending, classification, "no_ear")
+                    continue
+                }
+                scheduleRouteCheck(
+                    minOf(ROUTE_REPROBE_INTERVAL_MS, pending.deadlineMs - now),
+                )
+                return
+            }
+            if (!playback.isReady) {
+                playback.initialize()
+                if (now >= pending.deadlineMs) {
+                    pendingSpeaks.removeFirst()
+                    drop(pending, classification, "phone_unavailable")
+                    continue
+                }
+                scheduleRouteCheck(
+                    minOf(ROUTE_REPROBE_INTERVAL_MS, pending.deadlineMs - now),
+                )
+                return
+            }
+            pendingSpeaks.removeFirst()
+            if (classification == PhoneTtsRoute.GLASSES_LINK) playback.prewarm()
+            if (playback.speak(pending.request)) {
+                logger("phone TTS dispatch classification=$classification route=phone")
+            } else {
+                drop(pending, classification, "phone_unavailable")
+            }
+        }
+    }
+
+    private fun drop(
+        pending: PendingSpeak,
+        classification: PhoneTtsRoute,
+        reason: String,
+    ) {
+        val ownerPluginId = checkNotNull(pending.request.ownerPluginId)
+        logger(
+            "phone TTS dispatch classification=$classification " +
+                "route=dropped reason=$reason id=${pending.request.utteranceId}",
+        )
+        emitDone(
+            TtsDoneEvent(
+                ownerPluginId,
+                pending.request.utteranceId,
+                TtsDoneReason.UNAVAILABLE,
+            ),
+        )
+    }
+
+    private fun dropAllPending(reason: String) {
+        while (pendingSpeaks.isNotEmpty()) {
+            drop(pendingSpeaks.removeFirst(), PhoneTtsRoute.PHONE_SPEAKER, reason)
+        }
+    }
+
+    private fun retirePending(reason: TtsDoneReason) {
+        cancelRouteCheck()
+        while (pendingSpeaks.isNotEmpty()) {
+            val request = pendingSpeaks.removeFirst().request
+            emitDone(
+                TtsDoneEvent(
+                    checkNotNull(request.ownerPluginId),
+                    request.utteranceId,
+                    reason,
+                ),
+            )
+        }
+    }
+
+    private fun cancelRouteCheck() {
+        routeCheckScheduled = false
+        routeCheckGeneration += 1
+    }
+
+    internal companion object {
+        const val ROUTE_WAIT_BUDGET_MS = 3_500L
+        const val ROUTE_REPROBE_INTERVAL_MS = 500L
     }
 }
