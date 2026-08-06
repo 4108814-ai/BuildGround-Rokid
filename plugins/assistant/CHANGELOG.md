@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.1
+
+- **No more thinking out loud.** Models that reason inline — MiniMax, GLM,
+  DeepSeek and anything similar behind OpenRouter or a custom server — were
+  showing their raw `<think>` traces in every answer. Those blocks are now
+  stripped from the stream before the glasses display them, the voice reads
+  them, or the conversation keeps them: only the answer itself gets through.
+
 ## 1.1.0
 
 - **Choose who answers.** Settings now opens on a provider list: your ChatGPT
