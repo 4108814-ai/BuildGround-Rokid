@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.2.6
+
+This release is about the battery (thanks for the detailed report!). Three
+separate drains were found on the glasses, and all three are fixed.
+
+- **The display goes back to sleep on its own.** The glasses' system never
+  turns the display off by itself — and a display left awake costs about a
+  quarter of the battery per hour, even when the optic looks black. Anything
+  that woke the screen and didn't put it back — a notification, a glance at
+  the launcher, a photo — quietly kept that meter running. Nexus now watches
+  over it: three quiet minutes on battery — nothing on screen, nothing in
+  use — and the display is put back to standby, exactly as if you had done
+  the gesture yourself. It also no longer mistakes a full, unplugged battery
+  for "still charging", which used to block the first standby after a full
+  charge.
+
+- **The command bridge stopped pacing.** The helper that lets the phone reach
+  the glasses' system checked for work every single second, around the clock —
+  measured at several percent of a CPU core doing nothing. It now sleeps until
+  it is actually rung, with the same responsiveness when real work arrives.
+
+- **Wi-Fi that Nexus turns on, Nexus now turns off — always.** Setup and the
+  glasses camera sometimes left the radio running forever: a crash or restart
+  at the wrong moment erased the note that said "we turned this on". That
+  note now survives crashes, one caretaker decides when the radio is truly
+  no longer needed, and a standing sweep retries anything a crash
+  interrupted. Wi-Fi you enabled yourself is never touched.
+
 ## 1.2.5
 
 - **Settings got a spring clean.** The main settings page had slowly collected
