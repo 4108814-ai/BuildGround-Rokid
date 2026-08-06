@@ -143,7 +143,11 @@ file channel. It opens no port and takes no free-form input; that closed list is
 story, so keep it closed.
 
 **How a request travels.** The app writes `<nonce>.request` into its own external-files channel
-(`…/files/cmd_bridge/`), rings a FIFO doorbell, and the bridge picks it up. The line is
+(`…/files/cmd_bridge/`), rings a FIFO doorbell, and the bridge picks it up. The bridge keeps the
+FIFO open for its lifetime and blocks in one-second timed reads — the app's ring cannot cross the
+FUSE boundary on this ROM, so the read timeout is what actually delivers requests, forklessly.
+Every 30 seconds a wake refreshes the diagnostic heartbeat and drives maintenance; only a missing
+or unopenable FIFO falls back to the sleep-based poll. The line is
 `command:nonce:arg1:…:token`, where the token is `sha256(secret:command:nonce:arg1:…)` and the secret
 is a 32-byte value generated once, kept app-private and baked into the deployed script. Arguments
 that could contain `:` travel base64-encoded. The bridge re-validates everything itself and refuses
@@ -175,8 +179,8 @@ commands, a directory listing for the delete command. A listing also beats a `st
 from a cached entry.
 
 **How the script reaches the glasses.** Normally the self-arm session rewrites it on every hub start.
-That session needs working ADB, so the bridge also updates itself from the installed APK every few
-minutes (`unzip -p $(pm path …) assets/rokid-nexus-cmd-bridge.sh`) — the code it runs always comes
+That session needs working ADB, so the bridge also checks the installed APK on a five-minute elapsed
+deadline (`unzip -p $(pm path …) assets/rokid-nexus-cmd-bridge.sh`) — the code it runs always comes
 from a package we signed, never from a blob handed to it at runtime. A candidate must look like the
 script, carry exactly one secret slot and parse under `sh -n`; the successor has to still be alive
 three seconds later or the previous script is restored and the current loop keeps serving.
