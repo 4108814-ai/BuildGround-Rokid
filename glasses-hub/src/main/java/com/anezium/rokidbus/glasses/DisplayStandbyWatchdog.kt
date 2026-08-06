@@ -175,9 +175,10 @@ internal class DisplayStandbyWatchdog(
         val status = battery.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
         val plugged = battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1)
         return when {
-            plugged > 0 ||
-                status == BatteryManager.BATTERY_STATUS_CHARGING ||
-                status == BatteryManager.BATTERY_STATUS_FULL -> StandbyChargingState.CHARGING
+            plugged > 0 || status == BatteryManager.BATTERY_STATUS_CHARGING ->
+                StandbyChargingState.CHARGING
+            // STATUS_FULL can outlive the unplug at 100%, so it only means charging
+            // while a plug is present; unplugged it is just a battery that is full.
             plugged == 0 && status != BatteryManager.BATTERY_STATUS_UNKNOWN ->
                 StandbyChargingState.ON_BATTERY
             else -> StandbyChargingState.UNKNOWN
