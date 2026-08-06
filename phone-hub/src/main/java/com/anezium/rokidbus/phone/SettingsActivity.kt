@@ -18,7 +18,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -32,7 +31,6 @@ import com.anezium.rokidbus.phone.speech.SpeechSettingsStore
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.GlassesRepairContract
 import com.anezium.rokidbus.shared.LinkStateBits
-import com.anezium.rokidbus.shared.PhoneHubCapabilitiesContract
 
 private const val SETTINGS_TAG = "RokidNexusSettings"
 
@@ -599,33 +597,22 @@ class SettingsActivity : Activity() {
                 NexusUi.dp(this@SettingsActivity, 10),
             )
             val store = PhoneHudPositionStore(this@SettingsActivity)
-            val value = NexusUi.rowSub(
-                this@SettingsActivity,
-                "${store.hudTopInsetDp()} dp from top",
-            )
             addView(NexusUi.rowTitle(this@SettingsActivity, "Glasses display position"))
             addView(BusTheme.gap(this@SettingsActivity, 3))
-            addView(value)
             addView(
-                SeekBar(this@SettingsActivity).apply {
-                    max = PhoneHubCapabilitiesContract.MAX_HUD_TOP_INSET_DP
-                    progress = store.hudTopInsetDp()
-                    setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                        override fun onProgressChanged(
-                            seekBar: SeekBar?,
-                            progress: Int,
-                            fromUser: Boolean,
-                        ) {
-                            if (!fromUser) return
-                            store.setHudTopInsetDp(progress)
-                            value.text = "$progress dp from top"
-                            BusHubService.onHudPositionPreferenceChanged()
-                        }
-
-                        override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-
-                        override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
-                    })
+                NexusUi.rowSub(
+                    this@SettingsActivity,
+                    "Drag the panel to where you keep the Hi Rokid screen",
+                ),
+            )
+            addView(BusTheme.gap(this@SettingsActivity, 8))
+            addView(
+                HudPositionPreviewView(this@SettingsActivity).apply {
+                    insetDp = store.hudTopInsetDp()
+                    onInsetCommitted = { value ->
+                        store.setHudTopInsetDp(value)
+                        BusHubService.onHudPositionPreferenceChanged()
+                    }
                 },
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
