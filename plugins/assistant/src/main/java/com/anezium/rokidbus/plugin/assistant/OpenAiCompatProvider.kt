@@ -152,6 +152,7 @@ class OpenAiCompatProvider internal constructor(
         }
 
         val response = StringBuilder()
+        val thinkTagFilter = ThinkTagStreamFilter()
         try {
             apiClient.streamChat(
                 request = request.forVisionSupport(supportsVision()),
@@ -159,8 +160,10 @@ class OpenAiCompatProvider internal constructor(
                 requestId = request.requestId,
             ).collect { delta ->
                 if (delta.isEmpty()) return@collect
-                response.append(delta)
-                emit(AiProviderEvent.TextDelta(messageId, delta))
+                val filteredDelta = thinkTagFilter.filter(delta)
+                if (filteredDelta.isEmpty()) return@collect
+                response.append(filteredDelta)
+                emit(AiProviderEvent.TextDelta(messageId, filteredDelta))
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -176,12 +179,20 @@ class OpenAiCompatProvider internal constructor(
             )
             return@flow
         }
+        val remaining = thinkTagFilter.finish()
+        if (remaining.isNotEmpty()) {
+            response.append(remaining)
+            emit(AiProviderEvent.TextDelta(messageId, remaining))
+        }
+        val cleanResponse = response.toString()
+            .replace(INLINE_THINK_BLOCKS, "")
+            .trim()
         emit(
             AiProviderEvent.MessageDone(
                 ChatMessage(
                     id = messageId,
                     role = "assistant",
-                    content = response.toString(),
+                    content = cleanResponse,
                 ),
             ),
         )
@@ -211,3 +222,6 @@ internal fun ChatRequest.forVisionSupport(supportsVision: Boolean): ChatRequest 
 
 internal const val PHOTO_UNSUPPORTED_NOTE =
     "[A photo was attached, but the selected model cannot view images.]"
+
+private val INLINE_THINK_BLOCKS =
+    Regex("<think>.*?</think>|<think>.*$", RegexOption.DOT_MATCHES_ALL)

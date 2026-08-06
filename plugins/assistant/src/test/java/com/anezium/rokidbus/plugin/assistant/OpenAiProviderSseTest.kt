@@ -65,6 +65,27 @@ class OpenAiProviderSseTest {
     }
 
     @Test
+    fun compatibleProviderStripsInlineThinkContentFromDeltasAndDoneMessage() = runTest {
+        val provider = OpenAiCompatProvider(
+            preset = ProviderCatalog.openRouter,
+            apiClient = RecordingCompatClient(
+                listOf("<th", "ink>secret", " reasoning</thi", "nk>\n\nAnswer"),
+            ),
+            apiKeyConfigured = { true },
+            supportsVision = { false },
+        )
+
+        val events = provider.streamEvents(ChatRequest(userText = "Hello")).toList()
+        val deltas = events.filterIsInstance<AiProviderEvent.TextDelta>()
+            .map { event -> event.delta }
+        val done = events.filterIsInstance<AiProviderEvent.MessageDone>().single()
+
+        assertEquals(listOf("\n\nAnswer"), deltas)
+        assertEquals("Answer", done.message.content)
+        assertFalse(deltas.any { delta -> delta.contains("secret") || delta.contains("think") })
+    }
+
+    @Test
     fun nonVisionProviderDropsAllPhotosAndNotesCurrentAttachment() = runTest {
         val client = RecordingCompatClient()
         val provider = OpenAiCompatProvider(
@@ -130,14 +151,16 @@ class OpenAiProviderSseTest {
         )
     }
 
-    private class RecordingCompatClient : OpenAiCompatChatClient {
+    private class RecordingCompatClient(
+        private val deltas: List<String> = listOf("done"),
+    ) : OpenAiCompatChatClient {
         lateinit var request: ChatRequest
 
         override fun streamChat(
             request: ChatRequest,
             modelId: String,
             requestId: String,
-        ) = flowOf("done").also {
+        ) = flowOf(*deltas.toTypedArray()).also {
             this.request = request
         }
 
