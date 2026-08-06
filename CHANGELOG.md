@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.2.5
+
+- **Settings got a spring clean.** The main settings page had slowly collected
+  every switch, preview and console in one long scroll. It now reads as short,
+  honest sections — Connection, Glasses, Plugins, Maintenance, Advanced — and
+  the display controls (screen position with its draggable preview, the phone
+  battery chip, expanded activities) moved into their own *Display* screen
+  under Glasses, with the row showing at a glance whether the position is
+  automatic or manual.
+
+- **The console earned its own screen — and a memory.** It used to sit at the
+  bottom of the settings page and only showed what happened while you were
+  looking at it. It now lives under Maintenance → *Console*, opens already
+  filled with the recent activity that happened before you got there, keeps
+  tailing live, and has a Share button so you can send the traces along with
+  a bug report.
+
 ## 1.2.4
 
 - **The display now follows your screen position.** The Hi Rokid app lets you
