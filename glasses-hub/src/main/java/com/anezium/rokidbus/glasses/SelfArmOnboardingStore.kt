@@ -133,6 +133,25 @@ internal object SelfArmOnboardingStore {
         return canMutateSession(context, sessionId)
     }
 
+    /** Running work uses its normal lease; paused user work gets a longer abandonment window. */
+    fun isWifiStillNeededBySetup(
+        context: Context,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): Boolean {
+        val preferences = prefs(context)
+        if (!preferences.getBoolean(KEY_SESSION_ACTIVE, false) ||
+            preferences.getString(KEY_SESSION_ID, "").isNullOrBlank()
+        ) {
+            return false
+        }
+        val running = preferences.getBoolean(KEY_RUNNING, false)
+        return SelfArmSessionPolicy.leaseValid(
+            nowMillis = nowMillis,
+            lastHeartbeatMillis = preferences.getLong(KEY_LAST_HEARTBEAT, 0L),
+            timeoutMillis = if (running) LEASE_TIMEOUT_MS else PAUSED_WIFI_NEED_TIMEOUT_MS,
+        )
+    }
+
     fun heartbeat(
         context: Context,
         sessionId: String,
@@ -320,6 +339,9 @@ internal object SelfArmOnboardingStore {
                 diagnostic = diagnostic,
                 completionMode = SetupCompletionMode.UNKNOWN,
             )
+            SelfArmSetupWifiOwnershipStore.read(context)?.sessionId?.let { sessionId ->
+                GlassesHub.onSetupSessionTerminal(context, sessionId)
+            }
         }
     }
 
@@ -333,6 +355,7 @@ internal object SelfArmOnboardingStore {
     ) {
         if (!canMutateSession(context, sessionId)) return
         writeFinished(context, setupState, success, diagnostic, completionMode)
+        GlassesHub.onSetupSessionTerminal(context, sessionId)
         RokidBusAccessibilityService.onSetupSessionEnded(sessionId)
     }
 
@@ -373,6 +396,7 @@ internal object SelfArmOnboardingStore {
         SelfArmPhoneArmConfirmation.cancel()
         cancelNetworkPostureRefresh()
         val prefs = prefs(context)
+        val invalidatedSessionId = prefs.getString(KEY_SESSION_ID, "").orEmpty()
         prefs.edit()
             .putInt(KEY_GENERATION, prefs.getInt(KEY_GENERATION, 0) + 1)
             .putString(KEY_SESSION_ID, "")
@@ -380,6 +404,9 @@ internal object SelfArmOnboardingStore {
             .putBoolean(KEY_REQUESTED, false)
             .putBoolean(KEY_RUNNING, false)
             .apply()
+        if (invalidatedSessionId.isNotBlank()) {
+            GlassesHub.onSetupSessionTerminal(context, invalidatedSessionId)
+        }
         notifyChanged(context)
     }
 
@@ -547,6 +574,7 @@ internal object SelfArmOnboardingStore {
     private const val KEY_LAST_HEARTBEAT = "setup_last_heartbeat"
     private const val KEY_STAGE = "setup_stage"
     private const val KEY_COMPLETION_MODE = "setup_completion_mode"
+    internal const val PAUSED_WIFI_NEED_TIMEOUT_MS = 5 * 60_000L
     private const val MAX_STATE_LENGTH = 96
     private val networkPostureWorkerLock = Any()
     private var networkPostureRefreshThread: Thread? = null

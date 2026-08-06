@@ -59,6 +59,43 @@ class SelfArmOnboardingStoreTest {
             SelfArmOnboardingState.Action.RETRY_WIRELESS,
             SelfArmOnboardingStateMachine.evaluate(expired).action,
         )
+        assertTrue(
+            SelfArmOnboardingStore.isWifiStillNeededBySetup(
+                context,
+                nowMillis = System.currentTimeMillis(),
+            ),
+        )
+        assertFalse(
+            SelfArmOnboardingStore.isWifiStillNeededBySetup(
+                context,
+                nowMillis = System.currentTimeMillis() + SelfArmOnboardingStore.LEASE_TIMEOUT_MS,
+            ),
+        )
+    }
+
+    @Test
+    fun pausedSetupKeepsWifiForUserActionButEventuallyExpiresAsAbandoned() {
+        val context = RuntimeEnvironment.getApplication()
+        SelfArmOnboardingStore.invalidateSession(context)
+        val sessionId = SelfArmOnboardingStore.beginSession(context)
+        SelfArmOnboardingStore.markRunning(context, sessionId)
+        SelfArmOnboardingStore.pause(context, sessionId, "waiting_for_wifi_network")
+
+        assertTrue(
+            SelfArmOnboardingStore.isWifiStillNeededBySetup(
+                context,
+                nowMillis = System.currentTimeMillis() + SelfArmOnboardingStore.LEASE_TIMEOUT_MS * 2,
+            ),
+        )
+        assertFalse(
+            SelfArmOnboardingStore.isWifiStillNeededBySetup(
+                context,
+                nowMillis = System.currentTimeMillis() + SelfArmOnboardingStore.PAUSED_WIFI_NEED_TIMEOUT_MS,
+            ),
+        )
+
+        SelfArmOnboardingStore.invalidateSession(context)
+        assertFalse(SelfArmOnboardingStore.isWifiStillNeededBySetup(context))
     }
 
     @Test

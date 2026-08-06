@@ -67,6 +67,8 @@ internal object SelfArmController {
         if (runNow) guardedCallback()
     }
 
+    internal fun isOperationRunning(): Boolean = operationRunning.get()
+
     fun repairNow(context: Context, reason: String) {
         val appContext = context.applicationContext
         SelfArmControllerContext.context = appContext

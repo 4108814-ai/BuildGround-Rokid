@@ -180,6 +180,21 @@ internal class SelfArmWirelessDebuggingAutomator(
             return
         }
         if (!wifiEnabled()) {
+            if (sessionId.isNotBlank()) {
+                SelfArmSetupWifiOwnershipStore.recordBeforeEnable(
+                    context = service.applicationContext,
+                    sessionId = sessionId,
+                    wifiCurrentlyEnabled = false,
+                )
+                if (!SelfArmSetupWifiOwnershipStore.isPreparedForEnable(
+                        service.applicationContext,
+                        sessionId,
+                    )
+                ) {
+                    finish("wifi_ownership_record_failed", false)
+                    return
+                }
+            }
             report("enabling_wifi")
             openWifiSettings()
             schedule(1200L)
@@ -443,7 +458,16 @@ internal class SelfArmWirelessDebuggingAutomator(
             schedule(900L)
             return
         }
-        if (clickWifiToggle(root)) {
+        if (
+            clickWifiToggle(root) {
+                sessionId.isBlank() ||
+                    SelfArmSetupWifiOwnershipStore.markEnableIssued(
+                        service.applicationContext,
+                        sessionId,
+                        requestInFlight = true,
+                    )
+            }
+        ) {
             wifiClickIssued = true
             wifiClickAttempts++
             report("enabling_wifi")
@@ -477,6 +501,13 @@ internal class SelfArmWirelessDebuggingAutomator(
     private fun onWifiEnabled() {
         if (!isLiveRun()) return
         if (wifiConfirmed) return
+        if (sessionId.isNotBlank()) {
+            SelfArmSetupWifiOwnershipStore.markEnableRequestFinished(
+                service.applicationContext,
+                sessionId,
+            )
+            SelfArmSetupWifiOwnershipStore.discardUnissued(service.applicationContext, sessionId)
+        }
         if (operationMode == OperationMode.WIFI_ONLY) {
             wifiConfirmed = true
             returnFromWifiSettings()
@@ -1111,10 +1142,13 @@ internal class SelfArmWirelessDebuggingAutomator(
     private fun isDeveloperOptionsDisabledPrompt(root: AccessibilityNodeInfo): Boolean =
         containsSettingsLabel(root, SelfArmSettingsLabel.DEVELOPER_OPTIONS_DISABLED)
 
-    private fun clickWifiToggle(root: AccessibilityNodeInfo): Boolean {
+    private fun clickWifiToggle(
+        root: AccessibilityNodeInfo,
+        beforeClick: () -> Boolean,
+    ): Boolean {
         if (!isWifiSettingsScreen(root)) return false
         val target = wifiToggleByStableId(root)
-        return target != null && canClickNow() && clickNode(target)
+        return target != null && canClickNow() && beforeClick() && clickNode(target)
     }
 
     private fun isWifiSettingsScreen(root: AccessibilityNodeInfo): Boolean =

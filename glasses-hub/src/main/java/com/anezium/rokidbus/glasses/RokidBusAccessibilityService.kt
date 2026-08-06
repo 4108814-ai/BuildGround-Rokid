@@ -610,6 +610,15 @@ class RokidBusAccessibilityService : AccessibilityService() {
             waitForWifi(sessionId, force)
             return
         }
+        SelfArmSetupWifiOwnershipStore.recordBeforeEnable(
+            context = applicationContext,
+            sessionId = sessionId,
+            wifiCurrentlyEnabled = SelfArmWirelessAdbController.isWifiEnabled(applicationContext),
+        )
+        if (!SelfArmSetupWifiOwnershipStore.isPreparedForEnable(applicationContext, sessionId)) {
+            waitForWifi(sessionId, force)
+            return
+        }
         unregisterWifiResumeCallback()
         setupWifiEnableActive = true
         setupWifiEnableSessionId = sessionId
@@ -640,6 +649,10 @@ class RokidBusAccessibilityService : AccessibilityService() {
         wirelessBootstrapActive = false
         wirelessBootstrapSessionId = ""
         wirelessBootstrapForced = false
+        SelfArmSetupWifiOwnershipStore.clearIfRadioObservedOff(
+            applicationContext,
+            SelfArmWirelessAdbController.isWifiEnabled(applicationContext),
+        )
         SelfArmOnboardingStore.pause(
             applicationContext,
             sessionId,
@@ -762,6 +775,10 @@ class RokidBusAccessibilityService : AccessibilityService() {
                     returnToOnboarding(sessionId)
                 }
             } else {
+                SelfArmSetupWifiOwnershipStore.clearIfRadioObservedOff(
+                    applicationContext,
+                    SelfArmWirelessAdbController.isWifiEnabled(applicationContext),
+                )
                 finishManualNavigationRequest(sessionId, false)
             }
             return
@@ -883,14 +900,35 @@ class RokidBusAccessibilityService : AccessibilityService() {
             finishManualNavigationRequest(sessionId, false)
             return
         }
+        SelfArmSetupWifiOwnershipStore.recordBeforeEnable(
+            context = applicationContext,
+            sessionId = sessionId,
+            wifiCurrentlyEnabled = SelfArmWirelessAdbController.isWifiEnabled(applicationContext),
+        )
+        if (!SelfArmSetupWifiOwnershipStore.isPreparedForEnable(applicationContext, sessionId)) {
+            finishManualNavigationRequest(sessionId, false)
+            return
+        }
         manualWifiEnableActive = true
         val generation = ++manualWifiRequestGeneration
         Thread {
-            val enabledThroughBridge = runCatching {
+            val ownershipRecorded = SelfArmSetupWifiOwnershipStore.markEnableIssued(
+                applicationContext,
+                sessionId,
+                requestInFlight = true,
+            )
+            val enabledThroughBridge = ownershipRecorded && runCatching {
                 SelfArmCommandBridgeClient.setWifiEnabled(applicationContext, true)
             }.onFailure {
                 log("Manual Wi-Fi bridge enable failed: ${sanitizeSupportDiagnostic(it.message.orEmpty())}")
             }.getOrDefault(false)
+            if (ownershipRecorded && enabledThroughBridge) {
+                SelfArmSetupWifiOwnershipStore.markEnableRequestFinished(applicationContext, sessionId)
+            }
+            GlassesHub.requestWifiOwnershipReconciliation(
+                applicationContext,
+                "setup_wifi_enable_request_finished",
+            )
             main.post {
                 if (
                     !SelfArmOnboardingStore.isCurrentSession(applicationContext, sessionId) ||
@@ -901,7 +939,9 @@ class RokidBusAccessibilityService : AccessibilityService() {
                 ) {
                     return@post
                 }
-                if (enabledThroughBridge || SelfArmWirelessAdbController.isWifiEnabled(applicationContext)) {
+                if (!ownershipRecorded) {
+                    finishManualNavigationRequest(sessionId, false)
+                } else if (enabledThroughBridge || SelfArmWirelessAdbController.isWifiEnabled(applicationContext)) {
                     onWifiEnableFinished(true, sessionId)
                 } else {
                     log("Manual Wi-Fi bridge unavailable; using Settings accessibility fallback")
@@ -1083,6 +1123,11 @@ class RokidBusAccessibilityService : AccessibilityService() {
         returnToOnboarding(sessionId)
         if (armed && SelfArmOnboardingStore.isCurrentSession(applicationContext, sessionId)) {
             SelfArmPhoneArmConfirmation.confirm(applicationContext, sessionId)
+        } else if (!armed) {
+            // The session may legitimately continue (the phone can retry the manual flow), so it
+            // is not invalidated here; the reconcile gates on the setup lease and the standing
+            // sweep restores a Nexus-enabled radio once that lease lapses.
+            GlassesHub.requestWifiOwnershipReconciliation(applicationContext, "manual_close_unarmed")
         }
     }
 
