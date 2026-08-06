@@ -10,7 +10,7 @@ SEENFILE="$BASE/$NAME.seen"
 PENDING_DISABLE="$BASE/$NAME.pending-disable"
 CHANNEL="/sdcard/Android/data/com.anezium.rokidbus.glasses/files/cmd_bridge"
 DOORBELL="$CHANNEL/doorbell"
-VERSION="2026-08-06.1"
+VERSION="2026-08-06.2"
 CAPTURE_DIR="/sdcard/DCIM/Camera"
 SCRIPT_PATH="$BASE/$NAME.sh"
 PACKAGE="com.anezium.rokidbus.glasses"
@@ -22,6 +22,7 @@ SELF_UPDATE_INTERVAL=300
 SELF_UPDATE_SETTLE=3
 SECRET="__ROKID_NEXUS_BRIDGE_SECRET_HEX__"
 MAINTENANCE_INTERVAL=30
+REQUEST_SCAN_INTERVAL=1
 FALLBACK_POLL_INTERVAL=1
 DISABLE_DELAY=2
 MAX_REQUEST_BYTES=512
@@ -419,7 +420,13 @@ serve_channel() {
       run_maintenance_if_due
       continue
     fi
-    wait_started="$SECONDS"
+    # The app rings the doorbell through FUSE and that write never reaches a pipe the shell
+    # holds open, so a ring may simply not arrive. Slice the blocking read to one second: a
+    # queued request is still picked up within the client's response window, and the slices
+    # are pure builtins - no process is forked between maintenance wakes.
+    if [ "$wait_timeout" -gt "$REQUEST_SCAN_INTERVAL" ]; then
+      wait_timeout="$REQUEST_SCAN_INTERVAL"
+    fi
     if IFS= read -r -t "$wait_timeout" ignored <&3; then
       process_requests
       continue
@@ -427,12 +434,6 @@ serve_channel() {
 
     process_requests
     if [ ! -d "$CHANNEL" ] || [ ! -p "$DOORBELL" ]; then
-      return 1
-    fi
-    # SECONDS is a truncated integer, so a full read timeout can measure one second short of
-    # wait_timeout; only a wake clearly earlier than that is a broken read worth abandoning.
-    wait_elapsed="$((SECONDS - wait_started))"
-    if [ "$wait_elapsed" -lt "$((wait_timeout - 1))" ]; then
       return 1
     fi
     run_maintenance_if_due

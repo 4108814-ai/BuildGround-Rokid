@@ -144,9 +144,10 @@ story, so keep it closed.
 
 **How a request travels.** The app writes `<nonce>.request` into its own external-files channel
 (`…/files/cmd_bridge/`), rings a FIFO doorbell, and the bridge picks it up. The bridge keeps the
-FIFO open for its lifetime, scans once at startup and after every doorbell, and otherwise blocks in
-a timed read capped at 30 seconds. Timed wakes refresh its diagnostic heartbeat and drive
-maintenance; only a missing or unopenable FIFO falls back to a one-second request poll. The line is
+FIFO open for its lifetime and blocks in one-second timed reads — the app's ring cannot cross the
+FUSE boundary on this ROM, so the read timeout is what actually delivers requests, forklessly.
+Every 30 seconds a wake refreshes the diagnostic heartbeat and drives maintenance; only a missing
+or unopenable FIFO falls back to the sleep-based poll. The line is
 `command:nonce:arg1:…:token`, where the token is `sha256(secret:command:nonce:arg1:…)` and the secret
 is a 32-byte value generated once, kept app-private and baked into the deployed script. Arguments
 that could contain `:` travel base64-encoded. The bridge re-validates everything itself and refuses
