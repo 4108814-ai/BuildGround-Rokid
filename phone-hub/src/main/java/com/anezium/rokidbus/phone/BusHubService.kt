@@ -5030,12 +5030,14 @@ class BusHubService : Service() {
 
     /** The glasses learn phone-side feature bits (camera readiness) only through this. */
     private fun announcePhoneCapabilities() {
+        val hudPosition = PhoneHudPositionStore(this)
         val announced = PhoneHubCapabilitiesContract.create(
             features = PhoneAssistedSetupCapabilityPolicy.advertised(phoneCameraCapabilities()),
             cameraConsumerName = cameraConsumerReadiness.resolveApproved()?.descriptor?.displayName,
             activityAlwaysExpanded =
                 PhoneActivityPresentationSettings(this).isAlwaysExpanded(),
-            hudTopInsetDp = PhoneHudPositionStore(this).hudTopInsetDp(),
+            hudTopInsetDp = hudPosition.hudTopInsetDp(),
+            hudPositionAuto = hudPosition.hudPositionAuto(),
         )
         if (announced == lastAnnouncedPhoneCapabilities) return
         val envelope = BusEnvelope(

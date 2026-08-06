@@ -35,7 +35,26 @@ internal class PhoneHudPositionStore(context: Context) {
             .apply()
     }
 
+    fun hudPositionAuto(): Boolean {
+        val stored = runCatching {
+            preferences.getBoolean(
+                KEY_HUD_POSITION_AUTO,
+                PhoneHubCapabilitiesContract.DEFAULT_HUD_POSITION_AUTO,
+            )
+        }.getOrNull()
+        val cleanValue = stored ?: PhoneHubCapabilitiesContract.DEFAULT_HUD_POSITION_AUTO
+        if (stored == null) {
+            preferences.edit().putBoolean(KEY_HUD_POSITION_AUTO, cleanValue).apply()
+        }
+        return cleanValue
+    }
+
+    fun setHudPositionAuto(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_HUD_POSITION_AUTO, enabled).apply()
+    }
+
     private companion object {
         const val KEY_HUD_TOP_INSET_DP = "hud_top_inset_dp"
+        const val KEY_HUD_POSITION_AUTO = "hud_position_auto"
     }
 }

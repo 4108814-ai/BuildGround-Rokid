@@ -2,6 +2,8 @@ package com.anezium.rokidbus.phone
 
 import android.content.Context
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -32,8 +34,26 @@ class PhoneHudPositionStoreTest {
         store.setHudTopInsetDp(100)
         assertEquals(100, PhoneHudPositionStore(context).hudTopInsetDp())
         store.setHudTopInsetDp(500)
-        assertEquals(240, PhoneHudPositionStore(context).hudTopInsetDp())
+        assertEquals(120, PhoneHudPositionStore(context).hudTopInsetDp())
         store.setHudTopInsetDp(-1)
         assertEquals(0, PhoneHudPositionStore(context).hudTopInsetDp())
+    }
+
+    @Test
+    fun `hud position auto defaults on and persists wearer changes`() {
+        val context = RuntimeEnvironment.getApplication()
+        val preferences = context.getSharedPreferences(NexusPhoneState.PREFS, Context.MODE_PRIVATE)
+        preferences.edit().clear().commit()
+        val store = PhoneHudPositionStore(context)
+
+        assertTrue(store.hudPositionAuto())
+        preferences.edit().putString("hud_position_auto", "garbage").commit()
+        assertTrue(store.hudPositionAuto())
+        assertTrue(preferences.getBoolean("hud_position_auto", false))
+
+        store.setHudPositionAuto(false)
+        assertFalse(PhoneHudPositionStore(context).hudPositionAuto())
+        store.setHudPositionAuto(true)
+        assertTrue(PhoneHudPositionStore(context).hudPositionAuto())
     }
 }

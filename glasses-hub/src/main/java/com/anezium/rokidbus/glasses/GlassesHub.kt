@@ -923,10 +923,15 @@ object GlassesHub {
             cameraConsumerName = advertised.cameraConsumerName,
             activityAlwaysExpanded = advertised.activityAlwaysExpanded,
             hudTopInsetDp = advertised.hudTopInsetDp,
+            hudPositionAuto = advertised.hudPositionAuto,
         )
         appContext?.let {
             ActivityController.setAlwaysExpanded(it, next.activityAlwaysExpanded)
-            HudTopInset.set(it, next.hudTopInsetDp)
+            HudTopInset.set(
+                context = it,
+                manualDp = next.hudTopInsetDp,
+                auto = next.hudPositionAuto,
+            )
         }
         val previous = remotePhoneCapabilities
         if (next == previous) return

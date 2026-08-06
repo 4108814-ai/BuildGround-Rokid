@@ -597,23 +597,69 @@ class SettingsActivity : Activity() {
                 NexusUi.dp(this@SettingsActivity, 10),
             )
             val store = PhoneHudPositionStore(this@SettingsActivity)
+            val followGlasses = store.hudPositionAuto()
+            val preview = HudPositionPreviewView(this@SettingsActivity).apply {
+                insetDp = store.hudTopInsetDp()
+                dragEnabled = !followGlasses
+                onInsetCommitted = { value ->
+                    store.setHudTopInsetDp(value)
+                    BusHubService.onHudPositionPreferenceChanged()
+                }
+            }
             addView(NexusUi.rowTitle(this@SettingsActivity, "Glasses display position"))
             addView(BusTheme.gap(this@SettingsActivity, 3))
             addView(
                 NexusUi.rowSub(
                     this@SettingsActivity,
-                    "Drag the panel to where you keep the Hi Rokid screen",
+                    "Follow the Hi Rokid screen or set a manual position",
                 ),
             )
             addView(BusTheme.gap(this@SettingsActivity, 8))
             addView(
-                HudPositionPreviewView(this@SettingsActivity).apply {
-                    insetDp = store.hudTopInsetDp()
-                    onInsetCommitted = { value ->
-                        store.setHudTopInsetDp(value)
-                        BusHubService.onHudPositionPreferenceChanged()
-                    }
+                LinearLayout(this@SettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(
+                        NexusUi.rowTitle(this@SettingsActivity, "Follow glasses position"),
+                        LinearLayout.LayoutParams(
+                            0,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            1f,
+                        ),
+                    )
+                    addView(
+                        Switch(this@SettingsActivity).apply {
+                            isChecked = followGlasses
+                            thumbTintList = ColorStateList(
+                                arrayOf(
+                                    intArrayOf(android.R.attr.state_checked),
+                                    intArrayOf(),
+                                ),
+                                intArrayOf(NexusUi.GREEN, NexusUi.INK3),
+                            )
+                            trackTintList = ColorStateList(
+                                arrayOf(
+                                    intArrayOf(android.R.attr.state_checked),
+                                    intArrayOf(),
+                                ),
+                                intArrayOf(NexusUi.GREEN_DIM, NexusUi.LINE),
+                            )
+                            setOnCheckedChangeListener { _, enabled ->
+                                store.setHudPositionAuto(enabled)
+                                preview.dragEnabled = !enabled
+                                BusHubService.onHudPositionPreferenceChanged()
+                            }
+                        },
+                    )
                 },
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+            addView(BusTheme.gap(this@SettingsActivity, 8))
+            addView(
+                preview,
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,

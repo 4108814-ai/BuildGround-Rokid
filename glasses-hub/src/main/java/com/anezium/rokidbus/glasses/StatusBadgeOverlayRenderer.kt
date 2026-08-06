@@ -164,6 +164,13 @@ internal object StatusBadgeOverlayRenderer {
         // (home: top third; teleprompter: bottom edge), so yesterday's centre is
         // another layout's middle of the screen. No row on screen, no chip.
         rowCenterY = read.rowCenterY
+        if (read.weatherVisible) {
+            // Only the home layout carries weather; launcher app screens move
+            // this same row for their own content and are not position samples.
+            read.rowCenterY?.let { centerYpx ->
+                HudTopInset.onRomRowMeasured(activeService, centerYpx, metrics.density)
+            }
+        }
         val signature = if (read.weatherVisible) {
             StatusBadgeReserve.Signature.WEATHER
         } else {

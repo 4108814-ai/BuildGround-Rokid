@@ -4,6 +4,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PhoneHubCapabilitiesContractTest {
@@ -91,9 +92,9 @@ class PhoneHubCapabilitiesContractTest {
             ).hudTopInsetDp,
         )
         assertEquals(
-            240,
+            120,
             PhoneHubCapabilitiesContract.parse(
-                JSONObject().put("hudTopInsetDp", 241),
+                JSONObject().put("hudTopInsetDp", 121),
             ).hudTopInsetDp,
         )
     }
@@ -106,6 +107,36 @@ class PhoneHubCapabilitiesContractTest {
                 PhoneHubCapabilitiesContract.parse(
                     JSONObject().put("hudTopInsetDp", garbage),
                 ).hudTopInsetDp,
+            )
+        }
+    }
+
+    @Test
+    fun `hud position auto survives round trip`() {
+        val payload = PhoneHubCapabilitiesContract.toJson(
+            PhoneHubCapabilitiesContract.create(
+                features = 0,
+                cameraConsumerName = null,
+                hudPositionAuto = false,
+            ),
+        )
+
+        assertFalse(payload.getBoolean("hudPositionAuto"))
+        assertFalse(PhoneHubCapabilitiesContract.parse(payload).hudPositionAuto)
+    }
+
+    @Test
+    fun `hud position auto defaults on for legacy and garbage payloads`() {
+        assertTrue(
+            PhoneHubCapabilitiesContract.parse(
+                JSONObject().put("features", 0),
+            ).hudPositionAuto,
+        )
+        listOf("garbage", 0, 1.5, JSONObject.NULL).forEach { garbage ->
+            assertTrue(
+                PhoneHubCapabilitiesContract.parse(
+                    JSONObject().put("hudPositionAuto", garbage),
+                ).hudPositionAuto,
             )
         }
     }

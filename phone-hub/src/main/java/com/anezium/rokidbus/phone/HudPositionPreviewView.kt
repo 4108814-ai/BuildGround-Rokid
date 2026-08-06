@@ -23,6 +23,15 @@ internal class HudPositionPreviewView(context: Context) : View(context) {
             invalidate()
         }
 
+    var dragEnabled: Boolean = true
+        set(value) {
+            field = value
+            if (!value && dragging) {
+                dragging = false
+                parent?.requestDisallowInterceptTouchEvent(false)
+            }
+        }
+
     /** Fires on every drag tick with the draft value; cheap UI updates only. */
     var onInsetDragged: ((Int) -> Unit)? = null
 
@@ -79,7 +88,7 @@ internal class HudPositionPreviewView(context: Context) : View(context) {
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val measuredWidth = MeasureSpec.getSize(widthMeasureSpec)
         val availableWidth = (measuredWidth - paddingLeft - paddingRight).coerceAtLeast(dp(200))
-        val screenHeight = (availableWidth * SCREEN_HEIGHT_DP / SCREEN_WIDTH_DP).roundToInt()
+        val screenHeight = (availableWidth * PANEL_HEIGHT_PX / PANEL_WIDTH_PX).roundToInt()
         setMeasuredDimension(
             resolveSize(measuredWidth, widthMeasureSpec),
             resolveSize(paddingTop + screenHeight + paddingBottom, heightMeasureSpec),
@@ -90,9 +99,9 @@ internal class HudPositionPreviewView(context: Context) : View(context) {
         super.onDraw(canvas)
         val availableWidth = width - paddingLeft - paddingRight
         val availableHeight = height - paddingTop - paddingBottom
-        scale = minOf(availableWidth / SCREEN_WIDTH_DP, availableHeight / SCREEN_HEIGHT_DP)
-        val screenWidth = SCREEN_WIDTH_DP * scale
-        val screenHeight = SCREEN_HEIGHT_DP * scale
+        scale = minOf(availableWidth / PANEL_WIDTH_PX, availableHeight / PANEL_HEIGHT_PX)
+        val screenWidth = PANEL_WIDTH_PX * scale
+        val screenHeight = PANEL_HEIGHT_PX * scale
         val left = paddingLeft + (availableWidth - screenWidth) / 2f
         val top = paddingTop + (availableHeight - screenHeight) / 2f
         screenRect.set(left, top, left + screenWidth, top + screenHeight)
@@ -102,10 +111,10 @@ internal class HudPositionPreviewView(context: Context) : View(context) {
         drawGrid(canvas)
         canvas.drawRoundRect(screenRect, corner, corner, screenStroke)
 
-        val bandWidth = BAND_WIDTH_DP * scale
+        val bandWidth = BAND_WIDTH_PX * scale
         val bandLeft = screenRect.centerX() - bandWidth / 2f
-        val bandTop = screenRect.top + insetDp * scale
-        bandRect.set(bandLeft, bandTop, bandLeft + bandWidth, bandTop + BAND_HEIGHT_DP * scale)
+        val bandTop = screenRect.top + insetDp * PANEL_DENSITY * scale
+        bandRect.set(bandLeft, bandTop, bandLeft + bandWidth, bandTop + BAND_HEIGHT_PX * scale)
 
         val bandCorner = dp(4).toFloat()
         canvas.drawRoundRect(bandRect, bandCorner, bandCorner, bandFill)
@@ -115,6 +124,7 @@ internal class HudPositionPreviewView(context: Context) : View(context) {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!dragEnabled) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 if (!screenRect.contains(event.x, event.y)) return false
@@ -154,7 +164,7 @@ internal class HudPositionPreviewView(context: Context) : View(context) {
 
     private fun updateFromTouch(y: Float) {
         if (scale <= 0f) return
-        val raw = ((y - screenRect.top - dragGripPx) / scale).roundToInt()
+        val raw = ((y - screenRect.top - dragGripPx) / scale / PANEL_DENSITY).roundToInt()
         val clean = PhoneHubCapabilitiesContract.sanitizeHudTopInsetDp(raw)
         if (clean == insetDp) return
         insetDp = clean
@@ -183,10 +193,11 @@ internal class HudPositionPreviewView(context: Context) : View(context) {
     private fun dp(value: Int): Int = (value * density).roundToInt()
 
     private companion object {
-        // The glasses panel is 480x640 px at ~2x density; the mock keeps its 3:4 shape.
-        const val SCREEN_WIDTH_DP = 480f
-        const val SCREEN_HEIGHT_DP = 640f
-        const val BAND_WIDTH_DP = 442f
-        const val BAND_HEIGHT_DP = 126f
+        // The glasses panel is 480x640 px at 2x density; the mock keeps its 3:4 shape.
+        const val PANEL_WIDTH_PX = 480f
+        const val PANEL_HEIGHT_PX = 640f
+        const val BAND_WIDTH_PX = 442f
+        const val BAND_HEIGHT_PX = 126f
+        const val PANEL_DENSITY = 2f
     }
 }

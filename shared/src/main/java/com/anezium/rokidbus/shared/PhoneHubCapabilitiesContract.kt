@@ -7,6 +7,7 @@ data class PhoneHubCapabilities(
     val cameraConsumerName: String?,
     val activityAlwaysExpanded: Boolean = false,
     val hudTopInsetDp: Int = 0,
+    val hudPositionAuto: Boolean = true,
 )
 
 /** Additive phone-to-glasses hub capabilities payload. Unknown fields remain ignorable. */
@@ -14,14 +15,16 @@ object PhoneHubCapabilitiesContract {
     const val VERSION = 1
     const val MAX_CAMERA_CONSUMER_NAME_CHARS = 80
     const val MIN_HUD_TOP_INSET_DP = 0
-    const val MAX_HUD_TOP_INSET_DP = 240
+    const val MAX_HUD_TOP_INSET_DP = 120
     const val DEFAULT_HUD_TOP_INSET_DP = 0
+    const val DEFAULT_HUD_POSITION_AUTO = true
 
     fun create(
         features: Int,
         cameraConsumerName: String?,
         activityAlwaysExpanded: Boolean = false,
         hudTopInsetDp: Int = DEFAULT_HUD_TOP_INSET_DP,
+        hudPositionAuto: Boolean = DEFAULT_HUD_POSITION_AUTO,
     ): PhoneHubCapabilities {
         val ready = features and BusCapabilityBits.CAMERA_CONSUMER_READY != 0
         return PhoneHubCapabilities(
@@ -29,6 +32,7 @@ object PhoneHubCapabilitiesContract {
             cameraConsumerName = normalizeName(cameraConsumerName).takeIf { ready },
             activityAlwaysExpanded = activityAlwaysExpanded,
             hudTopInsetDp = sanitizeHudTopInsetDp(hudTopInsetDp),
+            hudPositionAuto = hudPositionAuto,
         )
     }
 
@@ -37,6 +41,7 @@ object PhoneHubCapabilitiesContract {
         .put("features", capabilities.features)
         .put("activityAlwaysExpanded", capabilities.activityAlwaysExpanded)
         .put("hudTopInsetDp", sanitizeHudTopInsetDp(capabilities.hudTopInsetDp))
+        .put("hudPositionAuto", capabilities.hudPositionAuto)
         .also { payload ->
             capabilities.cameraConsumerName?.let { payload.put("cameraConsumerName", it) }
         }
@@ -46,6 +51,10 @@ object PhoneHubCapabilitiesContract {
         cameraConsumerName = payload.optString("cameraConsumerName", ""),
         activityAlwaysExpanded = payload.optBoolean("activityAlwaysExpanded", false),
         hudTopInsetDp = parseHudTopInsetDp(payload.opt("hudTopInsetDp")),
+        hudPositionAuto = payload.optBoolean(
+            "hudPositionAuto",
+            DEFAULT_HUD_POSITION_AUTO,
+        ),
     )
 
     fun sanitizeHudTopInsetDp(value: Int): Int =
