@@ -93,7 +93,7 @@ internal fun ChatRequest.toChatCompletionMessages(): JSONArray {
     return messages
 }
 
-private fun chatCompletionContent(text: String, photos: List<PhotoAttachment>): Any {
+internal fun chatCompletionContent(text: String, photos: List<PhotoAttachment>): Any {
     val actualPhotos = photos.filterNot(PhotoAttachment::isOmittedHistoryPhoto)
     if (actualPhotos.isEmpty()) return text
     return JSONArray().apply {

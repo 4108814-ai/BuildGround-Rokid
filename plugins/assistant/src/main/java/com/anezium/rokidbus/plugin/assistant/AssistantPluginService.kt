@@ -75,8 +75,9 @@ class AssistantPluginService : NexusPluginService() {
                 preset = preset,
                 apiClient = checkNotNull(openAiCompatClients[preset.id]),
                 apiKeyConfigured = { !authStore.providerApiKey(preset.id).isNullOrBlank() },
+                toolExecutor = AssistantToolExecutor(::executeAssistantTool),
                 modelProvider = { authStore.providerModel(preset.id) },
-                supportsVision = { authStore.providerModelSupportsPhotos(preset.id) },
+                supportsVision = { providerSupportsPhotos(preset.id) },
             )
         }
     }
@@ -509,6 +510,7 @@ class AssistantPluginService : NexusPluginService() {
                 customPrompt = authStore.customSystemPrompt(),
                 noticeBand = noticeBandMode,
                 memory = authStore.combinedAssistantContextForPrompt(),
+                photoTool = providerSupportsPhotos(providerId),
             ),
             history = conversationContext.history,
             model = when (providerId) {

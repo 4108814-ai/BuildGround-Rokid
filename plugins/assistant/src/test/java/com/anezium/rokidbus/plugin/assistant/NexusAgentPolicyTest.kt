@@ -64,6 +64,17 @@ class NexusAgentPolicyTest {
         assertTrue(prompt.contains("say so plainly and offer to look again"))
     }
 
+    @Test
+    fun `non photo provider prompt denies current scene access without tool syntax`() {
+        val prompt = NexusAgentPolicy.buildSystemPrompt(photoTool = false).lowercase()
+
+        assertFalse(prompt.contains("take_photo"))
+        assertTrue(prompt.contains("cannot take photos or see the current scene"))
+        assertTrue(prompt.contains("say you cannot look"))
+        assertTrue(prompt.contains("answer from the available context"))
+        assertTrue(prompt.contains("never invent tool-call syntax"))
+    }
+
     private companion object {
         const val INCIDENT_WEATHER_TRANSCRIPT =
             "ouais c'est quoi la météo de paris aujourd'hui"

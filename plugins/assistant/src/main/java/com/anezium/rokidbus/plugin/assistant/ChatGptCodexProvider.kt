@@ -565,7 +565,8 @@ internal fun parseFunctionCall(item: JSONObject): AssistantToolCall? {
 
 internal fun isValidTakePhotoCall(call: AssistantToolCall): Boolean {
     if (call.name != TAKE_PHOTO_TOOL_NAME) return false
-    val arguments = runCatching { JSONObject(call.argumentsJson) }.getOrNull() ?: return false
+    val argumentsJson = call.argumentsJson.ifBlank { "{}" }
+    val arguments = runCatching { JSONObject(argumentsJson) }.getOrNull() ?: return false
     return arguments.length() == 0
 }
 

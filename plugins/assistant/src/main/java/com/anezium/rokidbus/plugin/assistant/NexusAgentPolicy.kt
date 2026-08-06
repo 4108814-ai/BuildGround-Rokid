@@ -16,6 +16,7 @@ internal object NexusAgentPolicy {
         customPrompt: String = "",
         noticeBand: Boolean = false,
         memory: String = "",
+        photoTool: Boolean = true,
     ): String {
         val base = customPrompt.trim().ifBlank { DEFAULT_SYSTEM_PROMPT }
         return buildString {
@@ -25,14 +26,22 @@ internal object NexusAgentPolicy {
             append("- Use 1-6 short HUD-friendly lines. Put the answer first and omit filler.\n")
             append("- Never pretend an action happened or claim access you do not have.\n")
             append("- Preserve numbers, dates, prices, units, references, names, and warnings.\n")
-            append(
-                "- You can call take_photo to inspect the wearer's current physical view. Decide yourself " +
-                    "whether current visual information is necessary to answer. Do not call it for discussion " +
-                    "of a previous photo, camera behavior or settings, web images, or questions answerable " +
-                    "from the conversation or the web. Call it at most once per request. Never claim to see " +
-                    "the current scene before a successful tool result. If no image is available for a question " +
-                    "about what was seen, say so plainly and offer to look again.\n",
-            )
+            if (photoTool) {
+                append(
+                    "- You can call take_photo to inspect the wearer's current physical view. Decide yourself " +
+                        "whether current visual information is necessary to answer. Do not call it for discussion " +
+                        "of a previous photo, camera behavior or settings, web images, or questions answerable " +
+                        "from the conversation or the web. Call it at most once per request. Never claim to see " +
+                        "the current scene before a successful tool result. If no image is available for a question " +
+                        "about what was seen, say so plainly and offer to look again.\n",
+                )
+            } else {
+                append(
+                    "- You cannot take photos or see the current scene. If a question needs current visual " +
+                        "information, say you cannot look and answer from the available context. Never invent " +
+                        "tool-call syntax.\n",
+                )
+            }
             append("- Give actionable, concise error or retry guidance when something is unavailable.")
             if (noticeBand) {
                 append("\n- ")

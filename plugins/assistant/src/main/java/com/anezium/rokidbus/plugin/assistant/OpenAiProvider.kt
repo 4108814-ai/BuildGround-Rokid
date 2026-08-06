@@ -17,11 +17,22 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 internal sealed interface OpenAiChatSseEvent {
-    data class TextDelta(val text: String) : OpenAiChatSseEvent
+    data class Delta(
+        val content: String? = null,
+        val toolCalls: List<OpenAiChatToolCallDelta> = emptyList(),
+        val finishReason: String? = null,
+    ) : OpenAiChatSseEvent
     data class Error(val message: String) : OpenAiChatSseEvent
     data object Done : OpenAiChatSseEvent
     data object Ignored : OpenAiChatSseEvent
 }
+
+internal data class OpenAiChatToolCallDelta(
+    val index: Int,
+    val id: String? = null,
+    val nameFragment: String? = null,
+    val argumentsFragment: String? = null,
+)
 
 internal object OpenAiChatSseParser {
     fun parseData(payload: String): OpenAiChatSseEvent {
@@ -37,11 +48,44 @@ internal object OpenAiChatSseParser {
             )
         }
         val choices = json.optJSONArray("choices") ?: return OpenAiChatSseEvent.Ignored
-        val delta = choices.optJSONObject(0)?.optJSONObject("delta")
-            ?: return OpenAiChatSseEvent.Ignored
-        if (!delta.has("content") || delta.isNull("content")) return OpenAiChatSseEvent.Ignored
-        val text = delta.optString("content")
-        return if (text.isEmpty()) OpenAiChatSseEvent.Ignored else OpenAiChatSseEvent.TextDelta(text)
+        val choice = choices.optJSONObject(0) ?: return OpenAiChatSseEvent.Ignored
+        val delta = choice.optJSONObject("delta")
+        val content = delta
+            ?.optionalString("content")
+            ?.takeIf(String::isNotEmpty)
+        val toolCalls = delta
+            ?.optJSONArray("tool_calls")
+            ?.let { calls ->
+                buildList {
+                    for (index in 0 until calls.length()) {
+                        val call = calls.optJSONObject(index) ?: continue
+                        if (!call.has("index") || call.isNull("index")) continue
+                        val callIndex = call.optInt("index", -1)
+                        if (callIndex < 0) continue
+                        val function = call.optJSONObject("function")
+                        add(
+                            OpenAiChatToolCallDelta(
+                                index = callIndex,
+                                id = call.optionalString("id"),
+                                nameFragment = function?.optionalString("name"),
+                                argumentsFragment = function?.optionalString("arguments"),
+                            ),
+                        )
+                    }
+                }
+            }
+            .orEmpty()
+        val finishReason = choice.optionalString("finish_reason")
+            ?.takeIf(String::isNotEmpty)
+        return if (content == null && toolCalls.isEmpty() && finishReason == null) {
+            OpenAiChatSseEvent.Ignored
+        } else {
+            OpenAiChatSseEvent.Delta(
+                content = content,
+                toolCalls = toolCalls,
+                finishReason = finishReason,
+            )
+        }
     }
 
     fun parseLine(line: String): OpenAiChatSseEvent {
@@ -49,6 +93,9 @@ internal object OpenAiChatSseParser {
         if (!trimmed.startsWith("data:")) return OpenAiChatSseEvent.Ignored
         return parseData(trimmed.removePrefix("data:").trim())
     }
+
+    private fun JSONObject.optionalString(name: String): String? =
+        if (has(name) && !isNull(name)) optString(name) else null
 }
 
 class OpenAiApiClient(
@@ -81,8 +128,8 @@ class OpenAiApiClient(
             }
             readSse(connection) { event ->
                 when (event) {
-                    is OpenAiChatSseEvent.TextDelta -> {
-                        emit(event.text)
+                    is OpenAiChatSseEvent.Delta -> {
+                        event.content?.let { content -> emit(content) }
                         true
                     }
                     is OpenAiChatSseEvent.Error -> throw IllegalStateException(event.message)
