@@ -156,7 +156,7 @@ class StorePluginDetailActivity : Activity() {
                 content.addView(sectionLabelRow("Screenshots", null, null))
                 content.addView(screenshotsRow(plugin), NexusUi.block())
             }
-            val about = plugin.listingDescriptionMarkdown.ifBlank { plugin.description }
+            val about = stripLeadingAboutHeading(plugin.listingDescriptionMarkdown.ifBlank { plugin.description })
             if (about.isNotBlank()) {
                 content.addView(sectionLabelRow("About", null, null))
                 content.addView(
@@ -347,7 +347,7 @@ class StorePluginDetailActivity : Activity() {
             add(cell(versionCell.first, versionCell.second, null))
             StoreScreens.formatSize(plugin.artifact.sizeBytes)?.let { add(cell("Size", it, null)) }
             updated?.let { add(cell("Updated", it, null)) }
-            add(cell("Source", "↗", plugin.sourceUrl))
+            add(cell("Source", "Open ›", plugin.sourceUrl))
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -431,7 +431,9 @@ class StorePluginDetailActivity : Activity() {
         }
         addView(notes, NexusUi.block())
         notes.post {
-            val truncated = !notesExpanded && notes.lineCount > COLLAPSED_NOTES_LINES
+            val layout = notes.layout
+            val truncated = !notesExpanded && layout != null && notes.lineCount > 0 &&
+                layout.getEllipsisCount(notes.lineCount - 1) > 0
             if (truncated || notesExpanded) {
                 addView(BusTheme.gap(this@StorePluginDetailActivity, 9))
                 addView(
@@ -521,7 +523,7 @@ class StorePluginDetailActivity : Activity() {
             add(Triple("Publisher", plugin.author, null))
             add(Triple("Package", plugin.artifact.packageName, null))
             entry.installedVersionCode?.let { add(Triple("Installed build", it.toString(), null)) }
-            add(Triple("Source code", "GitHub ↗", plugin.sourceUrl))
+            add(Triple("Source code", "GitHub ›", plugin.sourceUrl))
         }
         rows.forEachIndexed { index, (label, value, link) ->
             if (index > 0) {
@@ -644,6 +646,17 @@ class StorePluginDetailActivity : Activity() {
     companion object {
         private const val EXTRA_PLUGIN_ID = "plugin_id"
         private const val COLLAPSED_NOTES_LINES = 7
+
+        /** The listing markdown often opens with its own "About" heading; ours is already on screen. */
+        private fun stripLeadingAboutHeading(markdown: String): String {
+            val lines = markdown.lines()
+            val first = lines.indexOfFirst { it.isNotBlank() }
+            if (first < 0) return markdown
+            if (!Regex("^#{1,6}\\s*about\\s*$", RegexOption.IGNORE_CASE).matches(lines[first].trim())) {
+                return markdown
+            }
+            return lines.filterIndexed { index, _ -> index != first }.joinToString("\n")
+        }
         private val REVIEW_STATES = setOf(
             PluginCatalogState.PENDING,
             PluginCatalogState.DENIED,
