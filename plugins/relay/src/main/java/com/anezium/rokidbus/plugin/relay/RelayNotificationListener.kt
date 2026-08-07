@@ -82,10 +82,11 @@ class RelayNotificationListener : NotificationListenerService() {
         val keyHash = ReplyRepository.stableId(sbn.key).take(8)
         val interactive = NotificationForwardingPolicy.isPhoneScreenOn(this)
 
-        fun finish(decision: String, accepted: Boolean): Boolean {
+        fun finish(decision: String, accepted: Boolean, redacted: Boolean = false): Boolean {
             Log.i(
                 TAG,
-                "ingest source=$source keyHash=$keyHash interactive=$interactive decision=$decision",
+                "ingest source=$source keyHash=$keyHash interactive=$interactive " +
+                    "redacted=$redacted decision=$decision",
             )
             return accepted
         }
@@ -111,7 +112,7 @@ class RelayNotificationListener : NotificationListenerService() {
             !mayShow -> "captured rebuild_only"
             else -> "captured show=${capture.shouldShowNow}"
         }
-        val accepted = finish(decision, accepted = true)
+        val accepted = finish(decision, accepted = true, redacted = capture.redacted)
         if (mayShow && capture.shouldShowNow) runtime.show(capture.reply)
         return accepted
     }
