@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.7
+
+- **The built-in speech engine now works on phones whose default recognizer
+  isn't Google's.** The Android engine feeds the glasses' microphone straight
+  into your phone's speech service — but many phones (Vivo, Samsung…) ship
+  with the maker's own service as the default, and those refuse audio that
+  doesn't come from the phone's own mic. Nexus used to give up right there
+  with a cryptic "client failed". It now walks through the other recognizers
+  installed on the phone — Google's, then the on-device one — and uses the
+  first that accepts the stream. And on the rare phone with no recognizer
+  that can take external audio at all (ROMs without Google services), the
+  message now says so plainly and points you to the cloud engines instead.
+
 ## 1.2.6
 
 This release is about the battery (thanks for the detailed report!). Three
