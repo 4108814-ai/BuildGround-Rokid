@@ -12,8 +12,8 @@ android {
         applicationId = "com.anezium.rokidbus.plugin.relay"
         minSdk = 30
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.1.1"
+        versionCode = 6
+        versionName = "1.1.2"
     }
 
     compileOptions {

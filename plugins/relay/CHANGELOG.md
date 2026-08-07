@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.2
+
+- **A message now waits for the glasses instead of being dropped after five
+  seconds.** The link to the glasses drops and heals on its own all the time —
+  a pocket, a doorway, standby — and healing routinely takes ten to thirty
+  seconds. Relay used to give a captured message five seconds to reach the
+  glasses and then silently gave up: the message sat in the inbox, and the
+  band never came. A message now waits out the reconnection for up to two
+  minutes and shows the moment the link is back. Relay also stopped trusting
+  a "sent" that never left the phone — a send that dies on a broken
+  connection is now retried instead of counted as delivered — and a few
+  transient hiccups during registration no longer throw the waiting message
+  away. If a message still can't be shown, the log now says exactly what
+  blocked it, so field reports can point at the culprit.
+
 ## 1.1.1
 
 - **Choose how long messages stay up.** Display time has always scaled with

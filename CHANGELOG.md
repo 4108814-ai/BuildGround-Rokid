@@ -2,6 +2,19 @@
 
 ## 1.2.7
 
+- **A second message no longer arrives on a dark display.** When a short
+  notification woke the glasses and expired, the display went back to sleep —
+  and for the next few seconds any message that followed was accepted,
+  displayed, and never seen, because the screen simply wasn't lit. A new
+  message may now wake the display even right on the heels of the previous
+  one. It stays polite about it: two wake-ups in a row at most without you
+  touching anything, then the glasses wait for a quiet minute — so a runaway
+  app still can't keep the screen burning, and the battery work from 1.2.6
+  is untouched. Two timing holes went with it: a message landing at the
+  exact moment the display was being put to sleep, and one landing during
+  the quarter-second where the previous band was still fading out, both of
+  which used to leave the new message invisible.
+
 - **The built-in speech engine now works on phones whose default recognizer
   isn't Google's.** The Android engine feeds the glasses' microphone straight
   into your phone's speech service — but many phones (Vivo, Samsung…) ship
