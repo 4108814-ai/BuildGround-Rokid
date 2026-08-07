@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -14,6 +15,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
+import android.widget.Toast
 import com.anezium.rokidbus.client.ui.BusTheme
 import com.anezium.rokidbus.client.ui.NexusUi
 import java.util.concurrent.CopyOnWriteArrayList
@@ -51,6 +53,7 @@ class RelaySettingsActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
+        CompanionDeviceCoordinator.startObserving(this)
         unobserveData = observeData { main.post(::render) }
         unobserveHarness = FakeNotificationHarness.observe { main.post(::render) }
         render()
@@ -59,6 +62,29 @@ class RelaySettingsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         render()
+    }
+
+    @Deprecated("The companion device chooser still returns through onActivityResult")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == CompanionDeviceCoordinator.COMPANION_REQUEST_CODE) {
+            CompanionDeviceCoordinator.handleAssociationResult(this, resultCode, data)
+            render()
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        CompanionDeviceCoordinator.handleBluetoothPermissionResult(
+            this,
+            requestCode,
+            grantResults,
+            ::showTransientMessage,
+        )
     }
 
     override fun onStop() {
@@ -76,6 +102,8 @@ class RelaySettingsActivity : Activity() {
         content.addView(NexusUi.sectionRow(this, "Access"), NexusUi.block())
         content.addView(BusTheme.gap(this, 10))
         content.addView(notificationAccessCard(), NexusUi.block())
+        content.addView(BusTheme.gap(this, 8))
+        content.addView(companionLinkCard(), NexusUi.block())
         content.addView(BusTheme.gap(this, 8))
         content.addView(
             switchCard(
@@ -199,6 +227,44 @@ class RelaySettingsActivity : Activity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ),
         )
+    }
+
+    private fun companionLinkCard(): LinearLayout = NexusUi.card(this).apply {
+        val linked = CompanionDeviceCoordinator.hasAssociation(this@RelaySettingsActivity)
+        addView(NexusUi.cardTitle(this@RelaySettingsActivity, "Show messages Android hides"))
+        addView(BusTheme.gap(this@RelaySettingsActivity, 5))
+        addView(
+            NexusUi.cardBody(
+                this@RelaySettingsActivity,
+                CompanionLinkCardContent.body(linked, Build.VERSION.SDK_INT),
+            ),
+        )
+        if (!linked) {
+            addView(BusTheme.gap(this@RelaySettingsActivity, 10))
+            addView(
+                NexusUi.outlinePillButton(
+                    this@RelaySettingsActivity,
+                    "LINK ›",
+                ).apply {
+                    setOnClickListener {
+                        CompanionDeviceCoordinator.requestAssociation(
+                            this@RelaySettingsActivity,
+                            ::showTransientMessage,
+                        )
+                    }
+                },
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
+    }
+
+    private fun showTransientMessage(message: String) {
+        main.post {
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun switchCard(
