@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.1.3
+
+- **Messages Android hides can now come through.** Since Android 15, the system
+  blanks out any notification it reads as carrying a code — and it reads far
+  more than real codes that way, so an ordinary message with a few digits in it
+  arrived on the glasses as "Sensitive notification content hidden". The only
+  exemption Android grants is to an app registered as a device's companion,
+  which is exactly what Relay is, so a new **Show messages Android hides** entry
+  under Access offers to register it with your glasses. It is off until you ask
+  for it, and Android's own dialog tells you what registering covers before
+  anything happens.
+- The registration is worth having on its own: it also lets Relay keep running
+  when the system would otherwise stop it, which is one of the ways a message
+  used to go missing entirely.
+- **When Android does hide a message, Relay says so in its own words** instead
+  of showing you the system's placeholder as though it were the message.
+
 ## 1.1.2
 
 - **A message now waits for the glasses instead of being dropped after five
