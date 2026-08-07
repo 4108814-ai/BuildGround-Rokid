@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.9
 
 - **The Store is twice as dense.** The list is now one slim row per plugin —
   icon, name, author, version or size, and a state mark — so about eleven
@@ -10,9 +10,10 @@
 - **Every plugin has a real page now.** Tap a row and everything the old card
   had no room for is there: a full-width install or update button, version,
   size, date and source at a glance, the plugin's What's new with a Read
-  more fold, screenshots when the author published some, the long
-  description, the capabilities it asks for, and an uninstall row. A History
-  screen lists every release the plugin has ever shipped, with its notes.
+  more fold, screenshots when the author published some — tap one to see it
+  fullscreen and swipe through the rest — the long description, the
+  capabilities it asks for, and an uninstall row. A History screen lists
+  every release the plugin has ever shipped, with its notes.
 - **The app has a changelog too.** Tapping the amber update banner — or
   Settings › About › What's new — opens the app's own release notes: the
   waiting version in full, every earlier release below it, and an install
