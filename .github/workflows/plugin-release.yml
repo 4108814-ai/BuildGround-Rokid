@@ -90,6 +90,11 @@ jobs:
               changelog_path="plugins/sample/CHANGELOG.md"
               release_name="Sample"
               ;;
+            tasker)
+              module_dir="plugins/tasker"
+              changelog_path="plugins/tasker/CHANGELOG.md"
+              release_name="Tasker"
+              ;;
             *)
               echo "::error::Unknown Nexus plugin id '$plugin_id' in tag '$tag'."
               exit 1
