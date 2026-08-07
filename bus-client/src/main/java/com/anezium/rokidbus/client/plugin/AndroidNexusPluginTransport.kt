@@ -35,8 +35,7 @@ internal class AndroidNexusPluginTransport(
     }
 
     override fun send(path: String, id: String, payload: JSONObject): Boolean {
-        client.send(path, id, payload)
-        return true
+        return client.trySend(path, id, payload)
     }
 
     override fun sendBinary(path: String, id: String, payload: JSONObject, data: ByteArray): Boolean {

@@ -160,23 +160,35 @@ class BusClient(
         send(path, UUID.randomUUID().toString(), payload)
 
     fun send(path: String, id: String, payload: JSONObject): String {
+        trySend(path, id, payload)
+        return id
+    }
+
+    /**
+     * Returns true when Binder accepted the one-way transaction or the reconnect queue
+     * retained it. A closed client, registration rejection, or queue rejection returns false.
+     */
+    fun trySend(path: String, id: String, payload: JSONObject): Boolean {
         val bytes = payload.toString().toByteArray(Charsets.UTF_8)
+        if (closed) {
+            listener(BusEvent.Error("BusClient is closed"))
+            return false
+        }
         if (pluginId != null && pluginRegistrationState != PluginRegistrationResult.APPROVED) {
             listener(BusEvent.Error("Plugin registration is not approved"))
-            return id
+            return false
         }
         val hub = service
         if (hub == null) {
-            reportQueueMutation(
-                queued.offerJson(path, id, bytes),
-                operation = "json queue",
-            )
+            val mutation = queued.offerJson(path, id, bytes)
+            reportQueueMutation(mutation, operation = "json queue")
             connect()
-            return id
+            return mutation.accepted
         }
-        runCatching {
+        return runCatching {
             hub.send(path, id, bytes)
-        }.onFailure {
+            true
+        }.getOrElse {
             val mutation = queued.offerJson(path, id, bytes)
             service = null
             listener(
@@ -186,8 +198,8 @@ class BusClient(
                 ),
             )
             scheduleReconnect()
+            mutation.accepted
         }
-        return id
     }
 
     fun sendBinary(path: String, meta: JSONObject, data: ByteArray): String =

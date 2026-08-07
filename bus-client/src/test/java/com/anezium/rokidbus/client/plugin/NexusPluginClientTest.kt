@@ -21,6 +21,7 @@ class NexusPluginClientTest {
         var connected = false
         var closeCount = 0
         var featureBits = 0
+        var sendAccepted = true
         val sends = mutableListOf<Pair<String, JSONObject>>()
         override fun connect(listener: NexusPluginTransport.Listener) {
             this.listener = listener
@@ -28,7 +29,7 @@ class NexusPluginClientTest {
         }
         override fun send(path: String, id: String, payload: JSONObject): Boolean {
             sends += path to JSONObject(payload.toString())
-            return true
+            return sendAccepted
         }
         override fun sendBinary(path: String, id: String, payload: JSONObject, data: ByteArray) = true
         override fun capabilities(): Int = featureBits
@@ -100,6 +101,27 @@ class NexusPluginClientTest {
 
         assertTrue(client.hasCapability(PluginCapability.SURFACES))
         assertTrue(client.hasCapability(PluginCapability.STT))
+    }
+
+    @Test
+    fun `notice show reports not registered when the transport rejects json`() {
+        val (client, transport, _) = fixture()
+        transport.featureBits = BusCapabilityBits.NOTICE_SURFACE
+        transport.listener.onMessage(
+            BusPaths.PLUGIN_REGISTRATION,
+            "notice-registration",
+            payload()
+                .put("result", PluginRegistrationResult.APPROVED)
+                .put("capabilities", "surfaces"),
+        )
+        transport.listener.onLinkState(LinkStateBits.SPP_DATA_UP)
+        transport.sendAccepted = false
+
+        assertEquals(
+            NexusSdkResult.NOT_REGISTERED,
+            client.showNotice(NexusNotice(title = "NEXUS NOTICE")),
+        )
+        assertEquals(BusPaths.NOTICE_SHOW, transport.sends.single().first)
     }
 
     @Test

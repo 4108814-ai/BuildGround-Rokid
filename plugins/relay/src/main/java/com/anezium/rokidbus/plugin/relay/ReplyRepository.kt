@@ -45,6 +45,7 @@ internal object ReplyRepository {
 
     data class CaptureResult(
         val reply: PendingReply,
+        val contentChanged: Boolean,
         val shouldShowNow: Boolean,
     )
 
@@ -134,6 +135,7 @@ internal object ReplyRepository {
         trimRecent()
         return CaptureResult(
             reply = reply,
+            contentChanged = contentChanged,
             shouldShowNow = contentChanged && isMostRecent(id),
         )
     }

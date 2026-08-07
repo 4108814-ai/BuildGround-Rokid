@@ -78,24 +78,42 @@ class RelayNotificationListener : NotificationListenerService() {
 
     private fun ingest(sbn: StatusBarNotification, mayShow: Boolean): Boolean {
         val settings = RelaySettings(this)
-        if (!settings.enabled() || NotificationForwardingPolicy.isPaused(this)) return false
+        val source = if (mayShow) "posted" else "rebuild"
+        val keyHash = ReplyRepository.stableId(sbn.key).take(8)
+        val interactive = NotificationForwardingPolicy.isPhoneScreenOn(this)
+
+        fun finish(decision: String, accepted: Boolean): Boolean {
+            Log.i(
+                TAG,
+                "ingest source=$source keyHash=$keyHash interactive=$interactive decision=$decision",
+            )
+            return accepted
+        }
+
+        if (!settings.enabled()) return finish("disabled", accepted = false)
+        if (settings.pauseWhilePhoneScreenOn() && interactive) {
+            return finish("paused", accepted = false)
+        }
 
         // Carrying a free-form reply action is the whole admission test: it passes
         // only notifications a human is waiting on an answer to.
-        val action = sbn.notification.findRepliableAction() ?: return false
-        if (!settings.admits()) return true
+        val action = sbn.notification.findRepliableAction()
+            ?: return finish("no_action", accepted = false)
+        if (!settings.admits()) return finish("no_action", accepted = true)
 
-        val capture = ReplyRepository.capture(this, sbn, action) ?: return false
-        Log.i(
-            TAG,
-            "captured changed=${capture.shouldShowNow} textChars=${capture.reply.content.renderedText.length} " +
-                "imageBytes=${capture.reply.imagePreview?.bytes?.size ?: 0}",
-        )
+        val capture = ReplyRepository.capture(this, sbn, action)
+            ?: return finish("capture_failed", accepted = false)
         // The inbox, if it is open, is the only thing that will show this: the
         // band stands down while it holds the bus.
         NotificationControl.notifyCaptured()
+        val decision = when {
+            !capture.contentChanged -> "unchanged"
+            !mayShow -> "captured rebuild_only"
+            else -> "captured show=${capture.shouldShowNow}"
+        }
+        val accepted = finish(decision, accepted = true)
         if (mayShow && capture.shouldShowNow) runtime.show(capture.reply)
-        return true
+        return accepted
     }
 
     private companion object {
