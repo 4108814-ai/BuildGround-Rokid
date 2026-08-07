@@ -342,6 +342,9 @@ class MainActivity : Activity() {
                     actionLabel = NexusPhoneState.updateActionLabel(),
                     actionEnabled = NexusPhoneState.updateActionEnabled(),
                     onDetails = { startActivity(WhatsNewActivity.intent(this)) },
+                    preview = NexusPhoneState.availableRelease?.notes?.let {
+                        ReleaseNotesRenderer.render(this, it)
+                    },
                 ) { NexusUpdateManager.performUpdateAction(applicationContext) },
             )
         }

@@ -540,11 +540,11 @@ object NexusUi {
         actionLabel: String = "Install",
         actionEnabled: Boolean = true,
         onDetails: (() -> Unit)? = null,
+        preview: CharSequence? = null,
         onInstall: () -> Unit,
     ): LinearLayout =
         LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+            orientation = LinearLayout.VERTICAL
             background = if (onDetails != null) {
                 StateListDrawable().apply {
                     addState(
@@ -577,32 +577,54 @@ object NexusUi {
                     monoText(context, versionLabel, 10f, 0xFFB79A6A.toInt(), 0.06f),
                 )
             }
-            addView(textColumn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(
-                Button(context).apply {
-                    text = actionLabel
-                    textSize = 10f
-                    typeface = mono
-                    letterSpacing = 0.12f
-                    setAllCaps(false)
-                    setTextColor(0xFF241701.toInt())
-                    stateListAnimator = null
-                    minHeight = dp(context, 36)
-                    minimumHeight = dp(context, 36)
-                    minWidth = 0
-                    minimumWidth = 0
-                    includeFontPadding = false
-                    setPadding(dp(context, 13), 0, dp(context, 13), 0)
-                    background = rounded(context, AMBER, 18)
-                    isEnabled = actionEnabled
-                    alpha = if (actionEnabled) 1f else 0.65f
-                    setOnClickListener { onInstall() }
-                },
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply { marginStart = dp(context, 10) },
-            )
+            val row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(textColumn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(
+                    Button(context).apply {
+                        text = actionLabel
+                        textSize = 10f
+                        typeface = mono
+                        letterSpacing = 0.12f
+                        setAllCaps(false)
+                        setTextColor(0xFF241701.toInt())
+                        stateListAnimator = null
+                        minHeight = dp(context, 36)
+                        minimumHeight = dp(context, 36)
+                        minWidth = 0
+                        minimumWidth = 0
+                        includeFontPadding = false
+                        setPadding(dp(context, 13), 0, dp(context, 13), 0)
+                        background = rounded(context, AMBER, 18)
+                        isEnabled = actionEnabled
+                        alpha = if (actionEnabled) 1f else 0.65f
+                        setOnClickListener { onInstall() }
+                    },
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ).apply { marginStart = dp(context, 10) },
+                )
+            }
+            addView(row, block())
+            // A few cut-off lines of the release notes: enough to see what changed,
+            // truncated so the banner itself is the call to action for the rest.
+            if (preview != null && preview.isNotBlank()) {
+                addView(BusTheme.gap(context, 9))
+                addView(
+                    TextView(context).apply {
+                        text = preview
+                        textSize = 12f
+                        typeface = sans
+                        setTextColor(INK2)
+                        setLineSpacing(dp(context, 2).toFloat(), 1f)
+                        maxLines = 3
+                        ellipsize = TextUtils.TruncateAt.END
+                    },
+                    block(),
+                )
+            }
         }
 
     /** Plugin/navigation card: title + one-line description, optional chevron. */
