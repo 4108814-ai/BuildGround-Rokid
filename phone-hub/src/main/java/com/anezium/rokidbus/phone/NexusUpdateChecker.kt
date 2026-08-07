@@ -48,9 +48,20 @@ data class NexusAppRelease(
     val version: NexusSemVersion,
     val apkUrl: String,
     val sha256: String?,
+    val notes: String? = null,
+    val publishedAt: String? = null,
 ) {
     val versionName: String = version.toString()
     val versionLabel: String = "Rokid Nexus $versionName"
+}
+
+/** One published app release as shown in the What's new screen. */
+data class NexusAppReleaseNote(
+    val version: NexusSemVersion,
+    val publishedAt: String?,
+    val notes: String,
+) {
+    val versionName: String = version.toString()
 }
 
 internal object NexusUpdatePolicy {
@@ -205,8 +216,28 @@ class NexusUpdateChecker internal constructor(
         internal fun parseLatestAppRelease(body: String): NexusAppRelease? {
             val asset = NexusReleaseAssetResolver.parseLatest(body, NexusReleaseArtifact.PHONE)
                 ?: return null
-            return NexusAppRelease(asset.version, asset.apkUrl, asset.sha256)
+            return NexusAppRelease(
+                asset.version,
+                asset.apkUrl,
+                asset.sha256,
+                notes = asset.notes,
+                publishedAt = asset.publishedAt,
+            )
         }
+    }
+
+    fun releaseHistoryAsync(callback: (List<NexusAppReleaseNote>) -> Unit) {
+        ioExecutor.execute {
+            val history = cachedReleaseHistory()
+            callbackExecutor.execute { callback(history) }
+        }
+    }
+
+    /** Reads only the on-disk GitHub payload; never touches the network. */
+    internal fun cachedReleaseHistory(): List<NexusAppReleaseNote> {
+        val record = runCatching { cache.read() }.getOrNull() ?: return emptyList()
+        return runCatching { NexusReleaseAssetResolver.parseAppHistory(record.body) }
+            .getOrDefault(emptyList())
     }
 }
 

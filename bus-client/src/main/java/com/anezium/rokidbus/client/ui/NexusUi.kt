@@ -539,12 +539,28 @@ object NexusUi {
         title: String = "Update available",
         actionLabel: String = "Install",
         actionEnabled: Boolean = true,
+        onDetails: (() -> Unit)? = null,
         onInstall: () -> Unit,
     ): LinearLayout =
         LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = bordered(context, alpha(AMBER, 0x10), 0xFF4A3A1C.toInt(), 13)
+            background = if (onDetails != null) {
+                StateListDrawable().apply {
+                    addState(
+                        intArrayOf(android.R.attr.state_pressed),
+                        bordered(context, alpha(AMBER, 0x1E), 0xFF4A3A1C.toInt(), 13),
+                    )
+                    addState(intArrayOf(), bordered(context, alpha(AMBER, 0x10), 0xFF4A3A1C.toInt(), 13))
+                }
+            } else {
+                bordered(context, alpha(AMBER, 0x10), 0xFF4A3A1C.toInt(), 13)
+            }
+            if (onDetails != null) {
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { onDetails() }
+            }
             setPadding(dp(context, 14), dp(context, 12), dp(context, 14), dp(context, 12))
             val textColumn = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL

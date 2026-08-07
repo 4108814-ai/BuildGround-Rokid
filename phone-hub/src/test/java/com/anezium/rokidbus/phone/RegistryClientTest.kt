@@ -55,6 +55,32 @@ class RegistryClientTest {
     }
 
     @Test
+    fun `screenshot urls default to empty and drop invalid entries`() {
+        assertTrue(RegistryClient.parse(validFeed()).plugins.single().screenshotUrls.isEmpty())
+
+        val plugin = RegistryClient.parse(
+            validFeed(
+                pluginExtra = """
+                    ,"screenshotUrls": [
+                      "https://cdn.example.com/shots/feeds-1.png",
+                      "http://cdn.example.com/shots/insecure.png",
+                      "not a URL",
+                      "https://cdn.example.com/shots/feeds-2.png"
+                    ]
+                """,
+            ),
+        ).plugins.single()
+
+        assertEquals(
+            listOf(
+                "https://cdn.example.com/shots/feeds-1.png",
+                "https://cdn.example.com/shots/feeds-2.png",
+            ),
+            plugin.screenshotUrls,
+        )
+    }
+
+    @Test
     fun `accepts the published empty catalogue shape`() {
         assertTrue(RegistryClient.parse("{\"version\":1,\"plugins\":[]}").plugins.isEmpty())
     }

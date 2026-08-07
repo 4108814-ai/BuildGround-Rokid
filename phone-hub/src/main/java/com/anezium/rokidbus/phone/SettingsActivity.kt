@@ -285,6 +285,7 @@ class SettingsActivity : Activity() {
                         versionLabel = NexusPhoneState.updateVersionLabel,
                         actionLabel = NexusPhoneState.updateActionLabel(),
                         actionEnabled = NexusPhoneState.updateActionEnabled(),
+                        onDetails = { startActivity(WhatsNewActivity.intent(this)) },
                     ) { NexusUpdateManager.performUpdateAction(applicationContext) },
                 )
             }
@@ -403,6 +404,16 @@ class SettingsActivity : Activity() {
                     danger = false,
                     valueView = updateCheckValue,
                     onClick = ::onUpdateRowClicked,
+                ),
+                NexusUi.block(),
+            )
+            addView(NexusUi.divider(this@SettingsActivity))
+            addView(
+                plainActionRow(
+                    title = "What's new",
+                    danger = false,
+                    valueView = NexusUi.metaLabel(this@SettingsActivity, "›", NexusUi.INK3),
+                    onClick = { startActivity(WhatsNewActivity.intent(this@SettingsActivity)) },
                 ),
                 NexusUi.block(),
             )
