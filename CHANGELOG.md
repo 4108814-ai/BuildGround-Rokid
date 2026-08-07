@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.10
+
+- **The Store's Remove button removes again.** The new plugin detail screen
+  asked Android to uninstall without holding the permission that request
+  needs, and Android declined in silence — the tap did nothing. The app now
+  declares it, and Remove opens the system uninstall dialog as intended.
+
 ## 1.2.9
 
 - **The Store is twice as dense.** The list is now one slim row per plugin —
