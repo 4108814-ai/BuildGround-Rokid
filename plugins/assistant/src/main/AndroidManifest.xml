@@ -59,9 +59,12 @@
             </intent-filter>
         </receiver>
 
+        <!-- Exported but sendable only by callers holding DUMP (the shell); an
+             unexported receiver is silently unreachable from adb. -->
         <receiver
             android:name=".AssistantDebugAskReceiver"
-            android:exported="false" />
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
 
         <service
             android:name=".ReminderDeliveryService"

@@ -8,8 +8,10 @@ import android.util.Log
 /**
  * Test-only entry: feeds a typed question into the live assistant session exactly as
  * if the speech pipeline had produced it, so end-to-end behavior can be exercised
- * from adb without speaking. Unexported — only the shell or this app can reach it
- * (Relay's fake-notification harness is the precedent).
+ * from adb without speaking. Exported but locked behind android.permission.DUMP — a
+ * development permission the shell holds and third-party apps cannot obtain; an
+ * unexported receiver is silently unreachable from adb (Relay's fake-notification
+ * harness is the test-hook precedent).
  *
  * The assistant session must be open (assistant launched from the glasses); a
  * broadcast outside a session is logged and dropped.
