@@ -49,6 +49,15 @@
             android:exported="false" />
 
         <service
+            android:name=".RelayCompanionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_COMPANION_DEVICE_SERVICE">
+            <intent-filter>
+                <action android:name="android.companion.CompanionDeviceService" />
+            </intent-filter>
+        </service>
+
+        <service
             android:name=".RelayNotificationListener"
             android:exported="true"
             android:label="@string/app_name"

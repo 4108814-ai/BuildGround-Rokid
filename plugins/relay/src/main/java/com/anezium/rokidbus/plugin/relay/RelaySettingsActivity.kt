@@ -381,7 +381,7 @@ class RelaySettingsActivity : Activity() {
         addView(BusTheme.gap(this@RelaySettingsActivity, 8))
         addView(
             harnessButton(
-                // The one shape Android rewrites before the listener ever sees it.
+                // A code-shaped thread; see postCodeThread for why it does not prove anything.
                 "Code thread" to {
                     ensureCanPost() && FakeNotificationHarness.postCodeThread(this@RelaySettingsActivity)
                 },

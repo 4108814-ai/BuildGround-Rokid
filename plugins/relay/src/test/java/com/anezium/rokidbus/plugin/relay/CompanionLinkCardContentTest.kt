@@ -7,7 +7,7 @@ class CompanionLinkCardContentTest {
     @Test
     fun `linked body does not depend on sdk level`() {
         assertEquals(
-            "Linked. Messages arrive whole, and Relay is allowed to keep running.",
+            "Linked. Relay is registered as your glasses' companion app, and is allowed to keep running.",
             CompanionLinkCardContent.body(linked = true, sdkInt = 34),
         )
     }
