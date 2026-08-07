@@ -26,6 +26,7 @@ import com.anezium.rokidbus.client.plugin.speechSession
 import com.anezium.rokidbus.client.plugin.ttsSession
 import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
+import com.anezium.rokidbus.shared.plugin.PluginCapability
 import org.json.JSONObject
 import java.util.ArrayDeque
 
@@ -38,6 +39,8 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
 
     private var client: NexusPluginClient? = null
     private var pendingShow: ReplyRepository.PendingReply? = null
+    private var pendingShowStartedAtMs = 0L
+    private var pendingShowWasBlocked = false
     private var currentReply: ReplyRepository.PendingReply? = null
     private var currentTranscript: String? = null
     private var activeNotice = false
@@ -61,6 +64,7 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         }
         showGeneration += 1
         val generation = showGeneration
+        val nowMs = SystemClock.elapsedRealtime()
         invalidateSpeech()
         stopReadAloud()
         essentialUpdates.clear()
@@ -68,17 +72,27 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         currentReply = reply
         currentTranscript = null
         pendingShow = reply
+        pendingShowStartedAtMs = nowMs
+        pendingShowWasBlocked = false
+        val captureAgeMs = (System.currentTimeMillis() - reply.capturedAtMs).coerceAtLeast(0L)
+        Log.i(TAG, "showRequested generation=$generation captureAgeMs=$captureAgeMs")
 
         if (client == null) {
             client = NexusPluginClient.create(appContext, PLUGIN_ID, this).also(NexusPluginClient::connect)
         }
         tryShowPending()
         main.postDelayed({
-            if (showGeneration == generation && pendingShow != null) {
-                Log.i(TAG, "notice delivery timed out")
-                closeClient()
+            val elapsedNowMs = SystemClock.elapsedRealtime()
+            if (pendingShow != null && shouldAbandonPendingShow(
+                    timerGeneration = generation,
+                    activeGeneration = showGeneration,
+                    startedAtMs = pendingShowStartedAtMs,
+                    nowMs = elapsedNowMs,
+                )
+            ) {
+                abandonPendingShow(elapsedNowMs)
             }
-        }, SHOW_TIMEOUT_MS)
+        }, REPLAY_WINDOW_MS)
     }
 
     fun shutdown() = onMain {
@@ -99,11 +113,16 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
     override fun onLinkState(state: Int) = onMain { tryShowPending() }
 
     override fun onRegistrationState(result: Int) = onMain {
-        if (result == PluginRegistrationResult.APPROVED) {
-            tryShowPending()
-        } else {
-            Log.i(TAG, "registration unavailable result=$result")
-            closeClient()
+        when {
+            result == PluginRegistrationResult.APPROVED -> tryShowPending()
+            isTerminalRegistrationResult(result) -> {
+                Log.w(TAG, "registration terminal result=$result")
+                closeClient()
+            }
+            else -> {
+                Log.i(TAG, "registration retryable result=$result")
+                tryShowPending()
+            }
         }
     }
 
@@ -126,8 +145,24 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
 
     private fun tryShowPending() {
         val reply = pendingShow ?: return
-        val currentClient = client ?: return
-        if (!currentClient.isApproved || !currentClient.supportsNoticeSurface) return
+        val nowMs = SystemClock.elapsedRealtime()
+        if (isReplayWindowExpired(pendingShowStartedAtMs, nowMs)) {
+            abandonPendingShow(nowMs)
+            return
+        }
+        val currentClient = client
+        if (currentClient == null || !currentClient.isApproved) {
+            markShowBlocked("registration", nowMs)
+            return
+        }
+        if (!currentClient.hasCapability(PluginCapability.SURFACES)) {
+            markShowBlocked("grant", nowMs)
+            return
+        }
+        if (!currentClient.supportsNoticeSurface) {
+            markShowBlocked("capability", nowMs)
+            return
+        }
 
         val preview = reply.imagePreview
         val image = preview?.let {
@@ -159,17 +194,46 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         }
         Log.i(
             TAG,
-            "notice show result=$result textChars=${reply.content.renderedText.length} " +
+            "notice show generation=$showGeneration result=$result textChars=${reply.content.renderedText.length} " +
                 "imageBytes=${preview?.bytes?.size ?: 0}",
         )
         if (result == NexusSdkResult.SENT) {
+            val delayMs = pendingShowAgeMs(pendingShowStartedAtMs, SystemClock.elapsedRealtime())
+            val wasBlocked = pendingShowWasBlocked
             pendingShow = null
+            pendingShowStartedAtMs = 0L
+            pendingShowWasBlocked = false
             activeNotice = true
             lastNoticeMessageAtMs = SystemClock.uptimeMillis()
+            if (wasBlocked) Log.i(TAG, "showReplayed generation=$showGeneration delayMs=$delayMs")
             readNoticeAloud(reply)
-        } else if (result !in RETRYABLE_SHOW_RESULTS) {
-            closeClient()
+        } else {
+            val blockReason = RETRYABLE_SHOW_BLOCK_REASONS[result]
+            if (blockReason != null) {
+                markShowBlocked(blockReason, SystemClock.elapsedRealtime())
+            } else {
+                closeClient()
+            }
         }
+    }
+
+    private fun markShowBlocked(reason: String, nowMs: Long) {
+        pendingShowWasBlocked = true
+        Log.i(
+            TAG,
+            "showBlocked generation=$showGeneration reason=$reason " +
+                "pendingAgeMs=${pendingShowAgeMs(pendingShowStartedAtMs, nowMs)}",
+        )
+    }
+
+    private fun abandonPendingShow(nowMs: Long) {
+        if (pendingShow == null) return
+        Log.w(
+            TAG,
+            "showAbandoned generation=$showGeneration " +
+                "pendingAgeMs=${pendingShowAgeMs(pendingShowStartedAtMs, nowMs)}",
+        )
+        closeClient()
     }
 
     private fun readNoticeAloud(reply: ReplyRepository.PendingReply) {
@@ -480,6 +544,8 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
         pendingPartial = null
         updateDrainScheduled = false
         pendingShow = null
+        pendingShowStartedAtMs = 0L
+        pendingShowWasBlocked = false
         currentReply = null
         currentTranscript = null
         activeNotice = false
@@ -544,7 +610,6 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
     companion object {
         const val TAG = "NexusRelayNotice"
         const val PLUGIN_ID = "relay"
-        const val SHOW_TIMEOUT_MS = 5_000L
         const val HIDE_FALLBACK_MS = 500L
         const val MIN_NOTICE_MESSAGE_INTERVAL_MS = 210L
 
@@ -552,9 +617,11 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
             if (displaySeconds == 0) null else displaySeconds * 1_000L
 
         /**
-         * Neither of these is a refusal — both mean "not yet", and both are
+         * None of these is a refusal — each means "not yet", and each is
          * resolved by an event that is already on its way.
          *
+         * `NOT_REGISTERED` includes a synchronous transport rejection after the
+         * SDK's registration view went stale; re-registration brings it back.
          * `CAPABILITY_NOT_AVAILABLE` is the glasses being out of reach; the hub
          * holds the band and `onLinkState` brings us back.
          * `CAPABILITY_NOT_GRANTED` is subtler and cost an afternoon on hardware:
@@ -564,11 +631,12 @@ internal class RelayNoticeRuntime(context: Context) : NexusPluginCallbacks {
          * set that is still empty. APPROVED arrives a second time with the
          * grants on it, so the only correct move is to keep the pending show and
          * let the retry happen. Closing here threw away a notice the wearer was
-         * entitled to see. The show timeout is what stops us waiting forever.
+         * entitled to see. The replay window is what stops us waiting forever.
          */
-        val RETRYABLE_SHOW_RESULTS = setOf(
-            NexusSdkResult.CAPABILITY_NOT_AVAILABLE,
-            NexusSdkResult.CAPABILITY_NOT_GRANTED,
+        private val RETRYABLE_SHOW_BLOCK_REASONS = mapOf(
+            NexusSdkResult.NOT_REGISTERED to "registration",
+            NexusSdkResult.CAPABILITY_NOT_AVAILABLE to "capability",
+            NexusSdkResult.CAPABILITY_NOT_GRANTED to "grant",
         )
 
         /**
