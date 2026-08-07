@@ -46,6 +46,7 @@ internal object ReplyRepository {
     data class CaptureResult(
         val reply: PendingReply,
         val shouldShowNow: Boolean,
+        val redacted: Boolean,
     )
 
     data class PendingReply(
@@ -78,10 +79,16 @@ internal object ReplyRepository {
         val sourceTitle = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim().orEmpty()
         val displayTitle = (sourceTitle.ifBlank { appLabel })
             .take(NoticeSurfaceContract.MAX_TITLE_CHARS)
-        val renderedText = NotificationTextExtractor.extract(
+        val extractedText = NotificationTextExtractor.extract(
             NotificationTextExtractor.fromExtras(extras),
             settings.messagesPerThread(),
         )
+        val redacted = AndroidSensitiveNotificationDetector.isRedacted(sourceTitle, extractedText)
+        val renderedText = if (redacted) {
+            SensitiveNotificationDetector.HIDDEN_BODY
+        } else {
+            extractedText
+        }
         val footer = appLabel.trim().take(NoticeSurfaceContract.MAX_FOOTER_CHARS)
         val imagePreview = if (settings.imagePreviewsEnabled()) {
             NotificationImageExtractor.extract(context, sbn.notification)
@@ -135,6 +142,7 @@ internal object ReplyRepository {
         return CaptureResult(
             reply = reply,
             shouldShowNow = contentChanged && isMostRecent(id),
+            redacted = redacted,
         )
     }
 

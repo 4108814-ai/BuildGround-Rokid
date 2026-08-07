@@ -86,6 +86,9 @@ class RelayNotificationListener : NotificationListenerService() {
         if (!settings.admits()) return true
 
         val capture = ReplyRepository.capture(this, sbn, action) ?: return false
+        if (capture.redacted) {
+            Log.i(TAG, "redacted=true keyHash=${capture.reply.id}")
+        }
         Log.i(
             TAG,
             "captured changed=${capture.shouldShowNow} textChars=${capture.reply.content.renderedText.length} " +
