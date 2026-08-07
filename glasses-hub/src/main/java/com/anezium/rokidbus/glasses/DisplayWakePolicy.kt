@@ -20,14 +20,24 @@ internal enum class DisplayWakeKind(val logValue: String) {
 }
 
 /** The entire global budget: there is deliberately no plugin or kind key. */
-internal data class DisplayWakeBudget(val lastWakeAtMs: Long? = null)
+internal data class DisplayWakeBudget(
+    val lastWakeAtMs: Long? = null,
+    val unattendedNoticeWakeCount: Int = 0,
+    val lastNoticeWakeAtMs: Long? = null,
+)
 
-internal enum class DisplayWakeRefusal {
-    NOT_REQUESTED,
-    ALREADY_INTERACTIVE,
-    BUDGET_EXHAUSTED,
-    POWER_SERVICE_UNAVAILABLE,
-    ACQUIRE_FAILED,
+internal enum class DisplayWakeAdmission(val logValue: String) {
+    BUDGET_AVAILABLE("budget_available"),
+    NEW_NOTICE_ENTITLEMENT("new_notice_entitlement"),
+}
+
+internal enum class DisplayWakeRefusal(val logValue: String) {
+    NOT_REQUESTED("not_requested"),
+    ALREADY_INTERACTIVE("already_interactive"),
+    BUDGET_EXHAUSTED("budget_exhausted"),
+    NOTICE_EPISODE_LIMIT("notice_episode_limit"),
+    POWER_SERVICE_UNAVAILABLE("power_unavailable"),
+    ACQUIRE_FAILED("acquire_failed"),
 }
 
 internal sealed interface DisplayWakeDecision {
@@ -36,6 +46,7 @@ internal sealed interface DisplayWakeDecision {
 
     data class Wake(
         override val kind: DisplayWakeKind,
+        val admission: DisplayWakeAdmission,
         override val budget: DisplayWakeBudget,
     ) : DisplayWakeDecision
 
@@ -56,6 +67,8 @@ internal sealed interface DisplayWakeDecision {
 internal object DisplayWakePolicy {
     const val BUDGET_WINDOW_MS = 5_000L
     const val WAKE_LOCK_MS = 3_000L
+    const val MAX_UNATTENDED_NOTICE_WAKE_EPISODES = 2
+    const val NOTICE_EPISODE_RESET_MS = 60_000L
 
     private var currentBudget = DisplayWakeBudget()
 
@@ -65,6 +78,7 @@ internal object DisplayWakePolicy {
         isInteractive: Boolean,
         budget: DisplayWakeBudget,
         nowMs: Long,
+        newNotice: Boolean = false,
     ): DisplayWakeDecision = when {
         !requested -> DisplayWakeDecision.Refused(
             kind,
@@ -76,13 +90,57 @@ internal object DisplayWakePolicy {
             DisplayWakeRefusal.ALREADY_INTERACTIVE,
             budget,
         )
-        budget.lastWakeAtMs?.let { nowMs - it < BUDGET_WINDOW_MS } == true ->
+        // A cold budget wakes exactly as it always has; the episode limit only
+        // bounds the new-notice entitlement, which is what lets a fresh notice
+        // wake while the budget is still hot. Counting cold wakes too would
+        // darken the third of three messages spaced half a minute apart — the
+        // very miss this entitlement exists to fix.
+        budgetIsHot(budget, nowMs) && !(newNotice && kind == DisplayWakeKind.NOTICE) ->
             DisplayWakeDecision.Refused(
                 kind,
                 DisplayWakeRefusal.BUDGET_EXHAUSTED,
                 budget,
             )
-        else -> DisplayWakeDecision.Wake(kind, DisplayWakeBudget(lastWakeAtMs = nowMs))
+        budgetIsHot(budget, nowMs) &&
+            unattendedNoticeWakeCount(budget, nowMs) >= MAX_UNATTENDED_NOTICE_WAKE_EPISODES ->
+            DisplayWakeDecision.Refused(
+                kind,
+                DisplayWakeRefusal.NOTICE_EPISODE_LIMIT,
+                budget,
+            )
+        else -> {
+            val entitled = budgetIsHot(budget, nowMs)
+            DisplayWakeDecision.Wake(
+                kind = kind,
+                admission = if (entitled) {
+                    DisplayWakeAdmission.NEW_NOTICE_ENTITLEMENT
+                } else {
+                    DisplayWakeAdmission.BUDGET_AVAILABLE
+                },
+                budget = budget.copy(
+                    lastWakeAtMs = nowMs,
+                    unattendedNoticeWakeCount = if (entitled) {
+                        unattendedNoticeWakeCount(budget, nowMs) + 1
+                    } else {
+                        unattendedNoticeWakeCount(budget, nowMs)
+                    },
+                    lastNoticeWakeAtMs = if (entitled) nowMs else budget.lastNoticeWakeAtMs,
+                ),
+            )
+        }
+    }
+
+    private fun budgetIsHot(budget: DisplayWakeBudget, nowMs: Long): Boolean =
+        budget.lastWakeAtMs?.let { nowMs - it < BUDGET_WINDOW_MS } == true
+
+    internal fun afterUserInteraction(budget: DisplayWakeBudget): DisplayWakeBudget = budget.copy(
+        unattendedNoticeWakeCount = 0,
+        lastNoticeWakeAtMs = null,
+    )
+
+    @Synchronized
+    fun noteUserInteraction() {
+        currentBudget = afterUserInteraction(currentBudget)
     }
 
     @Synchronized
@@ -91,24 +149,36 @@ internal object DisplayWakePolicy {
         context: Context,
         kind: DisplayWakeKind,
         requested: Boolean,
+        seq: Long? = null,
+        newNotice: Boolean = false,
     ): DisplayWakeDecision {
+        val previousBudget = currentBudget
+        val nowMs = SystemClock.elapsedRealtime()
         val power = context.getSystemService(PowerManager::class.java)
             ?: return DisplayWakeDecision.Refused(
                 kind,
                 DisplayWakeRefusal.POWER_SERVICE_UNAVAILABLE,
                 currentBudget,
-            ).also { log("display wake refused kind=${kind.logValue} reason=power_unavailable") }
+            ).also { decision ->
+                logDecision(
+                    seq = seq,
+                    decision = decision,
+                    interactive = null,
+                    nowMs = nowMs,
+                    previousBudget = previousBudget,
+                )
+            }
+        val interactive = power.isInteractive
         val decision = decide(
             kind = kind,
             requested = requested,
-            isInteractive = power.isInteractive,
+            isInteractive = interactive,
             budget = currentBudget,
-            nowMs = SystemClock.elapsedRealtime(),
+            nowMs = nowMs,
+            newNotice = newNotice,
         )
         if (decision is DisplayWakeDecision.Refused) {
-            if (decision.reason == DisplayWakeRefusal.BUDGET_EXHAUSTED) {
-                log("display wake refused kind=${kind.logValue} reason=budget")
-            }
+            logDecision(seq, decision, interactive, nowMs, previousBudget)
             return decision
         }
 
@@ -118,7 +188,7 @@ internal object DisplayWakePolicy {
                 "rokidbus:display-wake",
             ).acquire(WAKE_LOCK_MS)
             currentBudget = decision.budget
-            log("display wake acquired kind=${kind.logValue}")
+            logDecision(seq, decision, interactive, nowMs, previousBudget)
             decision
         }.getOrElse { error ->
             logError("Display wake failed kind=${kind.logValue}", error)
@@ -126,7 +196,42 @@ internal object DisplayWakePolicy {
                 kind,
                 DisplayWakeRefusal.ACQUIRE_FAILED,
                 currentBudget,
-            )
+            ).also { refused ->
+                logDecision(seq, refused, interactive, nowMs, previousBudget)
+            }
         }
+    }
+
+    private fun unattendedNoticeWakeCount(
+        budget: DisplayWakeBudget,
+        nowMs: Long,
+    ): Int = if (
+        budget.lastNoticeWakeAtMs == null ||
+        nowMs - budget.lastNoticeWakeAtMs >= NOTICE_EPISODE_RESET_MS
+    ) {
+        0
+    } else {
+        budget.unattendedNoticeWakeCount
+    }
+
+    private fun logDecision(
+        seq: Long?,
+        decision: DisplayWakeDecision,
+        interactive: Boolean?,
+        nowMs: Long,
+        previousBudget: DisplayWakeBudget,
+    ) {
+        val lastWakeAgeMs = previousBudget.lastWakeAtMs
+            ?.let { (nowMs - it).coerceAtLeast(0L) }
+            ?: -1L
+        val (value, reason) = when (decision) {
+            is DisplayWakeDecision.Wake -> "wake" to decision.admission.logValue
+            is DisplayWakeDecision.Refused -> "refused" to decision.reason.logValue
+        }
+        log(
+            "wake seq=${seq ?: -1L} decision=$value reason=$reason " +
+                "interactive=${interactive ?: "unknown"} lastWakeAgeMs=$lastWakeAgeMs " +
+                "kind=${decision.kind.logValue}",
+        )
     }
 }
