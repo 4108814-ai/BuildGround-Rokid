@@ -87,6 +87,68 @@ class NexusUpdateCheckerTest {
     }
 
     @Test
+    fun `release parser keeps notes and publish date`() {
+        val release = NexusUpdateChecker.parseLatestAppRelease(
+            """
+            [
+              {
+                "tag_name": "v1.2.8",
+                "published_at": "2026-08-07T18:00:00Z",
+                "body": "- **Fix.** Details.",
+                "assets": [{
+                  "name": "nexus-phone-1.2.8.apk",
+                  "browser_download_url": "https://example.com/phone.apk"
+                }]
+              }
+            ]
+            """.trimIndent(),
+        )
+
+        assertEquals("- **Fix.** Details.", release?.notes)
+        assertEquals("2026-08-07T18:00:00Z", release?.publishedAt)
+    }
+
+    @Test
+    fun `app history keeps only published app releases with notes, newest first`() {
+        val history = NexusReleaseAssetResolver.parseAppHistory(
+            """
+            [
+              {"tag_name": "v1.2.6", "published_at": "2026-08-07T00:30:00Z", "body": "Battery work."},
+              {"tag_name": "relay-v1.1.2", "body": "Plugin release."},
+              {"tag_name": "v1.2.7", "body": "Watchdog validated."},
+              {"tag_name": "v1.2.9", "prerelease": true, "body": "Beta."},
+              {"tag_name": "v1.2.5", "draft": true, "body": "Draft."},
+              {"tag_name": "v1.2.8", "published_at": "2026-08-07T18:00:00Z", "body": "Wake fix."},
+              {"tag_name": "v1.2.4", "body": ""}
+            ]
+            """.trimIndent(),
+        )
+
+        assertEquals(listOf("1.2.8", "1.2.7", "1.2.6"), history.map(NexusAppReleaseNote::versionName))
+        assertEquals("Wake fix.", history.first().notes)
+        assertEquals("2026-08-07T18:00:00Z", history.first().publishedAt)
+        assertNull(history[1].publishedAt)
+    }
+
+    @Test
+    fun `cached history reads the on-disk payload without a network call`() {
+        val cache = MemoryCache(
+            NexusUpdateCacheRecord(
+                body = """[{"tag_name": "v1.2.8", "body": "Wake fix."}]""",
+                etag = null,
+                lastFetchEpochMillis = 0L,
+            ),
+        )
+        val checker = NexusUpdateChecker(
+            transport = { throw IOException("network must not be touched") },
+            cache = cache,
+        )
+
+        assertEquals(listOf("1.2.8"), checker.cachedReleaseHistory().map(NexusAppReleaseNote::versionName))
+        assertTrue(NexusUpdateChecker(transport = { throw IOException("no") }, cache = MemoryCache()).cachedReleaseHistory().isEmpty())
+    }
+
+    @Test
     fun `release parser selects latest exact glasses asset`() {
         val release = NexusReleaseAssetResolver.parseLatest(
             """

@@ -31,6 +31,7 @@ data class RegistryPlugin(
     val iconAsset: String,
     val iconUrl: String? = null,
     val screenshotAssets: List<String>,
+    val screenshotUrls: List<String> = emptyList(),
     val listingDescriptionMarkdown: String,
     val releases: List<RegistryRelease>,
     val nexus: RegistryNexus,
@@ -244,6 +245,7 @@ class RegistryClient(
                 iconAsset = value.requiredString("iconAsset", path),
                 iconUrl = validatedHttpsUrl(value.opt("iconUrl") as? String),
                 screenshotAssets = value.requiredStringList("screenshotAssets", path),
+                screenshotUrls = value.optionalHttpsUrlList("screenshotUrls"),
                 listingDescriptionMarkdown = listing.requiredString("descriptionMarkdown", "$path.listing", allowEmpty = true),
                 releases = releases,
                 nexus = RegistryNexus(
@@ -331,6 +333,16 @@ class RegistryClient(
             val url = runCatching { URL(value) }.getOrNull()
             if (url?.protocol != "https") throw RegistryParseException("$path.$key is not an HTTPS URL")
             return value
+        }
+
+        /** Lenient by design: a malformed screenshot URL drops the screenshot, not the plugin. */
+        private fun JSONObject.optionalHttpsUrlList(key: String): List<String> {
+            val values = optJSONArray(key) ?: return emptyList()
+            return buildList {
+                for (index in 0 until values.length()) {
+                    validatedHttpsUrl(values.opt(index) as? String)?.let(::add)
+                }
+            }
         }
 
         private fun JSONObject.requiredSha256(key: String, path: String): String {
