@@ -45,7 +45,32 @@ object CompanionDeviceCoordinator {
     // Custom SDP service the glasses firmware registers on the bonded link.
     private val ROKID_GLASSES_SERVICE_UUID = UUID.fromString("3c36c196-e056-4e4f-b88e-2cb249365f00")
 
-    fun hasAssociation(context: Context): Boolean = associatedAddresses(context).isNotEmpty()
+    /**
+     * Whether we are linked at all — which is not the same question as which
+     * devices we can watch, however alike the two reads look.
+     *
+     * CDM hands back associations with no MAC address on it: the chooser path
+     * produces them, and the standalone app left one behind on this very phone.
+     * [associatedAddresses] drops those, because presence observation is keyed by
+     * address and there is nothing to observe. Answering "are we linked?" from
+     * that filtered list was measured on hardware to say no while Android's own
+     * settings said yes, so the card offered to link again and the tap stacked a
+     * second association on top of the first. Ask the unfiltered list.
+     */
+    fun hasAssociation(context: Context): Boolean {
+        val manager = manager(context) ?: return false
+        return runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                manager.myAssociations.isNotEmpty()
+            } else {
+                @Suppress("DEPRECATION")
+                manager.associations.isNotEmpty()
+            }
+        }.getOrElse {
+            Log.w(TAG, "read associations failed: ${it.message}")
+            false
+        }
+    }
 
     fun requestAssociation(activity: Activity, showMessage: (String) -> Unit) {
         // CDM happily stacks duplicate associations for the same device; keep one.
@@ -215,6 +240,7 @@ object CompanionDeviceCoordinator {
         }
     }
 
+    /** Only the associations that carry an address; see [hasAssociation] for why that differs. */
     private fun associatedAddresses(context: Context): List<String> {
         val manager = manager(context) ?: return emptyList()
         return runCatching {
