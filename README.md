@@ -45,6 +45,7 @@ grants one at a time and can take back.
 | **[Lyrics](plugins/lyrics/)** | Time-synced lyrics for whatever is playing on the phone, from Spotify/Musixmatch/Netease/LrcLib |
 | **[Media Deck](plugins/media/)** | Universal now-playing surface with album art and transport controls |
 | **[Photos Sync](plugins/photosync/)** | Not a HUD plugin: copies the photos and videos you shoot on the glasses into the phone gallery by itself, and gives you the switches for it |
+| **[Tasker](plugins/tasker/)** | Your named Tasker tasks on the HUD — swipe, tap, and the phone runs the automation. The glasses are the remote, Tasker does the work |
 | **[Sample](plugins/sample/)** | Minimal copyable reference plugin |
 
 And two that are not in this repository at all, written by
