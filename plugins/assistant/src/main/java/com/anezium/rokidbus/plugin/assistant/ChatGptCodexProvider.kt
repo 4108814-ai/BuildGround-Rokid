@@ -557,13 +557,33 @@ internal fun functionCallOutput(
                     .put("detail", "high"),
             )
         is AssistantToolResult.Error ->
-            """{"ok":false,"code":${JSONObject.quote(result.code)}}"""
+            assistantToolErrorJson(result)
     }
     return JSONObject()
         .put("type", "function_call_output")
         .put("call_id", call.callId)
         .put("output", output)
 }
+
+// Hand-built so the key order is stable on every org.json implementation
+// (Android preserves insertion order, the JVM artifact does not). detailsJson is
+// validated at construction to be a JSON object without "ok"/"code" keys, so its
+// interior can be spliced verbatim.
+internal fun assistantToolErrorJson(result: AssistantToolResult.Error): String =
+    buildString {
+        append("{\"ok\":false,\"code\":")
+        append(JSONObject.quote(result.code))
+        result.detailsJson?.let { detailsJson ->
+            val interior = JSONObject(detailsJson).toString()
+                .removePrefix("{")
+                .removeSuffix("}")
+            if (interior.isNotEmpty()) {
+                append(',')
+                append(interior)
+            }
+        }
+        append('}')
+    }
 
 internal fun ChatRequest.toCodexResponsesInput(): JSONArray {
     val input = JSONArray()

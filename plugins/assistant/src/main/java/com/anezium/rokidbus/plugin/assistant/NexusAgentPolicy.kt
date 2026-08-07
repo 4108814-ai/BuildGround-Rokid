@@ -1,5 +1,9 @@
 package com.anezium.rokidbus.plugin.assistant
 
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
 internal object NexusAgentPolicy {
     const val DEFAULT_SYSTEM_PROMPT =
         "You are Assistant, a fast voice assistant for Rokid Glasses. " +
@@ -16,11 +20,17 @@ internal object NexusAgentPolicy {
         customPrompt: String = "",
         noticeBand: Boolean = false,
         memory: String = "",
+        currentDateTime: ZonedDateTime? = null,
         availableToolNames: Collection<String> = listOf(TAKE_PHOTO_TOOL_NAME),
     ): String {
         val base = customPrompt.trim().ifBlank { DEFAULT_SYSTEM_PROMPT }
+        val productivityToolsAvailable = availableToolNames.any(PRODUCTIVITY_TOOL_NAMES::contains)
         return buildString {
             append(base)
+            if (productivityToolsAvailable && currentDateTime != null) {
+                append("\nNow: ")
+                append(currentDateTime.format(CURRENT_TIME_FORMAT))
+            }
             append("\n\nResponse rules:\n")
             append("- Reply in the user's current language unless they ask for another language.\n")
             append("- Use 1-6 short HUD-friendly lines. Put the answer first and omit filler.\n")
@@ -42,6 +52,13 @@ internal object NexusAgentPolicy {
                         "tool-call syntax.\n",
                 )
             }
+            if (productivityToolsAvailable) {
+                append(
+                    "- Resolve relative reminder times into an absolute ISO-8601 local date-time with offset before calling set_reminder.\n",
+                )
+                append("- Confirm the scheduled time from the tool result in the final answer.\n")
+                append("- Never claim a reminder, timer, or note was saved unless its tool result says so.\n")
+            }
             append("- Give actionable, concise error or retry guidance when something is unavailable.")
             if (noticeBand) {
                 append("\n- ")
@@ -53,4 +70,9 @@ internal object NexusAgentPolicy {
             }
         }
     }
+
+    private val CURRENT_TIME_FORMAT = DateTimeFormatter.ofPattern(
+        "EEEE yyyy-MM-dd HH:mm (xxx VV)",
+        Locale.ENGLISH,
+    )
 }

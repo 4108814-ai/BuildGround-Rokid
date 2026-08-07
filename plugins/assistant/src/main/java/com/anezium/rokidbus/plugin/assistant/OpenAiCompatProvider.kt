@@ -402,6 +402,16 @@ private fun toolResultMessage(
             JSONObject()
                 .put("status", "error")
                 .put("code", result.code)
+                .apply {
+                    result.detailsJson?.let { detailsJson ->
+                        val details = JSONObject(detailsJson)
+                        val keys = details.keys()
+                        while (keys.hasNext()) {
+                            val key = keys.next()
+                            put(key, details.get(key))
+                        }
+                    }
+                }
     }
     return JSONObject()
         .put("role", "tool")

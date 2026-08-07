@@ -44,6 +44,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.time.ZonedDateTime
 import kotlin.coroutines.resume
 
 class AssistantPluginService : NexusPluginService() {
@@ -51,10 +52,18 @@ class AssistantPluginService : NexusPluginService() {
     private val authStore by lazy { CodexAuthStore(applicationContext) }
     private val accountContextSync by lazy { AccountContextSync(applicationContext) }
     private val threadStore by lazy { AssistantThreadStore(applicationContext) }
+    private val noteStore by lazy { AssistantNoteStore(applicationContext) }
+    private val reminderStore by lazy { AssistantReminderStore(applicationContext) }
+    private val reminderScheduler by lazy { androidReminderScheduler(applicationContext) }
     private val conversationThreading by lazy { AssistantConversationThreading(threadStore) }
     private val assistantToolRegistry by lazy {
         AssistantToolRegistry(
-            definitions = listOf(TakePhotoTool(createTakePhotoToolCapabilities())),
+            definitions = listOf(TakePhotoTool(createTakePhotoToolCapabilities())) +
+                assistantProductivityTools(
+                    noteStore = noteStore,
+                    reminderStore = reminderStore,
+                    reminderScheduler = reminderScheduler,
+                ),
             sessionContext = ::assistantToolSessionContext,
         )
     }
@@ -508,6 +517,7 @@ class AssistantPluginService : NexusPluginService() {
                 customPrompt = authStore.customSystemPrompt(),
                 noticeBand = noticeBandMode,
                 memory = authStore.combinedAssistantContextForPrompt(),
+                currentDateTime = ZonedDateTime.now(),
                 availableToolNames = assistantToolRegistry
                     .availableDefinitions(assistantProviderFeatures(providerId))
                     .map(AssistantToolDefinition::name),

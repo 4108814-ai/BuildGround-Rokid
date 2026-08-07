@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.ZonedDateTime
 
 class NexusAgentPolicyTest {
     @Test
@@ -75,6 +76,33 @@ class NexusAgentPolicyTest {
         assertTrue(prompt.contains("say you cannot look"))
         assertTrue(prompt.contains("answer from the available context"))
         assertTrue(prompt.contains("never invent tool-call syntax"))
+    }
+
+    @Test
+    fun `productivity tools add the supplied current local time and save policy`() {
+        val now = ZonedDateTime.parse("2026-08-07T11:32:00+02:00[Europe/Paris]")
+
+        val prompt = NexusAgentPolicy.buildSystemPrompt(
+            currentDateTime = now,
+            availableToolNames = listOf(SET_REMINDER_TOOL_NAME, TAKE_NOTE_TOOL_NAME),
+        )
+
+        assertTrue(prompt.contains("Now: Friday 2026-08-07 11:32 (+02:00 Europe/Paris)"))
+        assertTrue(prompt.contains("absolute ISO-8601 local date-time with offset"))
+        assertTrue(prompt.contains("Confirm the scheduled time from the tool result"))
+        assertTrue(prompt.contains("Never claim a reminder, timer, or note was saved"))
+    }
+
+    @Test
+    fun `current time and productivity policy are absent without those tools`() {
+        val prompt = NexusAgentPolicy.buildSystemPrompt(
+            currentDateTime = ZonedDateTime.parse("2026-08-07T11:32:00+02:00[Europe/Paris]"),
+            availableToolNames = listOf(TAKE_PHOTO_TOOL_NAME),
+        )
+
+        assertFalse(prompt.contains("Now:"))
+        assertFalse(prompt.contains("absolute ISO-8601"))
+        assertFalse(prompt.contains("note was saved"))
     }
 
     private companion object {

@@ -18,10 +18,20 @@ sealed interface AssistantToolResult {
 
     data class Error(
         val code: String,
+        val detailsJson: String? = null,
     ) : AssistantToolResult {
         init {
             require(ASSISTANT_TOOL_ERROR_CODE.matches(code)) {
                 "Assistant tool error codes must be stable lowercase identifiers."
+            }
+            require(
+                detailsJson == null || runCatching {
+                    org.json.JSONObject(detailsJson).apply {
+                        require(!has("ok") && !has("code"))
+                    }
+                }.isSuccess,
+            ) {
+                "Assistant tool error details must be a JSON object without ok or code."
             }
         }
     }
