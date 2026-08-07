@@ -67,6 +67,11 @@
             android:parentActivityName=".StorePluginDetailActivity" />
 
         <activity
+            android:name=".WhatsNewActivity"
+            android:exported="false"
+            android:parentActivityName=".SettingsActivity" />
+
+        <activity
             android:name=".SettingsActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity" />

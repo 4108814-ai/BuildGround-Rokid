@@ -341,6 +341,7 @@ class MainActivity : Activity() {
                     title = "Phone app update",
                     actionLabel = NexusPhoneState.updateActionLabel(),
                     actionEnabled = NexusPhoneState.updateActionEnabled(),
+                    onDetails = { startActivity(WhatsNewActivity.intent(this)) },
                 ) { NexusUpdateManager.performUpdateAction(applicationContext) },
             )
         }
