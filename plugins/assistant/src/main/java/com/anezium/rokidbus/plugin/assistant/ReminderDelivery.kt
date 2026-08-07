@@ -286,6 +286,10 @@ private class OneShotReminderGlassesDelivery(
                     NexusNotice(
                         title = title,
                         body = value.label,
+                        // A reminder arrives unannounced, so it has to outlast the
+                        // moment the wearer looks up. The default band lifetime is
+                        // tuned for answers the wearer is already waiting for.
+                        ttlMs = NOTICE_TTL_MS,
                         wakeDisplay = true,
                     ),
                 )
@@ -306,6 +310,7 @@ private class OneShotReminderGlassesDelivery(
     private companion object {
         const val PLUGIN_ID = "assistant"
         const val GLASSES_DELIVERY_TIMEOUT_MS = 10_000L
+        const val NOTICE_TTL_MS = 20_000L
         const val PIN_TITLE_CHARS = 24
         const val PIN_LINE_CHARS = 28
     }
