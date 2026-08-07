@@ -381,6 +381,19 @@ class RelaySettingsActivity : Activity() {
         addView(BusTheme.gap(this@RelaySettingsActivity, 8))
         addView(
             harnessButton(
+                // The one shape Android rewrites before the listener ever sees it.
+                "Code thread" to {
+                    ensureCanPost() && FakeNotificationHarness.postCodeThread(this@RelaySettingsActivity)
+                },
+            ),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        addView(BusTheme.gap(this@RelaySettingsActivity, 8))
+        addView(
+            harnessButton(
                 // More threads than the glasses viewport holds, so list
                 // windowing has something real to chase.
                 "Eight threads" to {
