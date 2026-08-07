@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.3.0
+
+- **Ask it to remember, and it will.** Say "remind me in twenty minutes to
+  check the oven", "set a timer for ten minutes", or "take a note that the
+  spare key is under the pot" — the assistant schedules it, and at the moment
+  it comes due your phone notifies you and the glasses raise the reminder,
+  waking the display if it went dark. If the glasses are away, the phone still
+  tells you and the reminder waits on the HUD for your return.
+- It can also list what is pending, cancel a reminder by name, and search your
+  notes back — all out loud, mid-conversation.
+- **Notes & reminders**, a new section in settings, is where all of it lands:
+  read a note in full, delete one, cancel a reminder before it rings. Nothing
+  leaves the phone.
+- Android guards precise alarms and notifications behind explicit consent, so
+  the screen offers both — and only while something is actually missing. Without
+  them a reminder still arrives, just later or only on the glasses; the
+  assistant says so rather than pretending.
+- Reminders survive a reboot, and one that came due while the phone was off is
+  delivered once you turn it back on.
+- **Every provider gets the new abilities**, not just ChatGPT: notes, reminders
+  and timers are text, so a model that cannot see photos is no longer cut off
+  from tools it could use perfectly well.
+- Answers no longer show their formatting: models like to bold the time they
+  just scheduled, and the glasses were rendering the asterisks.
+
 ## 1.2.0
 
 - **Every provider can look now.** Photo questions were a ChatGPT-only power;
