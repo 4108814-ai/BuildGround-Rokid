@@ -4,6 +4,14 @@
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.REQUEST_COMPANION_PROFILE_GLASSES" />
+    <uses-permission android:name="android.permission.REQUEST_COMPANION_RUN_IN_BACKGROUND" />
+    <uses-permission android:name="android.permission.REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND" />
+    <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE" />
     <!-- POST_NOTIFICATIONS is here for the test harness alone, and Relay is the
          one plugin that needs it: the harness posts a real repliable
          notification so the listener captures it exactly the way it captures
@@ -12,6 +20,10 @@
          that our own shortcut works.
          Relay still never notifies the wearer of anything itself. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <uses-feature
+        android:name="android.software.companion_device_setup"
+        android:required="false" />
 
     <queries>
         <intent>
@@ -35,6 +47,15 @@
         <receiver
             android:name=".FakeReplyReceiver"
             android:exported="false" />
+
+        <service
+            android:name=".RelayCompanionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_COMPANION_DEVICE_SERVICE">
+            <intent-filter>
+                <action android:name="android.companion.CompanionDeviceService" />
+            </intent-filter>
+        </service>
 
         <service
             android:name=".RelayNotificationListener"

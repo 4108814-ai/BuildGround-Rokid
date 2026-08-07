@@ -40,6 +40,32 @@ internal object FakeNotificationHarness {
         return post(context)
     }
 
+    /**
+     * A code-shaped thread — which does NOT reproduce Android's redaction.
+     *
+     * Android 15 blanks a notification carrying a one-time code before an
+     * unprivileged listener sees it, and that is the most reported way Relay
+     * shows the wrong thing. This button was written to exercise it and does
+     * not: measured on hardware, the platform classifier ignored this thread
+     * entirely, and so did a code-carrying notification posted from the shell —
+     * the app-op was never even consulted, while a real message from a real app
+     * had it rejected minutes earlier on the same phone.
+     *
+     * So the classifier wants more than digits, and redaction cannot be staged
+     * from here. Kept because a code-shaped thread is still the right fixture
+     * for the fallback rendering, but do not read a pass here as proof that
+     * sensitive notifications arrive whole: only a genuine one answers that.
+     */
+    @Synchronized
+    fun postCodeThread(context: Context): Boolean {
+        messages.clear()
+        val now = System.currentTimeMillis()
+        messages += Message("Mika", "Sending the code now.", now - 1_000L)
+        messages += Message("Mika", "Your verification code is 847291. Do not share it.", now)
+        deliveredReply = null
+        return post(context)
+    }
+
     @Synchronized
     fun appendAndPost(context: Context): Boolean {
         if (messages.isEmpty()) return resetAndPost(context)
