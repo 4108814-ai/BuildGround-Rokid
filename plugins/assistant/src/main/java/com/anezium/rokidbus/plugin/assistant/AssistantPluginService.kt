@@ -582,7 +582,7 @@ class AssistantPluginService : NexusPluginService() {
             }
             if (!failed) {
                 currentCoroutineContext().ensureActive()
-                answerSpeaker.speakCompletedAnswer(finalAnswer.orEmpty())
+                answerSpeaker.speakCompletedAnswer(stripHudMarkdown(finalAnswer.orEmpty()))
                 try {
                     val keepPhotosAtCompletion = authStore.keepPhotosInConversations()
                     withContext(Dispatchers.IO) {
@@ -767,9 +767,10 @@ class AssistantPluginService : NexusPluginService() {
     }
 
     private fun showAnswer(text: String) {
+        val plain = stripHudMarkdown(text)
         uiController.showAnswer(
-            body = text,
-            legacyCardLines = wrapHudText(text),
+            body = plain,
+            legacyCardLines = wrapHudText(plain),
         )
     }
 
@@ -949,6 +950,22 @@ internal fun snapshotStartErrorMessage(result: NexusSdkResult): String = when (r
 
 private fun normalizeTranscript(text: String): String =
     text.replace(Regex("\\s+"), " ").trim()
+
+/**
+ * The HUD renders one green monospace face, so emphasis markers arrive as literal
+ * asterisks on the wearer's glasses. Models reach for them anyway — especially when
+ * confirming a time a tool just returned — so the markers come off here instead of
+ * being begged away in the prompt. Bullets keep their "- " and code fences their
+ * content; only the decoration goes.
+ */
+internal fun stripHudMarkdown(text: String): String {
+    if (text.indexOf('*') < 0 && text.indexOf('_') < 0 && text.indexOf('`') < 0) return text
+    return text
+        .replace(Regex("(?<!\\*)\\*\\*(?!\\s)(.+?)(?<!\\s)\\*\\*(?!\\*)", RegexOption.DOT_MATCHES_ALL), "$1")
+        .replace(Regex("__(?!\\s)(.+?)(?<!\\s)__", RegexOption.DOT_MATCHES_ALL), "$1")
+        .replace(Regex("(?<![\\w*])\\*(?!\\s)([^*\\n]+?)(?<!\\s)\\*(?![\\w*])"), "$1")
+        .replace(Regex("`{1,3}([^`]+)`{1,3}", RegexOption.DOT_MATCHES_ALL), "$1")
+}
 
 internal fun wrapHudText(
     text: String,
