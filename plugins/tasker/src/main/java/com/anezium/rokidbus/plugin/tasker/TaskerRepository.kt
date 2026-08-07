@@ -51,7 +51,7 @@ class TaskerRepository(private val context: Context) {
         val message = when {
             prefs != null && !prefs.enabled -> "Tasker is disabled."
             prefs != null && !prefs.externalAccess -> "Enable Tasker external access in Tasker preferences."
-            !runPermissionGranted -> "Grant Tasker run permission to Tasker Bridge."
+            !runPermissionGranted -> "Grant the Tasker run permission in the plugin settings."
             tasks.isEmpty() -> "No named Tasker tasks found."
             else -> "${tasks.size} Tasker tasks ready."
         }
