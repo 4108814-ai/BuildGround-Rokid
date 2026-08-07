@@ -265,7 +265,11 @@ internal class AndroidSttSession(
                 true
             }
         }.getOrElse { failure ->
-            Log.w(TAG, "Android speech recognizer failed to start target=${target.reportName}", failure)
+            Log.w(
+                TAG,
+                "Android speech recognizer failed to start target=${target.reportName}",
+                failure,
+            )
             false
         }
         if (!started) {
@@ -275,13 +279,26 @@ internal class AndroidSttSession(
                 if (currentTarget === target) currentTarget = null
             }
             cleanupRecognizer(pipe, createdRecognizer)
-            return synchronized(lock) {
-                if (terminal || cancelled) null else SttError(
+            val nextAttempt = synchronized(lock) {
+                if (terminal || cancelled) return null
+                nextRecognizerTargetAttemptLocked()?.also { attempt ->
+                    languageTagIndex = attempt.languageTagIndex
+                    targetIndex = attempt.targetIndex
+                }
+            }
+            if (nextAttempt == null) {
+                return SttError(
                     SttErrorKind.PROVIDER,
                     ANDROID_PROVIDER_LABEL,
                     "Android speech recognizer failed to start",
                 )
             }
+            Log.i(
+                TAG,
+                "recognizer fallback reason=start-failure " +
+                    "target=${recognizerTarget(nextAttempt).reportName}",
+            )
+            return startCurrentAttempt()
         }
 
         val shouldClose = synchronized(lock) {
@@ -349,6 +366,8 @@ internal class AndroidSttSession(
                         retryAfterLanguageError(owner, error)
                     error == SpeechRecognizer.ERROR_SERVER_DISCONNECTED ->
                         retryAfterTransientDisconnect(owner, error)
+                    error == SpeechRecognizer.ERROR_CLIENT ->
+                        retryAfterClientError(owner)
                     else ->
                         finishWithError(androidRecognizerError(error, inputWasClosed))
                 }
@@ -432,6 +451,24 @@ internal class AndroidSttSession(
             nextAttempt = RecognizerWalkAttempt(languageTagIndex, targetIndex),
             delayMs = TRANSIENT_RETRY_DELAY_MS,
         )
+    }
+
+    private fun retryAfterClientError(owner: AndroidSpeechRecognizer) {
+        val nextAttempt = synchronized(lock) {
+            if (!isActiveLocked(owner)) return
+            nextRecognizerTargetAttemptLocked()
+        }
+        if (nextAttempt == null) {
+            val inputWasClosed = synchronized(lock) { currentInputClosed }
+            finishWithError(terminalClientError(inputWasClosed))
+            return
+        }
+        Log.i(
+            TAG,
+            "recognizer fallback reason=client-error " +
+                "target=${recognizerTarget(nextAttempt).reportName}",
+        )
+        replaceRecognizer(owner, nextAttempt, delayMs = 0L)
     }
 
     private fun replaceRecognizer(
@@ -613,6 +650,28 @@ internal class AndroidSttSession(
         return RecognizerWalkAttempt(0, nextTargetIndex)
     }
 
+    private fun nextRecognizerTargetAttemptLocked(): RecognizerWalkAttempt? {
+        val nextTargetIndex = targetIndex + 1
+        if (nextTargetIndex >= environment.recognitionTargets().size) return null
+        return RecognizerWalkAttempt(0, nextTargetIndex)
+    }
+
+    private fun recognizerTarget(attempt: RecognizerWalkAttempt): AndroidRecognizerTarget =
+        environment.recognitionTargets()[attempt.targetIndex]
+
+    private fun terminalClientError(inputWasClosed: Boolean): SttError {
+        val error = androidRecognizerError(SpeechRecognizer.ERROR_CLIENT, inputWasClosed)
+        val targets = environment.recognitionTargets()
+        val onlyNonGoogleDefault = targets.size == 1 &&
+            targets.single().id == DEFAULT_TARGET_ID &&
+            !targets.single().reportName.contains(GOOGLE_PACKAGE_PREFIX)
+        return if (onlyNonGoogleDefault) {
+            error.copy(detail = NO_EXTERNAL_AUDIO_SUPPORT_DETAIL)
+        } else {
+            error
+        }
+    }
+
     private fun androidLanguageTags(): List<String?> =
         if (language == TranscriptionLanguage.AUTO) {
             listOf(null)
@@ -665,6 +724,11 @@ internal class AndroidSttSession(
         private const val FINAL_RESULT_TIMEOUT_MS = 2_500L
         private const val TRANSIENT_RETRY_DELAY_MS = 250L
         private const val MAX_TRANSIENT_RETRIES = 1
+        private const val DEFAULT_TARGET_ID = "default"
+        private const val GOOGLE_PACKAGE_PREFIX = "com.google.android"
+        private const val NO_EXTERNAL_AUDIO_SUPPORT_DETAIL =
+            "Your phone's speech service does not accept external audio - choose a cloud engine " +
+                "(OpenAI, ElevenLabs or Azure) in Speech settings"
     }
 }
 
@@ -727,7 +791,8 @@ private fun Int.allowsPartialFallback(inputWasClosed: Boolean): Boolean =
         this == SpeechRecognizer.ERROR_SERVER_DISCONNECTED ||
         this == SpeechRecognizer.ERROR_SERVER ||
         this == SpeechRecognizer.ERROR_NETWORK ||
-        this == SpeechRecognizer.ERROR_NETWORK_TIMEOUT
+        this == SpeechRecognizer.ERROR_NETWORK_TIMEOUT ||
+        this == SpeechRecognizer.ERROR_CLIENT
 
 private fun Bundle?.bestRecognizerText(): String {
     val values = this?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()

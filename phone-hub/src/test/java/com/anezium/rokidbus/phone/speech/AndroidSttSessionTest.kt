@@ -174,6 +174,127 @@ class AndroidSttSessionTest {
     }
 
     @Test
+    fun clientErrorFallsBackToNextTargetAndCanReturnFinalResult() {
+        val first = RecordingRecognizer()
+        val second = RecordingRecognizer()
+        val listener = RecordingListener()
+        val session = sessionWithTargets(
+            targets = listOf(
+                target("default", "default:test") { first },
+                target("component:google", "google:test") { second },
+            ),
+            listener = listener,
+        )
+
+        assertTrue(session.start())
+        first.listener!!.onError(SpeechRecognizer.ERROR_CLIENT)
+
+        assertEquals(1, first.destroyCalls)
+        assertTrue(second.intent != null)
+        assertNull(listener.error)
+
+        second.listener!!.onResults(recognitionResults("fallback result"))
+
+        assertEquals(listOf("fallback result"), listener.finals)
+        assertNull(listener.error)
+    }
+
+    @Test
+    fun clientErrorOnLastTargetFinishesWithInternalError() {
+        val recognizer = RecordingRecognizer()
+        val listener = RecordingListener()
+        val session = sessionWithTargets(
+            targets = listOf(
+                target("on-device", "on-device:test") { recognizer },
+            ),
+            listener = listener,
+        )
+
+        assertTrue(session.start())
+        recognizer.listener!!.onError(SpeechRecognizer.ERROR_CLIENT)
+
+        assertEquals(SttErrorKind.INTERNAL, listener.error?.kind)
+        assertEquals("Android speech recognizer client failed", listener.error?.detail)
+        assertTrue(listener.finals.isEmpty())
+    }
+
+    @Test
+    fun clientErrorAfterPartialFinishesPartialInsteadOfFallingBack() {
+        val first = RecordingRecognizer()
+        var secondCreates = 0
+        val listener = RecordingListener()
+        val session = sessionWithTargets(
+            targets = listOf(
+                target("default", "default:test") { first },
+                target("component:google", "google:test") {
+                    secondCreates += 1
+                    RecordingRecognizer()
+                },
+            ),
+            listener = listener,
+        )
+
+        assertTrue(session.start())
+        first.listener!!.onPartialResults(recognitionResults("usable partial"))
+        first.listener!!.onError(SpeechRecognizer.ERROR_CLIENT)
+
+        assertEquals(listOf("usable partial"), listener.finals)
+        assertNull(listener.error)
+        assertEquals(0, secondCreates)
+    }
+
+    @Test
+    fun startFailureFallsBackToNextTarget() {
+        val second = RecordingRecognizer()
+        val listener = RecordingListener()
+        var pipeCreates = 0
+        val session = sessionWithTargets(
+            targets = listOf(
+                target("default", "default:test") {
+                    throw IllegalStateException("recognizer unavailable")
+                },
+                target("component:google", "google:test") { second },
+            ),
+            listener = listener,
+            pipeFactory = AndroidAudioPipeFactory {
+                pipeCreates += 1
+                TrackingPipe()
+            },
+        )
+
+        assertTrue(session.start())
+
+        assertEquals(2, pipeCreates)
+        assertTrue(second.intent != null)
+        assertNull(listener.error)
+
+        second.listener!!.onResults(recognitionResults("started on fallback"))
+        assertEquals(listOf("started on fallback"), listener.finals)
+    }
+
+    @Test
+    fun clientErrorWithoutGoogleOrOnDeviceTargetSuggestsCloudEngine() {
+        val recognizer = RecordingRecognizer()
+        val listener = RecordingListener()
+        val session = sessionWithTargets(
+            targets = listOf(
+                target("default", "default:com.vivo.speech") { recognizer },
+            ),
+            listener = listener,
+        )
+
+        assertTrue(session.start())
+        recognizer.listener!!.onError(SpeechRecognizer.ERROR_CLIENT)
+
+        assertEquals(SttErrorKind.INTERNAL, listener.error?.kind)
+        assertEquals(
+            "Your phone's speech service does not accept external audio - choose a cloud engine " +
+                "(OpenAI, ElevenLabs or Azure) in Speech settings",
+            listener.error?.detail,
+        )
+    }
+
+    @Test
     fun recognizerErrorsMapToStructuredKinds() {
         val cases = mapOf(
             SpeechRecognizer.ERROR_AUDIO to SttErrorKind.SOURCE_UNAVAILABLE,
@@ -223,6 +344,42 @@ class AndroidSttSessionTest {
             foregroundController = foreground,
         )
     }
+
+    private fun sessionWithTargets(
+        targets: List<AndroidRecognizerTarget>,
+        listener: RecordingListener,
+        pipeFactory: AndroidAudioPipeFactory = AndroidAudioPipeFactory { TrackingPipe() },
+    ): AndroidSttSession =
+        AndroidSttSession(
+            context = context,
+            language = TranscriptionLanguage.AUTO,
+            listener = listener,
+            environment = ReadyEnvironment(targets),
+            pipeFactory = pipeFactory,
+            mainThread = ManualMainThread(),
+            foregroundController = RecordingForeground(),
+        )
+
+    private fun target(
+        id: String,
+        reportName: String,
+        create: () -> AndroidSpeechRecognizer,
+    ): AndroidRecognizerTarget =
+        AndroidRecognizerTarget(
+            id = id,
+            reportName = reportName,
+            segmentedSession = false,
+            stopListeningOnInputClose = true,
+            create = create,
+        )
+
+    private fun recognitionResults(text: String): Bundle =
+        Bundle().apply {
+            putStringArrayList(
+                SpeechRecognizer.RESULTS_RECOGNITION,
+                arrayListOf(text),
+            )
+        }
 
     private class ReadyEnvironment(
         private val targets: List<AndroidRecognizerTarget>,
