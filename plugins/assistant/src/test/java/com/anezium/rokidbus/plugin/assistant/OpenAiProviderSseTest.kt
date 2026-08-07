@@ -87,7 +87,7 @@ class OpenAiProviderSseTest {
             preset = ProviderCatalog.openRouter,
             apiClient = RecordingCompatClient(),
             apiKeyConfigured = { false },
-            toolExecutor = unusedToolExecutor(),
+            toolRegistry = unusedToolRegistry(),
             supportsVision = { false },
         ).streamEvents(ChatRequest(userText = "Hello")).toList()
 
@@ -102,7 +102,7 @@ class OpenAiProviderSseTest {
                 listOf("<th", "ink>secret", " reasoning</thi", "nk>\n\nAnswer"),
             ),
             apiKeyConfigured = { true },
-            toolExecutor = unusedToolExecutor(),
+            toolRegistry = unusedToolRegistry(),
             supportsVision = { false },
         )
 
@@ -123,7 +123,7 @@ class OpenAiProviderSseTest {
             preset = ProviderCatalog.deepSeek,
             apiClient = client,
             apiKeyConfigured = { true },
-            toolExecutor = unusedToolExecutor(),
+            toolRegistry = unusedToolRegistry(),
             supportsVision = { false },
         )
 
@@ -195,9 +195,5 @@ class OpenAiProviderSseTest {
         }
 
         override fun cancel(requestId: String) = Unit
-    }
-
-    private fun unusedToolExecutor() = AssistantToolExecutor {
-        AssistantToolResult.Error(TOOL_ERROR_CAPTURE_FAILED)
     }
 }

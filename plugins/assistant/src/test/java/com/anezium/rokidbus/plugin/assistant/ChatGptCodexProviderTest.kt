@@ -37,6 +37,9 @@ class ChatGptCodexProviderTest {
             request = request,
             modelId = "unsupported-model",
             reasoningEffort = "xhigh",
+            toolDefinitions = listOf(
+                testTakePhotoTool { error("Tool was not expected.") },
+            ),
         ).toList()
 
         val sent = transport.requests.single()
@@ -112,7 +115,7 @@ class ChatGptCodexProviderTest {
         val provider = ChatGptCodexProvider(
             apiClient = client(transport),
             oauthConfigured = { true },
-            toolExecutor = unusedToolExecutor(),
+            toolRegistry = unusedToolRegistry(),
             modelProvider = { "unsupported-model" },
             reasoningEffortProvider = { "medium" },
         )
@@ -139,7 +142,7 @@ class ChatGptCodexProviderTest {
             val provider = ChatGptCodexProvider(
                 apiClient = client(transport),
                 oauthConfigured = { true },
-                toolExecutor = unusedToolExecutor(),
+                toolRegistry = unusedToolRegistry(),
                 modelProvider = { modelId },
             )
 
@@ -201,7 +204,7 @@ class ChatGptCodexProviderTest {
                 transport = transport,
             ),
             oauthConfigured = { true },
-            toolExecutor = unusedToolExecutor(),
+            toolRegistry = unusedToolRegistry(),
         )
         var deltaObservedBeforeTerminal = false
 
@@ -293,7 +296,7 @@ class ChatGptCodexProviderTest {
         val provider = ChatGptCodexProvider(
             apiClient = client,
             oauthConfigured = { true },
-            toolExecutor = unusedToolExecutor(),
+            toolRegistry = unusedToolRegistry(),
         )
 
         val events = provider.streamEvents(ChatRequest(userText = "Hello")).toList()
@@ -310,7 +313,7 @@ class ChatGptCodexProviderTest {
         ChatGptCodexProvider(
             apiClient = client(transport),
             oauthConfigured = { true },
-            toolExecutor = unusedToolExecutor(),
+            toolRegistry = unusedToolRegistry(),
         )
 
     private fun client(
@@ -358,10 +361,6 @@ class ChatGptCodexProviderTest {
     }
 
     private companion object {
-        fun unusedToolExecutor() = AssistantToolExecutor {
-            error("Tool execution was not expected.")
-        }
-
         fun tokens(
             accessToken: String = "access-token",
             accountId: String = "account-id",

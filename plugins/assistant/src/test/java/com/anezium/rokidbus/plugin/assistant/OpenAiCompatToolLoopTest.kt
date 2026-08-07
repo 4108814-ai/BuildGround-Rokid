@@ -31,7 +31,7 @@ class OpenAiCompatToolLoopTest {
         val executed = mutableListOf<AssistantToolCall>()
         val provider = provider(
             client = client,
-            toolExecutor = AssistantToolExecutor { call ->
+            toolExecutor = { call ->
                 executed += call
                 AssistantToolResult.Image("image/jpeg", "AQID")
             },
@@ -64,7 +64,7 @@ class OpenAiCompatToolLoopTest {
         val function = declaration.getJSONObject("function")
         assertEquals(TAKE_PHOTO_TOOL_NAME, function.getString("name"))
         assertEquals(
-            "Take one photo through the glasses camera to see what is currently in front of the wearer.",
+            TAKE_PHOTO_TOOL_DESCRIPTION,
             function.getString("description"),
         )
         val parameters = function.getJSONObject("parameters")
@@ -123,7 +123,7 @@ class OpenAiCompatToolLoopTest {
         )
         val provider = provider(
             client = client,
-            toolExecutor = AssistantToolExecutor {
+            toolExecutor = {
                 AssistantToolResult.Error(TOOL_ERROR_CAMERA_BUSY)
             },
         )
@@ -152,6 +152,60 @@ class OpenAiCompatToolLoopTest {
     }
 
     @Test
+    fun `test only second tool is declared dispatched and replayed as json`() = runTest {
+        val lookupTool = TestAssistantTool(
+            name = "lookup_note",
+            description = "Look up a saved note.",
+            executor = { _, _ ->
+                AssistantToolResult.Json("""{"ok":true,"title":"Groceries"}""")
+            },
+        )
+        val client = RecordingCompatClient(
+            listOf(
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(
+                        toolCalls = listOf(
+                            OpenAiChatToolCallDelta(
+                                index = 0,
+                                id = "call-note",
+                                nameFragment = "lookup_note",
+                                argumentsFragment = "{}",
+                            ),
+                        ),
+                        finishReason = "tool_calls",
+                    ),
+                ),
+                StubResponse.Events(OpenAiChatSseEvent.Delta(content = "Milk and bread.")),
+            ),
+        )
+        val provider = provider(
+            client = client,
+            toolExecutor = { error("Photo tool must not execute") },
+            additionalTools = listOf(lookupTool),
+        )
+
+        provider.streamEvents(ChatRequest(userText = "Read my groceries note")).toList()
+
+        val tools = bodyFor(client.requests[0]).getJSONArray("tools")
+        assertEquals(2, tools.length())
+        assertEquals(
+            TAKE_PHOTO_TOOL_NAME,
+            tools.getJSONObject(0).getJSONObject("function").getString("name"),
+        )
+        assertEquals(
+            "lookup_note",
+            tools.getJSONObject(1).getJSONObject("function").getString("name"),
+        )
+        val replayMessages = client.requests[1].messages
+        assertEquals(3, replayMessages.length())
+        assertEquals("tool", replayMessages.getJSONObject(2).getString("role"))
+        assertEquals(
+            """{"ok":true,"title":"Groceries"}""",
+            replayMessages.getJSONObject(2).getString("content"),
+        )
+    }
+
+    @Test
     fun `only first of two valid tool calls reaches executor`() = runTest {
         var executionCount = 0
         val client = RecordingCompatClient(
@@ -170,7 +224,7 @@ class OpenAiCompatToolLoopTest {
         )
         val provider = provider(
             client = client,
-            toolExecutor = AssistantToolExecutor {
+            toolExecutor = {
                 executionCount += 1
                 AssistantToolResult.Image("image/png", "cGhvdG8=")
             },
@@ -201,18 +255,44 @@ class OpenAiCompatToolLoopTest {
         val provider = provider(
             client = client,
             supportsVision = false,
-            toolExecutor = AssistantToolExecutor { error("Tool must not execute") },
+            toolExecutor = { error("Tool must not execute") },
         )
 
         val events = provider.streamEvents(ChatRequest(userText = "Hello")).toList()
 
         assertEquals(1, client.requests.size)
-        assertFalse(client.requests.single().includeTakePhotoTool)
+        assertTrue(client.requests.single().toolDefinitions.isEmpty())
         assertFalse(bodyFor(client.requests.single()).has("tools"))
         assertFalse(events.any { event -> event is AiProviderEvent.TextReset })
         assertEquals(
             "Text only.",
             events.filterIsInstance<AiProviderEvent.MessageDone>().single().message.content,
+        )
+    }
+
+    @Test
+    fun `non vision model still declares an available non vision tool`() = runTest {
+        val client = RecordingCompatClient(
+            listOf(StubResponse.Events(OpenAiChatSseEvent.Delta(content = "Text only."))),
+        )
+        val lookupTool = TestAssistantTool(
+            name = "lookup_note",
+            description = "Look up a saved note.",
+        )
+        val provider = provider(
+            client = client,
+            supportsVision = false,
+            toolExecutor = { error("Photo tool must not execute") },
+            additionalTools = listOf(lookupTool),
+        )
+
+        provider.streamEvents(ChatRequest(userText = "Hello")).toList()
+
+        val tools = bodyFor(client.requests.single()).getJSONArray("tools")
+        assertEquals(1, tools.length())
+        assertEquals(
+            "lookup_note",
+            tools.getJSONObject(0).getJSONObject("function").getString("name"),
         )
     }
 
@@ -226,14 +306,17 @@ class OpenAiCompatToolLoopTest {
         )
         val provider = provider(
             client = client,
-            toolExecutor = AssistantToolExecutor { error("Tool must not execute") },
+            toolExecutor = { error("Tool must not execute") },
         )
         val request = ChatRequest(userText = "Hello")
 
         val events = provider.streamEvents(request).toList()
 
         assertEquals(2, client.requests.size)
-        assertEquals(listOf(true, false), client.requests.map { it.includeTakePhotoTool })
+        assertEquals(
+            listOf(true, false),
+            client.requests.map { it.toolDefinitions.isNotEmpty() },
+        )
         assertTrue(client.requests.all { it.requestId == request.requestId })
         assertEquals(
             listOf("Fallback answer."),
@@ -248,13 +331,14 @@ class OpenAiCompatToolLoopTest {
 
     private fun provider(
         client: RecordingCompatClient,
-        toolExecutor: AssistantToolExecutor,
+        toolExecutor: suspend (AssistantToolCall) -> AssistantToolResult,
         supportsVision: Boolean = true,
+        additionalTools: List<AssistantToolDefinition> = emptyList(),
     ) = OpenAiCompatProvider(
         preset = ProviderCatalog.openAi,
         apiClient = client,
         apiKeyConfigured = { true },
-        toolExecutor = toolExecutor,
+        toolRegistry = testToolRegistry(toolExecutor, *additionalTools.toTypedArray()),
         supportsVision = { supportsVision },
     )
 

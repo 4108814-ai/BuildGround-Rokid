@@ -199,6 +199,7 @@ internal class ChatGptCodexApiClient(
         request: ChatRequest,
         modelId: String,
         reasoningEffort: String = DEFAULT_REASONING_EFFORT,
+        toolDefinitions: List<AssistantToolDefinition> = emptyList(),
         requestId: String = request.requestId,
     ): Flow<String> = flow {
         executeResponses(
@@ -206,7 +207,7 @@ internal class ChatGptCodexApiClient(
             modelId = modelId,
             reasoningEffort = reasoningEffort,
             input = request.toCodexResponsesInput(),
-            includeTakePhotoTool = true,
+            toolDefinitions = toolDefinitions,
             requestId = requestId,
         ).textDeltas.forEach { delta -> emit(delta) }
     }
@@ -216,7 +217,7 @@ internal class ChatGptCodexApiClient(
         modelId: String,
         reasoningEffort: String = DEFAULT_REASONING_EFFORT,
         input: JSONArray,
-        includeTakePhotoTool: Boolean,
+        toolDefinitions: List<AssistantToolDefinition>,
         requestId: String = request.requestId,
         onTextDelta: suspend (String) -> Unit = {},
         onStreamRestart: suspend () -> Unit = {},
@@ -237,7 +238,7 @@ internal class ChatGptCodexApiClient(
                 modelId = supportedModel(modelId),
                 reasoningEffort = supportedReasoningEffort(reasoningEffort),
                 input = input,
-                includeTakePhotoTool = includeTakePhotoTool,
+                toolDefinitions = toolDefinitions,
                 tokens = tokens,
             )
             val response = withContext(Dispatchers.IO) {
@@ -319,7 +320,7 @@ internal class ChatGptCodexApiClient(
         modelId: String,
         reasoningEffort: String,
         input: JSONArray,
-        includeTakePhotoTool: Boolean,
+        toolDefinitions: List<AssistantToolDefinition>,
         tokens: CodexChatGptOAuthTokenBundle,
     ): ChatGptCodexHttpRequest {
         require(tokens.accessToken.isNotBlank()) { "Stored ChatGPT access token is blank." }
@@ -328,7 +329,7 @@ internal class ChatGptCodexApiClient(
             .put("model", modelId)
             .put("instructions", request.systemPrompt?.trim().orEmpty())
             .put("input", input)
-            .put("tools", codexTools(includeTakePhotoTool))
+            .put("tools", codexTools(toolDefinitions))
             .put("tool_choice", "auto")
             .put("parallel_tool_calls", false)
             .put("store", false)
@@ -369,33 +370,21 @@ internal class ChatGptCodexApiClient(
         }
     }
 
-    private fun codexTools(includeTakePhotoTool: Boolean): JSONArray =
+    private fun codexTools(toolDefinitions: List<AssistantToolDefinition>): JSONArray =
         JSONArray()
             .put(JSONObject().put("type", "web_search"))
             .apply {
-                if (includeTakePhotoTool) put(takePhotoToolDeclaration())
+                toolDefinitions.forEach { definition ->
+                    put(codexToolDeclaration(definition))
+                }
             }
 
-    private fun takePhotoToolDeclaration(): JSONObject =
+    private fun codexToolDeclaration(definition: AssistantToolDefinition): JSONObject =
         JSONObject()
             .put("type", "function")
-            .put("name", TAKE_PHOTO_TOOL_NAME)
-            .put(
-                "description",
-                "Capture one current point-of-view photo from the user's Rokid glasses. " +
-                    "Call this only when answering the current request requires seeing the user's " +
-                    "current physical scene. Do not call it for web images, questions about camera " +
-                    "behavior or settings, discussion of a previous photo, or questions answerable " +
-                    "from text or web information.",
-            )
-            .put(
-                "parameters",
-                JSONObject()
-                    .put("type", "object")
-                    .put("properties", JSONObject())
-                    .put("required", JSONArray())
-                    .put("additionalProperties", false),
-            )
+            .put("name", definition.name)
+            .put("description", definition.description)
+            .put("parameters", definition.parametersSchema.toJsonObject())
             .put("strict", true)
 
     companion object {
@@ -432,7 +421,7 @@ internal class ChatGptCodexApiClient(
 internal class ChatGptCodexProvider(
     private val apiClient: ChatGptCodexApiClient,
     private val oauthConfigured: () -> Boolean,
-    private val toolExecutor: AssistantToolExecutor,
+    private val toolRegistry: AssistantToolRegistry,
     private val modelProvider: () -> String = { ChatGptCodexApiClient.DEFAULT_MODEL_ID },
     private val reasoningEffortProvider: () -> String = {
         ChatGptCodexApiClient.DEFAULT_REASONING_EFFORT
@@ -450,6 +439,7 @@ internal class ChatGptCodexProvider(
         }
 
         try {
+            val toolPhase = toolRegistry.newExecutionPhase(CODEX_PROVIDER_FEATURES)
             val originalInput = request.toCodexResponsesInput()
             val modelId = request.model ?: modelProvider()
             val reasoningEffort = reasoningEffortProvider()
@@ -471,7 +461,7 @@ internal class ChatGptCodexProvider(
                 modelId = modelId,
                 reasoningEffort = reasoningEffort,
                 input = originalInput,
-                includeTakePhotoTool = true,
+                toolDefinitions = toolPhase.availableDefinitions,
                 requestId = request.requestId,
                 onTextDelta = ::streamDelta,
                 onStreamRestart = ::resetStreamedText,
@@ -484,18 +474,8 @@ internal class ChatGptCodexProvider(
                 resetStreamedText()
                 val replayInput = JSONArray()
                 originalInput.forEachJsonValue(replayInput::put)
-                var executorClaimed = false
                 functionCalls.forEach { call ->
-                    val result = when {
-                        !isValidTakePhotoCall(call) ->
-                            AssistantToolResult.Error(TOOL_ERROR_INVALID_CALL)
-                        executorClaimed ->
-                            AssistantToolResult.Error(TOOL_ERROR_ALREADY_USED)
-                        else -> {
-                            executorClaimed = true
-                            executeToolSafely(call)
-                        }
-                    }
+                    val result = toolPhase.execute(call)
                     currentCoroutineContext().ensureActive()
                     replayInput.put(functionCallReplay(call))
                     replayInput.put(functionCallOutput(call, result))
@@ -505,7 +485,7 @@ internal class ChatGptCodexProvider(
                     modelId = modelId,
                     reasoningEffort = reasoningEffort,
                     input = replayInput,
-                    includeTakePhotoTool = false,
+                    toolDefinitions = emptyList(),
                     requestId = request.requestId,
                     onTextDelta = ::streamDelta,
                     onStreamRestart = ::resetStreamedText,
@@ -540,16 +520,6 @@ internal class ChatGptCodexProvider(
     companion object {
         const val ID = "chatgpt_codex"
     }
-
-    private suspend fun executeToolSafely(call: AssistantToolCall): AssistantToolResult =
-        try {
-            currentCoroutineContext().ensureActive()
-            toolExecutor.execute(call)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Throwable) {
-            AssistantToolResult.Error(TOOL_ERROR_CAPTURE_FAILED)
-    }
 }
 
 internal fun parseFunctionCall(item: JSONObject): AssistantToolCall? {
@@ -561,13 +531,6 @@ internal fun parseFunctionCall(item: JSONObject): AssistantToolCall? {
         name = item.optString("name"),
         argumentsJson = item.optString("arguments"),
     )
-}
-
-internal fun isValidTakePhotoCall(call: AssistantToolCall): Boolean {
-    if (call.name != TAKE_PHOTO_TOOL_NAME) return false
-    val argumentsJson = call.argumentsJson.ifBlank { "{}" }
-    val arguments = runCatching { JSONObject(argumentsJson) }.getOrNull() ?: return false
-    return arguments.length() == 0
 }
 
 internal fun functionCallReplay(call: AssistantToolCall): JSONObject =
@@ -582,6 +545,7 @@ internal fun functionCallOutput(
     result: AssistantToolResult,
 ): JSONObject {
     val output = when (result) {
+        is AssistantToolResult.Json -> result.text
         is AssistantToolResult.Image ->
             JSONArray().put(
                 JSONObject()
@@ -659,6 +623,11 @@ private fun codexMessage(
 private val CODEX_MESSAGE_ROLES = setOf("system", "developer", "user", "assistant")
 private const val MAX_CODEX_HISTORY_MESSAGES = 24
 private const val PHOTO_HISTORY_MARKER = "[photo]"
+
+private val CODEX_PROVIDER_FEATURES = AssistantProviderFeatures(
+    supportsTools = true,
+    supportsVision = true,
+)
 
 private inline fun JSONArray.forEachJsonValue(block: (Any) -> Unit) {
     for (index in 0 until length()) block(get(index))

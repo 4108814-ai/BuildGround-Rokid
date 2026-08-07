@@ -1,9 +1,6 @@
 package com.anezium.rokidbus.plugin.assistant
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.os.SystemClock
-import android.util.Base64
 import android.util.Log
 import android.view.KeyEvent
 import com.anezium.rokidbus.client.plugin.NexusAudioCallbacks
@@ -45,13 +42,9 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
-import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
 class AssistantPluginService : NexusPluginService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -59,6 +52,12 @@ class AssistantPluginService : NexusPluginService() {
     private val accountContextSync by lazy { AccountContextSync(applicationContext) }
     private val threadStore by lazy { AssistantThreadStore(applicationContext) }
     private val conversationThreading by lazy { AssistantConversationThreading(threadStore) }
+    private val assistantToolRegistry by lazy {
+        AssistantToolRegistry(
+            definitions = listOf(TakePhotoTool(createTakePhotoToolCapabilities())),
+            sessionContext = ::assistantToolSessionContext,
+        )
+    }
     private val openAiCompatClients by lazy {
         ProviderCatalog.presets.associate { preset ->
             preset.id to OpenAiCompatApiClient(
@@ -75,7 +74,7 @@ class AssistantPluginService : NexusPluginService() {
                 preset = preset,
                 apiClient = checkNotNull(openAiCompatClients[preset.id]),
                 apiKeyConfigured = { !authStore.providerApiKey(preset.id).isNullOrBlank() },
-                toolExecutor = AssistantToolExecutor(::executeAssistantTool),
+                toolRegistry = assistantToolRegistry,
                 modelProvider = { authStore.providerModel(preset.id) },
                 supportsVision = { providerSupportsPhotos(preset.id) },
             )
@@ -93,7 +92,7 @@ class AssistantPluginService : NexusPluginService() {
         ChatGptCodexProvider(
             apiClient = chatGptCodexClient,
             oauthConfigured = { authStore.oauthTokens() != null },
-            toolExecutor = AssistantToolExecutor(::executeAssistantTool),
+            toolRegistry = assistantToolRegistry,
             modelProvider = authStore::chatGptModel,
             reasoningEffortProvider = authStore::chatGptReasoningEffort,
         )
@@ -121,7 +120,6 @@ class AssistantPluginService : NexusPluginService() {
     private var pipelineJob: Job? = null
     private var currentRequestId: String? = null
     private var currentAssistantGeneration: Long? = null
-    private var photoAttemptRequestId: String? = null
     private var photoCapturedRequestId: String? = null
     private var photoJpegForCompletedTurn: ByteArray? = null
     private var currentLinkState = 0
@@ -510,7 +508,9 @@ class AssistantPluginService : NexusPluginService() {
                 customPrompt = authStore.customSystemPrompt(),
                 noticeBand = noticeBandMode,
                 memory = authStore.combinedAssistantContextForPrompt(),
-                photoTool = providerSupportsPhotos(providerId),
+                availableToolNames = assistantToolRegistry
+                    .availableDefinitions(assistantProviderFeatures(providerId))
+                    .map(AssistantToolDefinition::name),
             ),
             history = conversationContext.history,
             model = when (providerId) {
@@ -520,7 +520,6 @@ class AssistantPluginService : NexusPluginService() {
         )
         currentRequestId = request.requestId
         currentAssistantGeneration = captureGeneration
-        photoAttemptRequestId = null
         photoCapturedRequestId = null
         photoJpegForCompletedTurn = null
         val answer = StringBuilder()
@@ -602,163 +601,92 @@ class AssistantPluginService : NexusPluginService() {
         }
     }
 
-    private suspend fun executeAssistantTool(call: AssistantToolCall): AssistantToolResult {
-        val startedAt = SystemClock.elapsedRealtime()
-        val requestId = currentRequestId
-        val loggedToolName = call.name.takeIf { it == TAKE_PHOTO_TOOL_NAME } ?: "invalid"
-        var photoStateShown = false
-
-        fun error(
-            code: String,
-            captureMs: Long = 0L,
-            processMs: Long = 0L,
-        ): AssistantToolResult.Error {
-            if (
-                photoStateShown &&
-                currentRequestId == requestId &&
-                pipelineJob?.isActive == true
-            ) {
-                uiController.showTransient("Thinking…")
+    private fun createTakePhotoToolCapabilities(): TakePhotoToolCapabilities =
+        object : TakePhotoToolCapabilities {
+            override fun currentSession(): TakePhotoToolSession? {
+                val requestId = currentRequestId ?: return null
+                val generation = currentAssistantGeneration ?: return null
+                return TakePhotoToolSession(requestId, generation)
             }
-            logToolOutcome(
-                requestId = requestId,
-                toolName = loggedToolName,
-                outcome = code,
-                byteCount = 0,
-                width = 0,
-                height = 0,
-                captureMs = captureMs,
-                processMs = processMs,
-                totalMs = SystemClock.elapsedRealtime() - startedAt,
-            )
-            return AssistantToolResult.Error(code)
+
+            override fun isSessionActive(session: TakePhotoToolSession): Boolean =
+                currentRequestId == session.requestId &&
+                    currentAssistantGeneration == session.generation &&
+                    captureGeneration == session.generation &&
+                    pipelineJob?.isActive == true &&
+                    isNexusSessionOpen
+
+            override fun hasCameraGrant(): Boolean =
+                nexusClient?.hasCapability(PluginCapability.CAMERA) == true
+
+            override fun isGlassesConnected(): Boolean =
+                currentLinkState and LinkStateBits.SPP_DATA_UP != 0
+
+            override fun isCameraBusy(): Boolean = snapshotSession != null
+
+            override fun showTransient(message: String) {
+                uiController.showTransient(message)
+            }
+
+            override suspend fun captureSnapshotJpeg(): TakePhotoCaptureResult =
+                this@AssistantPluginService.captureSnapshotJpeg()
+
+            override fun markPhotoCaptured(session: TakePhotoToolSession) {
+                if (
+                    currentRequestId == session.requestId &&
+                    currentAssistantGeneration == session.generation
+                ) {
+                    photoCapturedRequestId = session.requestId
+                }
+            }
+
+            override fun retainPhoto(session: TakePhotoToolSession, jpeg: ByteArray) {
+                if (
+                    currentRequestId == session.requestId &&
+                    currentAssistantGeneration == session.generation
+                ) {
+                    photoJpegForCompletedTurn = jpeg
+                }
+            }
+
+            override fun logOutcome(outcome: TakePhotoToolOutcome) {
+                logToolOutcome(
+                    requestId = outcome.requestId,
+                    toolName = outcome.toolName,
+                    outcome = outcome.outcome,
+                    byteCount = outcome.byteCount,
+                    width = outcome.width,
+                    height = outcome.height,
+                    captureMs = outcome.captureMs,
+                    processMs = outcome.processMs,
+                    totalMs = outcome.totalMs,
+                )
+            }
         }
 
-        if (!isValidTakePhotoCall(call)) return error(TOOL_ERROR_INVALID_CALL)
-        if (!providerSupportsPhotos(selectedProviderId())) {
-            return error(TOOL_ERROR_CAPTURE_FAILED)
-        }
-        val generation = currentAssistantGeneration
-            ?: return error(TOOL_ERROR_CANCELLED)
-        if (
-            requestId == null ||
-            generation != captureGeneration ||
-            pipelineJob?.isActive != true ||
-            !isNexusSessionOpen
-        ) {
-            return error(TOOL_ERROR_CANCELLED)
-        }
-
-        val client = nexusClient
-        if (client?.hasCapability(PluginCapability.CAMERA) != true) {
-            return error(TOOL_ERROR_NOT_AUTHORIZED)
-        }
-        if (currentLinkState and LinkStateBits.SPP_DATA_UP == 0) {
-            return error(TOOL_ERROR_GLASSES_DISCONNECTED)
-        }
-        if (snapshotSession != null) return error(TOOL_ERROR_CAMERA_BUSY)
-        if (photoAttemptRequestId == requestId) return error(TOOL_ERROR_ALREADY_USED)
-
-        currentCoroutineContext().ensureActive()
-        uiController.showTransient("Photo…")
-        photoStateShown = true
-        currentCoroutineContext().ensureActive()
-        if (
-            currentRequestId != requestId ||
-            currentAssistantGeneration != generation ||
-            generation != captureGeneration ||
-            pipelineJob?.isActive != true
-        ) {
-            throw CancellationException("Assistant generation is stale.")
-        }
-
-        // The budget is consumed immediately before the first hardware-facing call.
-        photoAttemptRequestId = requestId
-        val captureStartedAt = SystemClock.elapsedRealtime()
-        val jpeg = try {
-            withTimeoutOrNull(SNAPSHOT_CAPTURE_TIMEOUT_MS) {
-                captureSnapshotJpeg()
-            } ?: return error(
-                code = TOOL_ERROR_CAPTURE_FAILED,
-                captureMs = SystemClock.elapsedRealtime() - captureStartedAt,
-            )
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: SnapshotCaptureFailure) {
-            return error(
-                code = failure.code,
-                captureMs = SystemClock.elapsedRealtime() - captureStartedAt,
-            )
-        } catch (_: Throwable) {
-            return error(
-                code = TOOL_ERROR_CAPTURE_FAILED,
-                captureMs = SystemClock.elapsedRealtime() - captureStartedAt,
-            )
-        }
-        val captureMs = SystemClock.elapsedRealtime() - captureStartedAt
-        photoCapturedRequestId = requestId
-
-        currentCoroutineContext().ensureActive()
-        val processStartedAt = SystemClock.elapsedRealtime()
-        val image = withContext(Dispatchers.Default) {
-            prepareToolImage(jpeg)
-        } ?: return error(
-            code = TOOL_ERROR_CAPTURE_FAILED,
-            captureMs = captureMs,
-            processMs = SystemClock.elapsedRealtime() - processStartedAt,
-        )
-        val processMs = SystemClock.elapsedRealtime() - processStartedAt
-        currentCoroutineContext().ensureActive()
-        if (
-            currentRequestId != requestId ||
-            currentAssistantGeneration != generation ||
-            generation != captureGeneration
-        ) {
-            throw CancellationException("Assistant generation is stale.")
-        }
-        photoJpegForCompletedTurn = image.jpeg
-
-        uiController.showTransient("Thinking…")
-        logToolOutcome(
-            requestId = requestId,
-            toolName = TAKE_PHOTO_TOOL_NAME,
-            outcome = "ok",
-            byteCount = image.byteCount,
-            width = image.width,
-            height = image.height,
-            captureMs = captureMs,
-            processMs = processMs,
-            totalMs = SystemClock.elapsedRealtime() - startedAt,
-        )
-        return AssistantToolResult.Image(
-            mimeType = "image/jpeg",
-            base64 = image.base64,
-        )
-    }
-
-    private suspend fun captureSnapshotJpeg(): ByteArray =
+    private suspend fun captureSnapshotJpeg(): TakePhotoCaptureResult =
         suspendCancellableCoroutine { continuation ->
             var createdSession: NexusSnapshotSession? = null
             val callbacks = object : NexusSnapshotCallbacks {
                 override fun onSnapshotCaptured(jpeg: ByteArray) {
                     if (snapshotSession === createdSession) snapshotSession = null
                     if (!continuation.isActive) return
-                    continuation.resume(jpeg)
+                    continuation.resume(TakePhotoCaptureResult.Captured(jpeg))
                 }
 
                 override fun onSnapshotError(error: NexusSnapshotError) {
                     if (snapshotSession === createdSession) snapshotSession = null
                     if (!continuation.isActive) return
-                    continuation.resumeWithException(
-                        SnapshotCaptureFailure(snapshotToolErrorCode(error)),
+                    continuation.resume(
+                        TakePhotoCaptureResult.Failed(snapshotToolErrorCode(error)),
                     )
                 }
             }
             val session = nexusSnapshotSession(callbacks)
             createdSession = session
             if (session == null) {
-                continuation.resumeWithException(
-                    SnapshotCaptureFailure(TOOL_ERROR_CAPTURE_FAILED),
+                continuation.resume(
+                    TakePhotoCaptureResult.Failed(TOOL_ERROR_CAPTURE_FAILED),
                 )
                 return@suspendCancellableCoroutine
             }
@@ -771,84 +699,11 @@ class AssistantPluginService : NexusPluginService() {
             if (result != NexusSdkResult.SENT && continuation.isActive) {
                 if (snapshotSession === session) snapshotSession = null
                 session.cancel()
-                continuation.resumeWithException(
-                    SnapshotCaptureFailure(snapshotStartToolErrorCode(result)),
+                continuation.resume(
+                    TakePhotoCaptureResult.Failed(snapshotStartToolErrorCode(result)),
                 )
             }
         }
-
-    private fun prepareToolImage(jpeg: ByteArray): PreparedToolImage? {
-        if (jpeg.isEmpty()) return null
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-
-        var sampleSize = 1
-        val sourceLongEdge = maxOf(bounds.outWidth, bounds.outHeight)
-        while (sourceLongEdge / (sampleSize * 2) >= MAX_TOOL_IMAGE_LONG_EDGE_PX) {
-            sampleSize *= 2
-        }
-        var bitmap = BitmapFactory.decodeByteArray(
-            jpeg,
-            0,
-            jpeg.size,
-            BitmapFactory.Options().apply { inSampleSize = sampleSize },
-        ) ?: return null
-
-        try {
-            val decodedLongEdge = maxOf(bitmap.width, bitmap.height)
-            if (decodedLongEdge > MAX_TOOL_IMAGE_LONG_EDGE_PX) {
-                val scale = MAX_TOOL_IMAGE_LONG_EDGE_PX.toFloat() / decodedLongEdge
-                val scaled = Bitmap.createScaledBitmap(
-                    bitmap,
-                    (bitmap.width * scale).roundToInt().coerceAtLeast(1),
-                    (bitmap.height * scale).roundToInt().coerceAtLeast(1),
-                    true,
-                )
-                if (scaled !== bitmap) {
-                    bitmap.recycle()
-                    bitmap = scaled
-                }
-            }
-
-            while (true) {
-                val output = ByteArrayOutputStream()
-                if (!bitmap.compress(Bitmap.CompressFormat.JPEG, TOOL_IMAGE_JPEG_QUALITY, output)) {
-                    return null
-                }
-                val bytes = output.toByteArray()
-                if (bytes.size <= MAX_TOOL_IMAGE_JPEG_BYTES) {
-                    val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                    if (base64.length > MAX_TOOL_IMAGE_BASE64_CHARS) return null
-                    return PreparedToolImage(
-                        jpeg = bytes,
-                        base64 = base64,
-                        byteCount = bytes.size,
-                        width = bitmap.width,
-                        height = bitmap.height,
-                    )
-                }
-
-                val sizeScale =
-                    (sqrt(MAX_TOOL_IMAGE_JPEG_BYTES.toDouble() / bytes.size) * 0.9)
-                        .coerceIn(0.5, 0.9)
-                val nextWidth = (bitmap.width * sizeScale).roundToInt().coerceAtLeast(1)
-                val nextHeight = (bitmap.height * sizeScale).roundToInt().coerceAtLeast(1)
-                if (nextWidth == bitmap.width && nextHeight == bitmap.height) return null
-                val scaled = Bitmap.createScaledBitmap(
-                    bitmap,
-                    nextWidth,
-                    nextHeight,
-                    true,
-                )
-                if (scaled === bitmap) return null
-                bitmap.recycle()
-                bitmap = scaled
-            }
-        } finally {
-            bitmap.recycle()
-        }
-    }
 
     private fun logToolOutcome(
         requestId: String?,
@@ -1001,6 +856,24 @@ class AssistantPluginService : NexusPluginService() {
             else -> ProviderCatalog.openAi.id
         }
 
+    private fun assistantToolSessionContext(): AssistantToolSessionContext =
+        AssistantToolSessionContext(
+            active = isNexusSessionOpen,
+            grantedCapabilities = if (
+                nexusClient?.hasCapability(PluginCapability.CAMERA) == true
+            ) {
+                setOf(PluginCapability.CAMERA.wireValue)
+            } else {
+                emptySet()
+            },
+        )
+
+    private fun assistantProviderFeatures(providerId: String): AssistantProviderFeatures =
+        AssistantProviderFeatures(
+            supportsTools = true,
+            supportsVision = providerSupportsPhotos(providerId),
+        )
+
     private fun providerSupportsPhotos(providerId: String): Boolean =
         providerId == ChatGptCodexProvider.ID || authStore.providerModelSupportsPhotos(providerId)
 
@@ -1010,30 +883,13 @@ class AssistantPluginService : NexusPluginService() {
         const val AI_ASSIST_OPEN_PATH = "/system/plugin/ai-assist"
         const val AI_ASSIST_OPEN_TYPE = "ai_assist"
         const val FALLBACK_CAPTURE_DURATION_MS = 6_000L
-        const val SNAPSHOT_CAPTURE_TIMEOUT_MS = 8_000L
         const val HUD_UPDATE_INTERVAL_MS = 250L
-        const val MAX_TOOL_IMAGE_LONG_EDGE_PX = 1_024
-        const val TOOL_IMAGE_JPEG_QUALITY = 80
-        const val MAX_TOOL_IMAGE_BASE64_CHARS = 1_500_000
-        const val MAX_TOOL_IMAGE_JPEG_BYTES = MAX_TOOL_IMAGE_BASE64_CHARS / 4 * 3
         const val MAX_HUD_LINES = 6
         const val MAX_HUD_LINE_CHARS = 42
         const val MAX_CARD_LINE_CHARS = 240
         const val MAX_ERROR_CHARS = 180
     }
 }
-
-private data class PreparedToolImage(
-    val jpeg: ByteArray,
-    val base64: String,
-    val byteCount: Int,
-    val width: Int,
-    val height: Int,
-)
-
-private class SnapshotCaptureFailure(
-    val code: String,
-) : IllegalStateException()
 
 internal fun shouldUseRawCaptureFallback(result: NexusSdkResult): Boolean =
     result == NexusSdkResult.CAPABILITY_NOT_GRANTED ||
@@ -1055,23 +911,6 @@ internal fun snapshotStartErrorMessage(result: NexusSdkResult): String = when (r
     NexusSdkResult.CAPABILITY_NOT_GRANTED -> "Grant Camera access in Nexus settings."
     NexusSdkResult.NOT_REGISTERED -> "Assistant is not connected to Nexus."
     else -> "Glasses camera is unavailable."
-}
-
-internal fun snapshotToolErrorCode(error: NexusSnapshotError): String = when (error) {
-    NexusSnapshotError.BUSY -> TOOL_ERROR_CAMERA_BUSY
-    NexusSnapshotError.LINK_DOWN -> TOOL_ERROR_GLASSES_DISCONNECTED
-    NexusSnapshotError.CANCELLED -> TOOL_ERROR_CANCELLED
-    NexusSnapshotError.TIMEOUT,
-    NexusSnapshotError.CAPTURE_FAILED,
-    NexusSnapshotError.ERROR,
-    -> TOOL_ERROR_CAPTURE_FAILED
-}
-
-internal fun snapshotStartToolErrorCode(result: NexusSdkResult): String = when (result) {
-    NexusSdkResult.CAPABILITY_NOT_GRANTED -> TOOL_ERROR_NOT_AUTHORIZED
-    NexusSdkResult.NOT_REGISTERED -> TOOL_ERROR_GLASSES_DISCONNECTED
-    NexusSdkResult.CAPABILITY_NOT_AVAILABLE -> TOOL_ERROR_CAMERA_BUSY
-    else -> TOOL_ERROR_CAPTURE_FAILED
 }
 
 private fun normalizeTranscript(text: String): String =

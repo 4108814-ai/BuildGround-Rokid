@@ -21,7 +21,7 @@ internal data class OpenAiCompatChatRequest(
     val request: ChatRequest,
     val modelId: String,
     val messages: JSONArray,
-    val includeTakePhotoTool: Boolean,
+    val toolDefinitions: List<AssistantToolDefinition>,
     val requestId: String = request.requestId,
 )
 
@@ -94,44 +94,45 @@ internal class OpenAiCompatApiClient(
                 if (effort in preset.supportedEfforts) {
                     put("reasoning", JSONObject().put("effort", effort))
                 }
-                if (request.includeTakePhotoTool) {
-                    put("tools", JSONArray().put(takePhotoToolDeclaration()))
+                if (request.toolDefinitions.isNotEmpty()) {
+                    put(
+                        "tools",
+                        JSONArray().apply {
+                            request.toolDefinitions.forEach { definition ->
+                                put(compatToolDeclaration(definition))
+                            }
+                        },
+                    )
                 }
             }
 
     internal fun requestBody(
         request: ChatRequest,
         modelId: String,
-        includeTakePhotoTool: Boolean = false,
+        toolDefinitions: List<AssistantToolDefinition> = emptyList(),
     ): JSONObject = requestBody(
         OpenAiCompatChatRequest(
             request = request,
             modelId = modelId,
             messages = request.toChatCompletionMessages(),
-            includeTakePhotoTool = includeTakePhotoTool,
+            toolDefinitions = toolDefinitions,
         ),
     )
 
-    private fun takePhotoToolDeclaration(): JSONObject =
-        JSONObject()
+    private fun compatToolDeclaration(definition: AssistantToolDefinition): JSONObject {
+        val parameters = definition.parametersSchema.toJsonObject().apply {
+            if (optJSONArray("required")?.length() == 0) remove("required")
+        }
+        return JSONObject()
             .put("type", "function")
             .put(
                 "function",
                 JSONObject()
-                    .put("name", TAKE_PHOTO_TOOL_NAME)
-                    .put(
-                        "description",
-                        "Take one photo through the glasses camera to see what is currently in " +
-                            "front of the wearer.",
-                    )
-                    .put(
-                        "parameters",
-                        JSONObject()
-                            .put("type", "object")
-                            .put("properties", JSONObject())
-                            .put("additionalProperties", false),
-                    ),
+                    .put("name", definition.name)
+                    .put("description", definition.description)
+                    .put("parameters", parameters),
             )
+    }
 
     private fun openConnection(): HttpURLConnection =
         (URL(endpointUrl()).openConnection() as HttpURLConnection).apply {
@@ -210,14 +211,13 @@ internal class OpenAiToolCallAccumulator {
 private data class OpenAiCompatPassResult(
     val text: String,
     val toolCalls: List<AssistantToolCall>,
-    val toolsDeclared: Boolean,
 )
 
 internal class OpenAiCompatProvider(
     private val preset: ProviderPreset,
     private val apiClient: OpenAiCompatChatClient,
     private val apiKeyConfigured: () -> Boolean,
-    private val toolExecutor: AssistantToolExecutor,
+    private val toolRegistry: AssistantToolRegistry,
     private val modelProvider: () -> String = { preset.defaultModel },
     private val supportsVision: () -> Boolean,
 ) : AiProvider {
@@ -234,13 +234,19 @@ internal class OpenAiCompatProvider(
 
         try {
             val visionSupported = supportsVision()
+            val toolPhase = toolRegistry.newExecutionPhase(
+                AssistantProviderFeatures(
+                    supportsTools = true,
+                    supportsVision = visionSupported,
+                ),
+            )
             val effectiveRequest = request.forVisionSupport(visionSupported)
             val modelId = request.model ?: modelProvider()
             val originalMessages = effectiveRequest.toChatCompletionMessages()
 
             suspend fun streamPass(
                 messages: JSONArray,
-                includeTakePhotoTool: Boolean,
+                toolDefinitions: List<AssistantToolDefinition>,
             ): OpenAiCompatPassResult {
                 val response = StringBuilder()
                 val toolCalls = OpenAiToolCallAccumulator()
@@ -250,7 +256,7 @@ internal class OpenAiCompatProvider(
                         request = effectiveRequest,
                         modelId = modelId,
                         messages = messages,
-                        includeTakePhotoTool = includeTakePhotoTool,
+                        toolDefinitions = toolDefinitions,
                         requestId = request.requestId,
                     ),
                 ).collect { event ->
@@ -279,35 +285,29 @@ internal class OpenAiCompatProvider(
                 return OpenAiCompatPassResult(
                     text = cleanCompatResponse(response.toString()),
                     toolCalls = toolCalls.completeCalls(),
-                    toolsDeclared = includeTakePhotoTool,
                 )
             }
 
             val firstPass = try {
-                streamPass(originalMessages, includeTakePhotoTool = visionSupported)
+                streamPass(originalMessages, toolDefinitions = toolPhase.availableDefinitions)
             } catch (error: OpenAiCompatHttpException) {
-                if (!visionSupported || error.statusCode !in 400..499) throw error
-                streamPass(originalMessages, includeTakePhotoTool = false)
+                if (
+                    toolPhase.availableDefinitions.isEmpty() ||
+                    error.statusCode !in 400..499
+                ) {
+                    throw error
+                }
+                streamPass(originalMessages, toolDefinitions = emptyList())
             }
             currentCoroutineContext().ensureActive()
 
-            val finalText = if (firstPass.toolsDeclared && firstPass.toolCalls.isNotEmpty()) {
+            val finalText = if (firstPass.toolCalls.isNotEmpty()) {
                 emit(AiProviderEvent.TextReset(messageId))
                 val replayMessages = originalMessages.copyJsonArray()
                 replayMessages.put(assistantToolCallMessage(firstPass.text, firstPass.toolCalls))
-                var executorClaimed = false
                 var capturedPhoto: PhotoAttachment? = null
                 firstPass.toolCalls.forEach { call ->
-                    val result = when {
-                        !isValidTakePhotoCall(call) ->
-                            AssistantToolResult.Error(TOOL_ERROR_INVALID_CALL)
-                        executorClaimed ->
-                            AssistantToolResult.Error(TOOL_ERROR_ALREADY_USED)
-                        else -> {
-                            executorClaimed = true
-                            executeToolSafely(call)
-                        }
-                    }
+                    val result = toolPhase.execute(call)
                     currentCoroutineContext().ensureActive()
                     if (result is AssistantToolResult.Image) {
                         capturedPhoto = PhotoAttachment(result.mimeType, result.base64)
@@ -327,7 +327,7 @@ internal class OpenAiCompatProvider(
                             ),
                     )
                 }
-                streamPass(replayMessages, includeTakePhotoTool = false).text
+                streamPass(replayMessages, toolDefinitions = emptyList()).text
             } else {
                 firstPass.text
             }
@@ -360,16 +360,6 @@ internal class OpenAiCompatProvider(
     override suspend fun cancel(requestId: String) {
         apiClient.cancel(requestId)
     }
-
-    private suspend fun executeToolSafely(call: AssistantToolCall): AssistantToolResult =
-        try {
-            currentCoroutineContext().ensureActive()
-            toolExecutor.execute(call)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Throwable) {
-            AssistantToolResult.Error(TOOL_ERROR_CAPTURE_FAILED)
-        }
 }
 
 private fun assistantToolCallMessage(
@@ -403,6 +393,7 @@ private fun toolResultMessage(
     result: AssistantToolResult,
 ): JSONObject {
     val content = when (result) {
+        is AssistantToolResult.Json -> result.text
         is AssistantToolResult.Image ->
             JSONObject()
                 .put("status", "captured")

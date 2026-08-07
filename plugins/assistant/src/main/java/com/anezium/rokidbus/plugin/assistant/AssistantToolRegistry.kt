@@ -1,0 +1,154 @@
+package com.anezium.rokidbus.plugin.assistant
+
+import kotlinx.coroutines.CancellationException
+import org.json.JSONObject
+
+internal data class AssistantProviderFeatures(
+    val supportsTools: Boolean,
+    val supportsVision: Boolean,
+)
+
+internal data class AssistantToolSessionContext(
+    val active: Boolean,
+    val grantedCapabilities: Set<String> = emptySet(),
+)
+
+internal data class AssistantToolAvailabilityContext(
+    val provider: AssistantProviderFeatures,
+    val session: AssistantToolSessionContext,
+)
+
+internal data class AssistantToolJsonSchema(
+    val text: String,
+) {
+    init {
+        require(runCatching { JSONObject(text) }.isSuccess) {
+            "Assistant tool parameter schema must be a JSON object."
+        }
+    }
+
+    fun toJsonObject(): JSONObject = JSONObject(text)
+}
+
+internal sealed interface AssistantToolValidation {
+    data class Valid(val arguments: JSONObject) : AssistantToolValidation
+    data class Invalid(
+        val error: AssistantToolResult.Error = AssistantToolResult.Error(
+            TOOL_ERROR_INVALID_CALL,
+        ),
+    ) : AssistantToolValidation
+}
+
+internal interface AssistantToolDefinition {
+    val name: String
+    val description: String
+    val parametersSchema: AssistantToolJsonSchema
+    val sideEffecting: Boolean
+    val progressLabel: String?
+        get() = null
+    val executionFailureCode: String
+        get() = "${name}_failed"
+
+    fun isAvailable(context: AssistantToolAvailabilityContext): Boolean
+
+    fun validate(argumentsJson: String): AssistantToolValidation
+
+    suspend fun execute(
+        call: AssistantToolCall,
+        arguments: JSONObject,
+    ): AssistantToolResult
+}
+
+internal class AssistantToolRegistry(
+    definitions: List<AssistantToolDefinition>,
+    private val sessionContext: () -> AssistantToolSessionContext = {
+        AssistantToolSessionContext(active = true)
+    },
+) {
+    private val definitionsByName = definitions.associateBy(AssistantToolDefinition::name)
+
+    init {
+        require(definitionsByName.size == definitions.size) {
+            "Assistant tool names must be unique."
+        }
+        definitions.forEach { definition ->
+            require(TOOL_NAME.matches(definition.name)) {
+                "Assistant tool names must be stable lowercase identifiers."
+            }
+            require(definition.description.isNotBlank()) {
+                "Assistant tool descriptions must not be blank."
+            }
+            AssistantToolResult.Error(definition.executionFailureCode)
+        }
+    }
+
+    fun availableDefinitions(features: AssistantProviderFeatures): List<AssistantToolDefinition> {
+        if (!features.supportsTools) return emptyList()
+        val context = AssistantToolAvailabilityContext(features, sessionContext())
+        return definitionsByName.values.filter { definition ->
+            runCatching { definition.isAvailable(context) }.getOrDefault(false)
+        }
+    }
+
+    fun newExecutionPhase(features: AssistantProviderFeatures): AssistantToolExecutionPhase =
+        AssistantToolExecutionPhase(availableDefinitions(features))
+
+    private companion object {
+        val TOOL_NAME = Regex("[a-z][a-z0-9_]{0,63}")
+    }
+}
+
+internal class AssistantToolExecutionPhase(
+    val availableDefinitions: List<AssistantToolDefinition>,
+) {
+    private val definitionsByName = availableDefinitions.associateBy(AssistantToolDefinition::name)
+    private val resultsByCallId = mutableMapOf<String, AssistantToolResult>()
+    private val executedSideEffectingTools = mutableSetOf<String>()
+    private var executedCalls = 0
+
+    suspend fun execute(call: AssistantToolCall): AssistantToolResult {
+        resultsByCallId[call.callId]?.let { result -> return result }
+
+        val definition = definitionsByName[call.name]
+            ?: return memoize(call, AssistantToolResult.Error(TOOL_ERROR_INVALID_CALL))
+        val validation = try {
+            definition.validate(call.argumentsJson)
+        } catch (_: Throwable) {
+            AssistantToolValidation.Invalid()
+        }
+        if (validation is AssistantToolValidation.Invalid) {
+            return memoize(call, validation.error)
+        }
+        validation as AssistantToolValidation.Valid
+
+        if (
+            executedCalls >= MAX_EXECUTED_CALLS ||
+            definition.sideEffecting && definition.name in executedSideEffectingTools
+        ) {
+            return memoize(call, AssistantToolResult.Error(TOOL_ERROR_ALREADY_USED))
+        }
+
+        executedCalls += 1
+        if (definition.sideEffecting) executedSideEffectingTools += definition.name
+        val result = try {
+            definition.execute(call, validation.arguments)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            AssistantToolResult.Error(definition.executionFailureCode)
+        }
+        return memoize(call, result)
+    }
+
+    private fun memoize(
+        call: AssistantToolCall,
+        result: AssistantToolResult,
+    ): AssistantToolResult {
+        resultsByCallId[call.callId] = result
+        return result
+    }
+
+    private companion object {
+        const val MAX_EXECUTED_CALLS = 3
+    }
+}

@@ -116,7 +116,16 @@ class ChatGptCodexToolLoopTest {
     fun `all stable error codes serialize as compact tool output strings`() {
         val call = AssistantToolCall("call-1", TAKE_PHOTO_TOOL_NAME, "{}")
 
-        ASSISTANT_TOOL_ERROR_CODES.forEach { code ->
+        listOf(
+            TOOL_ERROR_NOT_AUTHORIZED,
+            TOOL_ERROR_GLASSES_DISCONNECTED,
+            TOOL_ERROR_CAMERA_BUSY,
+            TOOL_ERROR_ALREADY_USED,
+            TOOL_ERROR_CANCELLED,
+            TOOL_ERROR_CAPTURE_FAILED,
+            TOOL_ERROR_INVALID_CALL,
+            "notes_failed",
+        ).forEach { code ->
             val output = functionCallOutput(call, AssistantToolResult.Error(code))
             assertEquals("call-1", output.getString("call_id"))
             assertEquals(
@@ -124,6 +133,59 @@ class ChatGptCodexToolLoopTest {
                 output.getString("output"),
             )
         }
+    }
+
+    @Test
+    fun `json tool result replays as a function output string`() {
+        val output = functionCallOutput(
+            AssistantToolCall("call-json", "lookup_note", "{}"),
+            AssistantToolResult.Json("""{"ok":true,"title":"Groceries"}"""),
+        )
+
+        assertEquals("call-json", output.getString("call_id"))
+        assertEquals(
+            """{"ok":true,"title":"Groceries"}""",
+            output.getString("output"),
+        )
+    }
+
+    @Test
+    fun `test only second tool is declared dispatched and replayed`() = runTest {
+        val lookupTool = TestAssistantTool(
+            name = "lookup_note",
+            description = "Look up a saved note.",
+            executor = { _, _ ->
+                AssistantToolResult.Json("""{"ok":true,"title":"Groceries"}""")
+            },
+        )
+        val transport = FakeTransport(
+            StubResponse(
+                statusCode = 200,
+                sseData = listOf(
+                    functionCallDone("call-note", name = lookupTool.name),
+                    """{"type":"response.completed"}""",
+                ),
+            ),
+            completedText("Milk and bread."),
+        )
+        val provider = provider(
+            transport = transport,
+            additionalTools = listOf(lookupTool),
+        ) {
+            error("Photo tool must not execute")
+        }
+
+        provider.streamEvents(ChatRequest(userText = "Read my groceries note")).toList()
+
+        val declarations = JSONObject(transport.requests[0].body).getJSONArray("tools")
+        assertEquals(3, declarations.length())
+        assertEquals(TAKE_PHOTO_TOOL_NAME, declarations.getJSONObject(1).getString("name"))
+        assertEquals("lookup_note", declarations.getJSONObject(2).getString("name"))
+        val replay = JSONObject(transport.requests[1].body).getJSONArray("input")
+        assertEquals(
+            """{"ok":true,"title":"Groceries"}""",
+            replay.getJSONObject(2).getString("output"),
+        )
     }
 
     @Test
@@ -480,6 +542,7 @@ class ChatGptCodexToolLoopTest {
         refreshTokens: suspend () -> CodexChatGptOAuthTokenBundle = {
             error("Refresh was not expected.")
         },
+        additionalTools: List<AssistantToolDefinition> = emptyList(),
         executor: suspend (AssistantToolCall) -> AssistantToolResult,
     ): ChatGptCodexProvider =
         ChatGptCodexProvider(
@@ -490,7 +553,7 @@ class ChatGptCodexToolLoopTest {
                 sessionId = "tool-loop-test",
             ),
             oauthConfigured = { true },
-            toolExecutor = AssistantToolExecutor(executor),
+            toolRegistry = testToolRegistry(executor, *additionalTools.toTypedArray()),
         )
 
     private data class StubResponse(

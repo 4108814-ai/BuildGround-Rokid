@@ -66,7 +66,9 @@ class NexusAgentPolicyTest {
 
     @Test
     fun `non photo provider prompt denies current scene access without tool syntax`() {
-        val prompt = NexusAgentPolicy.buildSystemPrompt(photoTool = false).lowercase()
+        val prompt = NexusAgentPolicy.buildSystemPrompt(
+            availableToolNames = emptyList(),
+        ).lowercase()
 
         assertFalse(prompt.contains("take_photo"))
         assertTrue(prompt.contains("cannot take photos or see the current scene"))

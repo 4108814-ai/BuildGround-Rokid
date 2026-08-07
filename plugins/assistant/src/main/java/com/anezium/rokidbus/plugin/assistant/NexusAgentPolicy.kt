@@ -16,7 +16,7 @@ internal object NexusAgentPolicy {
         customPrompt: String = "",
         noticeBand: Boolean = false,
         memory: String = "",
-        photoTool: Boolean = true,
+        availableToolNames: Collection<String> = listOf(TAKE_PHOTO_TOOL_NAME),
     ): String {
         val base = customPrompt.trim().ifBlank { DEFAULT_SYSTEM_PROMPT }
         return buildString {
@@ -26,7 +26,7 @@ internal object NexusAgentPolicy {
             append("- Use 1-6 short HUD-friendly lines. Put the answer first and omit filler.\n")
             append("- Never pretend an action happened or claim access you do not have.\n")
             append("- Preserve numbers, dates, prices, units, references, names, and warnings.\n")
-            if (photoTool) {
+            if (TAKE_PHOTO_TOOL_NAME in availableToolNames) {
                 append(
                     "- You can call take_photo to inspect the wearer's current physical view. Decide yourself " +
                         "whether current visual information is necessary to answer. Do not call it for discussion " +
