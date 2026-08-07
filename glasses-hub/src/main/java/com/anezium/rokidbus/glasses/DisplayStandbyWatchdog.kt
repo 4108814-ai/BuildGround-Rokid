@@ -56,6 +56,9 @@ internal class DisplayStandbyWatchdog(
     }
 
     fun noteKeyEvent(event: KeyEvent) {
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            DisplayWakePolicy.noteUserInteraction()
+        }
         noteUserInput(event.eventTime)
     }
 

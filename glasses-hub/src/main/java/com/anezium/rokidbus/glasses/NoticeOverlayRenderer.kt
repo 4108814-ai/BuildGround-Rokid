@@ -25,6 +25,18 @@ import com.anezium.rokidbus.client.ui.BusTheme
 internal fun noticeBackdropAlpha(fadeAlpha: Float, backdrop: Boolean): Float =
     if (backdrop) fadeAlpha else 0f
 
+internal enum class NoticeRenderMotion {
+    ENTER,
+    REENTER,
+    UPDATE,
+}
+
+internal fun noticeRenderMotion(fadeAlpha: Float, exitRunning: Boolean): NoticeRenderMotion = when {
+    exitRunning -> NoticeRenderMotion.REENTER
+    fadeAlpha == 0f -> NoticeRenderMotion.ENTER
+    else -> NoticeRenderMotion.UPDATE
+}
+
 internal fun noticeBandHeightCeiling(
     displayHeightPx: Int,
     heightFraction: Float,
@@ -44,8 +56,8 @@ internal fun noticeBandHeightCeiling(
  * Like the pin and like Relay's own overlay, the window is never focusable and
  * never touchable: it does not steal focus from what is underneath, and the
  * touchpad keeps working for everything the notice has not explicitly claimed.
- * It also never keeps the screen on and never wakes the display — a notice that
- * arrives on a dark screen is missed, and that is the correct behaviour.
+ * The window never keeps the screen on. Wake requests are owned separately by
+ * [NoticeController], so the renderer cannot extend a notice's wake episode.
  */
 object NoticeOverlayRenderer {
     private var service: AccessibilityService? = null
@@ -58,6 +70,8 @@ object NoticeOverlayRenderer {
     private var bandHeightPx = 0
     private var backdrop = false
     private var hudTopInsetDp = 0
+    private var exitRunning = false
+    private var renderedSeq: Long? = null
 
     private val slide = HudMotionValue(0f) { offset -> band?.translationY = offset }
     private val fade = HudMotionValue(0f) { alpha ->
@@ -106,22 +120,41 @@ object NoticeOverlayRenderer {
         scrim?.alpha = noticeBackdropAlpha(fade.current, backdrop)
         val activeService = service ?: return
         val view = ensureWindow(activeService) ?: return
-        val arriving = fade.current == 0f
+        val motion = noticeRenderMotion(fade.current, exitRunning)
+        val fadeWasRunning = fade.isRunning
+        renderedSeq = notice.seq
         view.render(notice)
-        if (arriving) {
-            // Measure once the content is in place: the band's height is what the
-            // arrival slides through, and it depends on how much body there is.
-            view.post {
-                bandHeightPx = view.height.takeIf { it > 0 } ?: bandHeightPx
-                slide.snapTo(-bandHeightPx.toFloat())
+        log(
+            "renderer seq=${notice.seq} event=render attached=${container != null} " +
+                "fadeRunning=$fadeWasRunning",
+        )
+        when (motion) {
+            NoticeRenderMotion.ENTER -> {
+                // Measure once the content is in place: the band's height is what the
+                // arrival slides through, and it depends on how much body there is.
+                view.post {
+                    if (band !== view || renderedSeq != notice.seq || exitRunning) return@post
+                    bandHeightPx = view.height.takeIf { it > 0 } ?: bandHeightPx
+                    slide.snapTo(-bandHeightPx.toFloat())
+                    slide.animateTo(0f, HudMotion.STANDARD_MS, HudMotion.enter)
+                    fade.animateTo(1f, HudMotion.STANDARD_MS, HudMotion.enter)
+                }
+            }
+            NoticeRenderMotion.REENTER -> {
+                // Retargeting immediately cancels the exit's teardown continuation.
+                // Waiting for layout here leaves one main-loop turn in which the old
+                // fade can still reach zero and remove the live notice's window.
+                exitRunning = false
                 slide.animateTo(0f, HudMotion.STANDARD_MS, HudMotion.enter)
                 fade.animateTo(1f, HudMotion.STANDARD_MS, HudMotion.enter)
             }
+            NoticeRenderMotion.UPDATE -> Unit
         }
     }
 
     private fun dismiss() {
         if (container == null) return
+        exitRunning = true
         slide.animateTo(-bandHeightPx.toFloat(), HudMotion.EXIT_MS, HudMotion.exit)
         fade.animateTo(0f, HudMotion.EXIT_MS, HudMotion.exit) { teardown() }
     }
@@ -195,14 +228,21 @@ object NoticeOverlayRenderer {
 
     private fun teardown() {
         val root = container ?: return
+        val seq = renderedSeq ?: -1L
         runCatching { windowManager?.removeView(root) }
             .onFailure { logError("Notice overlay removal failed", it) }
         container = null
         scrim = null
         band = null
         backdrop = false
+        exitRunning = false
         slide.snapTo(0f)
         fade.snapTo(0f)
+        renderedSeq = null
+        log(
+            "renderer seq=$seq event=teardown attached=${container != null} " +
+                "fadeRunning=${fade.isRunning}",
+        )
     }
 
     /** Shared top-band geometry used unchanged by notices and activity flares. */

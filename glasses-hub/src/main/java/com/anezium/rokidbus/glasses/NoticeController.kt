@@ -237,6 +237,8 @@ internal sealed interface NoticeStateDecision {
 
     data class Closed(
         val surfaceId: String,
+        val seq: Long,
+        val ttlMs: Long,
         val reason: NoticeCloseReason,
         val imageBitmap: Bitmap? = null,
     ) : NoticeStateDecision
@@ -434,14 +436,26 @@ internal class NoticeStateMachine {
         latestSeq = seq
         val closing = active ?: return NoticeStateDecision.Ignored
         active = null
-        return NoticeStateDecision.Closed(closing.surfaceId, reason, closing.imageBitmap)
+        return NoticeStateDecision.Closed(
+            surfaceId = closing.surfaceId,
+            seq = closing.seq,
+            ttlMs = closing.content.ttlMs,
+            reason = reason,
+            imageBitmap = closing.imageBitmap,
+        )
     }
 
     /** BACK and TTL are local: they carry no sequence from the phone. */
     fun close(reason: NoticeCloseReason): NoticeStateDecision {
         val closing = active ?: return NoticeStateDecision.Ignored
         active = null
-        return NoticeStateDecision.Closed(closing.surfaceId, reason, closing.imageBitmap)
+        return NoticeStateDecision.Closed(
+            surfaceId = closing.surfaceId,
+            seq = closing.seq,
+            ttlMs = closing.content.ttlMs,
+            reason = reason,
+            imageBitmap = closing.imageBitmap,
+        )
     }
 
     fun expire(nowMs: Long, expectedSeq: Long): NoticeStateDecision {
@@ -449,9 +463,11 @@ internal class NoticeStateMachine {
         if (notice.seq != expectedSeq || nowMs < notice.expiresAtMs) return NoticeStateDecision.Ignored
         active = null
         return NoticeStateDecision.Closed(
-            notice.surfaceId,
-            NoticeCloseReason.TIMEOUT,
-            notice.imageBitmap,
+            surfaceId = notice.surfaceId,
+            seq = notice.seq,
+            ttlMs = notice.content.ttlMs,
+            reason = NoticeCloseReason.TIMEOUT,
+            imageBitmap = notice.imageBitmap,
         )
     }
 
@@ -461,6 +477,13 @@ internal class NoticeStateMachine {
 }
 
 internal object NoticeController {
+    private data class PendingNoticeWake(
+        val surfaceId: String,
+        val seq: Long,
+        val deadlineAtMs: Long,
+        val screenOffObserved: Boolean = false,
+    )
+
     private val main = Handler(Looper.getMainLooper())
     private val state = NoticeStateMachine()
     private val listeners = CopyOnWriteArrayList<(NexusNoticeSurface?) -> Unit>()
@@ -471,12 +494,27 @@ internal object NoticeController {
     private var expiry: Runnable? = null
     private var cameraOverlayActive = false
     private var serviceContext: Context? = null
-    private var sleepDisplay: (() -> Unit)? = null
+    private var sleepDisplay: (() -> Boolean)? = null
     private var episodeOwnsWake = false
+    private var noticeLockPending = false
+    private var pendingNoticeWake: PendingNoticeWake? = null
+    private val pendingNoticeWakeRetry = Runnable(::retryPendingNoticeWake)
     private var screenOffReceiverRegistered = false
     private val screenOffReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            runOnMain { episodeOwnsWake = false }
+            if (intent.action != Intent.ACTION_SCREEN_OFF) return
+            runOnMain {
+                episodeOwnsWake = false
+                noticeLockPending = false
+                pendingNoticeWake?.let { pending ->
+                    pendingNoticeWake = pending.copy(
+                        deadlineAtMs = SystemClock.elapsedRealtime() + LOCK_SETTLE_TIMEOUT_MS,
+                        screenOffObserved = true,
+                    )
+                    main.removeCallbacks(pendingNoticeWakeRetry)
+                    main.post(pendingNoticeWakeRetry)
+                }
+            }
         }
     }
     private val ringInputPolicy = RingSurfaceInputPolicy()
@@ -484,7 +522,7 @@ internal object NoticeController {
 
     fun activeNotice(): NexusNoticeSurface? = state.activeNotice()
 
-    fun onServiceConnected(context: Context, sleepDisplay: () -> Unit) {
+    fun onServiceConnected(context: Context, sleepDisplay: () -> Boolean) {
         runOnMain {
             serviceContext = context.applicationContext
             this.sleepDisplay = sleepDisplay
@@ -494,6 +532,8 @@ internal object NoticeController {
 
     fun onServiceDestroyed() {
         runOnMain {
+            clearPendingNoticeWake()
+            noticeLockPending = false
             sleepDisplay = null
             serviceContext = null
         }
@@ -761,16 +801,12 @@ internal object NoticeController {
             previous != null &&
             previous.surfaceId != surfaceId
         ) {
+            logNoticeClosed(previous, NoticeCloseReason.REPLACED)
             reportClosed(previous.surfaceId, NoticeCloseReason.REPLACED)
         }
         applyDecision(decision)
         if (decision is NoticeStateDecision.Shown) {
-            val wakeDecision = DisplayWakePolicy.requestWake(
-                context,
-                DisplayWakeKind.NOTICE,
-                requested = decision.notice.content.wakeDisplay,
-            )
-            if (wakeDecision is DisplayWakeDecision.Wake) episodeOwnsWake = true
+            requestNoticeWake(context, decision.notice)
             previous?.imageBitmap
                 ?.takeUnless { it === decision.notice.imageBitmap }
                 ?.recycleSafely()
@@ -805,6 +841,10 @@ internal object NoticeController {
     private fun applyDecision(decision: NoticeStateDecision) {
         when (decision) {
             is NoticeStateDecision.Shown -> {
+                log(
+                    "notice state=shown seq=${decision.notice.seq} " +
+                        "ttlMs=${decision.notice.content.ttlMs}",
+                )
                 scheduleExpiry(decision.notice)
                 notifyChanged()
             }
@@ -825,9 +865,14 @@ internal object NoticeController {
                 notifyChanged()
             }
             is NoticeStateDecision.Closed -> {
+                clearPendingNoticeWake()
                 cancelExpiry()
                 main.removeCallbacks(ringTapExpiry)
                 ringInputPolicy.reset()
+                log(
+                    "notice state=closed seq=${decision.seq} ttlMs=${decision.ttlMs} " +
+                        "reason=${decision.reason.wireValue}",
+                )
                 reportClosed(decision.surfaceId, decision.reason)
                 notifyChanged()
                 maybeSleepDisplay(decision.reason)
@@ -866,6 +911,90 @@ internal object NoticeController {
         expiry = null
     }
 
+    private fun requestNoticeWake(context: Context, notice: NexusNoticeSurface) {
+        clearPendingNoticeWake()
+        val wakeDecision = DisplayWakePolicy.requestWake(
+            context = context,
+            kind = DisplayWakeKind.NOTICE,
+            requested = notice.content.wakeDisplay,
+            seq = notice.seq,
+            newNotice = true,
+        )
+        when (wakeDecision) {
+            is DisplayWakeDecision.Wake -> {
+                noticeLockPending = false
+                episodeOwnsWake = true
+            }
+            is DisplayWakeDecision.Refused -> {
+                if (
+                    wakeDecision.reason == DisplayWakeRefusal.ALREADY_INTERACTIVE &&
+                    notice.content.wakeDisplay &&
+                    noticeLockPending
+                ) {
+                    pendingNoticeWake = PendingNoticeWake(
+                        surfaceId = notice.surfaceId,
+                        seq = notice.seq,
+                        deadlineAtMs = SystemClock.elapsedRealtime() + LOCK_SETTLE_TIMEOUT_MS,
+                    )
+                    main.postDelayed(pendingNoticeWakeRetry, LOCK_SETTLE_TIMEOUT_MS)
+                }
+            }
+        }
+    }
+
+    private fun retryPendingNoticeWake() {
+        val pending = pendingNoticeWake ?: return
+        val nowMs = SystemClock.elapsedRealtime()
+        if (!pending.screenOffObserved) {
+            val remainingMs = pending.deadlineAtMs - nowMs
+            if (remainingMs > 0L) {
+                main.postDelayed(pendingNoticeWakeRetry, remainingMs)
+            } else {
+                clearPendingNoticeWake()
+            }
+            return
+        }
+        val notice = state.activeNotice()
+        if (notice == null || notice.surfaceId != pending.surfaceId) {
+            clearPendingNoticeWake()
+            return
+        }
+        val context = serviceContext
+        if (context == null) {
+            clearPendingNoticeWake()
+            return
+        }
+        val wakeDecision = DisplayWakePolicy.requestWake(
+            context = context,
+            kind = DisplayWakeKind.NOTICE,
+            requested = true,
+            seq = pending.seq,
+            newNotice = true,
+        )
+        when (wakeDecision) {
+            is DisplayWakeDecision.Wake -> {
+                noticeLockPending = false
+                episodeOwnsWake = true
+                clearPendingNoticeWake()
+            }
+            is DisplayWakeDecision.Refused -> {
+                if (
+                    wakeDecision.reason == DisplayWakeRefusal.ALREADY_INTERACTIVE &&
+                    nowMs < pending.deadlineAtMs
+                ) {
+                    main.postDelayed(pendingNoticeWakeRetry, LOCK_SETTLE_RETRY_MS)
+                } else {
+                    clearPendingNoticeWake()
+                }
+            }
+        }
+    }
+
+    private fun clearPendingNoticeWake() {
+        main.removeCallbacks(pendingNoticeWakeRetry)
+        pendingNoticeWake = null
+    }
+
     private fun discardPendingImage() {
         imageDecodeCoordinator.invalidate()?.let { pending ->
             if (pending !== state.activeNotice()?.imageBitmap) pending.recycleSafely()
@@ -898,8 +1027,10 @@ internal object NoticeController {
                 )
             ) {
                 NoticeSleepDecision.Sleep -> {
-                    log("notice display sleep")
-                    sleep()
+                    noticeLockPending = true
+                    val locked = runCatching(sleep).getOrDefault(false)
+                    if (!locked) noticeLockPending = false
+                    log("notice display sleep locked=$locked")
                 }
                 is NoticeSleepDecision.Skip ->
                     log("notice display sleep skipped condition=${decision.reason.logValue}")
@@ -927,9 +1058,19 @@ internal object NoticeController {
         listeners.forEach { listener -> runCatching { listener(visible) } }
     }
 
+    private fun logNoticeClosed(notice: NexusNoticeSurface, reason: NoticeCloseReason) {
+        log(
+            "notice state=closed seq=${notice.seq} ttlMs=${notice.content.ttlMs} " +
+                "reason=${reason.wireValue}",
+        )
+    }
+
     private fun runOnMain(block: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block)
     }
+
+    private const val LOCK_SETTLE_RETRY_MS = 75L
+    private const val LOCK_SETTLE_TIMEOUT_MS = 2_000L
 }
 
 private fun Bitmap.recycleSafely() {
