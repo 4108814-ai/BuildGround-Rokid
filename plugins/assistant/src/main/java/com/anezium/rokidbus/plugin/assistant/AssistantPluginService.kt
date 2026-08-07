@@ -179,6 +179,7 @@ class AssistantPluginService : NexusPluginService() {
 
     override fun onCreate() {
         super.onCreate()
+        debugInstance = this
         scheduleAccountContextSyncIfStale()
     }
 
@@ -241,6 +242,7 @@ class AssistantPluginService : NexusPluginService() {
     }
 
     override fun onDestroy() {
+        if (debugInstance === this) debugInstance = null
         uiController.onClose()
         resetCapture()
         cancelPipeline()
@@ -887,17 +889,39 @@ class AssistantPluginService : NexusPluginService() {
     private fun providerSupportsPhotos(providerId: String): Boolean =
         providerId == ChatGptCodexProvider.ID || authStore.providerModelSupportsPhotos(providerId)
 
-    private companion object {
-        const val TAG = "NexusAssistant"
-        const val SURFACE_ID = "assistant"
-        const val AI_ASSIST_OPEN_PATH = "/system/plugin/ai-assist"
-        const val AI_ASSIST_OPEN_TYPE = "ai_assist"
-        const val FALLBACK_CAPTURE_DURATION_MS = 6_000L
-        const val HUD_UPDATE_INTERVAL_MS = 250L
-        const val MAX_HUD_LINES = 6
-        const val MAX_HUD_LINE_CHARS = 42
-        const val MAX_CARD_LINE_CHARS = 240
-        const val MAX_ERROR_CHARS = 180
+    companion object {
+        private const val TAG = "NexusAssistant"
+        private const val SURFACE_ID = "assistant"
+        private const val AI_ASSIST_OPEN_PATH = "/system/plugin/ai-assist"
+        private const val AI_ASSIST_OPEN_TYPE = "ai_assist"
+        private const val FALLBACK_CAPTURE_DURATION_MS = 6_000L
+        private const val HUD_UPDATE_INTERVAL_MS = 250L
+        private const val MAX_HUD_LINES = 6
+        private const val MAX_HUD_LINE_CHARS = 42
+        private const val MAX_CARD_LINE_CHARS = 240
+        private const val MAX_ERROR_CHARS = 180
+
+        @Volatile
+        private var debugInstance: AssistantPluginService? = null
+
+        /**
+         * Test-only rendezvous for [AssistantDebugAskReceiver]: hands a typed
+         * question to the live service as if speech had produced it. Returns
+         * false when no service process is up; a closed session is reported in
+         * logcat from the main thread, where the session flag is trustworthy.
+         */
+        internal fun debugAsk(question: String): Boolean {
+            val service = debugInstance ?: return false
+            service.serviceScope.launch {
+                if (!service.isNexusSessionOpen) {
+                    Log.i(TAG, "debug ask ignored: no open assistant session")
+                    return@launch
+                }
+                service.stopAnswerSpeech()
+                service.launchAssistantPipeline(question)
+            }
+            return true
+        }
     }
 }
 

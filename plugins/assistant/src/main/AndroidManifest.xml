@@ -59,6 +59,10 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name=".AssistantDebugAskReceiver"
+            android:exported="false" />
+
         <service
             android:name=".ReminderDeliveryService"
             android:exported="false"
