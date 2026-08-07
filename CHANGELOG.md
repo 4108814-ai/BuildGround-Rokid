@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.11
+
+- **The update banner says what the update is.** It used to offer a version
+  number and nothing else, so anyone who already knows the app had no reason
+  to suspect there was anything worth reading behind it. The first lines of
+  the release notes now sit in the banner, cut off after three — tap the
+  banner for the rest. Install still just installs.
+
 ## 1.2.10
 
 - **The Store's Remove button removes again.** The new plugin detail screen
