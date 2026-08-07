@@ -21,11 +21,23 @@ Plugins are **dormant unless open**: the hub initiates everything. Your process 
 only between `PLUGIN_OPEN` and `PLUGIN_CLOSE`. Do not register yourself at boot, do
 not poll in the background, do not post notifications. The SDK holds a
 foreground-service session while you are open and drops it on close; the
-user-facing notification that names the live plugin belongs to the hub. The one
-sanctioned exception: a capability that Android forces into its own foreground
-service *while your surface is open* (Feeds' overlay WebView host is the
-precedent) may run that service with its own minimal notification — it must
-start with your surface, die with it, and never outlive a close.
+user-facing notification that names the live plugin belongs to the hub. Two
+sanctioned exceptions:
+
+1. A capability that Android forces into its own foreground service *while your
+   surface is open* (Feeds' overlay WebView host is the precedent) may run that
+   service with its own minimal notification — it must start with your surface,
+   die with it, and never outlive a close.
+2. **Scheduled delivery** (the Assistant's reminders are the precedent): a plugin
+   may wake at a moment the wearer *explicitly scheduled through it* — an alarm,
+   reminder, or timer they asked for by name — to deliver exactly that item. The
+   wake must be an `AlarmManager` broadcast into a short-lived foreground service
+   that posts the corresponding notification, optionally raises one notice or pin
+   through a one-shot registration, and stops itself within seconds. A boot
+   receiver may do nothing beyond rescheduling those same user-created alarms.
+   This is not a license to poll, sync, refresh, or run at boot for any other
+   reason; "the user would probably want it" does not qualify — only an item the
+   user explicitly created with a delivery time does.
 
 ## 2. Project setup
 
@@ -60,7 +72,10 @@ Copy `plugins/sample` as the canonical template. The hard rules:
    AAR manifest, but declare it in your own manifest too for clarity).
 5. Foreground-service permissions: `FOREGROUND_SERVICE` +
    `FOREGROUND_SERVICE_SPECIAL_USE`. Do **not** declare `POST_NOTIFICATIONS` — the
-   session FGS runs fine with its notification suppressed on Android 13+.
+   session FGS runs fine with its notification suppressed on Android 13+. The one
+   exception is scheduled delivery (§1): a plugin that delivers user-created
+   reminders may declare `POST_NOTIFICATIONS`, `SCHEDULE_EXACT_ALARM`, and
+   `RECEIVE_BOOT_COMPLETED`, strictly for those deliveries.
 6. `REQUEST_DELETE_PACKAGES` — required for the in-app Uninstall row
    (`NexusUi.uninstallCard`) to open the system uninstall dialog. Without it the
    `ACTION_DELETE` intent is silently rejected.

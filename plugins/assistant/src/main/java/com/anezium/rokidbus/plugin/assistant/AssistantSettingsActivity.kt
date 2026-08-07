@@ -44,6 +44,7 @@ class AssistantSettingsActivity : Activity() {
     private lateinit var personaField: EditText
     private lateinit var personaStatus: TextView
     private lateinit var conversationsSlot: LinearLayout
+    private lateinit var productivitySlot: LinearLayout
     private lateinit var syncSection: LinearLayout
     private lateinit var syncFooter: LinearLayout
     private lateinit var memorySyncStatus: TextView
@@ -150,6 +151,7 @@ class AssistantSettingsActivity : Activity() {
         renderConversationSettings()
         renderPersona()
         renderMemory()
+        renderProductivityCard()
     }
 
     private fun buildUi() {
@@ -241,6 +243,16 @@ class AssistantSettingsActivity : Activity() {
             addView(syncSection, NexusUi.block())
             addView(notesCard(), NexusUi.block())
             addView(BusTheme.gap(this@AssistantSettingsActivity, 28))
+            addView(
+                NexusUi.sectionRow(this@AssistantSettingsActivity, "Notes & reminders"),
+                NexusUi.block(),
+            )
+            addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
+            productivitySlot = LinearLayout(this@AssistantSettingsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            addView(productivitySlot, NexusUi.block())
+            addView(BusTheme.gap(this@AssistantSettingsActivity, 28))
             addView(NexusUi.sectionRow(this@AssistantSettingsActivity, "Plugin"), NexusUi.block())
             addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
             addView(uninstallCard(), NexusUi.block())
@@ -267,6 +279,7 @@ class AssistantSettingsActivity : Activity() {
         renderConversationSettings()
         renderPersona()
         renderMemory()
+        renderProductivityCard()
     }
 
     // ------------------------------------------------------------------ providers
@@ -1413,6 +1426,53 @@ class AssistantSettingsActivity : Activity() {
         else -> "$count saved on this phone"
     }
 
+    // ------------------------------------------------------- notes & reminders
+
+    private fun renderProductivityCard() {
+        // Two file reads; keep them off the frame that is drawing the screen.
+        Thread {
+            val reminders = runCatching {
+                AssistantReminderStore(applicationContext).pending().size
+            }.getOrDefault(0)
+            val notes = runCatching {
+                AssistantNoteStore(applicationContext).notes().size
+            }.getOrDefault(0)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                productivitySlot.removeAllViews()
+                productivitySlot.addView(
+                    NexusUi.navCard(
+                        this,
+                        "Notes & reminders",
+                        productivitySubtitle(notes, reminders),
+                    ) {
+                        startActivity(
+                            Intent(this, AssistantProductivityActivity::class.java),
+                        )
+                    },
+                    NexusUi.block(),
+                )
+            }
+        }.start()
+    }
+
+    private fun productivitySubtitle(notes: Int, reminders: Int): String {
+        if (notes == 0 && reminders == 0) {
+            return "Say “remind me…” or “take a note” on the glasses"
+        }
+        val notePart = when (notes) {
+            0 -> null
+            1 -> "1 note"
+            else -> "$notes notes"
+        }
+        val reminderPart = when (reminders) {
+            0 -> null
+            1 -> "1 pending reminder"
+            else -> "$reminders pending reminders"
+        }
+        return listOfNotNull(notePart, reminderPart).joinToString(" · ")
+    }
+
     // ------------------------------------------------------------------ memory
 
     private fun syncCard(): LinearLayout =
@@ -1501,7 +1561,8 @@ class AssistantSettingsActivity : Activity() {
             addView(
                 NexusUi.cardBody(
                     this@AssistantSettingsActivity,
-                    "Notes the assistant keeps in mind for every question you ask.",
+                    "Standing notes woven into every question you ask. One-off notes " +
+                        "you dictate on the glasses live in Notes & reminders below.",
                 ),
                 NexusUi.block(),
             )

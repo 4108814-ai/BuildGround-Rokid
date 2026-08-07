@@ -32,6 +32,10 @@
             android:exported="false" />
 
         <activity
+            android:name=".AssistantProductivityActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".CodexChatGptSignInActivity"
             android:exported="false"
             android:launchMode="singleTask" />
