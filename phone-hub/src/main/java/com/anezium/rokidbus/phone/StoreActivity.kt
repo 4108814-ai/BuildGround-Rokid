@@ -1,62 +1,44 @@
 package com.anezium.rokidbus.phone
 
 import android.app.Activity
-import android.content.ComponentName
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.graphics.Typeface
-import android.graphics.drawable.BitmapDrawable
-import android.graphics.drawable.Drawable
-import android.os.Build
+import android.graphics.drawable.StateListDrawable
 import android.os.Bundle
 import android.text.SpannableString
 import android.text.Spanned
+import android.text.TextUtils
 import android.text.style.ForegroundColorSpan
 import android.util.Log
 import android.view.Gravity
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.HorizontalScrollView
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import android.widget.Toast
 import com.anezium.rokidbus.client.ui.BusTheme
-import com.anezium.rokidbus.client.ui.NexusPluginIcons
 import com.anezium.rokidbus.client.ui.NexusUi
-import com.anezium.rokidbus.client.ui.PluginCustomIcon
 
+/**
+ * The Store list is an index: one dense row per plugin, everything else —
+ * summary, screenshots, changelog, install — lives on the detail screen.
+ */
 class StoreActivity : Activity() {
     private lateinit var list: LinearLayout
     private lateinit var chipRow: LinearLayout
+    private lateinit var headerSub: TextView
     private lateinit var registryClient: RegistryClient
     private lateinit var iconLoader: StoreIconLoader
-    private lateinit var pluginInstaller: PluginInstaller
-    private lateinit var postInstallCoordinator: PluginPostInstallCoordinator
     private var registrySnapshot: RegistrySnapshot? = null
     private var registryLoading = true
     private var registryFailure: Throwable? = null
     private var selectedCategory = ALL_CATEGORY
-    private val installStates = mutableMapOf<String, PluginInstallState>()
-    private val installOperations = mutableMapOf<String, PluginInstallOperation>()
     private val hostVersionCode: Long by lazy {
-        installedVersionCodes(setOf(packageName))[packageName] ?: 0L
+        StoreScreens.installedVersionCodes(packageManager, setOf(packageName))[packageName] ?: 0L
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         registryClient = RegistryClient.create(applicationContext)
         iconLoader = StoreIconLoader(applicationContext)
-        postInstallCoordinator = PluginPostInstallCoordinator(
-            discoverPackage = PhonePluginDiscovery(packageManager)::discoverPackage,
-            grantState = PluginGrantStore(applicationContext)::stateFor,
-            refreshCatalog = ::renderCatalog,
-        )
-        pluginInstaller = PluginInstaller.create(
-            context = applicationContext,
-            hostVersionCode = hostVersionCode,
-        )
         buildUi()
         refreshRegistry()
     }
@@ -130,21 +112,9 @@ class StoreActivity : Activity() {
     private fun renderCatalog() {
         if (!::list.isInitialized) return
         val feed = registrySnapshot?.feed ?: RegistryFeed(RegistryClient.SUPPORTED_VERSION, emptyList())
-        val local = BusHubService.pluginCatalog(this)
-        val packageNames = buildSet {
-            feed.plugins.forEach { add(it.artifact.packageName) }
-            local.entries.mapNotNullTo(this) {
-                it.principal?.packageName ?: it.settingsComponent?.packageName
-            }
-        }
-        val catalog = StoreCatalog.build(
-            feed = feed,
-            localCatalog = local,
-            installedVersionCodes = installedVersionCodes(packageNames),
-            hostVersionCode = hostVersionCode,
-            logger = { Log.w(TAG, it) },
-        )
+        val catalog = StoreScreens.buildCatalog(this, feed, hostVersionCode) { Log.w(TAG, it) }
 
+        renderHeaderSub(catalog)
         renderChips(feed)
         list.removeAllViews()
         renderCatalogueStatus(feed)
@@ -155,8 +125,28 @@ class StoreActivity : Activity() {
             addEmptyCard("No plugins here", "Choose another category to see available plugins.")
         }
         visible.forEachIndexed { index, entry ->
-            if (index > 0 || list.childCount > 0) list.addView(BusTheme.gap(this, 10))
-            list.addView(storeEntryCard(entry), NexusUi.block())
+            if (index > 0 || list.childCount > 0) list.addView(BusTheme.gap(this, 7))
+            list.addView(storeRow(entry), NexusUi.block())
+        }
+    }
+
+    private fun renderHeaderSub(catalog: StoreCatalog) {
+        if (!::headerSub.isInitialized) return
+        val total = catalog.entries.size
+        if (total == 0) {
+            headerSub.text = "Plugins for your glasses"
+            return
+        }
+        val installed = catalog.entries.count {
+            it.state == StoreEntryState.INSTALLED ||
+                it.state == StoreEntryState.SIDELOADED ||
+                it.state == StoreEntryState.UPDATE_AVAILABLE
+        }
+        val updates = catalog.entries.count { it.state == StoreEntryState.UPDATE_AVAILABLE }
+        headerSub.text = buildString {
+            append(total).append(" plugin").append(if (total == 1) "" else "s")
+            append(" · ").append(installed).append(" installed")
+            if (updates > 0) append(" · ").append(updates).append(" update").append(if (updates == 1) "" else "s")
         }
     }
 
@@ -212,204 +202,112 @@ class StoreActivity : Activity() {
                 addView(NexusUi.cardBody(this@StoreActivity, body), NexusUi.block())
                 action?.let { (label, onClick) ->
                     addView(BusTheme.gap(this@StoreActivity, 12))
-                    addView(storeButton(label, filled = false, enabled = true, onClick = onClick))
+                    addView(
+                        NexusUi.outlinePillButton(this@StoreActivity, label).apply {
+                            setOnClickListener { onClick() }
+                        },
+                        LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ),
+                    )
                 }
             },
             NexusUi.block(),
         )
     }
 
-    private fun storeEntryCard(entry: StoreEntry): LinearLayout {
-        val action = actionFor(entry)
-        return storeCard(
-            icon = storeIconView(entry),
-            title = entry.displayName,
-            meta = buildString {
-                entry.registryAuthor?.takeIf(String::isNotBlank)?.let { append(it).append(" · ") }
-                append(metaFor(entry))
+    private fun storeRow(entry: StoreEntry): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = rowBackground(highlight = entry.state == StoreEntryState.UPDATE_AVAILABLE)
+        setPadding(
+            NexusUi.dp(this@StoreActivity, 12),
+            NexusUi.dp(this@StoreActivity, 10),
+            NexusUi.dp(this@StoreActivity, 13),
+            NexusUi.dp(this@StoreActivity, 10),
+        )
+        isClickable = true
+        isFocusable = true
+        setOnClickListener {
+            startActivity(StorePluginDetailActivity.intent(this@StoreActivity, entry.id))
+        }
+        addView(StoreScreens.iconView(this@StoreActivity, iconLoader, entry, 32))
+        addView(
+            LinearLayout(this@StoreActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(
+                    NexusUi.rowTitle(this@StoreActivity, entry.displayName).apply { maxLines = 1 },
+                )
+                addView(BusTheme.gap(this@StoreActivity, 3))
+                addView(
+                    NexusUi.metaLabel(this@StoreActivity, rowMeta(entry), NexusUi.INK3).apply {
+                        textSize = 9f
+                        maxLines = 1
+                        ellipsize = TextUtils.TruncateAt.END
+                    },
+                )
             },
-            description = entry.summary,
-            size = sizeFor(entry),
-            button = action.label,
-            buttonEnabled = action.enabled,
-            buttonFilled = action.filled,
-            onClick = action.onClick,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = NexusUi.dp(this@StoreActivity, 11)
+            },
+        )
+        val (stateLabel, stateColor) = rowState(entry)
+        addView(
+            NexusUi.metaLabel(this@StoreActivity, stateLabel, stateColor).apply {
+                textSize = 9.5f
+            },
+        )
+        addView(
+            NexusUi.chevron(this@StoreActivity),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { marginStart = NexusUi.dp(this@StoreActivity, 9) },
         )
     }
 
-    private fun storeIconView(entry: StoreEntry): ImageView {
-        val imageView = NexusUi.iconTileDrawable(this, fallbackIcon(entry), 40)
-        val iconUrl = entry.registryPlugin?.iconUrl ?: return imageView
-        imageView.tag = iconUrl
-        iconLoader.load(iconUrl) { bitmap ->
-            if (isFinishing || isDestroyed || imageView.tag != iconUrl) return@load
-            NexusUi.applyIconTileArtwork(
-                imageView,
-                BitmapDrawable(resources, bitmap),
-                sizeDp = 40,
+    private fun rowBackground(highlight: Boolean): StateListDrawable =
+        StateListDrawable().apply {
+            val stroke = if (highlight) UPDATE_STROKE else NexusUi.LINE2
+            addState(
+                intArrayOf(android.R.attr.state_pressed),
+                NexusUi.bordered(this@StoreActivity, NexusUi.CARD_PRESSED, stroke, 12),
             )
+            addState(intArrayOf(), NexusUi.bordered(this@StoreActivity, NexusUi.PANEL, stroke, 12))
         }
-        return imageView
-    }
 
-    private fun fallbackIcon(entry: StoreEntry): Drawable {
-        val local = entry.localEntry
-        return when (
-            val fallback = selectStoreIconFallback(
-                pluginId = entry.id,
-                installedPackageName = local?.principal?.packageName,
-                iconKey = local?.iconKey,
-                customIconResId = local?.iconDrawableResId,
-            )
-        ) {
-            is StoreIconFallback.InstalledDescriptor -> NexusPluginIcons.resolve(
-                context = this,
-                iconKey = fallback.iconKey,
-                customIcon = fallback.customIconResId?.let { resId ->
-                    PluginCustomIcon(fallback.packageName, resId)
-                },
-                pluginId = fallback.pluginId,
-                fallbackResId = fallback.legacyResId,
-            )
-            is StoreIconFallback.Legacy -> requireNotNull(getDrawable(fallback.resId))
+    private fun rowMeta(entry: StoreEntry): String {
+        val author = entry.registryAuthor?.takeIf(String::isNotBlank)
+        val plugin = entry.registryPlugin
+        return when (entry.state) {
+            StoreEntryState.AVAILABLE -> listOfNotNull(
+                author,
+                StoreScreens.formatSize(plugin?.artifact?.sizeBytes) ?: entry.category,
+            ).joinToString(" · ")
+            StoreEntryState.UPDATE_AVAILABLE -> listOfNotNull(
+                author,
+                plugin?.artifact?.versionName?.let { "$it available" },
+            ).joinToString(" · ")
+            StoreEntryState.INSTALLED -> listOfNotNull(
+                author,
+                if (entry.updateBlockedByHost) "update needs newer Nexus" else plugin?.artifact?.versionName,
+            ).joinToString(" · ").ifBlank { StoreScreens.grantLabel(entry.localGrantState) }
+            StoreEntryState.SIDELOADED -> "Local · ${StoreScreens.grantLabel(entry.localGrantState)}"
+            StoreEntryState.REQUIRES_HOST -> listOfNotNull(author, "needs a Nexus update").joinToString(" · ")
         }
     }
 
-    private data class StoreAction(
-        val label: String,
-        val enabled: Boolean,
-        val filled: Boolean,
-        val onClick: () -> Unit,
-    )
-
-    private fun actionFor(entry: StoreEntry): StoreAction {
-        val installState = installStates[entry.id]
-        if (installState != null) {
-            return when (installState) {
-                is PluginInstallState.Downloading -> StoreAction(
-                    label = installState.totalBytes?.takeIf { it > 0 }?.let {
-                        "${(installState.downloadedBytes * 100 / it).coerceIn(0, 100)}% · Cancel"
-                    } ?: "Cancel",
-                    enabled = true,
-                    filled = false,
-                    onClick = { installOperations[entry.id]?.cancel() },
-                )
-                PluginInstallState.Verifying -> StoreAction("Verifying", false, false) {}
-                PluginInstallState.Installing -> StoreAction("Preparing", false, false) {}
-                PluginInstallState.AwaitingUserConfirmation -> StoreAction("Confirm install", false, false) {}
-                PluginInstallState.Cancelled -> StoreAction("Retry", true, false) { beginInstall(entry) }
-                is PluginInstallState.Failure -> StoreAction("Retry", true, false) { beginInstall(entry) }
-                is PluginInstallState.Success -> baseAction(entry)
-            }
-        }
-        return baseAction(entry)
-    }
-
-    private fun baseAction(entry: StoreEntry): StoreAction = when (entry.state) {
-        StoreEntryState.AVAILABLE -> StoreAction("Install", true, true) { beginInstall(entry) }
-        StoreEntryState.UPDATE_AVAILABLE -> StoreAction("Update", true, true) { beginInstall(entry) }
-        StoreEntryState.REQUIRES_HOST -> StoreAction("Unavailable", false, false) {}
+    private fun rowState(entry: StoreEntry): Pair<String, Int> = when (entry.state) {
+        StoreEntryState.AVAILABLE -> "Get" to NexusUi.GREEN
+        StoreEntryState.UPDATE_AVAILABLE -> "Update" to NexusUi.AMBER
+        StoreEntryState.REQUIRES_HOST -> "Held" to NexusUi.INK4
         StoreEntryState.INSTALLED,
         StoreEntryState.SIDELOADED,
-        -> {
-            val review = entry.localGrantState in REVIEW_STATES
-            StoreAction(if (review) "Review" else "Open", true, false) {
-                openCatalogEntry(entry.localEntry)
-            }
-        }
-    }
-
-    private fun beginInstall(entry: StoreEntry) {
-        installStates.remove(entry.id)
-        installOperations[entry.id] = pluginInstaller.install(entry) { state ->
-            installStates[entry.id] = state
-            if (state is PluginInstallState.Failure) {
-                Toast.makeText(this, state.message, Toast.LENGTH_LONG).show()
-            } else if (state == PluginInstallState.Cancelled) {
-                Toast.makeText(this, "Installation cancelled", Toast.LENGTH_SHORT).show()
-            } else if (state is PluginInstallState.Success) {
-                installOperations.remove(entry.id)
-                when (val handoff = postInstallCoordinator.onInstalled(state.packageName, state.pluginId)) {
-                    is PluginPostInstallResult.Ready -> {
-                        Toast.makeText(this, "${entry.displayName} installed. Review its access.", Toast.LENGTH_SHORT).show()
-                        startActivity(PluginPermissionsActivity.intent(this, handoff.target))
-                    }
-                    is PluginPostInstallResult.Failure -> {
-                        Toast.makeText(this, handoff.reason, Toast.LENGTH_LONG).show()
-                    }
-                }
-            }
-            renderCatalog()
-        }
-    }
-
-    private fun metaFor(entry: StoreEntry): String = when (entry.state) {
-        StoreEntryState.AVAILABLE -> "${entry.category} · ${entry.registryPlugin?.artifact?.versionName.orEmpty()}"
-        StoreEntryState.UPDATE_AVAILABLE ->
-            "Update available · ${entry.registryPlugin?.artifact?.versionName.orEmpty()}"
-        StoreEntryState.INSTALLED -> if (entry.updateBlockedByHost) {
-            "Installed · Update requires Nexus host ${entry.registryPlugin?.nexus?.minHostVersionCode ?: "?"}"
+        -> if (entry.localGrantState in REVIEW_STATES) {
+            "Review" to NexusUi.AMBER
         } else {
-            "Installed · ${grantLabel(entry.localGrantState)}"
-        }
-        StoreEntryState.SIDELOADED -> "Local · ${grantLabel(entry.localGrantState)}"
-        StoreEntryState.REQUIRES_HOST ->
-            "Requires Nexus host ${entry.registryPlugin?.nexus?.minHostVersionCode ?: "?"}"
-    }
-
-    private fun grantLabel(state: PluginCatalogState?): String = when (state) {
-        PluginCatalogState.BUILT_IN -> "built in"
-        PluginCatalogState.PENDING -> "pending approval"
-        PluginCatalogState.ENABLED -> "enabled"
-        PluginCatalogState.DISABLED -> "disabled"
-        PluginCatalogState.DENIED -> "denied"
-        PluginCatalogState.INVALID -> "invalid"
-        PluginCatalogState.MISSING_CAPABILITY -> "missing access"
-        null -> "installed"
-    }
-
-    private fun sizeFor(entry: StoreEntry): String {
-        val bytes = entry.registryPlugin?.artifact?.sizeBytes ?: return "Local"
-        if (bytes <= 0) return entry.registryPlugin.artifact.versionName
-        return if (bytes >= 1024 * 1024) {
-            String.format("%.1f MB", bytes / (1024.0 * 1024.0))
-        } else {
-            "${(bytes + 1023) / 1024} KB"
-        }
-    }
-
-    private fun installedVersionCodes(packageNames: Set<String>): Map<String, Long> = buildMap {
-        packageNames.forEach { packageName ->
-            val info = runCatching {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
-                } else {
-                    @Suppress("DEPRECATION")
-                    packageManager.getPackageInfo(packageName, 0)
-                }
-            }.getOrNull() ?: return@forEach
-            put(packageName, info.longVersionCode)
-        }
-    }
-
-    private fun openCatalogEntry(entry: PluginCatalogEntry?) {
-        if (entry == null) return
-        if (entry.principal != null && entry.state != PluginCatalogState.ENABLED) {
-            startActivity(Intent(this, PluginPermissionsActivity::class.java))
-            return
-        }
-        val target = entry.settingsComponent
-        if (target == null) {
-            if (entry.principal != null) {
-                startActivity(Intent(this, PluginPermissionsActivity::class.java))
-            } else {
-                Toast.makeText(this, "No settings available", Toast.LENGTH_SHORT).show()
-            }
-            return
-        }
-        val intent = Intent().setComponent(ComponentName(target.packageName, target.className))
-        runCatching { startActivity(intent) }.onFailure {
-            Toast.makeText(this, "Plugin settings are unavailable", Toast.LENGTH_SHORT).show()
+            "✓" to NexusUi.INK4
         }
     }
 
@@ -446,7 +344,8 @@ class StoreActivity : Activity() {
             },
         )
         addView(BusTheme.gap(this@StoreActivity, 5))
-        addView(NexusUi.rowSub(this@StoreActivity, "Plugins for your glasses"))
+        headerSub = NexusUi.rowSub(this@StoreActivity, "Plugins for your glasses")
+        addView(headerSub)
     }
 
     private fun chip(label: String, selected: Boolean): TextView =
@@ -470,109 +369,10 @@ class StoreActivity : Activity() {
             }
         }
 
-    private fun storeCard(
-        icon: ImageView,
-        title: String,
-        meta: String,
-        description: String,
-        size: String,
-        button: String,
-        buttonEnabled: Boolean,
-        buttonFilled: Boolean,
-        onClick: () -> Unit,
-    ): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        background = NexusUi.bordered(this@StoreActivity, NexusUi.PANEL, NexusUi.LINE2, 16)
-        setPadding(
-            NexusUi.dp(this@StoreActivity, 15),
-            NexusUi.dp(this@StoreActivity, 15),
-            NexusUi.dp(this@StoreActivity, 15),
-            NexusUi.dp(this@StoreActivity, 15),
-        )
-        addView(
-            LinearLayout(this@StoreActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                addView(icon)
-                addView(
-                    LinearLayout(this@StoreActivity).apply {
-                        orientation = LinearLayout.VERTICAL
-                        addView(NexusUi.cardTitle(this@StoreActivity, title))
-                        addView(BusTheme.gap(this@StoreActivity, 5))
-                        addView(NexusUi.metaLabel(this@StoreActivity, meta, NexusUi.INK3))
-                    },
-                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                        marginStart = NexusUi.dp(this@StoreActivity, 13)
-                    },
-                )
-            },
-            NexusUi.block(),
-        )
-        addView(BusTheme.gap(this@StoreActivity, 11))
-        addView(
-            NexusUi.cardBody(this@StoreActivity, description).apply {
-                textSize = 12.5f
-                maxLines = 2
-            },
-            NexusUi.block(),
-        )
-        addView(BusTheme.gap(this@StoreActivity, 13))
-        addView(
-            LinearLayout(this@StoreActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                addView(
-                    NexusUi.metaLabel(this@StoreActivity, size, NexusUi.INK4),
-                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-                )
-                addView(storeButton(button, buttonFilled, buttonEnabled, onClick))
-            },
-            NexusUi.block(),
-        )
-    }
-
-    private fun storeButton(
-        label: String,
-        filled: Boolean,
-        enabled: Boolean,
-        onClick: () -> Unit,
-    ): Button = Button(this).apply {
-        text = label
-        textSize = 11f
-        typeface = Typeface.MONOSPACE
-        letterSpacing = 0.12f
-        setAllCaps(false)
-        stateListAnimator = null
-        minHeight = NexusUi.dp(this@StoreActivity, 38)
-        minimumHeight = NexusUi.dp(this@StoreActivity, 38)
-        minWidth = 0
-        minimumWidth = 0
-        includeFontPadding = false
-        setPadding(NexusUi.dp(this@StoreActivity, 18), 0, NexusUi.dp(this@StoreActivity, 18), 0)
-        isEnabled = enabled
-        setTextColor(
-            when {
-                !enabled -> NexusUi.INK4
-                filled -> NexusUi.ON_ACCENT
-                else -> NexusUi.GREEN
-            },
-        )
-        background = if (filled && enabled) {
-            NexusUi.rounded(this@StoreActivity, NexusUi.GREEN, 20)
-        } else {
-            NexusUi.bordered(
-                this@StoreActivity,
-                android.graphics.Color.TRANSPARENT,
-                if (enabled) 0xFF2C4A37.toInt() else NexusUi.LINE2,
-                20,
-            )
-        }
-        setOnClickListener { onClick() }
-    }
-
     companion object {
         private const val TAG = "NexusStore"
         private const val ALL_CATEGORY = "All"
+        private const val UPDATE_STROKE = 0xFF3A2E16.toInt()
         private val REVIEW_STATES = setOf(
             PluginCatalogState.PENDING,
             PluginCatalogState.DENIED,

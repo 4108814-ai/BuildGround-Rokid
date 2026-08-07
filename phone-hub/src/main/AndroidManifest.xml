@@ -57,6 +57,16 @@
             android:parentActivityName=".MainActivity" />
 
         <activity
+            android:name=".StorePluginDetailActivity"
+            android:exported="false"
+            android:parentActivityName=".StoreActivity" />
+
+        <activity
+            android:name=".StoreVersionHistoryActivity"
+            android:exported="false"
+            android:parentActivityName=".StorePluginDetailActivity" />
+
+        <activity
             android:name=".SettingsActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity" />
