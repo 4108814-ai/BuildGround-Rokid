@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- **The Store is twice as dense.** The list is now one slim row per plugin —
+  icon, name, author, version or size, and a state mark — so about eleven
+  plugins fit on a screen instead of four and a half. A pending update reads
+  as an amber "Update" with an amber-edged row, and the header counts the
+  catalogue: how many plugins, how many installed, how many updates.
+- **Every plugin has a real page now.** Tap a row and everything the old card
+  had no room for is there: a full-width install or update button, version,
+  size, date and source at a glance, the plugin's What's new with a Read
+  more fold, screenshots when the author published some, the long
+  description, the capabilities it asks for, and an uninstall row. A History
+  screen lists every release the plugin has ever shipped, with its notes.
+- **The app has a changelog too.** Tapping the amber update banner — or
+  Settings › About › What's new — opens the app's own release notes: the
+  waiting version in full, every earlier release below it, and an install
+  button at the bottom that follows the download live.
+- Release notes and screenshots were always published by the plugin
+  registry; the Store simply never showed them. No plugin needs an update
+  to appear correctly.
+
 ## 1.2.8
 
 - **A second message no longer arrives on a dark display.** When a short
