@@ -468,6 +468,17 @@ class StorePluginDetailActivity : Activity() {
                 background = NexusUi.bordered(this@StorePluginDetailActivity, NexusUi.PANEL, NexusUi.LINE2, 10)
                 clipToOutline = true
                 contentDescription = "${plugin.name} screenshot ${index + 1}"
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    startActivity(
+                        StoreScreenshotViewerActivity.intent(
+                            this@StorePluginDetailActivity,
+                            plugin.screenshotUrls,
+                            index,
+                        ),
+                    )
+                }
             }
             row.addView(
                 image,
