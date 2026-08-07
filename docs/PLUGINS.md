@@ -178,7 +178,7 @@ listener must remain idle until the plugin is open. While open, the SDK
 promotes the plugin service to a special-use foreground service so OEM app
 freezers leave it alone; when closed, it returns the plugin to dormant state.
 
-**Pins are the one exception**, and they are deliberately narrow. A dormant
+**Pins are the first exception**, and they are deliberately narrow. A dormant
 plugin may wake on a phone-side event, connect, send a single `/pin/show` or
 `/pin/hide`, and go straight back to dormant — that is the shape the pin was
 designed for (a ride-hailing plugin putting the arriving car in the corner).
@@ -188,11 +188,24 @@ polling loop alive between pushes. The pin outlives your process on its own,
 and `ttlMs` bounds it if you never come back. Anything that needs to keep
 running still needs an open surface.
 
+**Scheduled delivery is the second**, and it is narrower still: a plugin may
+wake at a moment the wearer explicitly scheduled through it — an alarm,
+reminder or timer they asked for by name — to deliver exactly that item. The
+Assistant's reminders are the precedent. The wake is an `AlarmManager`
+broadcast into a short-lived foreground service that posts the matching
+notification, optionally raises one notice or pin through a one-shot
+registration, and stops itself within seconds; a boot receiver may do nothing
+beyond rescheduling those same user-created alarms. "The user would probably
+want it" does not qualify — only an item they created with a delivery time.
+
 The SDK always constructs the notification object required for the session
 foreground service. Do **not** declare or request `POST_NOTIFICATIONS`: on
 Android 13+ the SDK notification stays suppressed, and the Rokid Nexus hub
 notification — which names the plugin live on the glasses — remains the
-primary user-visible one. Plugins must not post notifications beyond the
+primary user-visible one. The exception is scheduled delivery above: a plugin
+that rings user-created reminders may declare `POST_NOTIFICATIONS`,
+`SCHEDULE_EXACT_ALARM` and `RECEIVE_BOOT_COMPLETED`, strictly for those
+deliveries. Otherwise plugins must not post notifications beyond the
 open-scoped dedicated-foreground-service exception described above.
 
 ## 4. Settings screen — the design kit
