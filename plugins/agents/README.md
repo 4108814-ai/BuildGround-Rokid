@@ -36,6 +36,25 @@ The daemon dials the phone, so the phone decides who is allowed in:
   token is never overwritten.
 - A new link is announced on the glasses, never on the phone.
 
+### Away from home
+
+The zero-setup link covers the home Wi-Fi. Everywhere else it rides a
+[Tailscale](https://tailscale.com) network, and the setup is deliberately
+short:
+
+1. Install Tailscale on the phone — the plugin's *Away from home* section
+   offers the Play Store button — and on the computer: Windows and macOS from
+   <https://tailscale.com/download>, Linux with
+   `curl -fsSL https://tailscale.com/install.sh | sh` followed by
+   `sudo tailscale up`.
+2. Sign in with the same account on both.
+3. There is no step three. `nexus-agentd` watches the tailnet, spots the
+   phone, and dials it with the identity it already earned at home — no
+   re-pairing, no address to type.
+
+`agentd link-phone <host[:port]>` stays available as a manual override, and
+pasting the pairing line stays available as the no-Tailscale fallback.
+
 The current OpenClaw protocol requires device identity in addition to the
 shared Gateway token. On the first remote connection, approve the new
 **Nexus Agents** device in OpenClaw. The plugin persists its identity so this is

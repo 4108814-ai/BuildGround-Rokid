@@ -11,6 +11,7 @@ import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Switch
@@ -42,6 +43,8 @@ class AgentsSettingsActivity : Activity() {
     private lateinit var linkSub: TextView
     private lateinit var awayBlock: LinearLayout
     private lateinit var awayDisclosure: TextView
+    private lateinit var tailscaleStatus: TextView
+    private lateinit var tailscaleGet: Button
     private lateinit var openClawEnabled: Switch
     private lateinit var openClawHost: EditText
     private lateinit var openClawPort: EditText
@@ -63,6 +66,7 @@ class AgentsSettingsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         renderLinkState()
+        renderTailscaleState()
     }
 
     override fun onDestroy() {
@@ -236,9 +240,43 @@ class AgentsSettingsActivity : Activity() {
 
     /** Dialling out over a tailnet: the exception, folded away until asked for. */
     private fun awayBlock(): LinearLayout {
+        tailscaleStatus = NexusUi.statusLine(this)
+        tailscaleGet = NexusUi.textButton(this, "Get Tailscale for this phone").apply {
+            setOnClickListener { openTailscaleInstall() }
+        }
         awayBlock = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
+            addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
+            addView(
+                NexusUi.cardBody(
+                    this@AgentsSettingsActivity,
+                    "Away from home the link rides your Tailscale network. Put " +
+                        "Tailscale on this phone and on the computer, sign in with " +
+                        "the same account on both, and the computer keeps finding " +
+                        "this phone by itself — nothing to declare, nothing to type.",
+                ),
+                NexusUi.block(),
+            )
+            addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
+            addView(tailscaleStatus, NexusUi.block())
+            addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
+            addView(tailscaleGet, NexusUi.block())
+            addView(
+                NexusUi.cardBody(
+                    this@AgentsSettingsActivity,
+                    "On the computer: Windows and macOS install it from " +
+                        "tailscale.com/download; Linux runs " +
+                        "“curl -fsSL https://tailscale.com/install.sh | sh” and then " +
+                        "“sudo tailscale up”. Sign in, and that is the whole setup.",
+                ),
+                NexusUi.block(),
+            )
+            addView(BusTheme.gap(this@AgentsSettingsActivity, 16))
+            addView(
+                NexusUi.rowSub(this@AgentsSettingsActivity, "MANUAL PAIRING — WITHOUT TAILSCALE"),
+                NexusUi.block(),
+            )
             addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
             addView(agentdPairing, NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
@@ -254,7 +292,30 @@ class AgentsSettingsActivity : Activity() {
                 NexusUi.block(),
             )
         }
+        renderTailscaleState()
         return awayBlock
+    }
+
+    private fun tailscaleInstalled(): Boolean =
+        runCatching { packageManager.getPackageInfo(TAILSCALE_PACKAGE, 0) }.isSuccess
+
+    private fun renderTailscaleState() {
+        if (!::tailscaleStatus.isInitialized) return
+        val installed = tailscaleInstalled()
+        tailscaleStatus.text = if (installed) "TAILSCALE IS ON THIS PHONE" else "TAILSCALE NOT INSTALLED YET"
+        tailscaleGet.visibility = if (installed) View.GONE else View.VISIBLE
+    }
+
+    private fun openTailscaleInstall() {
+        val market = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$TAILSCALE_PACKAGE"))
+        runCatching { startActivity(market) }.onFailure {
+            startActivity(
+                Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse("https://play.google.com/store/apps/details?id=$TAILSCALE_PACKAGE"),
+                ),
+            )
+        }
     }
 
     private fun openClawCard() = NexusUi.card(this).apply {
@@ -477,6 +538,7 @@ class AgentsSettingsActivity : Activity() {
     private companion object {
         const val AWAY_CLOSED = "AWAY FROM HOME ›"
         const val AWAY_OPEN = "AWAY FROM HOME ⌄"
+        const val TAILSCALE_PACKAGE = "com.tailscale.ipn"
     }
 }
 
