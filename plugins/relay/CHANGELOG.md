@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.4
+
+- **After a reply is sent, the inbox comes back a bit sooner.** The "Sent"
+  screen used to hand you back to the list after 1.2 seconds — which turned
+  out to be the exact moment most people tap Back, so the tap landed on a
+  list they had not seen yet and threw them out of Relay entirely. The
+  hand-back now happens at 0.85 seconds: still enough to read "Sent", but
+  the switch is over before your thumb gets there.
+
 ## 1.1.3
 
 - **Messages Android hides can now come through.** Since Android 15, the system
