@@ -35,6 +35,7 @@ individual plan headers are the detail of record.
 | [016](016-assistant-camera-tool.md) | Assistant `take_photo` camera tool | DONE |
 | [017](017-relay-notifications.md) | Relay notifications | DONE |
 | [018](018-notice-lines.md) | Notice lines | DONE |
+| [020](020-rich-surface.md) | Rich Surface: declarative rich rendering for assistants (inline blocks + AIUI full-scene) | TODO — transport proven on device 2026-08-08 |
 
 Status values are `TODO`, `IN PROGRESS`, `BLOCKED`, and `DONE`. Update both this table and the individual plan when execution status changes. What comes after these plans is tracked on the roadmap, not here: display arbitration, continuous speech, and the plugin roadmap's Navigation, T3code, and Terminal/Agent do not have plan documents yet.
 
