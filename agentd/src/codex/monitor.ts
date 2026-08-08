@@ -372,7 +372,15 @@ export class CodexMonitor {
         "thread/start",
         { cwd } satisfies ThreadStartParams,
       );
-      await this.adoptStartedThread(response.thread, true);
+      // A thread born on this connection is already live here: thread/resume
+      // would look for a rollout that does not exist yet and fail the spawn.
+      // Register and publish directly; the thread/started notification runs
+      // the tolerant adoption pass behind us.
+      this.threads.set(response.thread.id, response.thread);
+      this.trimThreads();
+      if (this.threads.has(response.thread.id)) {
+        this.publishThread(response.thread.id);
+      }
       if (prompt) {
         await this.request<TurnStartResponse>(
           "turn/start",
@@ -1012,20 +1020,18 @@ export class CodexMonitor {
     }
   }
 
-  private async adoptStartedThread(thread: Thread, propagateErrors = false): Promise<void> {
+  private async adoptStartedThread(thread: Thread): Promise<void> {
     this.threads.set(thread.id, thread);
     this.trimThreads();
     if (!this.threads.has(thread.id)) {
       return;
     }
     this.publishThread(thread.id);
-    await this.resumeAndRefresh(thread.id, propagateErrors);
+    await this.resumeAndRefresh(thread.id);
   }
 
-  private async resumeAndRefresh(threadId: string, propagateErrors = false): Promise<void> {
-    const resumed = propagateErrors
-      ? await this.resumeThread(threadId)
-      : await this.tryResume(threadId);
+  private async resumeAndRefresh(threadId: string): Promise<void> {
+    const resumed = await this.tryResume(threadId);
     if (!resumed || this.stopped) {
       return;
     }
@@ -1042,9 +1048,6 @@ export class CodexMonitor {
         threadId,
         reason: errorMessage(error),
       });
-      if (propagateErrors) {
-        throw error;
-      }
     }
   }
 

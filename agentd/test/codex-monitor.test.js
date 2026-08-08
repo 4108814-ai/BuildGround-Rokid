@@ -359,14 +359,13 @@ test("startThread creates, adopts, and optionally starts a turn in binding order
       sessionId: "started-thread-1",
     });
     const firstRequests = messages.slice(requestStart);
+    // A thread born on this connection is live already: no resume, no read.
     assert.deepEqual(firstRequests.map((message) => message.method), [
       "thread/start",
-      "thread/resume",
-      "thread/read",
       "turn/start",
     ]);
     assert.deepEqual(firstRequests[0].params, { cwd: "E:\\work\\new" });
-    assert.deepEqual(firstRequests[3].params, {
+    assert.deepEqual(firstRequests[1].params, {
       threadId: "started-thread-1",
       input: [{ type: "text", text: "Do work", text_elements: [] }],
     });
@@ -379,8 +378,6 @@ test("startThread creates, adopts, and optionally starts a turn in binding order
     });
     assert.deepEqual(messages.slice(requestStart).map((message) => message.method), [
       "thread/start",
-      "thread/resume",
-      "thread/read",
     ]);
 
     assert.deepEqual(await monitor.startThread("E:\\work\\rpc-error", "ignored"), {
