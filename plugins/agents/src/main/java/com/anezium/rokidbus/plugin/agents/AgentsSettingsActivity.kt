@@ -9,7 +9,6 @@ import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Switch
@@ -32,9 +31,8 @@ class AgentsSettingsActivity : Activity() {
     private lateinit var agentdConnection: TextView
     private lateinit var agentdDot: View
     private lateinit var computersList: LinearLayout
-    private lateinit var tailscaleStatus: TextView
-    private lateinit var tailscaleDot: View
-    private lateinit var tailscaleGet: Button
+    private lateinit var openClawFold: TextView
+    private lateinit var openClawBlock: LinearLayout
     private lateinit var openClawEnabled: Switch
     private lateinit var openClawHost: EditText
     private lateinit var openClawPort: EditText
@@ -58,7 +56,6 @@ class AgentsSettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        renderTailscaleState()
         renderComputers()
     }
 
@@ -84,12 +81,7 @@ class AgentsSettingsActivity : Activity() {
         }
         agentdDot = NexusUi.dot(this)
         openClawDot = NexusUi.dot(this)
-        tailscaleDot = NexusUi.dot(this)
         agentdConnection = NexusUi.statusLine(this).apply { text = "DISCONNECTED" }
-        tailscaleStatus = NexusUi.statusLine(this)
-        tailscaleGet = NexusUi.textButton(this, "Get Tailscale for this phone").apply {
-            setOnClickListener { openTailscaleInstall(this@AgentsSettingsActivity) }
-        }
         computersList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         openClawHost = NexusUi.field(this, "Host or ws(s)://host").apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
@@ -122,13 +114,8 @@ class AgentsSettingsActivity : Activity() {
             addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
             addView(computersCard(), NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 22))
-            addView(NexusUi.sectionRow(this@AgentsSettingsActivity, "Away from home"), NexusUi.block())
-            addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
-            addView(awayCard(), NexusUi.block())
-            addView(BusTheme.gap(this@AgentsSettingsActivity, 22))
-            addView(NexusUi.sectionRow(this@AgentsSettingsActivity, "OpenClaw"), NexusUi.block())
-            addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
-            addView(openClawCard(), NexusUi.block())
+            addView(openClawFoldRow(), NexusUi.block())
+            addView(openClawFoldBlock(), NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 24))
             addView(NexusUi.sectionRow(this@AgentsSettingsActivity, "Plugin"), NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
@@ -186,20 +173,31 @@ class AgentsSettingsActivity : Activity() {
         )
     }
 
-    private fun awayCard() = NexusUi.card(this).apply {
-        addView(
-            NexusUi.cardBody(
-                this@AgentsSettingsActivity,
-                "Away from your Wi-Fi the link rides your Tailscale network. Sign " +
-                    "in with the same account on this phone and on your computers, " +
-                    "and they keep reaching this phone wherever you are.",
-            ),
-            NexusUi.block(),
-        )
-        addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
-        addView(connectionRow(this@AgentsSettingsActivity, tailscaleDot, tailscaleStatus), NexusUi.block())
-        addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
-        addView(tailscaleGet, NexusUi.block())
+    /**
+     * OpenClaw is the odd one out — its own gateway, its own credentials — and
+     * most wearers never touch it, so it stays folded unless it is switched on.
+     */
+    private fun openClawFoldRow(): TextView {
+        openClawFold = NexusUi.rowSub(this, OPENCLAW_CLOSED).apply {
+            setPadding(0, NexusUi.dp(this@AgentsSettingsActivity, 6), 0, 0)
+            setOnClickListener { setOpenClawFold(open = openClawBlock.visibility != View.VISIBLE) }
+        }
+        return openClawFold
+    }
+
+    private fun openClawFoldBlock(): LinearLayout {
+        openClawBlock = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
+            addView(openClawCard(), NexusUi.block())
+        }
+        return openClawBlock
+    }
+
+    private fun setOpenClawFold(open: Boolean) {
+        openClawBlock.visibility = if (open) View.VISIBLE else View.GONE
+        openClawFold.text = if (open) OPENCLAW_OPEN else OPENCLAW_CLOSED
     }
 
     private fun openClawCard() = NexusUi.card(this).apply {
@@ -346,14 +344,6 @@ class AgentsSettingsActivity : Activity() {
         }
     }
 
-    private fun renderTailscaleState() {
-        if (!::tailscaleStatus.isInitialized) return
-        val installed = tailscaleInstalled(this)
-        tailscaleStatus.text = if (installed) "TAILSCALE IS ON THIS PHONE" else "TAILSCALE NOT INSTALLED YET"
-        NexusUi.setDotColor(tailscaleDot, if (installed) NexusUi.GREEN else NexusUi.AMBER)
-        tailscaleGet.visibility = if (installed) View.GONE else View.VISIBLE
-    }
-
     private fun loadConfig() {
         val config = configStore.load()
         agentdEnabled.isChecked = config.agentdEnabled
@@ -363,6 +353,7 @@ class AgentsSettingsActivity : Activity() {
             (config.openClaw?.port ?: OpenClawConfig.DEFAULT_PORT).toString(),
         )
         openClawToken.setText(config.openClaw?.token.orEmpty())
+        setOpenClawFold(open = config.openClawEnabled)
         renderComputers()
     }
 
@@ -462,6 +453,8 @@ class AgentsSettingsActivity : Activity() {
     private companion object {
         /** List-row id for the hand-paired daemon entry, which has no machineId. */
         const val PAIRED_ROW_ID = "paired-daemon"
+        const val OPENCLAW_CLOSED = "OPENCLAW ›"
+        const val OPENCLAW_OPEN = "OPENCLAW ⌄"
     }
 }
 

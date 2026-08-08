@@ -122,6 +122,8 @@ class AddComputerActivity : Activity() {
         pairingSummary = NexusUi.cardBody(this, "No daemon paired.")
 
         val content = NexusUi.contentColumn(this).apply {
+            addView(daemonCard(), NexusUi.block())
+            addView(BusTheme.gap(this@AddComputerActivity, 14))
             addView(wifiCard(), NexusUi.block())
             addView(BusTheme.gap(this@AddComputerActivity, 14))
             addView(tailscaleCard(), NexusUi.block())
@@ -159,6 +161,28 @@ class AddComputerActivity : Activity() {
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
                 typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
             },
+        )
+    }
+
+    /**
+     * Every road below assumes the daemon exists on the computer, so the how
+     * of getting it comes before any of them.
+     */
+    private fun daemonCard() = NexusUi.card(this).apply {
+        addView(NexusUi.rowTitle(this@AddComputerActivity, "First: nexus-agentd on the computer"), NexusUi.block())
+        addView(BusTheme.gap(this@AddComputerActivity, 6))
+        addView(
+            NexusUi.cardBody(
+                this@AddComputerActivity,
+                "nexus-agentd is the small program that watches Claude Code and " +
+                    "Codex on the computer and talks to this phone. It ships with " +
+                    "Rokid Nexus: on the computer, get the repository at " +
+                    "github.com/Anezium/RokidNexus, and with Node 20 installed run, " +
+                    "inside agentd/: “npm install”, “npm run build”, " +
+                    "“node dist/cli.js install-hooks” once, then “node dist/cli.js " +
+                    "run” to start it. Its README covers keeping it running at logon.",
+            ),
+            NexusUi.block(),
         )
     }
 

@@ -11,13 +11,14 @@ on the glasses.
 The settings screen reads top to bottom: Monitoring (one switch for the
 `nexus-agentd` link, which carries Claude Code and Codex, with a status line
 that counts the watched sessions), Computers (every linked machine with its
-state; tap a row to reach its own Forget), Away from home (Tailscale status
-for this phone), and OpenClaw.
+state; tap a row to reach its own Forget), and OpenClaw, folded away unless
+it is switched on.
 
 - Adding a computer happens on its own screen, reached from the Computers
-  list, and offers three roads as equals: automatic on the home Wi-Fi (a
-  two-minute door with a visible countdown and a Cancel button), Tailscale
-  for everywhere else, and a pasted pairing line for whoever wants neither.
+  list. It opens on how to get `nexus-agentd` itself, then offers three
+  roads as equals: automatic on the home Wi-Fi (a two-minute door with a
+  visible countdown and a Cancel button), Tailscale for everywhere else,
+  and a pasted pairing line for whoever wants neither.
   The pairing line is the single JSON line `nexus-agentd pair` prints; the
   plugin validates `v:1` and `kind:"nexus-agentd"` and stores one
   host/port/token/name slot.
