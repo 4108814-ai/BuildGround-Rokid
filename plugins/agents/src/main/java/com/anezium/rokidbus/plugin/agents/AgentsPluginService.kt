@@ -292,7 +292,7 @@ class AgentsPluginService : NexusPluginService() {
     private fun scrollConversation(delta: Int) {
         val total = AgentsRuntime.store.conversation.value
             ?.let { conversationRows(it).size } ?: 0
-        val maxScroll = (total - DETAIL_VISIBLE_ROWS).coerceAtLeast(0)
+        val maxScroll = (total - 1).coerceAtLeast(0)
         scrollBack = (scrollBack + delta).coerceIn(0, maxScroll)
         render(show = false)
     }
@@ -817,9 +817,18 @@ class AgentsPluginService : NexusPluginService() {
                 ),
             )
             else -> {
+                // The window is a budget of rendered lines, not a row count:
+                // six one-line rows would strand the bottom half of the screen.
                 val all = conversationRows(conversation)
                 val end = (all.size - scrollBack).coerceIn(1, all.size)
-                val start = (end - DETAIL_VISIBLE_ROWS).coerceAtLeast(0)
+                var start = end
+                var lines = 0
+                while (start > 0) {
+                    val next = estimatedLines(all[start - 1])
+                    if (start < end && lines + next > READER_LINE_BUDGET) break
+                    lines += next
+                    start--
+                }
                 all.subList(start, end)
             }
         }
@@ -844,26 +853,70 @@ class AgentsPluginService : NexusPluginService() {
      */
     private var readerCache: Pair<AgentConversation, List<NexusCardLine>>? = null
 
+    /** How many wrapped lines a row will take on the HUD's mono body. */
+    private fun estimatedLines(row: NexusCardLine): Int {
+        // Only prose wraps; every other row is drawn as one ellipsized line.
+        if (row.tone != NexusRowTone.BODY) return 1
+        val cols = if (row.badge.isNullOrBlank()) READER_FULL_COLS else READER_BADGE_COLS
+        return ((row.text.length + cols - 1) / cols).coerceAtLeast(1)
+    }
+
     private fun conversationRows(conversation: AgentConversation): List<NexusCardLine> {
         readerCache?.let { (cached, rows) -> if (cached === conversation) return rows }
-        val rows = conversation.messages.flatMap { messageRows(it, conversation.provider) }
+        val rows = mutableListOf<NexusCardLine>()
+        val toolRun = mutableListOf<AgentMessage>()
+        fun flushTools() {
+            if (toolRun.isNotEmpty()) {
+                rows += toolRunRow(toolRun.toList())
+                toolRun.clear()
+            }
+        }
+        for (message in conversation.messages) {
+            if (message.role == MessageRole.TOOL) {
+                toolRun += message
+            } else {
+                flushTools()
+                rows += messageRows(message, conversation.provider)
+            }
+        }
+        flushTools()
         readerCache = conversation to rows
         return rows
+    }
+
+    /**
+     * An agent's work is long trains of tool calls between two paragraphs.
+     * The reader is for the paragraphs, so a train collapses to one dim line:
+     * the wearer sees "Edit ×4 · Bash" and moves on.
+     */
+    private fun toolRunRow(run: List<AgentMessage>): NexusCardLine {
+        if (run.size == 1) {
+            return NexusCardLine(
+                text = run.single().text.singleLine(180),
+                badge = MessageRole.TOOL.label,
+                tone = NexusRowTone.DIM,
+            )
+        }
+        val counts = LinkedHashMap<String, Int>()
+        for (message in run) {
+            val name = message.tool?.takeIf(String::isNotBlank)
+                ?: message.text.substringBefore(" · ").ifBlank { "tool" }
+            counts[name] = (counts[name] ?: 0) + 1
+        }
+        val label = counts.entries.joinToString(" · ") { (name, times) ->
+            if (times > 1) "$name ×$times" else name
+        }
+        return NexusCardLine(
+            text = label.singleLine(180),
+            badge = MessageRole.TOOL.label,
+            tone = NexusRowTone.DIM,
+        )
     }
 
     private fun messageRows(
         message: AgentMessage,
         provider: AgentProvider,
     ): List<NexusCardLine> {
-        if (message.role == MessageRole.TOOL) {
-            return listOf(
-                NexusCardLine(
-                    text = message.text.singleLine(180),
-                    badge = MessageRole.TOOL.label,
-                    tone = NexusRowTone.DIM,
-                ),
-            )
-        }
         val badge =
             if (message.role == MessageRole.USER) MessageRole.USER.label else provider.marker
         return proseChunks(message.text).mapIndexed { index, chunk ->
@@ -878,6 +931,10 @@ class AgentsPluginService : NexusPluginService() {
     private fun proseChunks(text: String): List<String> {
         val chunks = mutableListOf<String>()
         val current = StringBuilder()
+        // Where, inside [current], the last finished sentence ends. A chunk
+        // that must break prefers that seam: a row ending mid-sentence reads
+        // like a message of its own once the HUD spaces the rows apart.
+        var sentenceEnd = 0
         // The first chunk shares its row with the role badge and loses that
         // column's width; every later chunk runs the full line.
         fun limit() = if (chunks.isEmpty()) READER_FIRST_CHUNK_CHARS else READER_CHUNK_CHARS
@@ -886,6 +943,22 @@ class AgentsPluginService : NexusPluginService() {
                 chunks += current.toString()
                 current.setLength(0)
             }
+            sentenceEnd = 0
+        }
+        fun breakForNext(piece: String) {
+            val seam = sentenceEnd
+            if (seam >= limit() / 2 && seam < current.length) {
+                val rest = current.substring(seam).trimStart()
+                current.setLength(seam)
+                flush()
+                current.append(rest)
+                if (current.length + 1 + piece.length <= limit()) {
+                    current.append(' ').append(piece)
+                    return
+                }
+            }
+            flush()
+            current.append(piece)
         }
         for (paragraph in text.split('\n')) {
             for (word in paragraph.trim().split(' ', '\t')) {
@@ -901,10 +974,10 @@ class AgentsPluginService : NexusPluginService() {
                     current.isEmpty() -> current.append(piece)
                     current.length + 1 + piece.length <= limit() ->
                         current.append(' ').append(piece)
-                    else -> {
-                        flush()
-                        current.append(piece)
-                    }
+                    else -> breakForNext(piece)
+                }
+                if (piece.isNotEmpty() && piece.last() in SENTENCE_ENDS) {
+                    sentenceEnd = current.length
                 }
             }
             // A paragraph break ends the chunk, so the message keeps its shape.
@@ -980,8 +1053,6 @@ class AgentsPluginService : NexusPluginService() {
         private const val SURFACE_ID = "agents"
         private const val VISIBLE_SESSION_ROWS = 6
         private const val MIN_SESSION_ROWS = 4
-        private const val DETAIL_VISIBLE_ROWS = 6
-
         /**
          * The HUD's mono body wraps at about 29 characters a line and clips a
          * row after three; these sizes keep a chunk whole on the worst line.
@@ -989,6 +1060,14 @@ class AgentsPluginService : NexusPluginService() {
          */
         private const val READER_CHUNK_CHARS = 86
         private const val READER_FIRST_CHUNK_CHARS = 72
+        private const val READER_FULL_COLS = 28
+        private const val READER_BADGE_COLS = 23
+
+        /** The screen takes ~20 mono lines; the slack absorbs row spacing. */
+        private const val READER_LINE_BUDGET = 16
+
+        /** A word ending in one of these closes a sentence a chunk can break after. */
+        private val SENTENCE_ENDS = setOf('.', '!', '?', '…', ':', ';')
         private const val AGE_TICK_MS = 60_000L
         private const val NOTICE_TITLE_CHARS = 32
         private const val NOTICE_BODY_CHARS = 240
