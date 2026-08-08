@@ -100,6 +100,15 @@ data class AgentProject(
     val path: String,
 )
 
+/** The daemon's verdict on one thread_start request. */
+data class ThreadStartResult(
+    val requestId: String,
+    val ok: Boolean,
+    val provider: AgentProvider?,
+    val sessionId: String?,
+    val error: String?,
+)
+
 /**
  * A tool call an agent is holding still for, waiting on the wearer.
  *

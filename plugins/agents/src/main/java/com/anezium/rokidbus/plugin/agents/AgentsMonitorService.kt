@@ -94,6 +94,16 @@ class AgentsMonitorService : Service() {
                     linkServer.requestFolders(requestId, path)
                 }
             }
+            ACTION_THREAD_START -> {
+                val requestId = intent.getStringExtra(EXTRA_REQUEST_ID)
+                val provider = AgentProvider.fromWire(intent.getStringExtra(EXTRA_PROVIDER))
+                val path = intent.getStringExtra(EXTRA_PATH)
+                val prompt = intent.getStringExtra(EXTRA_PROMPT).orEmpty()
+                if (requestId != null && provider != null && path != null) {
+                    agentdClient.requestThreadStart(requestId, provider, path, prompt)
+                    linkServer.requestThreadStart(requestId, provider, path, prompt)
+                }
+            }
             ACTION_DECIDE_APPROVAL -> {
                 val requestId = intent.getStringExtra(EXTRA_REQUEST_ID)
                 val decision = ApprovalDecision.values()
@@ -257,9 +267,13 @@ class AgentsMonitorService : Service() {
             "com.anezium.rokidbus.plugin.agents.action.DROP_MACHINE"
         const val ACTION_FS_LIST =
             "com.anezium.rokidbus.plugin.agents.action.FS_LIST"
+        const val ACTION_THREAD_START =
+            "com.anezium.rokidbus.plugin.agents.action.THREAD_START"
         const val EXTRA_SESSION_ID = "sessionId"
         const val EXTRA_MACHINE_ID = "machineId"
         const val EXTRA_PATH = "path"
+        const val EXTRA_PROVIDER = "provider"
+        const val EXTRA_PROMPT = "prompt"
         const val EXTRA_REQUEST_ID = "requestId"
         const val EXTRA_DECISION = "decision"
         private const val MONITOR_NOTIFICATION_ID = 3101
@@ -325,6 +339,25 @@ class AgentsMonitorService : Service() {
                         .putExtra(EXTRA_MACHINE_ID, machineId),
                 )
             }
+        }
+
+        /** The wearer asked for a new session inside an anchored project. */
+        fun requestThreadStart(
+            context: Context,
+            requestId: String,
+            provider: AgentProvider,
+            path: String,
+            prompt: String,
+        ) {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, AgentsMonitorService::class.java)
+                    .setAction(ACTION_THREAD_START)
+                    .putExtra(EXTRA_REQUEST_ID, requestId)
+                    .putExtra(EXTRA_PROVIDER, provider.wireValue)
+                    .putExtra(EXTRA_PATH, path)
+                    .putExtra(EXTRA_PROMPT, prompt),
+            )
         }
 
         /** The wearer is browsing a linked computer's folders in the picker. */

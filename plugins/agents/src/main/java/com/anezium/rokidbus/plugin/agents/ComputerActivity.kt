@@ -34,9 +34,6 @@ class ComputerActivity : Activity() {
     private lateinit var statusLine: TextView
     private lateinit var projectsList: LinearLayout
 
-    /** The project whose row the wearer tapped open to reach its Remove. */
-    private var expandedProjectPath: String? = null
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         machineId = intent.getStringExtra(EXTRA_MACHINE_ID) ?: run { finish(); return }
@@ -168,10 +165,14 @@ class ComputerActivity : Activity() {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         setPadding(0, NexusUi.dp(this@ComputerActivity, 6), 0, NexusUi.dp(this@ComputerActivity, 6))
-        val expanded = expandedProjectPath == project.path
         setOnClickListener {
-            expandedProjectPath = if (expanded) null else project.path
-            renderProjects()
+            startActivity(
+                Intent(this@ComputerActivity, NewThreadActivity::class.java)
+                    .putExtra(EXTRA_MACHINE_ID, machineId)
+                    .putExtra(EXTRA_MACHINE_NAME, machineName)
+                    .putExtra(NewThreadActivity.EXTRA_PROJECT_NAME, project.name)
+                    .putExtra(NewThreadActivity.EXTRA_PROJECT_PATH, project.path),
+            )
         }
         addView(
             LinearLayout(this@ComputerActivity).apply {
@@ -181,22 +182,7 @@ class ComputerActivity : Activity() {
             },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
-        if (expanded) {
-            addView(
-                NexusUi.rowTitle(this@ComputerActivity, "Remove").apply {
-                    setTextColor(NexusUi.DANGER)
-                    setPadding(NexusUi.dp(this@ComputerActivity, 12), 0, 0, 0)
-                    setOnClickListener {
-                        configStore.removeProject(machineId, project.path)
-                        expandedProjectPath = null
-                        renderProjects()
-                        toast("${project.name} removed.")
-                    }
-                },
-            )
-        } else {
-            addView(NexusUi.chevron(this@ComputerActivity))
-        }
+        addView(NexusUi.chevron(this@ComputerActivity))
     }
 
     private fun toast(message: String) {

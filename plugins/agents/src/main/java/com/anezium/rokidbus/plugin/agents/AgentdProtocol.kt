@@ -33,6 +33,7 @@ sealed interface AgentdAction {
     data class ApprovalRequested(val approval: AgentApproval) : AgentdAction
     data class ApprovalResolved(val requestId: String) : AgentdAction
     data class FolderListing(val listing: FsListing) : AgentdAction
+    data class ThreadStarted(val result: ThreadStartResult) : AgentdAction
     data class Send(val text: String) : AgentdAction
     data object Ignore : AgentdAction
 }
@@ -187,6 +188,22 @@ class AgentdProtocolCodec {
             }
             // Folder listings carry no seq: each is the reply to one fs_list
             // the wearer just asked for, matched back by its request id.
+            // The verdict on a spawn the wearer asked for, matched by request id.
+            "thread_started" -> {
+                val requestId = json.identifierOrNull("id", MAX_FS_REQUEST_ID_CHARS)
+                    ?: return AgentdAction.Ignore
+                AgentdAction.ThreadStarted(
+                    ThreadStartResult(
+                        requestId = requestId,
+                        ok = json.booleanOrNull("ok") ?: false,
+                        provider = AgentProvider.fromWire(
+                            json.nullableString("provider", MAX_WIRE_TYPE_CHARS),
+                        ),
+                        sessionId = json.identifierOrNull("sessionId"),
+                        error = json.nullableString("error", MAX_STATUS_DETAIL_CHARS),
+                    ),
+                )
+            }
             "fs_listing" -> {
                 val requestId = json.identifierOrNull("id", MAX_FS_REQUEST_ID_CHARS)
                     ?: return AgentdAction.Ignore
@@ -251,6 +268,20 @@ class AgentdProtocolCodec {
             .put("type", "fs_list")
             .put("id", requestId)
             .apply { if (path != null) put("path", path) }
+            .toString()
+
+        /** The wearer asked for a new session inside a project folder. */
+        fun threadStart(
+            requestId: String,
+            provider: AgentProvider,
+            path: String,
+            prompt: String,
+        ): String = JSONObject()
+            .put("type", "thread_start")
+            .put("id", requestId)
+            .put("provider", provider.wireValue)
+            .put("path", path)
+            .put("prompt", prompt)
             .toString()
 
         /** The wearer answered a held tool call. */

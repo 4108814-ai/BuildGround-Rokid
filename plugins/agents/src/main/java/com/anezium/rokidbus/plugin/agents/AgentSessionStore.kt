@@ -49,6 +49,15 @@ class AgentSessionStore {
         _fsListing.value = listing
     }
 
+    private val _threadStart = MutableStateFlow<ThreadStartResult?>(null)
+
+    /** The latest spawn verdict the daemon answered; matched by request id. */
+    val threadStart: StateFlow<ThreadStartResult?> = _threadStart.asStateFlow()
+
+    fun setThreadStart(result: ThreadStartResult) {
+        _threadStart.value = result
+    }
+
     @Synchronized
     fun openConversation(session: AgentSession) {
         _conversation.value = AgentConversation(

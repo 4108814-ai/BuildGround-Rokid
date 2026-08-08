@@ -46,6 +46,10 @@ class AgentdClient(
         sockets.current()?.send(AgentdProtocolCodec.fsList(requestId, path))
     }
 
+    fun requestThreadStart(requestId: String, provider: AgentProvider, path: String, prompt: String) {
+        sockets.current()?.send(AgentdProtocolCodec.threadStart(requestId, provider, path, prompt))
+    }
+
     @Synchronized
     fun start(config: AgentdConfig) {
         loopJob?.cancel()
@@ -203,6 +207,9 @@ class AgentdClient(
                     }
                     is AgentdAction.FolderListing -> {
                         if (connected.get()) store.setFsListing(action.listing)
+                    }
+                    is AgentdAction.ThreadStarted -> {
+                        if (connected.get()) store.setThreadStart(action.result)
                     }
                     is AgentdAction.Send -> {
                         if (action.text == AgentdProtocolCodec.REFRESH) {

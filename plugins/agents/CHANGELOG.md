@@ -12,6 +12,9 @@
 - Give each computer its own screen, and let the wearer walk its folders over
   the link to anchor project folders — the ground the glasses will start
   sessions from.
+- Start a new session from a project: one prompt, Claude Code or Codex, and
+  the daemon launches it inside the project folder. It appears on the board
+  like any other session.
 - Alert on the glasses with an interactive notice; the phone stays silent and
   the plugin holds no notification permission.
 - Let a computer link itself over the LAN, and refuse the ones that were not

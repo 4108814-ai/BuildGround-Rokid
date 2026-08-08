@@ -24,6 +24,12 @@ and stores the chosen `{name, path}` per machine on the phone. Projects are
 the ground the glasses-side flow will offer when starting a session on a
 computer.
 
+Tapping a project opens New thread: one prompt and a harness — Claude Code or
+Codex — and the daemon starts the session inside the project folder
+(`thread_start`/`thread_started`; the prompt travels over the authenticated
+link and, for Claude, reaches the CLI only through stdin). The new session
+then flows through the ordinary monitoring to the board.
+
 - Adding a computer happens on its own screen, reached from the Computers
   list. It opens on how to get `nexus-agentd` itself, then offers three
   roads as equals: automatic on the home Wi-Fi (a two-minute door with a
