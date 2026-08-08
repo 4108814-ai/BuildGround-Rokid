@@ -8,6 +8,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+data class LinkMachine(
+    val machineId: String,
+    val machineName: String,
+    val overTailnet: Boolean,
+)
+
 class AgentSessionStore {
     private val providerSessions = AgentProvider.values().associateWith {
         linkedMapOf<String, AgentSession>()
@@ -19,12 +25,20 @@ class AgentSessionStore {
 
     private val _conversation = MutableStateFlow<AgentConversation?>(null)
     private val _approvals = MutableStateFlow<List<AgentApproval>>(emptyList())
+    private val _linkMachine = MutableStateFlow<LinkMachine?>(null)
 
     val approvals: StateFlow<List<AgentApproval>> = _approvals.asStateFlow()
     val sessions: StateFlow<List<AgentSession>> = _sessions.asStateFlow()
     val connections: StateFlow<Map<AgentProvider, ProviderConnectionState>> =
         _connections.asStateFlow()
     val conversation: StateFlow<AgentConversation?> = _conversation.asStateFlow()
+
+    /** The machine currently holding the LAN link, if any. */
+    val linkMachine: StateFlow<LinkMachine?> = _linkMachine.asStateFlow()
+
+    fun setLinkMachine(machine: LinkMachine?) {
+        _linkMachine.value = machine
+    }
 
     @Synchronized
     fun openConversation(session: AgentSession) {

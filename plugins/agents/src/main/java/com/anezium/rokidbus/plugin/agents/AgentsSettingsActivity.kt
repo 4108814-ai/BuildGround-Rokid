@@ -5,9 +5,7 @@ import android.content.Intent
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
-import android.text.Editable
 import android.text.InputType
-import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -22,27 +20,18 @@ import com.anezium.rokidbus.client.ui.NexusPluginIcons
 import com.anezium.rokidbus.client.ui.NexusUi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class AgentsSettingsActivity : Activity() {
     private val configStore by lazy { AgentsConfigStore(applicationContext) }
     private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var agentdEnabled: Switch
-    private lateinit var agentdPairing: EditText
-    private lateinit var agentdSummary: TextView
     private lateinit var agentdConnection: TextView
     private lateinit var agentdDot: View
-    private lateinit var machinesLine: TextView
-    private lateinit var linkTitle: TextView
-    private lateinit var linkSub: TextView
-    private lateinit var manualBlock: LinearLayout
-    private lateinit var manualDisclosure: TextView
+    private lateinit var computersList: LinearLayout
     private lateinit var tailscaleStatus: TextView
     private lateinit var tailscaleDot: View
     private lateinit var tailscaleGet: Button
@@ -52,13 +41,16 @@ class AgentsSettingsActivity : Activity() {
     private lateinit var openClawToken: EditText
     private lateinit var openClawConnection: TextView
     private lateinit var openClawDot: View
-    private var linkCountdown: Job? = null
+
+    /** The machine whose row the wearer tapped open to reach its Forget. */
+    private var expandedMachineId: String? = null
+    private var liveLink: LinkMachine? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         buildUi()
         loadConfig()
-        observeConnections()
+        observeState()
         if (configStore.load().shouldMonitor) {
             AgentsMonitorService.reconcile(applicationContext)
         }
@@ -66,8 +58,8 @@ class AgentsSettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        renderLinkState()
         renderTailscaleState()
+        renderComputers()
     }
 
     override fun onDestroy() {
@@ -78,29 +70,27 @@ class AgentsSettingsActivity : Activity() {
     private fun buildUi() {
         window.statusBarColor = NexusUi.BG
         window.navigationBarColor = NexusUi.BG
-        agentdEnabled = NexusUi.switch(this)
-        openClawEnabled = NexusUi.switch(this)
+        agentdEnabled = NexusUi.switch(this).apply {
+            setOnCheckedChangeListener { _, checked ->
+                configStore.saveAgentd(configStore.load().agentd, checked)
+                AgentsMonitorService.reconcile(applicationContext)
+            }
+        }
+        openClawEnabled = NexusUi.switch(this).apply {
+            setOnCheckedChangeListener { _, checked ->
+                configStore.saveOpenClaw(configStore.load().openClaw, checked)
+                AgentsMonitorService.reconcile(applicationContext)
+            }
+        }
         agentdDot = NexusUi.dot(this)
         openClawDot = NexusUi.dot(this)
-        agentdPairing = NexusUi.field(this, "Paste the pairing line from nexus-agentd").apply {
-            setSingleLine(false)
-            minLines = 3
-            maxLines = 6
-            gravity = Gravity.TOP
-            setPadding(paddingLeft, 14, paddingRight, 14)
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    renderPairingPreview(s?.toString().orEmpty())
-                }
-                override fun afterTextChanged(s: Editable?) = Unit
-            })
-        }
-        machinesLine = NexusUi.rowSub(this, "No computer linked yet")
-        linkTitle = NexusUi.rowTitle(this, "Link a computer")
-        linkSub = NexusUi.rowSub(this, "Opens for two minutes while your computer says hello")
-        agentdSummary = NexusUi.cardBody(this, "No daemon paired.")
+        tailscaleDot = NexusUi.dot(this)
         agentdConnection = NexusUi.statusLine(this).apply { text = "DISCONNECTED" }
+        tailscaleStatus = NexusUi.statusLine(this)
+        tailscaleGet = NexusUi.textButton(this, "Get Tailscale for this phone").apply {
+            setOnClickListener { openTailscaleInstall(this@AgentsSettingsActivity) }
+        }
+        computersList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         openClawHost = NexusUi.field(this, "Host or ws(s)://host").apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         }
@@ -124,9 +114,13 @@ class AgentsSettingsActivity : Activity() {
                 NexusUi.block(),
             )
             addView(BusTheme.gap(this@AgentsSettingsActivity, 18))
-            addView(NexusUi.sectionRow(this@AgentsSettingsActivity, "Claude Code & Codex"), NexusUi.block())
+            addView(NexusUi.sectionRow(this@AgentsSettingsActivity, "Monitoring"), NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
-            addView(agentdCard(), NexusUi.block())
+            addView(monitoringCard(), NexusUi.block())
+            addView(BusTheme.gap(this@AgentsSettingsActivity, 22))
+            addView(NexusUi.sectionRow(this@AgentsSettingsActivity, "Computers"), NexusUi.block())
+            addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
+            addView(computersCard(), NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 22))
             addView(NexusUi.sectionRow(this@AgentsSettingsActivity, "Away from home"), NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
@@ -163,170 +157,49 @@ class AgentsSettingsActivity : Activity() {
         setContentView(root)
     }
 
-    private fun agentdCard() = NexusUi.card(this).apply {
+    private fun monitoringCard() = NexusUi.card(this).apply {
         addView(
             NexusUi.switchRow(
                 this@AgentsSettingsActivity,
                 "Monitor sessions",
-                "Watch the sessions running on your computers",
+                "Claude Code, Codex, and OpenClaw",
                 agentdEnabled,
             ),
             NexusUi.block(),
         )
         addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
-        addView(connectionRow(agentdDot, agentdConnection), NexusUi.block())
-        addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
-        addView(
-            NexusUi.cardBody(
-                this@AgentsSettingsActivity,
-                "Run nexus-agentd on your computer and it finds this phone on the " +
-                    "same Wi-Fi by itself — no address, no cable, nothing to open.",
-            ),
-            NexusUi.block(),
-        )
-        addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
-        addView(machinesLine, NexusUi.block())
+        addView(connectionRow(this@AgentsSettingsActivity, agentdDot, agentdConnection), NexusUi.block())
+    }
+
+    private fun computersCard() = NexusUi.card(this).apply {
+        addView(computersList, NexusUi.block())
         addView(NexusUi.divider(this@AgentsSettingsActivity))
-        addView(linkCard(), NexusUi.block())
-        addView(BusTheme.gap(this@AgentsSettingsActivity, 12))
         addView(
-            NexusUi.textButton(this@AgentsSettingsActivity, "Forget computers", danger = true).apply {
+            NexusUi.rowTitle(this@AgentsSettingsActivity, "+ Add a computer").apply {
+                setTextColor(NexusUi.GREEN)
+                setPadding(0, NexusUi.dp(this@AgentsSettingsActivity, 10), 0, NexusUi.dp(this@AgentsSettingsActivity, 4))
                 setOnClickListener {
-                    agentdPairing.text.clear()
-                    configStore.saveAgentd(null, enabled = agentdEnabled.isChecked)
-                    configStore.forgetMachines()
-                    agentdSummary.text = "No daemon paired."
-                    machinesLine.text = "No computer linked yet"
-                    AgentsMonitorService.reconcile(applicationContext)
-                    renderLinkState()
-                    toast("Linked computers forgotten.")
+                    startActivity(Intent(this@AgentsSettingsActivity, AddComputerActivity::class.java))
                 }
             },
             NexusUi.block(),
         )
     }
 
-    /**
-     * The pairing act. The first computer ever is taken on trust — there is
-     * nothing yet to impersonate — but every one after it has to arrive while
-     * the wearer is holding this door open.
-     */
-    private fun linkCard() = NexusUi.pressableCard(this).apply {
-        setOnClickListener {
-            configStore.armLinkWindow()
-            AgentsMonitorService.reconcile(applicationContext)
-            renderLinkState()
-        }
-        addView(
-            LinearLayout(this@AgentsSettingsActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(linkTitle)
-                addView(BusTheme.gap(this@AgentsSettingsActivity, 4))
-                addView(linkSub)
-            },
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-        )
-        addView(NexusUi.chevron(this@AgentsSettingsActivity))
-    }
-
-    /**
-     * Out of the house the link rides a tailnet. The guided road is Tailscale —
-     * status first, one button if it is missing, one paragraph for the computer —
-     * and the pasted pairing line stays behind a fold for whoever refuses it.
-     */
-    private fun awayCard(): LinearLayout = NexusUi.card(this).apply {
-        tailscaleStatus = NexusUi.statusLine(this@AgentsSettingsActivity)
-        tailscaleDot = NexusUi.dot(this@AgentsSettingsActivity)
-        tailscaleGet = NexusUi.textButton(this@AgentsSettingsActivity, "Get Tailscale for this phone").apply {
-            setOnClickListener { openTailscaleInstall() }
-        }
+    private fun awayCard() = NexusUi.card(this).apply {
         addView(
             NexusUi.cardBody(
                 this@AgentsSettingsActivity,
-                "Away from your Wi-Fi the link rides your Tailscale network: put " +
-                    "Tailscale on this phone and on the computer, sign in with the " +
-                    "same account on both, and the computer keeps finding this " +
-                    "phone by itself — nothing to declare, nothing to type.",
+                "Away from your Wi-Fi the link rides your Tailscale network. Sign " +
+                    "in with the same account on this phone and on your computers, " +
+                    "and they keep reaching this phone wherever you are.",
             ),
             NexusUi.block(),
         )
         addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
-        addView(connectionRow(tailscaleDot, tailscaleStatus), NexusUi.block())
+        addView(connectionRow(this@AgentsSettingsActivity, tailscaleDot, tailscaleStatus), NexusUi.block())
         addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
         addView(tailscaleGet, NexusUi.block())
-        addView(
-            NexusUi.cardBody(
-                this@AgentsSettingsActivity,
-                "On the computer: Windows and macOS install it from " +
-                    "tailscale.com/download; Linux runs " +
-                    "“curl -fsSL https://tailscale.com/install.sh | sh” and then " +
-                    "“sudo tailscale up”. Sign in, and that is the whole setup.",
-            ),
-            NexusUi.block(),
-        )
-        addView(BusTheme.gap(this@AgentsSettingsActivity, 12))
-        addView(NexusUi.divider(this@AgentsSettingsActivity))
-        addView(manualDisclosureRow(), NexusUi.block())
-        addView(manualBlock(), NexusUi.block())
-        renderTailscaleState()
-    }
-
-    private fun manualDisclosureRow(): TextView {
-        manualDisclosure = NexusUi.rowSub(this, MANUAL_CLOSED).apply {
-            setPadding(0, NexusUi.dp(this@AgentsSettingsActivity, 6), 0, 0)
-            setOnClickListener {
-                val opening = manualBlock.visibility != View.VISIBLE
-                manualBlock.visibility = if (opening) View.VISIBLE else View.GONE
-                text = if (opening) MANUAL_OPEN else MANUAL_CLOSED
-            }
-        }
-        return manualDisclosure
-    }
-
-    /** Pasting the daemon's pairing line: the no-Tailscale fallback. */
-    private fun manualBlock(): LinearLayout {
-        manualBlock = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            visibility = View.GONE
-            addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
-            addView(agentdPairing, NexusUi.block())
-            addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
-            addView(agentdSummary, NexusUi.block())
-            addView(BusTheme.gap(this@AgentsSettingsActivity, 12))
-            addView(
-                actionRow(
-                    primary = "Save",
-                    onPrimary = { saveAgentd(test = false) },
-                    secondary = "Test connection",
-                    onSecondary = { saveAgentd(test = true) },
-                ),
-                NexusUi.block(),
-            )
-        }
-        return manualBlock
-    }
-
-    private fun tailscaleInstalled(): Boolean =
-        runCatching { packageManager.getPackageInfo(TAILSCALE_PACKAGE, 0) }.isSuccess
-
-    private fun renderTailscaleState() {
-        if (!::tailscaleStatus.isInitialized) return
-        val installed = tailscaleInstalled()
-        tailscaleStatus.text = if (installed) "TAILSCALE IS ON THIS PHONE" else "TAILSCALE NOT INSTALLED YET"
-        NexusUi.setDotColor(tailscaleDot, if (installed) NexusUi.GREEN else NexusUi.AMBER)
-        tailscaleGet.visibility = if (installed) View.GONE else View.VISIBLE
-    }
-
-    private fun openTailscaleInstall() {
-        val market = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$TAILSCALE_PACKAGE"))
-        runCatching { startActivity(market) }.onFailure {
-            startActivity(
-                Intent(
-                    Intent.ACTION_VIEW,
-                    Uri.parse("https://play.google.com/store/apps/details?id=$TAILSCALE_PACKAGE"),
-                ),
-            )
-        }
     }
 
     private fun openClawCard() = NexusUi.card(this).apply {
@@ -340,7 +213,7 @@ class AgentsSettingsActivity : Activity() {
             NexusUi.block(),
         )
         addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
-        addView(connectionRow(openClawDot, openClawConnection), NexusUi.block())
+        addView(connectionRow(this@AgentsSettingsActivity, openClawDot, openClawConnection), NexusUi.block())
         addView(NexusUi.divider(this@AgentsSettingsActivity))
         addView(openClawHost, NexusUi.block())
         addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
@@ -350,6 +223,7 @@ class AgentsSettingsActivity : Activity() {
         addView(BusTheme.gap(this@AgentsSettingsActivity, 12))
         addView(
             actionRow(
+                this@AgentsSettingsActivity,
                 primary = "Save",
                 onPrimary = { saveOpenClaw(test = false) },
                 secondary = "Test connection",
@@ -359,128 +233,137 @@ class AgentsSettingsActivity : Activity() {
         )
     }
 
-    private fun actionRow(
-        primary: String,
-        onPrimary: () -> Unit,
-        secondary: String,
-        onSecondary: () -> Unit,
-    ) = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        addView(
-            NexusUi.pillButton(this@AgentsSettingsActivity, primary).apply {
-                setOnClickListener { onPrimary() }
-            },
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginEnd = 6
-            },
-        )
-        addView(
-            NexusUi.outlinePillButton(this@AgentsSettingsActivity, secondary).apply {
-                setOnClickListener { onSecondary() }
-            },
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = 6
-            },
-        )
+    /**
+     * One row per computer this phone trusts. Tapping a row trades its chevron
+     * for Forget, so removing a machine takes two deliberate taps and a
+     * misplaced one costs nothing.
+     */
+    private fun renderComputers() {
+        if (!::computersList.isInitialized) return
+        computersList.removeAllViews()
+        val machines = configStore.trustedMachines()
+        val paired = configStore.load().agentd
+        if (machines.isEmpty() && paired == null) {
+            computersList.addView(
+                NexusUi.rowSub(this, "No computer linked yet — add one below"),
+                NexusUi.block(),
+            )
+            return
+        }
+        machines.forEachIndexed { index, machine ->
+            if (index > 0) computersList.addView(BusTheme.gap(this, 4))
+            val connected = liveLink?.machineId == machine.machineId
+            val sub = when {
+                connected && liveLink?.overTailnet == true -> "Connected · over Tailscale"
+                connected -> "Connected · same Wi-Fi"
+                else -> lastSeenText(machine.lastSeenAtMs)
+            }
+            computersList.addView(
+                machineRow(
+                    title = machine.name,
+                    sub = sub,
+                    dotColor = if (connected) NexusUi.GREEN else NexusUi.INK3,
+                    expanded = expandedMachineId == machine.machineId,
+                    onToggle = {
+                        expandedMachineId =
+                            if (expandedMachineId == machine.machineId) null else machine.machineId
+                        renderComputers()
+                    },
+                    onForget = {
+                        AgentsMonitorService.forgetMachine(applicationContext, machine.machineId)
+                        expandedMachineId = null
+                        renderComputers()
+                        toast("${machine.name} forgotten.")
+                    },
+                ),
+                NexusUi.block(),
+            )
+        }
+        if (paired != null) {
+            if (machines.isNotEmpty()) computersList.addView(BusTheme.gap(this, 4))
+            computersList.addView(
+                machineRow(
+                    title = paired.name,
+                    sub = "Paired by hand · ${paired.host}:${paired.port}",
+                    dotColor = NexusUi.INK3,
+                    expanded = expandedMachineId == PAIRED_ROW_ID,
+                    onToggle = {
+                        expandedMachineId = if (expandedMachineId == PAIRED_ROW_ID) null else PAIRED_ROW_ID
+                        renderComputers()
+                    },
+                    onForget = {
+                        configStore.saveAgentd(null, enabled = agentdEnabled.isChecked)
+                        AgentsMonitorService.reconcile(applicationContext)
+                        expandedMachineId = null
+                        renderComputers()
+                        toast("${paired.name} forgotten.")
+                    },
+                ),
+                NexusUi.block(),
+            )
+        }
     }
 
-    private fun connectionRow(dot: View, label: TextView) = LinearLayout(this).apply {
+    private fun machineRow(
+        title: String,
+        sub: String,
+        dotColor: Int,
+        expanded: Boolean,
+        onToggle: () -> Unit,
+        onForget: () -> Unit,
+    ) = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
+        setPadding(0, NexusUi.dp(this@AgentsSettingsActivity, 6), 0, NexusUi.dp(this@AgentsSettingsActivity, 6))
+        setOnClickListener { onToggle() }
+        val dot = NexusUi.dot(this@AgentsSettingsActivity)
+        NexusUi.setDotColor(dot, dotColor)
         val dotSize = NexusUi.dp(this@AgentsSettingsActivity, 8)
         addView(
             dot,
             LinearLayout.LayoutParams(dotSize, dotSize).apply {
-                marginEnd = NexusUi.dp(this@AgentsSettingsActivity, 8)
+                marginEnd = NexusUi.dp(this@AgentsSettingsActivity, 10)
             },
         )
-        addView(label)
+        addView(
+            LinearLayout(this@AgentsSettingsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(NexusUi.rowTitle(this@AgentsSettingsActivity, title))
+                addView(NexusUi.rowSub(this@AgentsSettingsActivity, sub))
+            },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        if (expanded) {
+            addView(
+                NexusUi.rowTitle(this@AgentsSettingsActivity, "Forget").apply {
+                    setTextColor(NexusUi.DANGER)
+                    setPadding(NexusUi.dp(this@AgentsSettingsActivity, 12), 0, 0, 0)
+                    setOnClickListener { onForget() }
+                },
+            )
+        } else {
+            addView(NexusUi.chevron(this@AgentsSettingsActivity))
+        }
+    }
+
+    private fun renderTailscaleState() {
+        if (!::tailscaleStatus.isInitialized) return
+        val installed = tailscaleInstalled(this)
+        tailscaleStatus.text = if (installed) "TAILSCALE IS ON THIS PHONE" else "TAILSCALE NOT INSTALLED YET"
+        NexusUi.setDotColor(tailscaleDot, if (installed) NexusUi.GREEN else NexusUi.AMBER)
+        tailscaleGet.visibility = if (installed) View.GONE else View.VISIBLE
     }
 
     private fun loadConfig() {
         val config = configStore.load()
         agentdEnabled.isChecked = config.agentdEnabled
-        agentdSummary.text = config.agentd?.let {
-            "${it.name} · ${it.host}:${it.port}"
-        } ?: "No daemon paired."
         openClawEnabled.isChecked = config.openClawEnabled
         openClawHost.setText(config.openClaw?.host.orEmpty())
         openClawPort.setText(
             (config.openClaw?.port ?: OpenClawConfig.DEFAULT_PORT).toString(),
         )
         openClawToken.setText(config.openClaw?.token.orEmpty())
-        renderLinkState()
-    }
-
-    /** One line that answers "is my computer going to get in right now?". */
-    private fun renderLinkState() {
-        linkCountdown?.cancel()
-        machinesLine.text = configStore.trustedMachineNames().let { machines ->
-            if (machines.isEmpty()) "No computer linked yet" else "Linked: ${machines.joinToString(", ")}"
-        }
-        if (!configStore.isLinkWindowOpen()) {
-            linkTitle.text = "Link a computer"
-            linkSub.text = if (configStore.trustedMachineNames().isEmpty()) {
-                "Or just start nexus-agentd — the first computer links itself"
-            } else {
-                "Opens for two minutes while your computer says hello"
-            }
-            return
-        }
-        linkTitle.text = "Waiting for a computer…"
-        linkCountdown = uiScope.launch {
-            while (isActive && configStore.isLinkWindowOpen()) {
-                val left = configStore.linkWindowRemainingMs() / 1000L
-                linkSub.text =
-                    "Start nexus-agentd now · closes in %d:%02d".format(left / 60, left % 60)
-                delay(1_000L)
-            }
-            renderLinkState()
-        }
-    }
-
-    private fun renderPairingPreview(raw: String) {
-        if (raw.isBlank()) {
-            agentdSummary.text = configStore.load().agentd?.let {
-                "Paired: ${it.name} · ${it.host}:${it.port}"
-            } ?: "No daemon paired."
-            return
-        }
-        agentdSummary.text = when (val parsed = AgentdPairingParser.parse(raw)) {
-            is AgentdPairingParseResult.Valid ->
-                "Parsed: ${parsed.config.name} · ${parsed.config.host}:${parsed.config.port}"
-            is AgentdPairingParseResult.Invalid -> parsed.reason
-        }
-    }
-
-    private fun saveAgentd(test: Boolean) {
-        val raw = agentdPairing.text.toString()
-        val config = if (raw.isBlank()) {
-            configStore.load().agentd
-        } else {
-            when (val parsed = AgentdPairingParser.parse(raw)) {
-                is AgentdPairingParseResult.Valid -> parsed.config
-                is AgentdPairingParseResult.Invalid -> {
-                    agentdSummary.text = parsed.reason
-                    toast("Fix the pairing data first.")
-                    return
-                }
-            }
-        }
-        if (config == null) {
-            toast("Paste pairing data first.")
-            return
-        }
-        configStore.saveAgentd(config, agentdEnabled.isChecked)
-        agentdPairing.text.clear()
-        agentdSummary.text = "Paired: ${config.name} · ${config.host}:${config.port}"
-        if (test) {
-            AgentsMonitorService.test(applicationContext, AgentProvider.CLAUDE)
-            toast("Testing the computer link…")
-        } else {
-            AgentsMonitorService.reconcile(applicationContext)
-            toast("Computer link settings saved.")
-        }
+        renderComputers()
     }
 
     private fun saveOpenClaw(test: Boolean) {
@@ -502,15 +385,10 @@ class AgentsSettingsActivity : Activity() {
         }
     }
 
-    private fun observeConnections() {
+    private fun observeState() {
         uiScope.launch {
             AgentsRuntime.store.connections.collectLatest { states ->
-                applyConnectionState(
-                    agentdDot,
-                    agentdConnection,
-                    states.getValue(AgentProvider.CLAUDE),
-                    authFailure = "PAIRING INVALID",
-                )
+                renderMonitoring(states.getValue(AgentProvider.CLAUDE))
                 applyConnectionState(
                     openClawDot,
                     openClawConnection,
@@ -520,8 +398,43 @@ class AgentsSettingsActivity : Activity() {
             }
         }
         uiScope.launch {
-            AgentsRuntime.linkedMachines.collect { renderLinkState() }
+            AgentsRuntime.store.sessions.collectLatest {
+                renderMonitoring(AgentsRuntime.store.connections.value.getValue(AgentProvider.CLAUDE))
+            }
         }
+        uiScope.launch {
+            AgentsRuntime.store.linkMachine.collectLatest {
+                liveLink = it
+                renderComputers()
+            }
+        }
+        uiScope.launch {
+            AgentsRuntime.linkedMachines.collect { renderComputers() }
+        }
+    }
+
+    /**
+     * The status answers what the glasses are seeing, not just whether a socket
+     * is up: session counts while the link works, the link's own state while it
+     * does not.
+     */
+    private fun renderMonitoring(state: ProviderConnectionState) {
+        if (state.state != ConnectionState.CONNECTED) {
+            applyConnectionState(agentdDot, agentdConnection, state, authFailure = "LINK REFUSED")
+            return
+        }
+        val sessions = AgentsRuntime.store.sessions.value
+            .filter { it.provider in AgentProvider.AGENTD_PROVIDERS }
+        val needsYou = sessions.count { it.status == AgentStatus.NEEDS_YOU }
+        val running = sessions.count { it.status == AgentStatus.WORKING }
+        val idle = sessions.count { it.status == AgentStatus.IDLE }
+        val parts = buildList {
+            if (needsYou > 0) add(if (needsYou == 1) "1 NEEDS YOU" else "$needsYou NEED YOU")
+            add("$running RUNNING")
+            add("$idle IDLE")
+        }
+        agentdConnection.text = "WATCHING · ${parts.joinToString(" · ")}"
+        NexusUi.setDotColor(agentdDot, if (needsYou > 0) NexusUi.AMBER else NexusUi.GREEN)
     }
 
     private fun applyConnectionState(
@@ -547,13 +460,12 @@ class AgentsSettingsActivity : Activity() {
     }
 
     private companion object {
-        const val MANUAL_CLOSED = "MANUAL PAIRING ›"
-        const val MANUAL_OPEN = "MANUAL PAIRING ⌄"
-        const val TAILSCALE_PACKAGE = "com.tailscale.ipn"
+        /** List-row id for the hand-paired daemon entry, which has no machineId. */
+        const val PAIRED_ROW_ID = "paired-daemon"
     }
 }
 
-private fun ProviderConnectionState.displayText(authFailure: String): String {
+internal fun ProviderConnectionState.displayText(authFailure: String): String {
     val label = if (state == ConnectionState.AUTH_FAILED) authFailure else state.wireValue.uppercase()
     val visibleDetail = detail?.takeIf {
         it.isNotBlank() && !it.equals(label, ignoreCase = true)

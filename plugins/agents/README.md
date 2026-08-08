@@ -8,13 +8,21 @@ on the glasses.
 
 ## Configuration
 
-- Claude Code & Codex: both arrive over the same `nexus-agentd` link — one
-  switch covers them. Away from home, paste the single JSON pairing line
-  emitted by `nexus-agentd`; the plugin validates `v:1` and
-  `kind:"nexus-agentd"` and stores one host/port/token/name slot.
+The settings screen reads top to bottom: Monitoring (one switch for the
+`nexus-agentd` link, which carries Claude Code and Codex, with a status line
+that counts the watched sessions), Computers (every linked machine with its
+state; tap a row to reach its own Forget), Away from home (Tailscale status
+for this phone), and OpenClaw.
+
+- Adding a computer happens on its own screen, reached from the Computers
+  list, and offers three roads as equals: automatic on the home Wi-Fi (a
+  two-minute door with a visible countdown and a Cancel button), Tailscale
+  for everywhere else, and a pasted pairing line for whoever wants neither.
+  The pairing line is the single JSON line `nexus-agentd pair` prints; the
+  plugin validates `v:1` and `kind:"nexus-agentd"` and stores one
+  host/port/token/name slot.
 - OpenClaw: enter the Gateway host, port (default `18789`), and token. A host
   may include `ws://` or `wss://`; a plain host uses `ws://`.
-- Each connection has an independent enable switch and connection test.
 - **Agents holds no notification permission and posts nothing on the phone.**
   The permission is deliberately absent from the manifest, so Android keeps the
   monitoring foreground service running but never shows its notification.
@@ -31,9 +39,12 @@ The daemon dials the phone, so the phone decides who is allowed in:
 - The **first** computer ever links itself — nothing exists yet to impersonate,
   and this is what keeps the zero-setup path zero-setup.
 - Every computer **after** that must arrive while the wearer holds the door
-  open: *Link a computer* on the settings screen opens a two-minute window.
+  open: *Open the door* on the Add a computer screen opens a two-minute
+  window, counts it down on screen, and can be cancelled at any moment.
 - A known computer presenting the **wrong token is refused**, and its stored
   token is never overwritten.
+- Forgetting a machine is per machine, takes two deliberate taps, and drops
+  its live connection on the spot.
 - A new link is announced on the glasses, never on the phone.
 
 ### Away from home

@@ -83,6 +83,9 @@ class AgentsMonitorService : Service() {
                 agentdClient.closeDetail()
                 linkServer.closeDetail()
             }
+            ACTION_DROP_MACHINE -> {
+                intent.getStringExtra(EXTRA_MACHINE_ID)?.let(linkServer::dropMachine)
+            }
             ACTION_DECIDE_APPROVAL -> {
                 val requestId = intent.getStringExtra(EXTRA_REQUEST_ID)
                 val decision = ApprovalDecision.values()
@@ -242,7 +245,10 @@ class AgentsMonitorService : Service() {
             "com.anezium.rokidbus.plugin.agents.action.CLOSE_DETAIL"
         const val ACTION_DECIDE_APPROVAL =
             "com.anezium.rokidbus.plugin.agents.action.DECIDE_APPROVAL"
+        const val ACTION_DROP_MACHINE =
+            "com.anezium.rokidbus.plugin.agents.action.DROP_MACHINE"
         const val EXTRA_SESSION_ID = "sessionId"
+        const val EXTRA_MACHINE_ID = "machineId"
         const val EXTRA_REQUEST_ID = "requestId"
         const val EXTRA_DECISION = "decision"
         private const val MONITOR_NOTIFICATION_ID = 3101
@@ -291,6 +297,23 @@ class AgentsMonitorService : Service() {
                 Intent(context, AgentsMonitorService::class.java)
                     .setAction(ACTION_CLOSE_DETAIL),
             )
+        }
+
+        /**
+         * Forgetting a machine is a preference write plus, when its link is
+         * live right now, a disconnect — the trust is gone, so the connection
+         * that rode on it goes too.
+         */
+        fun forgetMachine(context: Context, machineId: String) {
+            AgentsConfigStore(context).forgetMachine(machineId)
+            if (AgentsConfigStore(context).load().shouldMonitor) {
+                ContextCompat.startForegroundService(
+                    context,
+                    Intent(context, AgentsMonitorService::class.java)
+                        .setAction(ACTION_DROP_MACHINE)
+                        .putExtra(EXTRA_MACHINE_ID, machineId),
+                )
+            }
         }
 
         fun test(context: Context, provider: AgentProvider) {

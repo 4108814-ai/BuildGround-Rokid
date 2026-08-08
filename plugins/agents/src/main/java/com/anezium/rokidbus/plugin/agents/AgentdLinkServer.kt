@@ -61,6 +61,7 @@ class AgentdLinkServer(
         synchronized(clientLock) {
             client.also { client = null }
         }?.close()
+        store.setLinkMachine(null)
         store.setConnection(AgentProvider.CLAUDE, ConnectionState.DISCONNECTED)
         store.clearApprovals(AgentProvider.AGENTD_PROVIDERS)
         if (clearSessions) store.replaceLinkSessions(AgentProvider.AGENTD_PROVIDERS, emptyList())
@@ -121,11 +122,20 @@ class AgentdLinkServer(
             connection.lines { line ->
                 when (val decision = gate.receive(codec.parse(line))) {
                     is AgentdInboundDecision.HelloAccepted -> {
+                        connection.machineId = decision.hello.machineId
                         activate(connection)
                         if (decision.newlyTrusted) {
                             onMachineTrusted(decision.hello.machineName)
                         }
                         if (!connection.send(HELLO_ACK)) return@lines false
+                        configStore.touchMachineSeen(decision.hello.machineId)
+                        store.setLinkMachine(
+                            LinkMachine(
+                                machineId = decision.hello.machineId,
+                                machineName = decision.hello.machineName,
+                                overTailnet = isTailnetAddress(connection.remoteAddress),
+                            ),
+                        )
                         store.setConnection(
                             AgentProvider.CLAUDE,
                             ConnectionState.CONNECTED,
@@ -168,6 +178,8 @@ class AgentdLinkServer(
                 }
             }
             if (wasActive) {
+                connection.machineId?.let(configStore::touchMachineSeen)
+                store.setLinkMachine(null)
                 store.setConnection(
                     AgentProvider.CLAUDE,
                     ConnectionState.CONNECTING,
@@ -188,6 +200,12 @@ class AgentdLinkServer(
 
     private fun isActive(connection: LinkConnection): Boolean =
         synchronized(clientLock) { client === connection }
+
+    /** The wearer forgot this machine: a live link from it does not survive that. */
+    fun dropMachine(machineId: String) {
+        val current = synchronized(clientLock) { client }
+        if (current?.machineId == machineId) current.close()
+    }
 
     private fun handleAuthenticatedFrame(
         connection: LinkConnection,
@@ -314,7 +332,19 @@ internal class AgentdInboundGate(
     }
 }
 
+internal fun isTailnetAddress(address: String?): Boolean {
+    val parts = address?.split(".") ?: return false
+    if (parts.size != 4) return false
+    val octets = parts.map { it.toIntOrNull() ?: return false }
+    return octets[0] == 100 && octets[1] in 64..127
+}
+
 internal class LinkConnection(private val socket: Socket) {
+    /** Set once hello is accepted; identifies who holds this connection. */
+    @Volatile var machineId: String? = null
+
+    val remoteAddress: String? get() = socket.inetAddress?.hostAddress
+
     private val writer: BufferedWriter =
         BufferedWriter(OutputStreamWriter(socket.getOutputStream(), Charsets.UTF_8))
     private val reader: BufferedReader =

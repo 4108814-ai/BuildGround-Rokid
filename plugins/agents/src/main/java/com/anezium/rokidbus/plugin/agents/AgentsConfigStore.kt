@@ -66,6 +66,12 @@ object AgentdPairingParser {
     }
 }
 
+data class TrustedMachine(
+    val machineId: String,
+    val name: String,
+    val lastSeenAtMs: Long?,
+)
+
 internal enum class MachineTrustResult(val rejectionReason: String? = null) {
     TRUSTED,
     NEWLY_TRUSTED,
@@ -258,10 +264,43 @@ class AgentsConfigStore(
         .mapNotNull { prefs.getString(it, null) }
         .sorted()
 
+    fun trustedMachines(): List<TrustedMachine> = prefs.all.keys
+        .filter { it.startsWith(KEY_MACHINE_PREFIX) }
+        .map { it.removePrefix(KEY_MACHINE_PREFIX) }
+        .map { id ->
+            TrustedMachine(
+                machineId = id,
+                name = prefs.getString("$KEY_MACHINE_NAME_PREFIX$id", null)?.takeIf(String::isNotBlank) ?: id,
+                lastSeenAtMs = prefs.getLong("$KEY_MACHINE_SEEN_PREFIX$id", 0L).takeIf { it > 0L },
+            )
+        }
+        .sortedBy { it.name.lowercase() }
+
+    fun touchMachineSeen(machineId: String, now: Long = System.currentTimeMillis()) {
+        if (prefs.getString(machineKey(machineId), null) == null) return
+        prefs.edit().putLong("$KEY_MACHINE_SEEN_PREFIX$machineId", now).apply()
+    }
+
+    fun forgetMachine(machineId: String) {
+        prefs.edit()
+            .remove(machineKey(machineId))
+            .remove("$KEY_MACHINE_NAME_PREFIX$machineId")
+            .remove("$KEY_MACHINE_SEEN_PREFIX$machineId")
+            .apply()
+    }
+
+    fun cancelLinkWindow() {
+        prefs.edit().remove(KEY_LINK_WINDOW_DEADLINE).apply()
+    }
+
     fun forgetMachines() {
         prefs.edit().apply {
             prefs.all.keys
-                .filter { it.startsWith(KEY_MACHINE_PREFIX) || it.startsWith(KEY_MACHINE_NAME_PREFIX) }
+                .filter {
+                    it.startsWith(KEY_MACHINE_PREFIX) ||
+                        it.startsWith(KEY_MACHINE_NAME_PREFIX) ||
+                        it.startsWith(KEY_MACHINE_SEEN_PREFIX)
+                }
                 .forEach(::remove)
         }.apply()
     }
@@ -302,6 +341,7 @@ class AgentsConfigStore(
         const val KEY_NOTIFICATION_PREFIX = "notification."
         const val KEY_MACHINE_PREFIX = "machine.token."
         const val KEY_MACHINE_NAME_PREFIX = "machine.name."
+        const val KEY_MACHINE_SEEN_PREFIX = "machine.seen."
         const val KEY_LINK_WINDOW_DEADLINE = "machine.link_window_deadline"
     }
 }
