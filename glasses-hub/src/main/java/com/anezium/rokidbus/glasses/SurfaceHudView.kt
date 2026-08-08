@@ -37,6 +37,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         gravity = Gravity.CENTER_VERTICAL
         visibility = GONE
     }
+    private val readerView = ReaderSurfaceView(context).apply { visibility = GONE }
     private val mediaView = MediaHudView(context).apply { visibility = GONE }
     private val imageView = ImageHudView(context).apply {
         visibility = GONE
@@ -50,6 +51,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
     private var surface: NexusSurface? = null
     private var listRenderGeneration = 0L
     private var pendingListLayoutListener: View.OnLayoutChangeListener? = null
+    private var stopObservingReaderScroll: (() -> Unit)? = null
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -96,6 +98,9 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         addView(boardView, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply {
             topMargin = px(8)
         })
+        addView(readerView, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply {
+            topMargin = px(8)
+        })
         addView(nextView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
             topMargin = px(8)
         })
@@ -118,9 +123,19 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         requestFocus()
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        stopObservingReaderScroll?.invoke()
+        stopObservingReaderScroll = SurfaceController.observeReaderScroll { direction ->
+            if (surface?.isReader == true) readerView.smoothScrollByViewport(direction)
+        }
+    }
+
     override fun onDetachedFromWindow() {
         removeCallbacks(ticker)
         invalidatePendingListLayout()
+        stopObservingReaderScroll?.invoke()
+        stopObservingReaderScroll = null
         super.onDetachedFromWindow()
     }
 
@@ -136,6 +151,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         when {
             surface.isImage -> renderImage(surface)
             surface.isMedia -> renderMedia(surface)
+            surface.isReader -> renderReader(surface)
             surface.isTimed -> renderTimed(surface)
             else -> renderCard(surface)
         }
@@ -143,6 +159,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
 
     private fun renderTimed(surface: NexusSurface) {
         // Timed lines (lyrics) show one big centered line; cards pack a board.
+        hideReader()
         mediaView.visibility = GONE
         imageView.visibility = GONE
         boardView.visibility = GONE
@@ -177,6 +194,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
     }
 
     private fun renderCard(surface: NexusSurface) {
+        hideReader()
         mediaView.visibility = GONE
         imageView.visibility = GONE
         previousView.visibility = GONE
@@ -417,6 +435,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
     }
 
     private fun renderMedia(surface: NexusSurface) {
+        hideReader()
         imageView.visibility = GONE
         previousView.visibility = GONE
         currentView.visibility = GONE
@@ -427,6 +446,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
     }
 
     private fun renderImage(surface: NexusSurface) {
+        hideReader()
         mediaView.visibility = GONE
         previousView.visibility = GONE
         currentView.visibility = GONE
@@ -434,6 +454,22 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         nextView.visibility = GONE
         imageView.visibility = VISIBLE
         imageView.render(surface)
+    }
+
+    private fun renderReader(surface: NexusSurface) {
+        mediaView.visibility = GONE
+        imageView.visibility = GONE
+        previousView.visibility = GONE
+        currentView.visibility = GONE
+        boardView.visibility = GONE
+        nextView.visibility = GONE
+        readerView.visibility = VISIBLE
+        readerView.render(surface.surfaceId, surface.readerSegments)
+    }
+
+    private fun hideReader() {
+        if (readerView.visibility != GONE) readerView.clear()
+        readerView.visibility = GONE
     }
 
     private fun renderPlainCard(rows: List<SurfaceRow>) {
@@ -573,6 +609,8 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         mediaView.visibility = GONE
         imageView.render(null)
         imageView.visibility = GONE
+        readerView.clear()
+        readerView.visibility = GONE
         boardView.removeAllViews()
         boardView.visibility = GONE
         currentView.visibility = VISIBLE

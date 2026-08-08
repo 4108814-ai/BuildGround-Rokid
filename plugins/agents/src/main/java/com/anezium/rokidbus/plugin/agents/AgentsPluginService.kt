@@ -6,6 +6,9 @@ import com.anezium.rokidbus.client.plugin.NexusCard
 import com.anezium.rokidbus.client.plugin.NexusCardLine
 import com.anezium.rokidbus.client.plugin.NexusNotice
 import com.anezium.rokidbus.client.plugin.NexusPluginService
+import com.anezium.rokidbus.client.plugin.NexusReader
+import com.anezium.rokidbus.client.plugin.NexusReaderSegment
+import com.anezium.rokidbus.client.plugin.NexusReaderSegmentKind
 import com.anezium.rokidbus.client.plugin.NexusRowTone
 import com.anezium.rokidbus.client.plugin.NexusSdkResult
 import com.anezium.rokidbus.client.plugin.NexusSurfaceSession
@@ -45,8 +48,6 @@ class AgentsPluginService : NexusPluginService() {
     /** The session the last band was about, so a tap lands on it. */
     private var noticeTargetKey: String? = null
 
-    /** 0 keeps the conversation pinned to its newest message. */
-    private var scrollBack = 0
     private var ageTicker: Job? = null
 
     /** The held tool call the wearer is answering, if they are answering one. */
@@ -158,12 +159,11 @@ class AgentsPluginService : NexusPluginService() {
             return
         }
         // A touchpad swipe arrives as LEFT/RIGHT, the ring as UP/DOWN: both
-        // walk the same list, exactly as the other boards treat them.
+        // walk the same list, exactly as the other boards treat them. Inside a
+        // conversation the hub owns the scroll and swipes never reach us.
         when {
-            event.keyCode in BACKWARD_KEYS ->
-                if (conversation != null) scrollConversation(+1) else moveSelection(-1)
-            event.keyCode in FORWARD_KEYS ->
-                if (conversation != null) scrollConversation(-1) else moveSelection(+1)
+            event.keyCode in BACKWARD_KEYS -> if (conversation == null) moveSelection(-1)
+            event.keyCode in FORWARD_KEYS -> if (conversation == null) moveSelection(+1)
             event.keyCode == KeyEvent.KEYCODE_ENTER ||
                 event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER
             -> if (conversation == null) enterSelected()
@@ -289,14 +289,6 @@ class AgentsPluginService : NexusPluginService() {
         render(show = false)
     }
 
-    private fun scrollConversation(delta: Int) {
-        val total = AgentsRuntime.store.conversation.value
-            ?.let { conversationRows(it).size } ?: 0
-        val maxScroll = (total - 1).coerceAtLeast(0)
-        scrollBack = (scrollBack + delta).coerceIn(0, maxScroll)
-        render(show = false)
-    }
-
     /** ENTER means "deal with this": answer what is waiting, or read the rest. */
     private fun enterSelected() {
         val sessions = AgentsRuntime.store.sessions.value
@@ -317,7 +309,6 @@ class AgentsPluginService : NexusPluginService() {
     }
 
     private fun openConversation(session: AgentSession) {
-        scrollBack = 0
         AgentsRuntime.store.openConversation(session)
         AgentsMonitorService.openDetail(applicationContext, session)
         render(show = false)
@@ -348,18 +339,29 @@ class AgentsPluginService : NexusPluginService() {
         if (AgentsRuntime.store.conversation.value == null) return
         AgentsRuntime.store.closeConversation()
         AgentsMonitorService.closeDetail(applicationContext)
-        scrollBack = 0
     }
 
     private fun attemptAdoption() {
-        val adoptionSurface = surface ?: nexusSurfaceSession(SURFACE_ID)?.also { surface = it }
-        adoptionSurface?.showCard(buildCard())
+        surface = surface ?: nexusSurfaceSession(SURFACE_ID) ?: return
+        render(show = true)
     }
 
     private fun render(show: Boolean) {
         val activeSurface = surface ?: return
+        activeReader()?.let { reader ->
+            if (show) activeSurface.showReader(reader) else activeSurface.updateReader(reader)
+            return
+        }
         val card = buildCard()
         if (show) activeSurface.showCard(card) else activeSurface.updateCard(card)
+    }
+
+    /** An open conversation with something to read is the one reader screen. */
+    private fun activeReader(): NexusReader? {
+        if (decidingRequestId != null) return null
+        val conversation = AgentsRuntime.store.conversation.value ?: return null
+        if (conversation.loading || conversation.messages.isEmpty()) return null
+        return conversationReader(conversation)
     }
 
     private fun buildCard(): NexusCard {
@@ -802,188 +804,119 @@ class AgentsPluginService : NexusPluginService() {
 
     // ------------------------------------------------------------ conversation
 
+    /** Loading and empty states only; a readable conversation goes to the reader. */
     private fun conversationCard(conversation: AgentConversation): NexusCard {
         val session = AgentsRuntime.store.sessions.value
             .firstOrNull { it.key == conversation.sessionKey }
-        val rows = when {
-            conversation.loading -> listOf(
-                NexusCardLine(text = "Reading the conversation…", tone = NexusRowTone.DIM),
-            )
-            conversation.messages.isEmpty() -> listOf(
+        val rows = if (conversation.loading) {
+            listOf(NexusCardLine(text = "Reading the conversation…", tone = NexusRowTone.DIM))
+        } else {
+            listOf(
                 NexusCardLine(
                     text = "Nothing to show yet",
                     sub = "this session has no readable messages",
                     tone = NexusRowTone.DIM,
                 ),
             )
-            else -> {
-                // The window is a budget of rendered lines, not a row count:
-                // six one-line rows would strand the bottom half of the screen.
-                val all = conversationRows(conversation)
-                val end = (all.size - scrollBack).coerceIn(1, all.size)
-                var start = end
-                var lines = 0
-                while (start > 0) {
-                    val next = estimatedLines(all[start - 1])
-                    if (start < end && lines + next > READER_LINE_BUDGET) break
-                    lines += next
-                    start--
-                }
-                all.subList(start, end)
-            }
         }
         return card(
             title = session?.displayTitle?.singleLine(110) ?: "Conversation",
             subtitle = conversationSubtitle(session, conversation),
             rows = rows,
-            footer = if (scrollBack > 0) {
-                "swipe scroll · 2-tap back · $scrollBack older"
-            } else {
-                "swipe scroll · 2-tap back"
-            },
+            footer = "2-tap back",
         )
     }
 
     /**
-     * A conversation is read as prose, not scanned as a table. Each message is
-     * cut into chunks small enough that the HUD's three wrapped body lines show
-     * a chunk whole, and the swipe walks chunks — so a long answer is scrolled
-     * through, never ellipsized away. The badge marks where a message starts;
-     * a tool call stays one dim line, a glance and no more.
+     * The conversation as a document: a quiet header line where a turn starts,
+     * the message itself as full prose the hub wraps and scrolls, and a train
+     * of consecutive tool calls collapsed to one dim aside — the wearer sees
+     * "Edit ×4 · Bash" and moves on.
      */
-    private var readerCache: Pair<AgentConversation, List<NexusCardLine>>? = null
-
-    /** How many wrapped lines a row will take on the HUD's mono body. */
-    private fun estimatedLines(row: NexusCardLine): Int {
-        // Only prose wraps; every other row is drawn as one ellipsized line.
-        if (row.tone != NexusRowTone.BODY) return 1
-        val cols = if (row.badge.isNullOrBlank()) READER_FULL_COLS else READER_BADGE_COLS
-        return ((row.text.length + cols - 1) / cols).coerceAtLeast(1)
+    private fun conversationReader(conversation: AgentConversation): NexusReader {
+        val session = AgentsRuntime.store.sessions.value
+            .firstOrNull { it.key == conversation.sessionKey }
+        val last = conversation.messages.last()
+        return NexusReader(
+            title = session?.displayTitle?.singleLine(110) ?: "Conversation",
+            subtitle = conversationSubtitle(session, conversation),
+            footer = "swipe scroll · 2-tap back",
+            contentKey = listOf(
+                conversation.sessionKey,
+                conversation.messages.size,
+                last.at ?: 0L,
+                last.text.length,
+            ).joinToString(":").hashCode().toString(),
+            segments = readerSegments(conversation),
+        )
     }
 
-    private fun conversationRows(conversation: AgentConversation): List<NexusCardLine> {
-        readerCache?.let { (cached, rows) -> if (cached === conversation) return rows }
-        val rows = mutableListOf<NexusCardLine>()
+    private fun readerSegments(conversation: AgentConversation): List<NexusReaderSegment> {
+        val now = System.currentTimeMillis()
+        val groups = mutableListOf<List<NexusReaderSegment>>()
         val toolRun = mutableListOf<AgentMessage>()
         fun flushTools() {
             if (toolRun.isNotEmpty()) {
-                rows += toolRunRow(toolRun.toList())
+                groups += listOf(
+                    NexusReaderSegment(
+                        kind = NexusReaderSegmentKind.ASIDE,
+                        text = "⋯ ${toolRunLabel(toolRun)}".take(READER_SEGMENT_CHARS),
+                    ),
+                )
                 toolRun.clear()
             }
         }
         for (message in conversation.messages) {
             if (message.role == MessageRole.TOOL) {
                 toolRun += message
-            } else {
-                flushTools()
-                rows += messageRows(message, conversation.provider)
+                continue
             }
-        }
-        flushTools()
-        readerCache = conversation to rows
-        return rows
-    }
-
-    /**
-     * An agent's work is long trains of tool calls between two paragraphs.
-     * The reader is for the paragraphs, so a train collapses to one dim line:
-     * the wearer sees "Edit ×4 · Bash" and moves on.
-     */
-    private fun toolRunRow(run: List<AgentMessage>): NexusCardLine {
-        if (run.size == 1) {
-            return NexusCardLine(
-                text = run.single().text.singleLine(180),
-                badge = MessageRole.TOOL.label,
-                tone = NexusRowTone.DIM,
+            flushTools()
+            val who =
+                if (message.role == MessageRole.USER) MessageRole.USER.label
+                else conversation.provider.marker
+            groups += listOf(
+                NexusReaderSegment(
+                    kind = NexusReaderSegmentKind.HEADER,
+                    text = listOfNotNull(who, age(now, message.at)).joinToString(" · "),
+                    emphasis = message.role == MessageRole.USER,
+                ),
+                NexusReaderSegment(
+                    kind = NexusReaderSegmentKind.PROSE,
+                    text = message.text.take(READER_SEGMENT_CHARS),
+                ),
             )
         }
+        flushTools()
+        // Newest turns win the budget; a session's deep past lives on the phone.
+        val kept = ArrayDeque<List<NexusReaderSegment>>()
+        var chars = 0
+        var count = 0
+        for (group in groups.asReversed()) {
+            val groupChars = group.sumOf { it.text.length }
+            if (kept.isNotEmpty() &&
+                (chars + groupChars > READER_TOTAL_CHARS || count + group.size > READER_MAX_SEGMENTS)
+            ) {
+                break
+            }
+            kept.addFirst(group)
+            chars += groupChars
+            count += group.size
+        }
+        return kept.flatten()
+    }
+
+    private fun toolRunLabel(run: List<AgentMessage>): String {
+        if (run.size == 1) return run.single().text.singleLine(160)
         val counts = LinkedHashMap<String, Int>()
         for (message in run) {
             val name = message.tool?.takeIf(String::isNotBlank)
                 ?: message.text.substringBefore(" · ").ifBlank { "tool" }
             counts[name] = (counts[name] ?: 0) + 1
         }
-        val label = counts.entries.joinToString(" · ") { (name, times) ->
+        return counts.entries.joinToString(" · ") { (name, times) ->
             if (times > 1) "$name ×$times" else name
         }
-        return NexusCardLine(
-            text = label.singleLine(180),
-            badge = MessageRole.TOOL.label,
-            tone = NexusRowTone.DIM,
-        )
-    }
-
-    private fun messageRows(
-        message: AgentMessage,
-        provider: AgentProvider,
-    ): List<NexusCardLine> {
-        val badge =
-            if (message.role == MessageRole.USER) MessageRole.USER.label else provider.marker
-        return proseChunks(message.text).mapIndexed { index, chunk ->
-            NexusCardLine(
-                text = chunk,
-                badge = badge.takeIf { index == 0 },
-                tone = NexusRowTone.BODY,
-            )
-        }
-    }
-
-    private fun proseChunks(text: String): List<String> {
-        val chunks = mutableListOf<String>()
-        val current = StringBuilder()
-        // Where, inside [current], the last finished sentence ends. A chunk
-        // that must break prefers that seam: a row ending mid-sentence reads
-        // like a message of its own once the HUD spaces the rows apart.
-        var sentenceEnd = 0
-        // The first chunk shares its row with the role badge and loses that
-        // column's width; every later chunk runs the full line.
-        fun limit() = if (chunks.isEmpty()) READER_FIRST_CHUNK_CHARS else READER_CHUNK_CHARS
-        fun flush() {
-            if (current.isNotEmpty()) {
-                chunks += current.toString()
-                current.setLength(0)
-            }
-            sentenceEnd = 0
-        }
-        fun breakForNext(piece: String) {
-            val seam = sentenceEnd
-            if (seam >= limit() / 2 && seam < current.length) {
-                val rest = current.substring(seam).trimStart()
-                current.setLength(seam)
-                flush()
-                current.append(rest)
-                if (current.length + 1 + piece.length <= limit()) {
-                    current.append(' ').append(piece)
-                    return
-                }
-            }
-            flush()
-            current.append(piece)
-        }
-        for (paragraph in text.split('\n')) {
-            for (word in paragraph.trim().split(' ', '\t')) {
-                var piece = word
-                while (piece.length > limit()) {
-                    flush()
-                    val cut = limit()
-                    chunks += piece.take(cut)
-                    piece = piece.drop(cut)
-                }
-                when {
-                    piece.isEmpty() -> {}
-                    current.isEmpty() -> current.append(piece)
-                    current.length + 1 + piece.length <= limit() ->
-                        current.append(' ').append(piece)
-                    else -> breakForNext(piece)
-                }
-                if (piece.isNotEmpty() && piece.last() in SENTENCE_ENDS) {
-                    sentenceEnd = current.length
-                }
-            }
-            // A paragraph break ends the chunk, so the message keeps its shape.
-            flush()
-        }
-        return chunks.ifEmpty { listOf("…") }
     }
 
     private fun conversationSubtitle(
@@ -1054,20 +987,13 @@ class AgentsPluginService : NexusPluginService() {
         private const val VISIBLE_SESSION_ROWS = 6
         private const val MIN_SESSION_ROWS = 4
         /**
-         * The HUD's mono body wraps at about 29 characters a line and clips a
-         * row after three; these sizes keep a chunk whole on the worst line.
-         * The first chunk of a message also cedes a column to the role badge.
+         * Under the reader surface caps, and sized for the transport: past
+         * 3 KiB a surface rides the CXR data plane, whose image contract is
+         * 64 KiB — ~24k chars of text stays a ~30 KB frame, a ~90 ms push.
          */
-        private const val READER_CHUNK_CHARS = 86
-        private const val READER_FIRST_CHUNK_CHARS = 72
-        private const val READER_FULL_COLS = 28
-        private const val READER_BADGE_COLS = 23
-
-        /** The screen takes ~20 mono lines; the slack absorbs row spacing. */
-        private const val READER_LINE_BUDGET = 16
-
-        /** A word ending in one of these closes a sentence a chunk can break after. */
-        private val SENTENCE_ENDS = setOf('.', '!', '?', '…', ':', ';')
+        private const val READER_SEGMENT_CHARS = 4_000
+        private const val READER_TOTAL_CHARS = 24_000
+        private const val READER_MAX_SEGMENTS = 236
         private const val AGE_TICK_MS = 60_000L
         private const val NOTICE_TITLE_CHARS = 32
         private const val NOTICE_BODY_CHARS = 240

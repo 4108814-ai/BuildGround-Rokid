@@ -123,6 +123,97 @@ class SurfaceModelsTest {
     }
 
     @Test
+    fun `reader payload preserves segments and omits nullable and false fields`() {
+        val (client, transport) = client("surfaces")
+
+        assertEquals(
+            NexusSdkResult.SENT,
+            client.surfaceSession("thread").showReader(
+                NexusReader(
+                    title = "Conversation",
+                    subtitle = "2 turns",
+                    contentKey = "conversation-42",
+                    segments = listOf(
+                        NexusReaderSegment(NexusReaderSegmentKind.HEADER, "CX · now", emphasis = true),
+                        NexusReaderSegment(NexusReaderSegmentKind.PROSE, "A wrapped answer."),
+                        NexusReaderSegment(NexusReaderSegmentKind.ASIDE, "⋯ tool finished"),
+                    ),
+                ),
+            ),
+        )
+
+        val payload = transport.sends.single().second
+        assertEquals(BusPaths.SURFACE_SHOW, transport.sends.single().first)
+        assertEquals("thread", payload.getString("surfaceId"))
+        assertEquals("reader", payload.getString("kind"))
+        assertEquals("Conversation", payload.getString("title"))
+        assertEquals("2 turns", payload.getString("subtitle"))
+        assertEquals("conversation-42", payload.getString("contentKey"))
+        assertFalse(payload.has("footer"))
+        val segments = payload.getJSONArray("segments")
+        assertEquals("header", segments.getJSONObject(0).getString("kind"))
+        assertTrue(segments.getJSONObject(0).getBoolean("emphasis"))
+        assertEquals("A wrapped answer.", segments.getJSONObject(1).getString("text"))
+        assertFalse(segments.getJSONObject(1).has("emphasis"))
+        assertEquals("aside", segments.getJSONObject(2).getString("kind"))
+
+        val explicitBlanks = NexusReader(
+            title = "Blank shell fields",
+            subtitle = "",
+            footer = "",
+            contentKey = "",
+            segments = listOf(NexusReaderSegment(NexusReaderSegmentKind.PROSE, "text")),
+        ).toPayload("blank")
+        assertTrue(explicitBlanks.has("subtitle"))
+        assertTrue(explicitBlanks.has("footer"))
+        assertTrue(explicitBlanks.has("contentKey"))
+    }
+
+    @Test
+    fun `reader validates all frozen caps`() {
+        val prose = NexusReaderSegmentKind.PROSE
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusReader("", segments = listOf(NexusReaderSegment(prose, "text")))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusReader("x".repeat(121), segments = listOf(NexusReaderSegment(prose, "text")))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusReader("Title", subtitle = "x".repeat(241), segments = listOf(NexusReaderSegment(prose, "text")))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusReader("Title", footer = "x".repeat(241), segments = listOf(NexusReaderSegment(prose, "text")))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusReader("Title", contentKey = "x".repeat(129), segments = listOf(NexusReaderSegment(prose, "text")))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusReader("Title", segments = emptyList())
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusReader("Title", segments = List(241) { NexusReaderSegment(prose, "") })
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusReader("Title", segments = listOf(NexusReaderSegment(prose, "x".repeat(4_097))))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NexusReader(
+                "Title",
+                segments = List(10) { NexusReaderSegment(prose, "x".repeat(4_000)) } +
+                    NexusReaderSegment(prose, "x"),
+            )
+        }
+
+        NexusReader(
+            title = "x".repeat(120),
+            subtitle = "x".repeat(240),
+            footer = "x".repeat(240),
+            contentKey = "x".repeat(128),
+            segments = List(10) { NexusReaderSegment(prose, "x".repeat(4_000)) },
+        )
+    }
+
+    @Test
     fun `timed lines full and anchor-only updates preserve content key`() {
         val (client, transport) = client("surfaces")
         val session = client.surfaceSession("lyrics")
