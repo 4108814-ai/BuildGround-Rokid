@@ -1,5 +1,7 @@
 import { createSocket, type Socket as UdpSocket } from "node:dgram";
-import { networkInterfaces } from "node:os";
+import { existsSync } from "node:fs";
+import { readdir } from "node:fs/promises";
+import { homedir, networkInterfaces, platform } from "node:os";
 import { connect, type Socket as TcpSocket } from "node:net";
 import type {
   ApprovalDecision,
@@ -7,6 +9,7 @@ import type {
   ApprovalRequest,
 } from "./approval-manager";
 import { parsePhoneTarget, readPhoneLinkConfig } from "./config";
+import { listDirectory, listRoots, type FsListing } from "./fs-browse";
 import type { SessionStore } from "./session-store";
 import { TailscalePeerDiscovery } from "./tailnet-discovery";
 import type { AgentConfig, Logger, Session, SessionMessage } from "./types";
@@ -498,6 +501,18 @@ export class PhoneLink {
       case "ping":
         this.send({ type: "pong", t: message.t });
         break;
+      case "fs_list": {
+        const id =
+          typeof message.id === "string" && message.id.length > 0 && message.id.length <= 64
+            ? message.id
+            : undefined;
+        const socket = this.socket;
+        if (!id || !socket) {
+          break;
+        }
+        void this.sendFsListing(socket, id, message.path);
+        break;
+      }
       case "approval_decision": {
         const requestId =
           typeof message.requestId === "string" && message.requestId.length > 0
@@ -623,6 +638,41 @@ export class PhoneLink {
       session: this.options.store.get(sessionId) ?? null,
       messages,
     });
+  }
+
+  private async sendFsListing(
+    socket: TcpSocket,
+    id: string,
+    requestedPath: unknown,
+  ): Promise<void> {
+    let listing: FsListing;
+    try {
+      if (requestedPath === undefined || requestedPath === null) {
+        listing = listRoots(platform(), homedir(), existsSync);
+      } else if (typeof requestedPath === "string") {
+        listing = await listDirectory(requestedPath, readdir);
+      } else {
+        listing = {
+          path: null,
+          parent: null,
+          entries: [],
+          truncated: false,
+          error: "Path must be a local absolute path",
+        };
+      }
+    } catch {
+      listing = {
+        path: typeof requestedPath === "string" ? requestedPath : null,
+        parent: null,
+        entries: [],
+        truncated: false,
+        error: "Unable to list directory",
+      };
+    }
+    if (this.socket !== socket || socket.destroyed || !this.authenticated) {
+      return;
+    }
+    this.send({ type: "fs_listing", id, ...listing });
   }
 
   private sendSnapshot(): void {

@@ -343,6 +343,70 @@ test("TCP stays dialling until hello_ack, then sends data and accepts decisions"
   }
 });
 
+test("authenticated fs_list frames validate ids and return filesystem listings", async () => {
+  const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "nexus-agentd-fs-list-"));
+  const missingPath = path.join(tempDir, "missing");
+  const sockets = [];
+  let acceptConnection;
+  const accepted = new Promise((resolve) => { acceptConnection = resolve; });
+  const server = net.createServer((socket) => {
+    sockets.push(socket);
+    acceptConnection({ socket, lines: collectLines(socket) });
+  });
+  const port = await listen(server);
+  const { link, store } = createLink();
+
+  try {
+    link.connectToPhone({ host: "127.0.0.1", port, name: "test phone" });
+    const { socket, lines } = await accepted;
+    await lines.waitFor((frame) => frame.type === "hello");
+    socket.write('{"type":"hello_ack","v":1}\n');
+    await lines.waitFor((frame) => frame.type === "snapshot");
+
+    socket.write(`${JSON.stringify({ type: "fs_list" })}\n`);
+    socket.write(`${JSON.stringify({ type: "fs_list", id: "" })}\n`);
+    socket.write(`${JSON.stringify({ type: "fs_list", id: "x".repeat(65) })}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(lines.some((frame) => frame.type === "fs_listing"), false);
+
+    const rootId = "roots-request-opaque";
+    socket.write(`${JSON.stringify({ type: "fs_list", id: rootId })}\n`);
+    const roots = await lines.waitFor(
+      (frame) => frame.type === "fs_listing" && frame.id === rootId,
+    );
+    assert.equal(roots.path, null);
+    assert.equal(roots.parent, null);
+    assert.deepEqual(roots.entries[0], { name: "Home", path: os.homedir() });
+    assert.equal(roots.truncated, false);
+    assert.equal(roots.error, null);
+
+    const requests = [
+      { id: "relative", path: "relative/path", error: "Path must be a local absolute path" },
+      { id: "unc", path: "\\\\server\\share", error: "Path must be a local absolute path" },
+      { id: "overlong", path: path.resolve("x".repeat(4097)), error: "Path is too long" },
+      { id: "missing", path: missingPath, error: "Path does not exist" },
+    ];
+    for (const request of requests) {
+      socket.write(`${JSON.stringify({ type: "fs_list", id: request.id, path: request.path })}\n`);
+    }
+    for (const request of requests) {
+      const listing = await lines.waitFor(
+        (frame) => frame.type === "fs_listing" && frame.id === request.id,
+      );
+      assert.equal(listing.id, request.id);
+      assert.equal(listing.path, request.path);
+      assert.deepEqual(listing.entries, []);
+      assert.equal(listing.truncated, false);
+      assert.equal(listing.error, request.error);
+    }
+  } finally {
+    link.stop();
+    store.dispose();
+    await closeServer(server, sockets);
+    await fsp.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("hello rejection prints actionable guidance once and backs off for 60 seconds", async () => {
   assert.equal(REFUSAL_RECONNECT_DELAY_MS, 60_000);
   const sockets = [];
