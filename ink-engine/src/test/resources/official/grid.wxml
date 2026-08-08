@@ -1,0 +1,165 @@
+  <view class="container">
+    <view class="page-title">Grid Layouts</view>
+    <view class="page-subtitle">
+      Real-world page sections built with grid instead of isolated syntax demos.
+    </view>
+
+    <view class="card section">
+      <view class="title">Dashboard Overview</view>
+      <view class="section-note">A compact stats area using a two-column summary grid.</view>
+      <view class="dashboard-grid">
+        <view class="stat-card">
+          <view class="stat-label">Active Users</view>
+          <view class="stat-value">1,284</view>
+          <view class="stat-meta">Today</view>
+        </view>
+        <view class="stat-card">
+          <view class="stat-label">Avg Session</view>
+          <view class="stat-value">18 min</view>
+          <view class="stat-meta">Last 24h</view>
+        </view>
+        <view class="stat-card">
+          <view class="stat-label">Conversion</view>
+          <view class="stat-value">6.4%</view>
+          <view class="stat-meta">Weekly</view>
+        </view>
+        <view class="stat-card">
+          <view class="stat-label">Tickets</view>
+          <view class="stat-value">23</view>
+          <view class="stat-meta">Open</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="card section">
+      <view class="title">Sidebar + Main Workspace</view>
+      <view class="section-note">A classic application shell with a narrow sidebar and a flexible main area.</view>
+      <view class="workspace-grid">
+        <view class="workspace-sidebar">
+          <view class="sidebar-item">Home</view>
+          <view class="sidebar-item">Queue</view>
+          <view class="sidebar-item">Reports</view>
+          <view class="sidebar-item">Settings</view>
+        </view>
+        <view class="workspace-main">
+          <view class="workspace-hero">
+            <view class="hero-title">Project Overview</view>
+            <view class="hero-copy">Use grid to reserve a fixed navigation area while the content region grows naturally.</view>
+          </view>
+          <view class="workspace-summary-grid">
+            <view class="mini-panel">
+              <view class="mini-label">Pending</view>
+              <view class="mini-value">12</view>
+            </view>
+            <view class="mini-panel">
+              <view class="mini-label">Done</view>
+              <view class="mini-value">48</view>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="card section">
+      <view class="title">Media Gallery</view>
+      <view class="section-note">A responsive gallery where each card keeps a consistent thumbnail area.</view>
+      <view class="gallery-grid">
+        <view class="gallery-card">
+          <view class="gallery-thumb">Cover</view>
+          <view class="gallery-title">Morning Brief</view>
+          <view class="gallery-meta">Podcast</view>
+        </view>
+        <view class="gallery-card">
+          <view class="gallery-thumb">Cover</view>
+          <view class="gallery-title">Design Review</view>
+          <view class="gallery-meta">Video</view>
+        </view>
+        <view class="gallery-card">
+          <view class="gallery-thumb">Cover</view>
+          <view class="gallery-title">Sprint Notes</view>
+          <view class="gallery-meta">Article</view>
+        </view>
+        <view class="gallery-card">
+          <view class="gallery-thumb">Cover</view>
+          <view class="gallery-title">Roadmap</view>
+          <view class="gallery-meta">Deck</view>
+        </view>
+        <view class="gallery-card">
+          <view class="gallery-thumb">Cover</view>
+          <view class="gallery-title">Field Report</view>
+          <view class="gallery-meta">Audio</view>
+        </view>
+        <view class="gallery-card">
+          <view class="gallery-thumb">Cover</view>
+          <view class="gallery-title">Weekly Sync</view>
+          <view class="gallery-meta">Meeting</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="card section">
+      <view class="title">Article Card Feed</view>
+      <view class="section-note">A content feed where cards share structure but adapt well to a two-column layout.</view>
+      <view class="article-grid">
+        <view class="article-card">
+          <view class="article-kicker">Insight</view>
+          <view class="article-title">Using grid to organize dense content blocks</view>
+          <view class="article-copy">Cards stay readable because title, summary, and metadata live in a vertical stack.</view>
+          <view class="article-meta-row">
+            <view class="article-meta">6 min</view>
+            <view class="article-meta">Layout</view>
+          </view>
+        </view>
+        <view class="article-card">
+          <view class="article-kicker">Guide</view>
+          <view class="article-title">Practical section layouts for dashboards and detail pages</view>
+          <view class="article-copy">A simple repeating grid is often enough for feeds, summaries, and recommendation surfaces.</view>
+          <view class="article-meta-row">
+            <view class="article-meta">8 min</view>
+            <view class="article-meta">Patterns</view>
+          </view>
+        </view>
+        <view class="article-card">
+          <view class="article-kicker">Update</view>
+          <view class="article-title">Shipping a new overview page with reusable panels</view>
+          <view class="article-copy">Grid gives consistent outer rhythm while each card uses a flexible inner column.</view>
+          <view class="article-meta-row">
+            <view class="article-meta">4 min</view>
+            <view class="article-meta">Product</view>
+          </view>
+        </view>
+        <view class="article-card">
+          <view class="article-kicker">Case Study</view>
+          <view class="article-title">Combining card feeds with summary rows</view>
+          <view class="article-copy">Real pages often mix repeated grid cards with inner flex and column-based composition.</view>
+          <view class="article-meta-row">
+            <view class="article-meta">10 min</view>
+            <view class="article-meta">UX</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="card section">
+      <view class="title">Settings Overview</view>
+      <view class="section-note">A summary screen made of grouped entry cards instead of isolated grid mechanics.</view>
+      <view class="settings-grid">
+        <view class="setting-card">
+          <view class="setting-title">Profile</view>
+          <view class="setting-copy">Account photo, name, and visibility settings.</view>
+        </view>
+        <view class="setting-card">
+          <view class="setting-title">Notifications</view>
+          <view class="setting-copy">Delivery channels, digest frequency, and mute states.</view>
+        </view>
+        <view class="setting-card">
+          <view class="setting-title">Storage</view>
+          <view class="setting-copy">Offline assets, cache usage, and cleanup actions.</view>
+        </view>
+        <view class="setting-card">
+          <view class="setting-title">Security</view>
+          <view class="setting-copy">Session protection, passcode, and connected devices.</view>
+        </view>
+      </view>
+    </view>
+  </view>

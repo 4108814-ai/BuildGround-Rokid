@@ -36,6 +36,7 @@ include(":phone-client-probe")
 include(":glasses-client-probe")
 include(":plugin-sample")
 include(":plugin-wireless-adb")
+include(":ink-engine")
 
 // Plugin modules live under plugins/ (one folder per plugin, each with its own
 // README and CHANGELOG); feeds moves there once the in-flight feeds branch lands.
