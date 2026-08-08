@@ -3,7 +3,9 @@
 ## 1.0.0
 
 - Add Claude Code, Codex, and OpenClaw session monitoring.
-- Add a unified HUD mission-control board and a conversation view.
+- Add a unified HUD mission-control board and a conversation view that reads
+  like prose: whole messages, Codex history included, scrolled chunk by chunk
+  with a role badge marking where each message starts.
 - List every linked computer with its state, and forget them one at a time.
 - Gather the three ways to link a computer — automatic on the home Wi-Fi,
   Tailscale from anywhere, a pasted pairing line — on one Add a computer

@@ -2,7 +2,8 @@ import { open, stat } from "node:fs/promises";
 import type { MessageRole, SessionMessage } from "./types";
 
 const TAIL_READ_BYTES = 512 * 1024;
-const MAX_TEXT_CHARS = 400;
+export const MAX_TEXT_CHARS = 3500;
+const MAX_TOOL_SUMMARY_CHARS = 90;
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -10,8 +11,23 @@ function recordValue(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function condense(value: string, maxLength = MAX_TEXT_CHARS): string {
-  return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
+export function condense(value: string, maxLength = MAX_TEXT_CHARS): string {
+  const normalized = value
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return normalized.slice(0, Math.max(0, maxLength));
+}
+
+function condenseSingleLine(value: string, maxLength: number): string {
+  return value
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t\n]+/g, " ")
+    .trim()
+    .slice(0, Math.max(0, maxLength));
 }
 
 function timestampFrom(value: unknown, fallback: number): number {
@@ -45,7 +61,7 @@ function textFrom(content: unknown): string {
       parts.push(block.text);
     }
   }
-  return condense(parts.join(" "));
+  return condense(parts.join("\n"));
 }
 
 function toolBlock(content: unknown): Record<string, unknown> | undefined {
@@ -74,6 +90,7 @@ function shortenPath(value: string): string {
 
 /** The one input field that says what a tool call is actually doing. */
 export function toolSummary(name: string, input: unknown): string {
+  const label = condenseSingleLine(name, MAX_TOOL_SUMMARY_CHARS);
   const values = recordValue(input) ?? {};
   const pathValue = [values.file_path, values.path, values.notebook_path]
     .find((value): value is string => typeof value === "string" && value.trim().length > 0);
@@ -87,8 +104,12 @@ export function toolSummary(name: string, input: unknown): string {
         values.url,
         values.query,
       ].find((value): value is string => typeof value === "string" && value.trim().length > 0);
-  // A tool row is a glance, not a log: two HUD lines at most.
-  return candidate ? `${name} · ${condense(candidate, 90)}` : name;
+  if (!candidate) {
+    return label;
+  }
+  const prefix = `${label} · `;
+  const detail = condenseSingleLine(candidate, MAX_TOOL_SUMMARY_CHARS - prefix.length);
+  return detail ? `${prefix}${detail}` : label;
 }
 
 /**

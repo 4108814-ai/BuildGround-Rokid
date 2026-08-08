@@ -14,6 +14,10 @@ const {
   describeCodexApproval,
   normalizeCodexThread,
 } = require("../dist/codex/monitor.js");
+const {
+  codexThreadMessages,
+  extractCodexMessage,
+} = require("../dist/codex/messages.js");
 const { silentLogger } = require("../dist/logger.js");
 const { SessionStore } = require("../dist/session-store.js");
 const {
@@ -67,6 +71,82 @@ function turn(status, overrides = {}) {
     ...overrides,
   };
 }
+
+// Redacted copies of item shapes observed through thread/read on the live
+// app-server. Field names and nesting are preserved; user content is not.
+const REAL_APP_SERVER_ITEMS = [
+  {
+    id: "item-user-redacted",
+    type: "userMessage",
+    content: [{ type: "text", text: "[redacted user request]\r\nsecond line", text_elements: [] }],
+    clientId: null,
+  },
+  {
+    id: "item-agent-redacted",
+    type: "agentMessage",
+    text: "[redacted answer]\n\nwith detail",
+    phase: "final_answer",
+    memoryCitation: null,
+  },
+  {
+    id: "item-file-redacted",
+    type: "fileChange",
+    changes: [{ path: "E:\\redacted\\src\\monitor.ts", kind: "update", diff: "[redacted]" }],
+    status: "completed",
+  },
+  {
+    id: "item-mcp-redacted",
+    type: "mcpToolCall",
+    server: "cua-driver",
+    tool: "get_window_state",
+    arguments: { session: "[redacted]" },
+    status: "completed",
+    durationMs: 10,
+    result: null,
+    error: null,
+    pluginId: null,
+    appContext: null,
+  },
+  { id: "item-reasoning-redacted", type: "reasoning", content: [], summary: [] },
+  { id: "item-search-redacted", type: "webSearch", query: "[redacted]", action: null, results: [] },
+];
+
+// Redacted copies of representative JSONL records observed in real rollouts.
+const REAL_ROLLOUT_LINES = [
+  {
+    timestamp: "2026-08-08T10:00:00.000Z",
+    type: "response_item",
+    payload: {
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text: "[redacted rollout request]\r\nnext line" }],
+    },
+  },
+  {
+    timestamp: "2026-08-08T10:00:01.000Z",
+    type: "response_item",
+    payload: {
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: "[redacted rollout answer]" }],
+    },
+  },
+  {
+    timestamp: "2026-08-08T10:00:02.000Z",
+    type: "response_item",
+    payload: {
+      type: "function_call",
+      name: "exec_command",
+      arguments: JSON.stringify({ cmd: "git status", workdir: "E:\\redacted" }),
+      call_id: "call-redacted",
+    },
+  },
+  {
+    timestamp: "2026-08-08T10:00:03.000Z",
+    type: "response_item",
+    payload: { type: "reasoning", content: null, summary: [], encrypted_content: null },
+  },
+];
 
 class FakeApprovalTransport {
   connected = true;
@@ -173,6 +253,73 @@ function attachProtocol(server, threadFactory = () => makeThread()) {
   });
   return connections;
 }
+
+test("Codex display mapping uses observed app-server items and skips internal chatter", () => {
+  const startedAt = 1_753_000_030;
+  const threadValue = makeThread({
+    turns: [turn("completed", { startedAt, items: structuredClone(REAL_APP_SERVER_ITEMS) })],
+  });
+  const messages = codexThreadMessages(threadValue, 40);
+
+  assert.deepEqual(messages.map((message) => message.role), [
+    "user",
+    "assistant",
+    "tool",
+    "tool",
+  ]);
+  assert.equal(messages[0].text, "[redacted user request]\nsecond line");
+  assert.equal(messages[1].text, "[redacted answer]\n\nwith detail");
+  assert.match(messages[2].text, /^edit · .*monitor\.ts$/);
+  assert.equal(messages[2].tool, "edit");
+  assert.equal(messages[3].text, "get_window_state");
+  assert.equal(messages[3].tool, "get_window_state");
+  assert.equal(messages.every((message) => message.at === startedAt * 1000), true);
+  assert.deepEqual(codexThreadMessages(threadValue, 2), messages.slice(-2));
+});
+
+test("Codex display mapping accepts real rollout record shapes defensively", () => {
+  const messages = REAL_ROLLOUT_LINES
+    .map((line) => extractCodexMessage(line, 1))
+    .filter(Boolean);
+
+  assert.deepEqual(messages.map((message) => message.role), ["user", "assistant", "tool"]);
+  assert.equal(messages[0].text, "[redacted rollout request]\nnext line");
+  assert.equal(messages[1].text, "[redacted rollout answer]");
+  assert.equal(messages[2].text, "shell · git status");
+  assert.equal(messages[2].tool, "shell");
+  assert.equal(messages[2].at, Date.parse("2026-08-08T10:00:02.000Z"));
+  assert.equal(extractCodexMessage(null), undefined);
+  assert.equal(extractCodexMessage({ type: "response_item", payload: null }), undefined);
+});
+
+test("readMessages uses only thread/read and returns the requested display tail", async () => {
+  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  await new Promise((resolve) => server.once("listening", resolve));
+  const port = server.address().port;
+  const currentThread = makeThread({
+    turns: [turn("completed", { items: structuredClone(REAL_APP_SERVER_ITEMS) })],
+  });
+  const connections = attachProtocol(server, () => structuredClone(currentThread));
+  const { store, approvals, monitor } = makeHarness(port);
+  try {
+    monitor.start();
+    await waitUntil(() => monitor.availability().available, "monitor did not connect");
+    const requestStart = connections[0].messages.length;
+
+    const messages = await monitor.readMessages(currentThread.id, 3);
+
+    assert.deepEqual(
+      connections[0].messages.slice(requestStart).map((message) => message.method),
+      ["thread/read"],
+    );
+    assert.deepEqual(messages.map((message) => message.role), ["assistant", "tool", "tool"]);
+  } finally {
+    await monitor.stop();
+    approvals.dispose();
+    store.dispose();
+    await closeServer(server);
+  }
+});
 
 test("Codex normalization has conservative explicit status, title, and path mappings", () => {
   const cases = [

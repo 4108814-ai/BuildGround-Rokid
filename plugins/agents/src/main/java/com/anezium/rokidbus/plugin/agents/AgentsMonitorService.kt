@@ -296,7 +296,7 @@ class AgentsMonitorService : Service() {
 
         /** The wearer opened a conversation on the HUD: ask the daemon for it. */
         fun openDetail(context: Context, session: AgentSession) {
-            if (session.provider != AgentProvider.CLAUDE) return
+            if (session.provider !in AgentProvider.AGENTD_PROVIDERS) return
             ContextCompat.startForegroundService(
                 context,
                 Intent(context, AgentsMonitorService::class.java)

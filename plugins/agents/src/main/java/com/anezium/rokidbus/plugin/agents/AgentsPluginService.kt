@@ -290,7 +290,8 @@ class AgentsPluginService : NexusPluginService() {
     }
 
     private fun scrollConversation(delta: Int) {
-        val total = AgentsRuntime.store.conversation.value?.messages?.size ?: 0
+        val total = AgentsRuntime.store.conversation.value
+            ?.let { conversationRows(it).size } ?: 0
         val maxScroll = (total - DETAIL_VISIBLE_ROWS).coerceAtLeast(0)
         scrollBack = (scrollBack + delta).coerceIn(0, maxScroll)
         render(show = false)
@@ -816,10 +817,10 @@ class AgentsPluginService : NexusPluginService() {
                 ),
             )
             else -> {
-                val end = (conversation.messages.size - scrollBack)
-                    .coerceIn(1, conversation.messages.size)
+                val all = conversationRows(conversation)
+                val end = (all.size - scrollBack).coerceIn(1, all.size)
                 val start = (end - DETAIL_VISIBLE_ROWS).coerceAtLeast(0)
-                conversation.messages.subList(start, end).map(::messageRow)
+                all.subList(start, end)
             }
         }
         return card(
@@ -834,13 +835,83 @@ class AgentsPluginService : NexusPluginService() {
         )
     }
 
-    private fun messageRow(message: AgentMessage): NexusCardLine = NexusCardLine(
-        text = message.text.singleLine(238),
-        badge = message.role.label,
-        tone = NexusRowTone.BODY,
-        // The newest message stays brightest while older ones recede.
-        selected = false,
-    )
+    /**
+     * A conversation is read as prose, not scanned as a table. Each message is
+     * cut into chunks small enough that the HUD's three wrapped body lines show
+     * a chunk whole, and the swipe walks chunks — so a long answer is scrolled
+     * through, never ellipsized away. The badge marks where a message starts;
+     * a tool call stays one dim line, a glance and no more.
+     */
+    private var readerCache: Pair<AgentConversation, List<NexusCardLine>>? = null
+
+    private fun conversationRows(conversation: AgentConversation): List<NexusCardLine> {
+        readerCache?.let { (cached, rows) -> if (cached === conversation) return rows }
+        val rows = conversation.messages.flatMap { messageRows(it, conversation.provider) }
+        readerCache = conversation to rows
+        return rows
+    }
+
+    private fun messageRows(
+        message: AgentMessage,
+        provider: AgentProvider,
+    ): List<NexusCardLine> {
+        if (message.role == MessageRole.TOOL) {
+            return listOf(
+                NexusCardLine(
+                    text = message.text.singleLine(180),
+                    badge = MessageRole.TOOL.label,
+                    tone = NexusRowTone.DIM,
+                ),
+            )
+        }
+        val badge =
+            if (message.role == MessageRole.USER) MessageRole.USER.label else provider.marker
+        return proseChunks(message.text).mapIndexed { index, chunk ->
+            NexusCardLine(
+                text = chunk,
+                badge = badge.takeIf { index == 0 },
+                tone = NexusRowTone.BODY,
+            )
+        }
+    }
+
+    private fun proseChunks(text: String): List<String> {
+        val chunks = mutableListOf<String>()
+        val current = StringBuilder()
+        // The first chunk shares its row with the role badge and loses that
+        // column's width; every later chunk runs the full line.
+        fun limit() = if (chunks.isEmpty()) READER_FIRST_CHUNK_CHARS else READER_CHUNK_CHARS
+        fun flush() {
+            if (current.isNotEmpty()) {
+                chunks += current.toString()
+                current.setLength(0)
+            }
+        }
+        for (paragraph in text.split('\n')) {
+            for (word in paragraph.trim().split(' ', '\t')) {
+                var piece = word
+                while (piece.length > limit()) {
+                    flush()
+                    val cut = limit()
+                    chunks += piece.take(cut)
+                    piece = piece.drop(cut)
+                }
+                when {
+                    piece.isEmpty() -> {}
+                    current.isEmpty() -> current.append(piece)
+                    current.length + 1 + piece.length <= limit() ->
+                        current.append(' ').append(piece)
+                    else -> {
+                        flush()
+                        current.append(piece)
+                    }
+                }
+            }
+            // A paragraph break ends the chunk, so the message keeps its shape.
+            flush()
+        }
+        return chunks.ifEmpty { listOf("…") }
+    }
 
     private fun conversationSubtitle(
         session: AgentSession?,
@@ -909,7 +980,15 @@ class AgentsPluginService : NexusPluginService() {
         private const val SURFACE_ID = "agents"
         private const val VISIBLE_SESSION_ROWS = 6
         private const val MIN_SESSION_ROWS = 4
-        private const val DETAIL_VISIBLE_ROWS = 5
+        private const val DETAIL_VISIBLE_ROWS = 6
+
+        /**
+         * The HUD's mono body wraps at about 29 characters a line and clips a
+         * row after three; these sizes keep a chunk whole on the worst line.
+         * The first chunk of a message also cedes a column to the role badge.
+         */
+        private const val READER_CHUNK_CHARS = 86
+        private const val READER_FIRST_CHUNK_CHARS = 72
         private const val AGE_TICK_MS = 60_000L
         private const val NOTICE_TITLE_CHARS = 32
         private const val NOTICE_BODY_CHARS = 240

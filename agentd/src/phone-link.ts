@@ -45,6 +45,9 @@ const DETAIL_MESSAGE_LIMIT = 40;
 const MAX_LINE_BYTES = 512 * 1024;
 export const MAX_PHONE_SESSIONS_PER_PROVIDER = 200;
 export const THREAD_START_TIMEOUT_MS = 30_000;
+export const CODEX_DETAIL_REFRESH_DELAY_MS = 1_000;
+/** The phone's read loop times out at 90s; two of these fit inside it. */
+const LINK_PING_INTERVAL_MS = 30_000;
 const MAX_THREAD_PROMPT_BYTES = 16 * 1024;
 
 export interface PhoneLinkOptions {
@@ -67,6 +70,7 @@ export interface PhoneLinkOptions {
   reconnectDelayMs?: number;
   targetRefreshIntervalMs?: number;
   threadStartTimeoutMs?: number;
+  codexDetailRefreshDelayMs?: number;
   configFilePath?: string;
   tailnetDiscovery?: TailnetPeerSource;
   now?: () => number;
@@ -168,6 +172,10 @@ export class PhoneLink {
   private targetRefreshTimer?: NodeJS.Timeout;
   private reconnectTimer?: NodeJS.Timeout;
   private helloTimer?: NodeJS.Timeout;
+  private detailRefreshTimer?: NodeJS.Timeout;
+  private detailSendInFlight?: Promise<void>;
+  private pendingDetailSessionId?: string;
+  private pingTimer?: NodeJS.Timeout;
   private buffer = "";
   private sequence = 0;
   private openSessionId?: string;
@@ -241,6 +249,9 @@ export class PhoneLink {
       this.reconnectTimer = undefined;
     }
     this.clearHelloTimer();
+    this.clearDetailRefreshTimer();
+    this.clearPingTimer();
+    this.pendingDetailSessionId = undefined;
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     this.socket?.destroy();
@@ -266,7 +277,12 @@ export class PhoneLink {
   /** Streams an appended conversation message if the phone is reading that session. */
   sendDetailMessage(sessionId: string, message: SessionMessage): void {
     if (this.openSessionId === sessionId) {
-      this.send({ type: "detail_append", sessionId, message });
+      this.send({
+        type: "detail_append",
+        sessionId,
+        provider: this.options.store.get(sessionId)?.provider ?? "claude",
+        message,
+      });
     }
   }
 
@@ -425,12 +441,15 @@ export class PhoneLink {
     const wasAuthenticated = this.authenticated;
     const target = this.connectedTo;
     this.clearHelloTimer();
+    this.clearPingTimer();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     this.socket = undefined;
     this.authenticated = false;
     this.publishedSessions.clear();
     this.buffer = "";
+    this.clearDetailRefreshTimer();
+    this.pendingDetailSessionId = undefined;
     this.openSessionId = undefined;
     this.connectedTo = undefined;
     this.phoneName = undefined;
@@ -509,13 +528,17 @@ export class PhoneLink {
         if (!sessionId) {
           break;
         }
+        this.clearDetailRefreshTimer();
+        this.pendingDetailSessionId = undefined;
         this.openSessionId = sessionId;
         this.options.logger.info("phone_link_detail_open", { sessionId: sessionId.slice(0, 8) });
         this.options.onDetailOpen?.(sessionId);
-        void this.sendDetail(sessionId);
+        this.queueDetailSend(sessionId);
         break;
       }
       case "detail_close":
+        this.clearDetailRefreshTimer();
+        this.pendingDetailSessionId = undefined;
         this.openSessionId = undefined;
         break;
       case "ping":
@@ -586,7 +609,21 @@ export class PhoneLink {
     });
     this.sendSnapshot();
     this.unsubscribe = this.subscribe();
+    // The phone hangs up after 90 quiet seconds; TCP keepalive never reaches
+    // its read loop, so an idle board needs application-level pings.
+    this.clearPingTimer();
+    this.pingTimer = setInterval(() => {
+      this.send({ type: "ping", t: this.now() });
+    }, LINK_PING_INTERVAL_MS);
+    this.pingTimer.unref();
     this.options.onConnected?.();
+  }
+
+  private clearPingTimer(): void {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = undefined;
+    }
   }
 
   private onHelloReject(rawReason: unknown): void {
@@ -670,12 +707,63 @@ export class PhoneLink {
     if (this.openSessionId !== sessionId) {
       return;
     }
+    const session = this.options.store.get(sessionId) ?? null;
     this.send({
       type: "detail",
       sessionId,
-      session: this.options.store.get(sessionId) ?? null,
+      // The phone routes a detail frame by provider; omitting it means Claude.
+      provider: session?.provider ?? "claude",
+      session,
       messages,
     });
+  }
+
+  private scheduleCodexDetailRefresh(session: Session): void {
+    if (session.provider !== "codex" || this.openSessionId !== session.id) {
+      return;
+    }
+    this.clearDetailRefreshTimer();
+    this.detailRefreshTimer = setTimeout(() => {
+      this.detailRefreshTimer = undefined;
+      if (this.openSessionId === session.id) {
+        this.queueDetailSend(session.id);
+      }
+    }, this.options.codexDetailRefreshDelayMs ?? CODEX_DETAIL_REFRESH_DELAY_MS);
+    this.detailRefreshTimer.unref();
+  }
+
+  private queueDetailSend(sessionId: string): void {
+    if (this.detailSendInFlight) {
+      this.pendingDetailSessionId = sessionId;
+      return;
+    }
+    const operation = this.sendDetail(sessionId);
+    this.detailSendInFlight = operation;
+    void operation
+      .catch((error) => {
+        this.options.logger.info("phone_link_detail_read_failed", {
+          sessionId: sessionId.slice(0, 8),
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        if (this.detailSendInFlight !== operation) {
+          return;
+        }
+        this.detailSendInFlight = undefined;
+        const pendingSessionId = this.pendingDetailSessionId;
+        this.pendingDetailSessionId = undefined;
+        if (pendingSessionId && this.openSessionId === pendingSessionId) {
+          this.queueDetailSend(pendingSessionId);
+        }
+      });
+  }
+
+  private clearDetailRefreshTimer(): void {
+    if (this.detailRefreshTimer) {
+      clearTimeout(this.detailRefreshTimer);
+      this.detailRefreshTimer = undefined;
+    }
   }
 
   private async sendFsListing(
@@ -832,6 +920,7 @@ export class PhoneLink {
   private sendUpsert(session: Session): void {
     this.sequence += 1;
     this.send({ type: "session_upsert", seq: this.sequence, session });
+    this.scheduleCodexDetailRefresh(session);
   }
 
   private sendRemoved(sessionId: string): void {

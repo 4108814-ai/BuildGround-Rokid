@@ -822,3 +822,78 @@ test("snapshots and deltas publish at most 200 sessions per provider", async () 
     await closeServer(server, sockets);
   }
 });
+
+test("open Codex details debounce upsert refreshes and serialize detail reads", async () => {
+  const sockets = [];
+  let acceptConnection;
+  const accepted = new Promise((resolve) => { acceptConnection = resolve; });
+  const server = net.createServer((socket) => {
+    sockets.push(socket);
+    acceptConnection({ socket, lines: collectLines(socket) });
+  });
+  const port = await listen(server);
+  let releaseFirstRead;
+  const firstRead = new Promise((resolve) => { releaseFirstRead = resolve; });
+  let reads = 0;
+  let activeReads = 0;
+  let maxActiveReads = 0;
+  const { link, store } = createLink({
+    codexDetailRefreshDelayMs: 20,
+    detailProvider: async (sessionId) => {
+      const readNumber = ++reads;
+      activeReads += 1;
+      maxActiveReads = Math.max(maxActiveReads, activeReads);
+      try {
+        if (readNumber === 1) {
+          await firstRead;
+        }
+        assert.equal(sessionId, "codex-open-thread");
+        return [{ role: "assistant", text: `read ${readNumber}`, at: readNumber }];
+      } finally {
+        activeReads -= 1;
+      }
+    },
+  });
+  const session = {
+    id: "codex-open-thread",
+    provider: "codex",
+    machineId: config.machineId,
+    machineName: config.machineName,
+    title: "Open Codex thread",
+    cwd: "E:/repo",
+    project: "repo",
+    status: "idle",
+    stale: false,
+    lastActivityAt: 1,
+  };
+  store.upsertProviderSession(session);
+
+  try {
+    link.connectToPhone({ host: "127.0.0.1", port, name: "test phone" });
+    const { socket, lines } = await accepted;
+    await lines.waitFor((frame) => frame.type === "hello");
+    socket.write('{"type":"hello_ack","v":1}\n');
+    await lines.waitFor((frame) => frame.type === "snapshot");
+    socket.write('{"type":"detail_open","sessionId":"codex-open-thread"}\n');
+    await waitUntil(() => reads === 1, "initial detail read did not start");
+
+    store.upsertProviderSession({ ...session, status: "working", lastActivityAt: 2 });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    store.upsertProviderSession({ ...session, status: "working", lastActivityAt: 3 });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(reads, 1, "a debounced refresh overlapped the initial read");
+
+    releaseFirstRead();
+    const refreshed = await lines.waitFor(
+      (frame) => frame.type === "detail" && frame.messages?.[0]?.text === "read 2",
+    );
+    assert.equal(refreshed.sessionId, session.id);
+    assert.equal(reads, 2);
+    assert.equal(maxActiveReads, 1);
+  } finally {
+    releaseFirstRead();
+    link.stop();
+    store.dispose();
+    await closeServer(server, sockets);
+  }
+});

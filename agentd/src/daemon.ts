@@ -45,12 +45,22 @@ export async function startDaemon(): Promise<RunningDaemon> {
   );
 
   const detailProvider = async (sessionId: string, limit: number) => {
+    if (sessions.get(sessionId)?.provider === "codex") {
+      try {
+        return await codexMonitor?.readMessages(sessionId, limit) ?? [];
+      } catch {
+        return [];
+      }
+    }
     const transcriptPath = sessions.transcriptPath(sessionId);
     return transcriptPath ? readRecentMessages(transcriptPath, limit) : [];
   };
   // Reading a conversation also starts tailing it, so the view stays live
   // even for a session that had been quiet since the daemon started.
   const onDetailOpen = (sessionId: string) => {
+    if (sessions.get(sessionId)?.provider === "codex") {
+      return;
+    }
     const transcriptPath = sessions.transcriptPath(sessionId);
     if (transcriptPath && !tailManager.isTailing(sessionId)) {
       tailManager.start(sessionId, transcriptPath);

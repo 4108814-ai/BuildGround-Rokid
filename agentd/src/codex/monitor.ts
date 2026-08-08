@@ -16,8 +16,10 @@ import type {
   Logger,
   PendingRequest,
   Session,
+  SessionMessage,
   ThreadStartResult,
 } from "../types";
+import { codexThreadMessages } from "./messages";
 import type {
   AdditionalFileSystemPermissions,
   AdditionalNetworkPermissions,
@@ -361,6 +363,17 @@ export class CodexMonitor {
 
   availability(): CodexAvailability {
     return { ...this.state };
+  }
+
+  async readMessages(threadId: string, limit: number): Promise<SessionMessage[]> {
+    if (!this.state.available || this.stopped || !this.socket || limit <= 0) {
+      return [];
+    }
+    const response = await this.request<ThreadReadResponse>("thread/read", {
+      threadId,
+      includeTurns: true,
+    });
+    return codexThreadMessages(response.thread, limit);
   }
 
   async startThread(cwd: string, prompt: string): Promise<ThreadStartResult> {
