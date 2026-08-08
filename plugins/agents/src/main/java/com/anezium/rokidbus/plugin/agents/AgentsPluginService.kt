@@ -157,15 +157,17 @@ class AgentsPluginService : NexusPluginService() {
             onLaunchInput(event)
             return
         }
-        when (event.keyCode) {
-            KeyEvent.KEYCODE_DPAD_UP ->
+        // A touchpad swipe arrives as LEFT/RIGHT, the ring as UP/DOWN: both
+        // walk the same list, exactly as the other boards treat them.
+        when {
+            event.keyCode in BACKWARD_KEYS ->
                 if (conversation != null) scrollConversation(+1) else moveSelection(-1)
-            KeyEvent.KEYCODE_DPAD_DOWN ->
+            event.keyCode in FORWARD_KEYS ->
                 if (conversation != null) scrollConversation(-1) else moveSelection(+1)
-            KeyEvent.KEYCODE_ENTER,
-            KeyEvent.KEYCODE_DPAD_CENTER,
+            event.keyCode == KeyEvent.KEYCODE_ENTER ||
+                event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER
             -> if (conversation == null) enterSelected()
-            KeyEvent.KEYCODE_BACK ->
+            event.keyCode == KeyEvent.KEYCODE_BACK ->
                 if (conversation != null) {
                     leaveConversation()
                     render(show = false)
@@ -176,16 +178,18 @@ class AgentsPluginService : NexusPluginService() {
     }
 
     private fun onDecisionInput(event: NexusInputEvent) {
-        when (event.keyCode) {
-            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+        when {
+            event.keyCode in BACKWARD_KEYS || event.keyCode in FORWARD_KEYS -> {
                 decisionChoice = when (decisionChoice) {
                     ApprovalDecision.ALLOW -> ApprovalDecision.DENY
                     ApprovalDecision.DENY -> ApprovalDecision.ALLOW
                 }
                 render(show = false)
             }
-            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER -> confirmDecision()
-            KeyEvent.KEYCODE_BACK -> {
+            event.keyCode == KeyEvent.KEYCODE_ENTER ||
+                event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER
+            -> confirmDecision()
+            event.keyCode == KeyEvent.KEYCODE_BACK -> {
                 decidingRequestId = null
                 render(show = false)
             }
@@ -400,7 +404,7 @@ class AgentsPluginService : NexusPluginService() {
                 "waiting for you",
             ).joinToString(" · ").take(120),
             rows = rows,
-            footer = "UP/DOWN choose · ENTER confirm · BACK later",
+            footer = "swipe choose · tap confirm · 2-tap later",
         )
     }
 
@@ -424,7 +428,7 @@ class AgentsPluginService : NexusPluginService() {
                 tone = NexusRowTone.DIM,
             ),
         ),
-        footer = "BACK to the list",
+        footer = "2-tap back",
     )
 
     // ---------------------------------------------------------------- sessions
@@ -481,9 +485,9 @@ class AgentsPluginService : NexusPluginService() {
             subtitle = sessionsSubtitle(sessions, connections, config),
             rows = rows,
             footer = if (sessions.isEmpty()) {
-                "BACK exit"
+                "tap start an agent · 2-tap exit"
             } else {
-                "UP/DOWN move · ENTER open · BACK exit"
+                "swipe move · tap open · 2-tap exit"
             },
         )
     }
@@ -578,17 +582,19 @@ class AgentsPluginService : NexusPluginService() {
     // -------------------------------------------------------------- launcher
 
     private fun onLaunchInput(event: NexusInputEvent) {
-        when (event.keyCode) {
-            KeyEvent.KEYCODE_DPAD_UP -> {
+        when {
+            event.keyCode in BACKWARD_KEYS -> {
                 launchIndex -= 1
                 render(show = false)
             }
-            KeyEvent.KEYCODE_DPAD_DOWN -> {
+            event.keyCode in FORWARD_KEYS -> {
                 launchIndex += 1
                 render(show = false)
             }
-            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER -> launchEnter()
-            KeyEvent.KEYCODE_BACK -> {
+            event.keyCode == KeyEvent.KEYCODE_ENTER ||
+                event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER
+            -> launchEnter()
+            event.keyCode == KeyEvent.KEYCODE_BACK -> {
                 launch = when (val step = launch) {
                     is Launch.Threads -> Launch.Projects(step.machineId, step.machineName)
                     is Launch.Projects -> Launch.Computers
@@ -708,7 +714,7 @@ class AgentsPluginService : NexusPluginService() {
             title = "Start an agent",
             subtitle = "pick a computer",
             rows = rows,
-            footer = "UP/DOWN move · ENTER pick · BACK board",
+            footer = "swipe move · tap pick · 2-tap board",
         )
     }
 
@@ -737,7 +743,7 @@ class AgentsPluginService : NexusPluginService() {
             title = "Start an agent",
             subtitle = "${step.machineName} · pick a project".take(120),
             rows = rows,
-            footer = "UP/DOWN move · ENTER pick · BACK computers",
+            footer = "swipe move · tap pick · 2-tap computers",
         )
     }
 
@@ -771,7 +777,7 @@ class AgentsPluginService : NexusPluginService() {
                 if (threads.isEmpty()) "no threads yet" else "${threads.size} threads",
             ).joinToString(" · ").take(120),
             rows = rows,
-            footer = "UP/DOWN move · ENTER open or start · BACK projects",
+            footer = "swipe move · tap open or start · 2-tap projects",
         )
     }
 
@@ -821,9 +827,9 @@ class AgentsPluginService : NexusPluginService() {
             subtitle = conversationSubtitle(session, conversation),
             rows = rows,
             footer = if (scrollBack > 0) {
-                "UP/DOWN scroll · BACK to list · $scrollBack older"
+                "swipe scroll · 2-tap back · $scrollBack older"
             } else {
-                "UP/DOWN scroll · BACK to list"
+                "swipe scroll · 2-tap back"
             },
         )
     }
@@ -916,6 +922,18 @@ class AgentsPluginService : NexusPluginService() {
 
         /** Virtual board row: the door into the start-an-agent walk. */
         private const val START_KEY = "!start-an-agent"
+
+        /** Touchpad swipes come in as LEFT/RIGHT, the ring as UP/DOWN. */
+        private val FORWARD_KEYS = setOf(
+            KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_MEDIA_NEXT,
+        )
+        private val BACKWARD_KEYS = setOf(
+            KeyEvent.KEYCODE_DPAD_LEFT,
+            KeyEvent.KEYCODE_DPAD_UP,
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+        )
         private val PERMISSION_PATTERN =
             Regex("permission to use ([\\w.-]+)", RegexOption.IGNORE_CASE)
     }
