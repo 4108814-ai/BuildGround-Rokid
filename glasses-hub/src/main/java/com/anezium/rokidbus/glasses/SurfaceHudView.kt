@@ -1,11 +1,9 @@
 package com.anezium.rokidbus.glasses
 
 import android.content.Context
-import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.SystemClock
-import android.text.Layout
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.TextUtils
@@ -43,6 +41,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         visibility = GONE
         setPadding(px(4), px(4), px(4), px(4))
     }
+    private val inkView = InkHudView(context).apply { visibility = GONE }
     private val footerView = monoText(10.5f, BusTheme.dim).apply {
         gravity = Gravity.CENTER
         textAlignment = TEXT_ALIGNMENT_CENTER
@@ -88,6 +87,9 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
             topMargin = px(8)
         })
         addView(imageView, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply {
+            topMargin = px(8)
+        })
+        addView(inkView, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply {
             topMargin = px(8)
         })
         addView(previousView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
@@ -141,6 +143,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         invalidatePendingListLayout()
         stopObservingReaderScroll?.invoke()
         stopObservingReaderScroll = null
+        SurfaceController.detachInkRenderer(inkView)
         super.onDetachedFromWindow()
     }
 
@@ -158,13 +161,31 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         footerView.text = surface.footer
         footerView.visibility = visibleIf(surface.footer.isNotBlank())
 
+        if (!surface.isInk) hideInk()
         when {
+            surface.isInk -> renderInk(surface)
             surface.isImage -> renderImage(surface)
             surface.isMedia -> renderMedia(surface)
             surface.isReader -> renderReader(surface)
             surface.isTimed -> renderTimed(surface)
             else -> renderCard(surface)
         }
+    }
+
+    private fun renderInk(surface: NexusSurface) {
+        mediaView.visibility = GONE
+        imageView.visibility = GONE
+        previousView.visibility = GONE
+        currentView.visibility = GONE
+        boardView.visibility = GONE
+        nextView.visibility = GONE
+        inkView.visibility = VISIBLE
+        SurfaceController.attachInkRenderer(inkView, surface.ink?.debugActions == true)
+    }
+
+    private fun hideInk() {
+        SurfaceController.detachInkRenderer(inkView)
+        inkView.visibility = GONE
     }
 
     private fun renderTimed(surface: NexusSurface) {
@@ -633,6 +654,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         imageView.visibility = GONE
         readerView.clear()
         readerView.visibility = GONE
+        hideInk()
         boardView.removeAllViews()
         boardView.visibility = GONE
         currentView.visibility = VISIBLE
@@ -648,18 +670,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         if (surface.isMedia) MEDIA_TICK_MS else TICK_MS
 
     private fun monoText(sizeSp: Float, color: Int, bold: Boolean = false): TextView =
-        TextView(context).apply {
-            textSize = sizeSp
-            setTextColor(color)
-            typeface = Typeface.create(Typeface.MONOSPACE, if (bold) Typeface.BOLD else Typeface.NORMAL)
-            includeFontPadding = false
-            isSingleLine = false
-            setHorizontallyScrolling(false)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                breakStrategy = Layout.BREAK_STRATEGY_HIGH_QUALITY
-                hyphenationFrequency = Layout.HYPHENATION_FREQUENCY_NONE
-            }
-        }
+        monoHudText(context, sizeSp, color, bold)
 
     private fun px(dp: Int): Int =
         (dp * resources.displayMetrics.density + 0.5f).toInt()

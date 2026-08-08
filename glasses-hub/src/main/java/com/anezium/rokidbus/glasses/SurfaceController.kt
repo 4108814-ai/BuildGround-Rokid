@@ -21,6 +21,7 @@ object SurfaceController {
     private const val PREF_DISPLAY_PATH = "display_path"
     private const val BACK_FAILSAFE_MS = 1_500L
     private val main = Handler(Looper.getMainLooper())
+    private val inkRendererLayer = InkRendererLayer(main, ::onInkResyncNeeded)
     private val orderingCoordinator = SurfaceOrderingCoordinator<JSONObject>()
     private val listeners = CopyOnWriteArrayList<(NexusSurface?) -> Unit>()
     private val readerScrollListeners = CopyOnWriteArrayList<(Int) -> Unit>()
@@ -34,6 +35,8 @@ object SurfaceController {
     }
     private var backFailsafeSurfaceId: String? = null
     private var backFailsafe: Runnable? = null
+    private var inkFrameMeterRunning = false
+    @Volatile private var inkResyncListener: ((InkResyncRequest) -> Unit)? = null
     @Volatile private var active: NexusSurface? = null
 
     fun activeSurface(): NexusSurface? = active
@@ -138,7 +141,13 @@ object SurfaceController {
         }
 
         val launcherShow = envelope.path == BusPaths.SURFACE_SHOW
-        if (carriesImage && !(surface.isMedia && surface.imageBitmap != null)) {
+        if (surface.isInk) {
+            showOrUpdateInk(
+                context = context,
+                surface = surface,
+                launcherShow = launcherShow,
+            )
+        } else if (carriesImage && !(surface.isMedia && surface.imageBitmap != null)) {
             showOrUpdateImage(
                 context = context,
                 surface = surface,
@@ -207,6 +216,9 @@ object SurfaceController {
         val surface = active ?: return false
         if (surface.isReader) return handleReaderKeyEvent(surface, event)
         if (shouldSuppressDpadEvent(event)) {
+            return true
+        }
+        if (surface.isInk && inkRendererLayer.handleKeyEvent(event)) {
             return true
         }
         if ((event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP) &&
@@ -279,6 +291,18 @@ object SurfaceController {
         return true
     }
 
+    internal fun attachInkRenderer(view: InkHudView, debugActions: Boolean) {
+        inkRendererLayer.attach(view, debugActions)
+    }
+
+    internal fun detachInkRenderer(view: InkHudView) {
+        inkRendererLayer.detach(view)
+    }
+
+    internal fun setInkResyncListener(listener: ((InkResyncRequest) -> Unit)?) {
+        inkResyncListener = listener
+    }
+
     private fun showOrUpdate(
         context: Context,
         surface: NexusSurface,
@@ -288,6 +312,7 @@ object SurfaceController {
         val completesRingHandoff =
             launcherShow && launcherReturnCoordinator.onSurfaceShown(surface.surfaceId)
         runOnMain {
+            if (!surface.isInk) clearInkRenderer()
             val keepMediaDecode = surface.isMedia && surface.mediaArtworkMetadata != null &&
                 imageDecodeCoordinator.isCurrent(surface.surfaceId, surface.contentKey)
             val coordinated = if (keepMediaDecode) null else imageDecodeCoordinator.invalidate()
@@ -298,6 +323,7 @@ object SurfaceController {
             deactivateReplacedSurface(surface.surfaceId)
             prepareRingInputForSurface(surface.surfaceId)
             active = surface
+            syncInkFrameMeter(surface)
             RingFocusBroadcastCoordinator.setSurfaceActive(
                 context,
                 active = true,
@@ -306,6 +332,19 @@ object SurfaceController {
             notifyListeners(surface)
             displaySurface(context, surface, forcedPath)
         }
+    }
+
+    private fun showOrUpdateInk(
+        context: Context,
+        surface: NexusSurface,
+        launcherShow: Boolean,
+    ) {
+        inkRendererLayer.submit(
+            surface = surface,
+            onCommitted = {
+                showOrUpdate(context, surface, launcherShow = launcherShow)
+            },
+        )
     }
 
     private fun showOrUpdateImage(
@@ -325,6 +364,7 @@ object SurfaceController {
             // begin() invalidates older work; active still owns the visible bitmap.
             imageDecodeCoordinator.begin(key)
             if (surface.isMedia) {
+                clearInkRenderer()
                 recycleActiveImageUnless(surface.imageBitmap)
                 cancelBackFailsafeOnMain(surface.surfaceId)
                 DisplayWakePolicy.requestWake(context, DisplayWakeKind.SURFACE, requested = true)
@@ -366,6 +406,7 @@ object SurfaceController {
                                 return@post
                             }
                             recycleActiveImageUnless(decoded)
+                            clearInkRenderer()
                             val published = target.copy(imageBitmap = decoded)
                             cancelBackFailsafeOnMain(target.surfaceId)
                             DisplayWakePolicy.requestWake(
@@ -438,6 +479,7 @@ object SurfaceController {
         val coordinated = activeSurfaceId?.let(imageDecodeCoordinator::invalidate)
         coordinated?.recycleSafely()
         recycleActiveImageUnless(coordinated)
+        clearInkRenderer()
         resetRingInputOnMain()
         active = null
         notifyListeners(null)
@@ -450,6 +492,33 @@ object SurfaceController {
         active?.surfaceId
             ?.takeIf { it != surfaceId }
             ?.let(orderingCoordinator::deactivate)
+    }
+
+    private fun clearInkRenderer() {
+        inkRendererLayer.clear()
+        if (inkFrameMeterRunning) {
+            HudFrameMeter.stop()
+            inkFrameMeterRunning = false
+        }
+    }
+
+    private fun syncInkFrameMeter(surface: NexusSurface) {
+        val enabled = surface.isInk && surface.ink?.debugFrameMeter == true
+        if (!enabled && inkFrameMeterRunning) {
+            HudFrameMeter.stop()
+            inkFrameMeterRunning = false
+        } else if (enabled && !inkFrameMeterRunning) {
+            HudFrameMeter.start("ink-debug")
+            inkFrameMeterRunning = true
+        }
+    }
+
+    private fun onInkResyncNeeded(request: InkResyncRequest) {
+        log(
+            "Ink resync needed current=${request.currentDocumentId}@${request.currentRevision} " +
+                "patch=${request.patchDocumentId}@${request.patchBaseRevision}",
+        )
+        inkResyncListener?.invoke(request)
     }
 
     private fun JSONObject.toSurfaceOrder(): SurfaceOrder = SurfaceOrder(

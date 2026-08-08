@@ -58,14 +58,21 @@ class BudgetAndWireTest {
         val first = document.toWireJson()
         val second = document.toWireJson()
         assertEquals(first, second)
-        assertEquals(1, JSONObject(first).getInt("v"))
+        val documentJson = JSONObject(first)
+        assertEquals(1, documentJson.getInt("v"))
+        assertEquals(0, documentJson.getInt("rev"))
+        assertEquals(document.documentId, documentJson.getString("doc"))
         assertTrue(first.indexOf("\"roots\"") < first.indexOf("\"v\""))
 
         val update = result.session!!.applyPatch(JSONObject().put("message", "world"))
         val patchJson = update.patch!!.toWireJson()
         assertEquals(patchJson, update.patch.toWireJson())
-        assertEquals(1, JSONObject(patchJson).getInt("v"))
-        assertNotNull(JSONObject(patchJson).getJSONArray("changes"))
+        val patchObject = JSONObject(patchJson)
+        assertEquals(1, patchObject.getInt("v"))
+        assertEquals(document.documentId, patchObject.getString("doc"))
+        assertEquals(0, patchObject.getInt("baseRev"))
+        assertEquals(1, patchObject.getInt("targetRev"))
+        assertNotNull(patchObject.getJSONArray("changes"))
 
         val report = InkProblemReport(
             listOf(

@@ -23,6 +23,8 @@ internal class BindingRenderer(
     private val metadata: InkObject,
     private val data: InkObject,
     private val cache: EvaluationCache,
+    private val documentId: String,
+    private val revision: Int,
     private val dirtyPaths: List<DataPath> = emptyList(),
 ) {
     private val evaluator = ExpressionEvaluator(data)
@@ -33,7 +35,12 @@ internal class BindingRenderer(
     fun render(): BindingResult = try {
         val context = EvaluationContext(data)
         val renderedRoots = renderSiblings(roots, context, "root", "root", StyleContext())
-        val document = RenderDocument(renderedRoots, metadata.deepCopyObject())
+        val document = RenderDocument(
+            roots = renderedRoots,
+            metadata = metadata.deepCopyObject(),
+            documentId = documentId,
+            revision = revision,
+        )
         BindingResult(
             document.takeIf { problems.none { problem -> problem.severity == InkProblemSeverity.ERROR } },
             problems.toList(),

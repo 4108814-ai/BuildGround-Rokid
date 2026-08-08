@@ -2,6 +2,7 @@ package com.anezium.rokidbus.ink
 
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
+import java.util.UUID
 
 data class InkCompileResult(
     val document: RenderDocument?,
@@ -37,6 +38,11 @@ data class InkProblemReport(
     }
 
     fun toWireJson(): String = DeterministicJson.stringify(toJsonObject())
+
+    companion object {
+        fun fromWireJson(json: String): InkWireDecodeResult<InkProblemReport> =
+            InkWireCodec.decodeProblemReport(json)
+    }
 }
 
 object InkEngine {
@@ -76,7 +82,16 @@ object InkEngine {
         }
 
         val cache = EvaluationCache()
-        val binding = BindingRenderer(markup.roots, styles.rules, blocks.metadata, data, cache).render()
+        val documentId = UUID.randomUUID().toString()
+        val binding = BindingRenderer(
+            roots = markup.roots,
+            rules = styles.rules,
+            metadata = blocks.metadata,
+            data = data,
+            cache = cache,
+            documentId = documentId,
+            revision = 0,
+        ).render()
         problems += binding.problems
         val document = binding.document
         if (document == null || problems.any { it.severity == InkProblemSeverity.ERROR }) {
@@ -105,6 +120,7 @@ class InkSession internal constructor(
     private val ownerThread = Thread.currentThread()
     private var data: InkObject = initialData.deepCopyObject()
     private var cache: EvaluationCache = initialCache
+    private var revision: Int = initialDocument.revision
 
     var document: RenderDocument = initialDocument
         private set
@@ -141,6 +157,20 @@ class InkSession internal constructor(
             )
         }
 
+        if (revision == Int.MAX_VALUE) {
+            return InkPatchResult(
+                null,
+                document,
+                listOf(
+                    InkProblem(
+                        InkProblemCodes.WIRE_REVISION,
+                        "Ink document revision is exhausted",
+                        feature = document.documentId,
+                    ),
+                ),
+            )
+        }
+        val targetRevision = revision + 1
         val trialCache = cache.copyForUpdate()
         val binding = BindingRenderer(
             templateRoots,
@@ -148,6 +178,8 @@ class InkSession internal constructor(
             metadata,
             trialData,
             trialCache,
+            document.documentId,
+            targetRevision,
             update.dirtyPaths,
         ).render()
         val next = binding.document
@@ -157,6 +189,7 @@ class InkSession internal constructor(
         val patch = RenderDiffer.diff(document, next)
         data = trialData
         cache = trialCache
+        revision = targetRevision
         document = next
         return InkPatchResult(patch, next, binding.problems, binding.evaluatedExpressionCount)
     }

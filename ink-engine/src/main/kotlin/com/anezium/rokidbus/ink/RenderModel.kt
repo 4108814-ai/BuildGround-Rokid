@@ -50,6 +50,8 @@ data class RenderNode(
 data class RenderDocument(
     val roots: List<RenderNode>,
     val metadata: Map<String, Any?> = emptyMap(),
+    val documentId: String,
+    val revision: Int = 0,
     val version: Int = InkWire.VERSION,
 ) {
     val nodeCount: Int
@@ -57,11 +59,18 @@ data class RenderDocument(
 
     fun toJsonObject(): JSONObject = JSONObject().apply {
         put("v", version)
+        put("doc", documentId)
+        put("rev", revision)
         if (metadata.isNotEmpty()) put("meta", metadata.toJsonValue())
         put("roots", JSONArray().also { array -> roots.forEach { array.put(it.toJsonObject()) } })
     }
 
     fun toWireJson(): String = DeterministicJson.stringify(toJsonObject())
+
+    companion object {
+        fun fromWireJson(json: String): InkWireDecodeResult<RenderDocument> =
+            InkWireCodec.decodeDocument(json)
+    }
 }
 
 private fun RenderNode.countNodes(): Int = 1 + children.sumOf(RenderNode::countNodes)
@@ -98,14 +107,25 @@ sealed interface RenderChange {
 
 data class RenderPatch(
     val changes: List<RenderChange>,
+    val documentId: String,
+    val baseRevision: Int,
+    val targetRevision: Int,
     val version: Int = InkWire.VERSION,
 ) {
     fun toJsonObject(): JSONObject = JSONObject().apply {
         put("v", version)
+        put("doc", documentId)
+        put("baseRev", baseRevision)
+        put("targetRev", targetRevision)
         put("changes", JSONArray().also { array -> changes.forEach { array.put(it.toJsonObject()) } })
     }
 
     fun toWireJson(): String = DeterministicJson.stringify(toJsonObject())
+
+    companion object {
+        fun fromWireJson(json: String): InkWireDecodeResult<RenderPatch> =
+            InkWireCodec.decodePatch(json)
+    }
 }
 
 private fun RenderChange.toJsonObject(): JSONObject = JSONObject().apply {
@@ -165,9 +185,16 @@ private fun RenderChange.toJsonObject(): JSONObject = JSONObject().apply {
 
 internal object RenderDiffer {
     fun diff(old: RenderDocument, new: RenderDocument): RenderPatch {
+        require(old.documentId == new.documentId) { "Cannot diff different Ink documents" }
+        require(new.revision == old.revision + 1) { "Ink patch revisions must be consecutive" }
         val changes = mutableListOf<RenderChange>()
         diffChildren(null, old.roots, new.roots, changes)
-        return RenderPatch(changes)
+        return RenderPatch(
+            changes = changes,
+            documentId = old.documentId,
+            baseRevision = old.revision,
+            targetRevision = new.revision,
+        )
     }
 
     private fun diffChildren(

@@ -178,7 +178,7 @@ internal class WxssParser(
                 )
                 return@forEach
             }
-            if (!property.startsWith("--") && property !in ALLOWED_PROPERTIES) {
+            if (!property.startsWith("--") && property !in INK_V1_STYLE_PROPERTIES) {
                 warning(
                     InkProblemCodes.STYLE_UNSUPPORTED,
                     offset,
@@ -307,71 +307,72 @@ internal class WxssParser(
         val TRANSFORM_FUNCTION = Regex("([A-Za-z]+)\\([^()]*\\)")
         val TRANSFORM_NAMES = setOf("translate", "translatex", "translatey", "scale", "scalex", "scaley", "rotate")
         val EXPLICITLY_EXCLUDED_PROPERTIES = setOf("font-variant", "word-break", "visibility")
-        val ALLOWED_PROPERTIES = buildSet {
-            addAll(
-                setOf(
-                    "display",
-                    "flex-direction",
-                    "flex-wrap",
-                    "justify-content",
-                    "align-items",
-                    "align-self",
-                    "flex",
-                    "flex-grow",
-                    "flex-shrink",
-                    "flex-basis",
-                    "gap",
-                    "width",
-                    "height",
-                    "min-width",
-                    "min-height",
-                    "max-width",
-                    "max-height",
-                    "margin",
-                    "padding",
-                    "box-sizing",
-                    "border",
-                    "border-width",
-                    "border-color",
-                    "border-style",
-                    "border-radius",
-                    "font-size",
-                    "font-weight",
-                    "line-height",
-                    "text-align",
-                    "text-overflow",
-                    "white-space",
-                    "opacity",
-                    "color",
-                    "background-color",
-                    "transform",
-                    "transition",
-                    "transition-property",
-                    "transition-duration",
-                    "transition-timing-function",
-                    "transition-delay",
-                    "position",
-                    "overflow",
-                    "top",
-                    "right",
-                    "bottom",
-                    "left",
-                    "inset",
-                ),
-            )
-            listOf("margin", "padding").forEach { prefix ->
-                listOf("top", "right", "bottom", "left").forEach { side -> add("$prefix-$side") }
-            }
-            listOf("top", "right", "bottom", "left").forEach { side ->
-                add("border-$side")
-                add("border-$side-width")
-                add("border-$side-color")
-                add("border-$side-style")
-            }
-            listOf("top-left", "top-right", "bottom-right", "bottom-left").forEach { corner ->
-                add("border-$corner-radius")
-            }
-        }
+    }
+}
+
+internal val INK_V1_STYLE_PROPERTIES = buildSet {
+    addAll(
+        setOf(
+            "display",
+            "flex-direction",
+            "flex-wrap",
+            "justify-content",
+            "align-items",
+            "align-self",
+            "flex",
+            "flex-grow",
+            "flex-shrink",
+            "flex-basis",
+            "gap",
+            "width",
+            "height",
+            "min-width",
+            "min-height",
+            "max-width",
+            "max-height",
+            "margin",
+            "padding",
+            "box-sizing",
+            "border",
+            "border-width",
+            "border-color",
+            "border-style",
+            "border-radius",
+            "font-size",
+            "font-weight",
+            "line-height",
+            "text-align",
+            "text-overflow",
+            "white-space",
+            "opacity",
+            "color",
+            "background-color",
+            "transform",
+            "transition",
+            "transition-property",
+            "transition-duration",
+            "transition-timing-function",
+            "transition-delay",
+            "position",
+            "overflow",
+            "top",
+            "right",
+            "bottom",
+            "left",
+            "inset",
+        ),
+    )
+    listOf("margin", "padding").forEach { prefix ->
+        listOf("top", "right", "bottom", "left").forEach { side -> add("$prefix-$side") }
+    }
+    listOf("top", "right", "bottom", "left").forEach { side ->
+        add("border-$side")
+        add("border-$side-width")
+        add("border-$side-color")
+        add("border-$side-style")
+    }
+    listOf("top-left", "top-right", "bottom-right", "bottom-left").forEach { corner ->
+        add("border-$corner-radius")
     }
 }
 

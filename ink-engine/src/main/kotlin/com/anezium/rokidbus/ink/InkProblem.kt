@@ -41,8 +41,17 @@ object InkProblemCodes {
     const val EXPR_INVALID = "INK_EXPR_INVALID"
     const val EXPR_LIMIT = "INK_EXPR_LIMIT"
     const val BUDGET_NODES = "INK_BUDGET_NODES"
+    const val BUDGET_DEPTH = "INK_BUDGET_DEPTH"
     const val BUDGET_SIZE = "INK_BUDGET_SIZE"
     const val THREAD_INVALID = "INK_THREAD_INVALID"
+    const val WIRE_INVALID = "INK_WIRE_INVALID"
+    const val WIRE_UNKNOWN_FIELD = "INK_WIRE_UNKNOWN_FIELD"
+    const val WIRE_TYPE = "INK_WIRE_TYPE"
+    const val WIRE_VERSION = "INK_WIRE_VERSION"
+    const val WIRE_REVISION = "INK_WIRE_REVISION"
+    const val WIRE_ID = "INK_WIRE_ID"
+    const val WIRE_ACTION = "INK_WIRE_ACTION"
+    const val WIRE_DATASET = "INK_WIRE_DATASET"
 }
 
 internal fun List<InkProblem>.toJsonArray(): JSONArray = JSONArray().also { array ->

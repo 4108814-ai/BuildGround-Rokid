@@ -183,6 +183,13 @@ data class SurfaceImageMetadata(
     }
 }
 
+data class InkSurfacePayload(
+    val documentJson: String? = null,
+    val patchJson: String? = null,
+    val debugActions: Boolean = false,
+    val debugFrameMeter: Boolean = false,
+)
+
 data class NexusSurface(
     val surfaceId: String,
     val seq: Long,
@@ -203,6 +210,7 @@ data class NexusSurface(
     val imageMetadata: SurfaceImageMetadata? = null,
     val imageBitmap: Bitmap? = null,
     val readerSegments: List<ReaderSegment> = emptyList(),
+    val ink: InkSurfacePayload? = null,
 ) {
     val isTimed: Boolean
         get() = kind == KIND_TIMED_LINES && timedLines.isNotEmpty()
@@ -212,6 +220,8 @@ data class NexusSurface(
         get() = kind == KIND_IMAGE && imageMetadata != null
     val isReader: Boolean
         get() = kind == KIND_READER
+    val isInk: Boolean
+        get() = kind == KIND_INK && ink != null
 
     companion object {
         const val KIND_CARD = "card"
@@ -219,6 +229,7 @@ data class NexusSurface(
         const val KIND_TIMED_LINES = "timed-lines"
         const val KIND_MEDIA = "media"
         const val KIND_IMAGE = "image"
+        const val KIND_INK = "ink"
 
         private const val MAX_TITLE_CHARS = 120
         private const val MAX_LINE_CHARS = 240
@@ -231,7 +242,7 @@ data class NexusSurface(
             val kind = payload.optString("kind", KIND_CARD).ifBlank { KIND_CARD }
             require(
                 kind == KIND_CARD || kind == KIND_READER || kind == KIND_TIMED_LINES ||
-                    kind == KIND_MEDIA || kind == KIND_IMAGE,
+                    kind == KIND_MEDIA || kind == KIND_IMAGE || kind == KIND_INK,
             ) {
                 "Unknown surface kind: $kind"
             }
@@ -370,6 +381,18 @@ data class NexusSurface(
                     kind != KIND_READER -> emptyList()
                     !segmentsPresent && canMergePrevious -> previous?.readerSegments.orEmpty()
                     else -> parseReaderSegments(payload)
+                },
+                ink = if (kind == KIND_INK) {
+                    payload.optJSONObject("ink")?.let { ink ->
+                        InkSurfacePayload(
+                            documentJson = ink.opt("document") as? String,
+                            patchJson = ink.opt("patch") as? String,
+                            debugActions = ink.opt("debugActions") as? Boolean ?: false,
+                            debugFrameMeter = ink.opt("debugFrameMeter") as? Boolean ?: false,
+                        )
+                    }
+                } else {
+                    null
                 },
             )
         }

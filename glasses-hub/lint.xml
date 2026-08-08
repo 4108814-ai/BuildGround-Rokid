@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- Current SDK annotations expect LineBreaker constants; these untouched
+         renderers use the equivalent legacy Layout constants and are outside slice 2. -->
+    <issue id="WrongConstant">
+        <ignore path="src/main/java/com/anezium/rokidbus/glasses/MediaHudView.kt" />
+        <ignore path="src/main/java/com/anezium/rokidbus/glasses/NoticeOverlayRenderer.kt" />
+    </issue>
+
+    <!-- Required by the YodaOS self-arm path; deployment grants it out of band. -->
+    <issue id="ProtectedPermissions">
+        <ignore path="src/main/AndroidManifest.xml" />
+    </issue>
+</lint>
