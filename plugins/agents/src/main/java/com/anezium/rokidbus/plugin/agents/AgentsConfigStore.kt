@@ -33,8 +33,9 @@ data class AgentsConfig(
     val openClawEnabled: Boolean,
     val openClaw: OpenClawConfig?,
 ) {
-    // Claude Code needs no configuration any more: enabling it makes the phone
-    // listen, and the daemon on the LAN finds it by itself.
+    // The agentd link (Claude Code and Codex) needs no configuration any more:
+    // enabling it makes the phone listen, and the daemon on the LAN finds it
+    // by itself.
     val shouldMonitor: Boolean
         get() = agentdEnabled || openClawEnabled && openClaw?.configured == true
 }

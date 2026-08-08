@@ -2,7 +2,7 @@
 
 ## 1.0.0
 
-- Add read-only Claude Code and OpenClaw session monitoring.
+- Add Claude Code, Codex, and OpenClaw session monitoring.
 - Add a unified HUD mission-control board and a conversation view.
 - Alert on the glasses with an interactive notice; the phone stays silent and
   the plugin holds no notification permission.

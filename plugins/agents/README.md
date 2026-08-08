@@ -1,19 +1,20 @@
 # Agents
 
-Agents is the Phase 1 read-only mission-control plugin for coding-agent
-sessions. It merges Claude Code sessions from `nexus-agentd` with OpenClaw
+Agents is the mission-control plugin for coding-agent sessions. It merges the
+Claude Code and Codex sessions carried by `nexus-agentd` with OpenClaw
 Gateway sessions, keeps the connections in a low-priority foreground service,
 posts transition-only phone notifications, and renders a structured Nexus card
 on the glasses.
 
 ## Configuration
 
-- Claude Code: paste the single JSON pairing line emitted by `nexus-agentd`.
-  The plugin validates `v:1` and `kind:"nexus-agentd"` and stores one
-  host/port/token/name slot.
+- Claude Code & Codex: both arrive over the same `nexus-agentd` link — one
+  switch covers them. Away from home, paste the single JSON pairing line
+  emitted by `nexus-agentd`; the plugin validates `v:1` and
+  `kind:"nexus-agentd"` and stores one host/port/token/name slot.
 - OpenClaw: enter the Gateway host, port (default `18789`), and token. A host
   may include `ws://` or `wss://`; a plain host uses `ws://`.
-- Each provider has an independent enable switch and connection test.
+- Each connection has an independent enable switch and connection test.
 - **Agents holds no notification permission and posts nothing on the phone.**
   The permission is deliberately absent from the manifest, so Android keeps the
   monitoring foreground service running but never shows its notification.
@@ -54,8 +55,8 @@ between looking and pressing.
 
 ### Answering a held tool call
 
-Claude Code's `PreToolUse` hook blocks while it waits, and `nexus-agentd` offers
-that wait to the phone. A session with a live request shows what it wants on the
+Claude Code's `PreToolUse` hook blocks while it waits, and Codex's app-server
+raises an approval request; `nexus-agentd` offers either wait to the phone. A session with a live request shows what it wants on the
 board; ENTER opens the question rather than the transcript, with the command in
 the agent's own words and two answers — Allow and Deny. There is no *always
 allow*, no third path, and nothing that turns one glance into a standing

@@ -112,14 +112,14 @@ class AgentsSettingsActivity : Activity() {
             addView(
                 NexusUi.cardBody(
                     this@AgentsSettingsActivity,
-                    "Read-only mission control for Claude Code and OpenClaw sessions. " +
+                    "Mission control for Claude Code, Codex, and OpenClaw sessions. " +
                         "Agents never notifies this phone — when a session needs you, " +
                         "it says so on your glasses.",
                 ),
                 NexusUi.block(),
             )
             addView(BusTheme.gap(this@AgentsSettingsActivity, 18))
-            addView(NexusUi.sectionRow(this@AgentsSettingsActivity, "Claude Code"), NexusUi.block())
+            addView(NexusUi.sectionRow(this@AgentsSettingsActivity, "Claude Code & Codex"), NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
             addView(agentdCard(), NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 22))
@@ -159,7 +159,7 @@ class AgentsSettingsActivity : Activity() {
             NexusUi.switchRow(
                 this@AgentsSettingsActivity,
                 "Monitor sessions",
-                "Watch the Claude Code sessions running on your computers",
+                "Watch the Claude Code and Codex sessions running on your computers",
                 agentdEnabled,
             ),
             NexusUi.block(),
@@ -404,10 +404,10 @@ class AgentsSettingsActivity : Activity() {
         agentdSummary.text = "Paired: ${config.name} · ${config.host}:${config.port}"
         if (test) {
             AgentsMonitorService.test(applicationContext, AgentProvider.CLAUDE)
-            toast("Testing Claude Code connection…")
+            toast("Testing the computer link…")
         } else {
             AgentsMonitorService.reconcile(applicationContext)
-            toast("Claude Code settings saved.")
+            toast("Computer link settings saved.")
         }
     }
 
