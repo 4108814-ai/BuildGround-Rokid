@@ -11,7 +11,13 @@ import {
   type SessionStore,
   truncateText,
 } from "../session-store";
-import type { AgentConfig, Logger, PendingRequest, Session } from "../types";
+import type {
+  AgentConfig,
+  Logger,
+  PendingRequest,
+  Session,
+  ThreadStartResult,
+} from "../types";
 import type {
   AdditionalFileSystemPermissions,
   AdditionalNetworkPermissions,
@@ -25,7 +31,11 @@ import type {
   ThreadListResponse,
   ThreadReadResponse,
   ThreadResumeResponse,
+  ThreadStartParams,
+  ThreadStartResponse,
   Turn,
+  TurnStartParams,
+  TurnStartResponse,
 } from "./protocol";
 
 // The HUD board never shows more than 63 rows, and one thread/resume replays a
@@ -351,6 +361,31 @@ export class CodexMonitor {
 
   availability(): CodexAvailability {
     return { ...this.state };
+  }
+
+  async startThread(cwd: string, prompt: string): Promise<ThreadStartResult> {
+    if (!this.state.available || this.stopped || !this.socket) {
+      return { ok: false, error: "Codex is not available on this computer" };
+    }
+    try {
+      const response = await this.request<ThreadStartResponse>(
+        "thread/start",
+        { cwd } satisfies ThreadStartParams,
+      );
+      await this.adoptStartedThread(response.thread, true);
+      if (prompt) {
+        await this.request<TurnStartResponse>(
+          "turn/start",
+          {
+            threadId: response.thread.id,
+            input: [{ type: "text", text: prompt, text_elements: [] }],
+          } satisfies TurnStartParams,
+        );
+      }
+      return { ok: true, sessionId: response.thread.id };
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) };
+    }
   }
 
   start(): void {
@@ -731,10 +766,7 @@ export class CodexMonitor {
 
   private async tryResume(threadId: string): Promise<Thread | undefined> {
     try {
-      const response = await this.request<ThreadResumeResponse>("thread/resume", { threadId });
-      this.threads.set(threadId, response.thread);
-      this.publishThread(threadId);
-      return response.thread;
+      return await this.resumeThread(threadId);
     } catch (error) {
       this.options.logger.info("codex_thread_resume_failed", {
         threadId,
@@ -742,6 +774,13 @@ export class CodexMonitor {
       });
       return undefined;
     }
+  }
+
+  private async resumeThread(threadId: string): Promise<Thread> {
+    const response = await this.request<ThreadResumeResponse>("thread/resume", { threadId });
+    this.threads.set(threadId, response.thread);
+    this.publishThread(threadId);
+    return response.thread;
   }
 
   private request<T>(method: string, params: Record<string, unknown>): Promise<T> {
@@ -804,7 +843,7 @@ export class CodexMonitor {
       this.pendingRpc.delete(message.id);
       clearTimeout(pending.timer);
       if (message.error) {
-        pending.reject(new Error(`${message.error.code}: ${message.error.message}`));
+        pending.reject(new Error(message.error.message));
       } else {
         pending.resolve(message.result);
       }
@@ -878,13 +917,7 @@ export class CodexMonitor {
         if (!thread || typeof thread.id !== "string") {
           return;
         }
-        this.threads.set(thread.id, thread);
-        this.trimThreads();
-        if (!this.threads.has(thread.id)) {
-          return;
-        }
-        this.publishThread(thread.id);
-        void this.resumeAndRefresh(thread.id);
+        void this.adoptStartedThread(thread);
         break;
       }
       case "thread/status/changed": {
@@ -979,8 +1012,20 @@ export class CodexMonitor {
     }
   }
 
-  private async resumeAndRefresh(threadId: string): Promise<void> {
-    const resumed = await this.tryResume(threadId);
+  private async adoptStartedThread(thread: Thread, propagateErrors = false): Promise<void> {
+    this.threads.set(thread.id, thread);
+    this.trimThreads();
+    if (!this.threads.has(thread.id)) {
+      return;
+    }
+    this.publishThread(thread.id);
+    await this.resumeAndRefresh(thread.id, propagateErrors);
+  }
+
+  private async resumeAndRefresh(threadId: string, propagateErrors = false): Promise<void> {
+    const resumed = propagateErrors
+      ? await this.resumeThread(threadId)
+      : await this.tryResume(threadId);
     if (!resumed || this.stopped) {
       return;
     }
@@ -997,6 +1042,9 @@ export class CodexMonitor {
         threadId,
         reason: errorMessage(error),
       });
+      if (propagateErrors) {
+        throw error;
+      }
     }
   }
 

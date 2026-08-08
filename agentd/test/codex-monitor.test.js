@@ -284,6 +284,117 @@ test("spawn command is loopback-only and honors the Windows .cmd shim", () => {
   assert.equal(codexTerminateSpec(4321, "linux"), undefined);
 });
 
+test("startThread creates, adopts, and optionally starts a turn in binding order", async () => {
+  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  await new Promise((resolve) => server.once("listening", resolve));
+  const port = server.address().port;
+  const messages = [];
+  const threads = new Map();
+  let threadNumber = 0;
+  server.on("connection", (socket) => {
+    socket.on("message", (raw) => {
+      const message = JSON.parse(raw.toString());
+      messages.push(message);
+      if (message.id === undefined) return;
+      let result;
+      switch (message.method) {
+        case "initialize":
+          result = { userAgent: "fake-codex" };
+          break;
+        case "thread/list":
+          result = { data: [], nextCursor: null, backwardsCursor: null };
+          break;
+        case "thread/start": {
+          if (message.params.cwd.endsWith("rpc-error")) {
+            socket.send(JSON.stringify({
+              id: message.id,
+              error: { code: -32000, message: "Start denied by test" },
+            }));
+            return;
+          }
+          const thread = makeThread({
+            id: `started-thread-${++threadNumber}`,
+            cwd: message.params.cwd,
+            preview: "",
+          });
+          threads.set(thread.id, thread);
+          result = { thread };
+          break;
+        }
+        case "thread/resume": {
+          const thread = threads.get(message.params.threadId);
+          result = {
+            thread,
+            model: "gpt-5",
+            modelProvider: "openai",
+            serviceTier: null,
+            cwd: thread.cwd,
+          };
+          break;
+        }
+        case "thread/read":
+          result = { thread: threads.get(message.params.threadId) };
+          break;
+        case "turn/start":
+          result = { turn: turn("inProgress") };
+          break;
+        default:
+          return;
+      }
+      socket.send(JSON.stringify({ id: message.id, result }));
+    });
+  });
+  const { store, approvals, monitor } = makeHarness(port);
+  try {
+    assert.deepEqual(await monitor.startThread("E:\\work\\new", "Do work"), {
+      ok: false,
+      error: "Codex is not available on this computer",
+    });
+    monitor.start();
+    await waitUntil(() => monitor.availability().available, "monitor did not connect");
+
+    let requestStart = messages.length;
+    assert.deepEqual(await monitor.startThread("E:\\work\\new", "Do work"), {
+      ok: true,
+      sessionId: "started-thread-1",
+    });
+    const firstRequests = messages.slice(requestStart);
+    assert.deepEqual(firstRequests.map((message) => message.method), [
+      "thread/start",
+      "thread/resume",
+      "thread/read",
+      "turn/start",
+    ]);
+    assert.deepEqual(firstRequests[0].params, { cwd: "E:\\work\\new" });
+    assert.deepEqual(firstRequests[3].params, {
+      threadId: "started-thread-1",
+      input: [{ type: "text", text: "Do work", text_elements: [] }],
+    });
+    assert.equal(store.get("started-thread-1").provider, "codex");
+
+    requestStart = messages.length;
+    assert.deepEqual(await monitor.startThread("E:\\work\\empty", ""), {
+      ok: true,
+      sessionId: "started-thread-2",
+    });
+    assert.deepEqual(messages.slice(requestStart).map((message) => message.method), [
+      "thread/start",
+      "thread/resume",
+      "thread/read",
+    ]);
+
+    assert.deepEqual(await monitor.startThread("E:\\work\\rpc-error", "ignored"), {
+      ok: false,
+      error: "Start denied by test",
+    });
+  } finally {
+    await monitor.stop();
+    approvals.dispose();
+    store.dispose();
+    await closeServer(server);
+  }
+});
+
 test("monitor attaches, resumes, refreshes, streams statuses, and routes approval responses", async () => {
   const server = new WebSocketServer({ noServer: true });
   const port = await new Promise((resolve, reject) => {

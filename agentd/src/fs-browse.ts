@@ -27,6 +27,10 @@ export type ReadDirectory = (
   options: { withFileTypes: true },
 ) => Promise<readonly DirectoryEntryLike[]>;
 
+export type ReadStats = (
+  directoryPath: string,
+) => Promise<{ isDirectory(): boolean }>;
+
 export function listRoots(
   platform: NodeJS.Platform,
   homeDirectory: string,
@@ -90,7 +94,25 @@ export async function listDirectory(
   }
 }
 
-function isUncPath(requestedPath: string): boolean {
+export async function validateExistingDirectory(
+  requestedPath: string,
+  readStats: ReadStats,
+): Promise<string | null> {
+  if (requestedPath.length > MAX_PATH_CHARS) {
+    return "Path is too long";
+  }
+  if (isUncPath(requestedPath) || !path.isAbsolute(requestedPath)) {
+    return "Path must be a local absolute path";
+  }
+  try {
+    const stats = await readStats(requestedPath);
+    return stats.isDirectory() ? null : "Path is not a directory";
+  } catch (error) {
+    return pathErrorMessage(error, "Unable to access directory");
+  }
+}
+
+export function isUncPath(requestedPath: string): boolean {
   return requestedPath.startsWith("\\\\") ||
     (process.platform === "win32" && requestedPath.startsWith("//"));
 }
@@ -115,6 +137,10 @@ function errorListing(
 }
 
 function errorMessage(error: unknown): string {
+  return pathErrorMessage(error, "Unable to list directory");
+}
+
+function pathErrorMessage(error: unknown, fallback: string): string {
   const code =
     error && typeof error === "object" && "code" in error
       ? (error as { code?: unknown }).code
@@ -130,6 +156,6 @@ function errorMessage(error: unknown): string {
     case "ENAMETOOLONG":
       return "Path is too long";
     default:
-      return "Unable to list directory";
+      return fallback;
   }
 }

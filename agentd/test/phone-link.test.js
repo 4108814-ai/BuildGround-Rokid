@@ -407,6 +407,224 @@ test("authenticated fs_list frames validate ids and return filesystem listings",
   }
 });
 
+test("authenticated thread_start frames validate and round-trip with ids echoed", async () => {
+  const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "nexus-agentd-thread-start-"));
+  const filePath = path.join(tempDir, "not-a-directory.txt");
+  await fsp.writeFile(filePath, "file");
+  const sockets = [];
+  let acceptConnection;
+  const accepted = new Promise((resolve) => { acceptConnection = resolve; });
+  const server = net.createServer((socket) => {
+    sockets.push(socket);
+    acceptConnection({ socket, lines: collectLines(socket) });
+  });
+  const port = await listen(server);
+  const starts = [];
+  const { link, store, logs } = createLink({
+    async onThreadStart(provider, projectPath, prompt) {
+      starts.push({ provider, projectPath, prompt });
+      return provider === "codex"
+        ? { ok: true, sessionId: "new-codex-thread" }
+        : { ok: true };
+    },
+  });
+
+  try {
+    link.connectToPhone({ host: "127.0.0.1", port, name: "test phone" });
+    const { socket, lines } = await accepted;
+    await lines.waitFor((frame) => frame.type === "hello");
+    socket.write('{"type":"hello_ack","v":1}\n');
+    await lines.waitFor((frame) => frame.type === "snapshot");
+
+    socket.write(`${JSON.stringify({ type: "thread_start", provider: "codex" })}\n`);
+    socket.write(`${JSON.stringify({ type: "thread_start", id: "", provider: "codex" })}\n`);
+    socket.write(`${JSON.stringify({
+      type: "thread_start",
+      id: "x".repeat(65),
+      provider: "codex",
+    })}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(lines.some((frame) => frame.type === "thread_started"), false);
+
+    const invalidRequests = [
+      {
+        id: "provider",
+        provider: "other",
+        path: tempDir,
+        prompt: "provider prompt",
+        error: "Unknown provider",
+      },
+      {
+        id: "relative",
+        provider: "codex",
+        path: "relative/path",
+        prompt: "relative prompt",
+        error: "Path must be a local absolute path",
+      },
+      {
+        id: "unc",
+        provider: "codex",
+        path: "\\\\server\\share",
+        prompt: "unc prompt",
+        error: "Path must be a local absolute path",
+      },
+      {
+        id: "missing-path",
+        provider: "codex",
+        path: path.join(tempDir, "missing"),
+        prompt: "missing path prompt",
+        error: "Path does not exist",
+      },
+      {
+        id: "file-path",
+        provider: "codex",
+        path: filePath,
+        prompt: "file path prompt",
+        error: "Path is not a directory",
+      },
+      {
+        id: "claude-missing-prompt",
+        provider: "claude",
+        path: tempDir,
+        prompt: undefined,
+        error: "Prompt is required for Claude",
+      },
+      {
+        id: "long-prompt",
+        provider: "codex",
+        path: tempDir,
+        prompt: "x".repeat(16 * 1024 + 1),
+        error: "Prompt is too long",
+      },
+    ];
+    for (const request of invalidRequests) {
+      socket.write(`${JSON.stringify({ type: "thread_start", ...request, error: undefined })}\n`);
+    }
+    for (const request of invalidRequests) {
+      const response = await lines.waitFor(
+        (frame) => frame.type === "thread_started" && frame.id === request.id,
+      );
+      assert.equal(response.id, request.id);
+      assert.equal(response.ok, false);
+      assert.equal(response.error, request.error);
+    }
+    assert.equal(starts.length, 0);
+
+    socket.write(`${JSON.stringify({
+      type: "thread_start",
+      id: "codex-ok",
+      provider: "codex",
+      path: tempDir,
+      prompt: "  do the thing  ",
+    })}\n`);
+    assert.deepEqual(
+      await lines.waitFor((frame) => frame.type === "thread_started" && frame.id === "codex-ok"),
+      {
+        type: "thread_started",
+        id: "codex-ok",
+        ok: true,
+        provider: "codex",
+        sessionId: "new-codex-thread",
+        error: null,
+      },
+    );
+    socket.write(`${JSON.stringify({
+      type: "thread_start",
+      id: "claude-ok",
+      provider: "claude",
+      path: tempDir,
+      prompt: "  launch claude  ",
+    })}\n`);
+    assert.deepEqual(
+      await lines.waitFor((frame) => frame.type === "thread_started" && frame.id === "claude-ok"),
+      {
+        type: "thread_started",
+        id: "claude-ok",
+        ok: true,
+        provider: "claude",
+        error: null,
+      },
+    );
+    assert.deepEqual(starts, [
+      { provider: "codex", projectPath: tempDir, prompt: "do the thing" },
+      { provider: "claude", projectPath: tempDir, prompt: "launch claude" },
+    ]);
+
+    const attemptLogs = logs.entries.filter((entry) => entry.event === "phone_link_thread_start");
+    assert.equal(attemptLogs.length, invalidRequests.length + 2);
+    const serializedLogs = JSON.stringify(attemptLogs);
+    for (const prompt of [
+      ...invalidRequests.map((request) => request.prompt).filter(Boolean),
+      "do the thing",
+      "launch claude",
+    ]) {
+      assert.equal(serializedLogs.includes(prompt), false);
+    }
+    assert.ok(attemptLogs.every((entry) => typeof entry.meta.promptLength === "number"));
+    assert.ok(attemptLogs.every((entry) => entry.meta.path.length <= 40));
+  } finally {
+    link.stop();
+    store.dispose();
+    await closeServer(server, sockets);
+    await fsp.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("thread_start replies Timed out when the daemon callback hangs", async () => {
+  const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "nexus-agentd-thread-timeout-"));
+  const sockets = [];
+  let acceptConnection;
+  const accepted = new Promise((resolve) => { acceptConnection = resolve; });
+  const server = net.createServer((socket) => {
+    sockets.push(socket);
+    acceptConnection({ socket, lines: collectLines(socket) });
+  });
+  const port = await listen(server);
+  let starts = 0;
+  const { link, store, logs } = createLink({
+    threadStartTimeoutMs: 25,
+    onThreadStart() {
+      starts += 1;
+      return new Promise(() => undefined);
+    },
+  });
+
+  try {
+    link.connectToPhone({ host: "127.0.0.1", port, name: "test phone" });
+    const { socket, lines } = await accepted;
+    await lines.waitFor((frame) => frame.type === "hello");
+    socket.write('{"type":"hello_ack","v":1}\n');
+    await lines.waitFor((frame) => frame.type === "snapshot");
+    socket.write(`${JSON.stringify({
+      type: "thread_start",
+      id: "timeout",
+      provider: "codex",
+      path: tempDir,
+      prompt: "hang forever",
+    })}\n`);
+
+    assert.deepEqual(
+      await lines.waitFor((frame) => frame.type === "thread_started" && frame.id === "timeout"),
+      {
+        type: "thread_started",
+        id: "timeout",
+        ok: false,
+        provider: "codex",
+        error: "Timed out",
+      },
+    );
+    assert.equal(starts, 1);
+    const attemptLogs = logs.entries.filter((entry) => entry.event === "phone_link_thread_start");
+    assert.equal(attemptLogs.length, 1);
+    assert.equal(JSON.stringify(attemptLogs).includes("hang forever"), false);
+  } finally {
+    link.stop();
+    store.dispose();
+    await closeServer(server, sockets);
+    await fsp.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("hello rejection prints actionable guidance once and backs off for 60 seconds", async () => {
   assert.equal(REFUSAL_RECONNECT_DELAY_MS, 60_000);
   const sockets = [];

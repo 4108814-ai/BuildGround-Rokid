@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import { ApprovalManager, approvalTimeoutFromEnv, type HookResponse } from "./approval-manager";
+import { spawnClaudeThread } from "./claude-spawn";
 import { CodexMonitor } from "./codex/monitor";
 import { configPath, defaultStateDir, ensureConfig } from "./config";
 import { discoverRecentSessions } from "./discovery";
@@ -33,6 +34,7 @@ export async function startDaemon(): Promise<RunningDaemon> {
   let wsHub: WsHub | undefined;
   let phoneLink: PhoneLink | undefined;
   let approvals: ApprovalManager | undefined;
+  let codexMonitor: CodexMonitor | undefined;
   const tailManager = new TranscriptTailManager(
     (sessionId, update) => sessions.applyTranscriptUpdate(sessionId, update),
     logger,
@@ -85,6 +87,15 @@ export async function startDaemon(): Promise<RunningDaemon> {
     logger,
     detailProvider,
     onDetailOpen,
+    onThreadStart: (provider, projectPath, prompt) => {
+      if (provider === "claude") {
+        return spawnClaudeThread(projectPath, prompt);
+      }
+      return codexMonitor?.startThread(projectPath, prompt) ?? Promise.resolve({
+        ok: false,
+        error: "Codex is not available on this computer",
+      });
+    },
     onApprovalDecision: (requestId, decision) => approvals?.handleDecision(requestId, decision),
     onConnected: () => approvals?.onLinkConnected(),
     onDisconnected: () => approvals?.onLinkDisconnected(),
@@ -101,6 +112,7 @@ export async function startDaemon(): Promise<RunningDaemon> {
     approvals,
     logger,
   });
+  codexMonitor = codex;
   const httpServer = new HookHttpServer({
     port: config.httpPort,
     sessionCount: () => sessions.size,

@@ -80,6 +80,29 @@ export interface ThreadResumeResponse {
   cwd: string;
 }
 
+export interface ThreadStartParams {
+  cwd?: string | null;
+}
+
+export interface ThreadStartResponse {
+  thread: Thread;
+}
+
+export interface UserInput {
+  type: "text";
+  text: string;
+  text_elements: unknown[];
+}
+
+export interface TurnStartParams {
+  threadId: string;
+  input: UserInput[];
+}
+
+export interface TurnStartResponse {
+  turn: Turn;
+}
+
 export interface CommandApprovalParams {
   threadId: string;
   turnId: string;

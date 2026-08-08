@@ -1,5 +1,13 @@
 export type SessionStatus = "working" | "needs_you" | "idle" | "done" | "error";
 
+export type AgentProvider = "claude" | "codex";
+
+export interface ThreadStartResult {
+  ok: boolean;
+  sessionId?: string;
+  error?: string;
+}
+
 export type PendingRequestKind = "permission" | "question" | "idle_prompt";
 
 export interface PendingRequest {
@@ -15,7 +23,7 @@ export interface SessionTurn {
 
 export interface Session {
   id: string;
-  provider: "claude" | "codex";
+  provider: AgentProvider;
   machineId: string;
   machineName: string;
   title: string;

@@ -68,9 +68,15 @@ Codex monitoring is disabled by default. Enable it in the existing
 The daemon first tries to attach to `codex app-server` on that port. If nothing is
 listening, it starts and owns an app-server process. Both paths are fixed to
 `127.0.0.1`; the unauthenticated app-server WebSocket is never exposed to the network.
-Codex thread snapshots, live status changes, and approval requests use the already
-authenticated phone link. This integration is monitoring and approvals only: it does
-not create threads, send messages, steer turns, or interrupt work.
+Codex thread snapshots, live status changes, approval requests, and phone-requested
+thread starts use the already authenticated phone link. A start request creates a thread
+in an existing local project directory and can begin its first turn. Threads started by
+other Codex clients keep the same monitoring-only behavior as before.
+
+The authenticated phone can also start Claude Code in an existing local project
+directory. The prompt is written to the detached CLI process over stdin; user content is
+never placed in its command line. Existing user-wide Claude hooks surface the new session
+through the normal monitoring pipeline.
 
 If no phone decision is available, agentd sends no approval response to Codex. The
 app-server request remains pending for another subscribed Codex UI to answer and is

@@ -1,6 +1,6 @@
 import { createSocket, type Socket as UdpSocket } from "node:dgram";
 import { existsSync } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { homedir, networkInterfaces, platform } from "node:os";
 import { connect, type Socket as TcpSocket } from "node:net";
 import type {
@@ -9,10 +9,22 @@ import type {
   ApprovalRequest,
 } from "./approval-manager";
 import { parsePhoneTarget, readPhoneLinkConfig } from "./config";
-import { listDirectory, listRoots, type FsListing } from "./fs-browse";
+import {
+  listDirectory,
+  listRoots,
+  validateExistingDirectory,
+  type FsListing,
+} from "./fs-browse";
 import type { SessionStore } from "./session-store";
 import { TailscalePeerDiscovery } from "./tailnet-discovery";
-import type { AgentConfig, Logger, Session, SessionMessage } from "./types";
+import type {
+  AgentConfig,
+  AgentProvider,
+  Logger,
+  Session,
+  SessionMessage,
+  ThreadStartResult,
+} from "./types";
 
 /**
  * Outbound link to the phone.
@@ -32,6 +44,8 @@ export const REFUSAL_RECONNECT_DELAY_MS = 60_000;
 const DETAIL_MESSAGE_LIMIT = 40;
 const MAX_LINE_BYTES = 512 * 1024;
 export const MAX_PHONE_SESSIONS_PER_PROVIDER = 200;
+export const THREAD_START_TIMEOUT_MS = 30_000;
+const MAX_THREAD_PROMPT_BYTES = 16 * 1024;
 
 export interface PhoneLinkOptions {
   config: AgentConfig;
@@ -40,6 +54,11 @@ export interface PhoneLinkOptions {
   detailProvider: (sessionId: string, limit: number) => Promise<SessionMessage[]>;
   onDetailOpen?: (sessionId: string) => void;
   onApprovalDecision?: (requestId: string, decision: ApprovalDecision) => void;
+  onThreadStart?: (
+    provider: AgentProvider,
+    path: string,
+    prompt: string,
+  ) => Promise<ThreadStartResult>;
   onConnected?: () => void;
   onDisconnected?: () => void;
   operatorMessage?: (message: string) => void;
@@ -47,6 +66,7 @@ export interface PhoneLinkOptions {
   helloTimeoutMs?: number;
   reconnectDelayMs?: number;
   targetRefreshIntervalMs?: number;
+  threadStartTimeoutMs?: number;
   configFilePath?: string;
   tailnetDiscovery?: TailnetPeerSource;
   now?: () => number;
@@ -513,6 +533,24 @@ export class PhoneLink {
         void this.sendFsListing(socket, id, message.path);
         break;
       }
+      case "thread_start": {
+        const id =
+          typeof message.id === "string" && message.id.length > 0 && message.id.length <= 64
+            ? message.id
+            : undefined;
+        const socket = this.socket;
+        if (!id || !socket) {
+          break;
+        }
+        void this.sendThreadStarted(
+          socket,
+          id,
+          message.provider,
+          message.path,
+          message.prompt,
+        );
+        break;
+      }
       case "approval_decision": {
         const requestId =
           typeof message.requestId === "string" && message.requestId.length > 0
@@ -675,6 +713,93 @@ export class PhoneLink {
     this.send({ type: "fs_listing", id, ...listing });
   }
 
+  private async sendThreadStarted(
+    socket: TcpSocket,
+    id: string,
+    rawProvider: unknown,
+    requestedPath: unknown,
+    rawPrompt: unknown,
+  ): Promise<void> {
+    const provider: AgentProvider | undefined =
+      rawProvider === "codex" || rawProvider === "claude" ? rawProvider : undefined;
+    const prompt = typeof rawPrompt === "string" ? rawPrompt.trim() : "";
+    const promptLength = Buffer.byteLength(prompt, "utf8");
+    let result: ThreadStartResult;
+
+    if (!provider) {
+      result = { ok: false, error: "Unknown provider" };
+    } else if (typeof requestedPath !== "string") {
+      result = { ok: false, error: "Path must be a local absolute path" };
+    } else {
+      const pathError = await validateExistingDirectory(requestedPath, stat);
+      if (pathError) {
+        result = { ok: false, error: pathError };
+      } else if (typeof rawPrompt !== "string") {
+        result = {
+          ok: false,
+          error: provider === "claude" ? "Prompt is required for Claude" : "Prompt must be a string",
+        };
+      } else if (promptLength > MAX_THREAD_PROMPT_BYTES) {
+        result = { ok: false, error: "Prompt is too long" };
+      } else if (provider === "claude" && !prompt) {
+        result = { ok: false, error: "Prompt is required for Claude" };
+      } else {
+        result = await this.invokeThreadStart(provider, requestedPath, prompt);
+      }
+    }
+
+    this.options.logger.info("phone_link_thread_start", {
+      provider: provider ?? (typeof rawProvider === "string" ? rawProvider.slice(0, 16) : "unknown"),
+      ok: result.ok,
+      path: typeof requestedPath === "string" ? requestedPath.slice(0, 40) : "",
+      promptLength,
+    });
+    if (this.socket !== socket || socket.destroyed || !this.authenticated) {
+      return;
+    }
+    this.send({
+      type: "thread_started",
+      id,
+      ok: result.ok,
+      provider: provider ?? (typeof rawProvider === "string" ? rawProvider : null),
+      ...(result.ok && result.sessionId ? { sessionId: result.sessionId } : {}),
+      error: result.ok ? null : result.error ?? "Unable to start thread",
+    });
+  }
+
+  private invokeThreadStart(
+    provider: AgentProvider,
+    requestedPath: string,
+    prompt: string,
+  ): Promise<ThreadStartResult> {
+    const callback = this.options.onThreadStart;
+    if (!callback) {
+      return Promise.resolve({ ok: false, error: "Thread start is not available" });
+    }
+    return new Promise<ThreadStartResult>((resolve) => {
+      let settled = false;
+      const finish = (result: ThreadStartResult) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+      const timer = setTimeout(
+        () => finish({ ok: false, error: "Timed out" }),
+        Math.min(
+          this.options.threadStartTimeoutMs ?? THREAD_START_TIMEOUT_MS,
+          THREAD_START_TIMEOUT_MS,
+        ),
+      );
+      timer.unref();
+      void Promise.resolve()
+        .then(() => callback(provider, requestedPath, prompt))
+        .then(finish, (error) => finish({ ok: false, error: shortErrorMessage(error) }));
+    });
+  }
+
   private sendSnapshot(): void {
     const sessions = sessionsForPhone(this.options.store.list());
     this.publishedSessions = new Map(sessions.map((session) => [session.id, session]));
@@ -733,6 +858,13 @@ export class PhoneLink {
       return false;
     }
   }
+}
+
+function shortErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim().slice(0, 200);
+  }
+  return "Unable to start thread";
 }
 
 export function sessionsForPhone(sessions: Session[]): Session[] {
