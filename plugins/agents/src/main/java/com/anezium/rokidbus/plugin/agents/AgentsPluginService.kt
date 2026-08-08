@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.security.MessageDigest
+import java.util.UUID
 
 class AgentsPluginService : NexusPluginService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -53,6 +54,26 @@ class AgentsPluginService : NexusPluginService() {
     private var decisionChoice = ApprovalDecision.ALLOW
     private var decisionOpenedAt = 0L
 
+    /**
+     * The start-an-agent walk: computer, then project, then the project's
+     * threads. These lists are stable while open, so a positional cursor is
+     * safe here — unlike on the board.
+     */
+    private var launch: Launch? = null
+    private var launchIndex = 0
+    private var launchNote: String? = null
+    private var launchRequestId: String? = null
+
+    private sealed interface Launch {
+        data object Computers : Launch
+        data class Projects(val machineId: String, val machineName: String) : Launch
+        data class Threads(
+            val machineId: String,
+            val machineName: String,
+            val project: AgentProject,
+        ) : Launch
+    }
+
     override fun onCreate() {
         super.onCreate()
         serviceScope.launch {
@@ -65,6 +86,19 @@ class AgentsPluginService : NexusPluginService() {
                     if (surfaceShown) render(show = false)
                     raiseAttention()
                 }
+        }
+        serviceScope.launch {
+            AgentsRuntime.store.threadStart.collectLatest { result ->
+                if (result != null && result.requestId == launchRequestId) {
+                    launchRequestId = null
+                    launchNote = if (result.ok) {
+                        "started · it joins the list as it reports in"
+                    } else {
+                        result.error ?: "the computer could not start it"
+                    }
+                    if (surfaceShown) render(show = false)
+                }
+            }
         }
         serviceScope.launch {
             AgentsRuntime.linkedMachines.collect { machineName ->
@@ -106,6 +140,8 @@ class AgentsPluginService : NexusPluginService() {
         surfaceShown = false
         AgentsRuntime.hudOpen = false
         leaveConversation()
+        launch = null
+        launchNote = null
         surface?.hide()
         surface = null
     }
@@ -117,6 +153,10 @@ class AgentsPluginService : NexusPluginService() {
             return
         }
         val conversation = AgentsRuntime.store.conversation.value
+        if (conversation == null && launch != null) {
+            onLaunchInput(event)
+            return
+        }
         when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_UP ->
                 if (conversation != null) scrollConversation(+1) else moveSelection(-1)
@@ -235,10 +275,10 @@ class AgentsPluginService : NexusPluginService() {
 
     private fun moveSelection(delta: Int) {
         val sessions = AgentsRuntime.store.sessions.value
-        if (sessions.isNotEmpty()) {
-            val next = (selectedIndexIn(sessions) + delta).coerceIn(0, sessions.lastIndex)
-            selectedKey = sessions[next].key
-        }
+        // One virtual row sits past the sessions: the start-an-agent door.
+        val current = if (selectedKey == START_KEY) sessions.size else selectedIndexIn(sessions)
+        val next = (current + delta).coerceIn(0, sessions.size)
+        selectedKey = if (next == sessions.size) START_KEY else sessions[next].key
         render(show = false)
     }
 
@@ -252,6 +292,13 @@ class AgentsPluginService : NexusPluginService() {
     /** ENTER means "deal with this": answer what is waiting, or read the rest. */
     private fun enterSelected() {
         val sessions = AgentsRuntime.store.sessions.value
+        if (selectedKey == START_KEY || sessions.isEmpty()) {
+            launch = Launch.Computers
+            launchIndex = 0
+            launchNote = null
+            render(show = false)
+            return
+        }
         val session = sessions.getOrNull(selectedIndexIn(sessions)) ?: return
         val approval = AgentsRuntime.store.approvalFor(session.key)
         if (approval != null) {
@@ -309,7 +356,9 @@ class AgentsPluginService : NexusPluginService() {
 
     private fun buildCard(): NexusCard {
         decidingRequestId?.let { return decisionCard(it) }
-        return AgentsRuntime.store.conversation.value?.let(::conversationCard) ?: sessionsCard()
+        AgentsRuntime.store.conversation.value?.let { return conversationCard(it) }
+        launch?.let { return launchCard(it) }
+        return sessionsCard()
     }
 
     // ----------------------------------------------------------------- decide
@@ -382,8 +431,9 @@ class AgentsPluginService : NexusPluginService() {
         val sessions = AgentsRuntime.store.sessions.value
         val connections = AgentsRuntime.store.connections.value
         val config = configStore.load()
-        val selectedIndex = selectedIndexIn(sessions)
-        selectedKey = sessions.getOrNull(selectedIndex)?.key
+        val startSelected = selectedKey == START_KEY || sessions.isEmpty()
+        val selectedIndex = if (startSelected) -1 else selectedIndexIn(sessions)
+        if (!startSelected) selectedKey = sessions.getOrNull(selectedIndex)?.key
 
         val alerts = buildList {
             if (config.agentdEnabled &&
@@ -400,7 +450,8 @@ class AgentsPluginService : NexusPluginService() {
 
         // The HUD does not scroll: keep a window around the selection.
         val windowSize = (VISIBLE_SESSION_ROWS - alerts.size).coerceAtLeast(MIN_SESSION_ROWS)
-        val windowStart = (selectedIndex - windowSize / 2)
+        val anchor = if (startSelected) sessions.lastIndex.coerceAtLeast(0) else selectedIndex
+        val windowStart = (anchor - windowSize / 2)
             .coerceIn(0, (sessions.size - windowSize).coerceAtLeast(0))
 
         val rows = buildList {
@@ -412,6 +463,14 @@ class AgentsPluginService : NexusPluginService() {
                     add(sessionRow(session, windowStart + offset == selectedIndex, now))
                 }
             }
+            add(
+                NexusCardLine(
+                    text = "+ Start an agent",
+                    sub = "a new thread in one of your projects",
+                    tone = NexusRowTone.DIM,
+                    selected = startSelected,
+                ),
+            )
         }
 
         return card(
@@ -512,6 +571,224 @@ class AgentsPluginService : NexusPluginService() {
 
     private fun problemRow(text: String, sub: String): NexusCardLine =
         NexusCardLine(text = text, sub = sub, tone = NexusRowTone.ALERT, trail = listOf("!"))
+
+    // -------------------------------------------------------------- launcher
+
+    private fun onLaunchInput(event: NexusInputEvent) {
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP -> {
+                launchIndex -= 1
+                render(show = false)
+            }
+            KeyEvent.KEYCODE_DPAD_DOWN -> {
+                launchIndex += 1
+                render(show = false)
+            }
+            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER -> launchEnter()
+            KeyEvent.KEYCODE_BACK -> {
+                launch = when (val step = launch) {
+                    is Launch.Threads -> Launch.Projects(step.machineId, step.machineName)
+                    is Launch.Projects -> Launch.Computers
+                    else -> null
+                }
+                launchIndex = 0
+                launchNote = null
+                render(show = false)
+            }
+        }
+    }
+
+    private fun launchEnter() {
+        when (val step = launch) {
+            Launch.Computers -> {
+                val machines = configStore.trustedMachines()
+                val machine = machines.getOrNull(launchIndex) ?: return
+                launch = Launch.Projects(machine.machineId, machine.name)
+                launchIndex = 0
+                launchNote = null
+                render(show = false)
+            }
+            is Launch.Projects -> {
+                val project = configStore.projects(step.machineId).getOrNull(launchIndex) ?: return
+                launch = Launch.Threads(step.machineId, step.machineName, project)
+                launchIndex = 0
+                launchNote = null
+                render(show = false)
+            }
+            is Launch.Threads -> {
+                if (launchIndex <= 0) {
+                    startCodexThread(step)
+                } else {
+                    val session = projectThreads(step.project).getOrNull(launchIndex - 1) ?: return
+                    launch = null
+                    openConversation(session)
+                }
+            }
+            null -> Unit
+        }
+    }
+
+    /**
+     * The glasses have no keyboard, so the thread starts empty: Codex sits
+     * ready in the project until the wearer's first words reach it. Claude
+     * Code cannot start without a prompt — that road stays on the phone until
+     * the voice work lands.
+     */
+    private fun startCodexThread(step: Launch.Threads) {
+        if (launchRequestId != null) return
+        if (AgentsRuntime.store.linkMachine.value?.machineId != step.machineId) {
+            launchNote = "${step.machineName} is not connected"
+            render(show = false)
+            return
+        }
+        val requestId = UUID.randomUUID().toString()
+        launchRequestId = requestId
+        launchNote = "starting on ${step.machineName}…"
+        AgentsMonitorService.requestThreadStart(
+            applicationContext,
+            requestId,
+            AgentProvider.CODEX,
+            step.project.path,
+            prompt = "",
+        )
+        render(show = false)
+        serviceScope.launch {
+            delay(LAUNCH_VERDICT_TIMEOUT_MS)
+            if (launchRequestId == requestId) {
+                launchRequestId = null
+                launchNote = "no answer from ${step.machineName}"
+                if (surfaceShown) render(show = false)
+            }
+        }
+    }
+
+    private fun projectThreads(project: AgentProject): List<AgentSession> =
+        AgentsRuntime.store.sessions.value.filter { session ->
+            session.provider in AgentProvider.AGENTD_PROVIDERS &&
+                cwdInProject(session.cwd, project.path)
+        }
+
+    private fun launchCard(step: Launch): NexusCard = when (step) {
+        Launch.Computers -> computersCard()
+        is Launch.Projects -> projectsCard(step)
+        is Launch.Threads -> threadsCard(step)
+    }
+
+    private fun computersCard(): NexusCard {
+        val machines = configStore.trustedMachines()
+        launchIndex = launchIndex.coerceIn(0, (machines.size - 1).coerceAtLeast(0))
+        val link = AgentsRuntime.store.linkMachine.value
+        val rows = if (machines.isEmpty()) {
+            listOf(
+                NexusCardLine(
+                    text = "No computer linked yet",
+                    sub = "link one in the phone app first",
+                    tone = NexusRowTone.DIM,
+                ),
+            )
+        } else {
+            windowedRows(machines, launchIndex) { machine, selected ->
+                val connected = link?.machineId == machine.machineId
+                NexusCardLine(
+                    text = machine.name.singleLine(120),
+                    sub = when {
+                        connected && link?.overTailnet == true -> "connected · over Tailscale"
+                        connected -> "connected · same Wi-Fi"
+                        else -> lastSeenText(machine.lastSeenAtMs).lowercase()
+                    },
+                    tone = if (connected) NexusRowTone.NORMAL else NexusRowTone.DIM,
+                    selected = selected,
+                )
+            }
+        }
+        return card(
+            title = "Start an agent",
+            subtitle = "pick a computer",
+            rows = rows,
+            footer = "UP/DOWN move · ENTER pick · BACK board",
+        )
+    }
+
+    private fun projectsCard(step: Launch.Projects): NexusCard {
+        val projects = configStore.projects(step.machineId)
+        launchIndex = launchIndex.coerceIn(0, (projects.size - 1).coerceAtLeast(0))
+        val rows = if (projects.isEmpty()) {
+            listOf(
+                NexusCardLine(
+                    text = "No project on ${step.machineName}".singleLine(120),
+                    sub = "anchor a folder in the phone app first",
+                    tone = NexusRowTone.DIM,
+                ),
+            )
+        } else {
+            windowedRows(projects, launchIndex) { project, selected ->
+                NexusCardLine(
+                    text = project.name.singleLine(120),
+                    sub = project.path.singleLine(120),
+                    tone = NexusRowTone.NORMAL,
+                    selected = selected,
+                )
+            }
+        }
+        return card(
+            title = "Start an agent",
+            subtitle = "${step.machineName} · pick a project".take(120),
+            rows = rows,
+            footer = "UP/DOWN move · ENTER pick · BACK computers",
+        )
+    }
+
+    private fun threadsCard(step: Launch.Threads): NexusCard {
+        val now = System.currentTimeMillis()
+        val threads = projectThreads(step.project)
+        launchIndex = launchIndex.coerceIn(0, threads.size)
+        val rows = buildList {
+            add(
+                NexusCardLine(
+                    text = "+ New Codex thread",
+                    sub = (
+                        launchNote
+                            ?: "starts empty here · Claude Code needs a prompt, use the phone"
+                        ).singleLine(120),
+                    badge = "CX",
+                    tone = if (launchIndex == 0) NexusRowTone.NORMAL else NexusRowTone.DIM,
+                    selected = launchIndex == 0,
+                ),
+            )
+            addAll(
+                windowedRows(threads, launchIndex - 1) { session, selected ->
+                    sessionRow(session, selected, now)
+                },
+            )
+        }
+        return card(
+            title = step.project.name.singleLine(110),
+            subtitle = listOfNotNull(
+                step.machineName,
+                if (threads.isEmpty()) "no threads yet" else "${threads.size} threads",
+            ).joinToString(" · ").take(120),
+            rows = rows,
+            footer = "UP/DOWN move · ENTER open or start · BACK projects",
+        )
+    }
+
+    private fun <T> windowedRows(
+        items: List<T>,
+        selected: Int,
+        row: (T, Boolean) -> NexusCardLine,
+    ): List<NexusCardLine> {
+        val start = (selected - VISIBLE_SESSION_ROWS / 2)
+            .coerceIn(0, (items.size - VISIBLE_SESSION_ROWS).coerceAtLeast(0))
+        return items.drop(start).take(VISIBLE_SESSION_ROWS).mapIndexed { offset, item ->
+            row(item, start + offset == selected)
+        }
+    }
+
+    private fun cwdInProject(cwd: String?, projectPath: String): Boolean {
+        val where = cwd?.replace('\\', '/')?.trimEnd('/')?.lowercase() ?: return false
+        val root = projectPath.replace('\\', '/').trimEnd('/').lowercase()
+        return where == root || where.startsWith("$root/")
+    }
 
     // ------------------------------------------------------------ conversation
 
@@ -632,6 +909,10 @@ class AgentsPluginService : NexusPluginService() {
 
         /** Long enough to swallow a double tap, short enough to never be felt. */
         private const val DECISION_GUARD_MS = 600L
+        private const val LAUNCH_VERDICT_TIMEOUT_MS = 35_000L
+
+        /** Virtual board row: the door into the start-an-agent walk. */
+        private const val START_KEY = "!start-an-agent"
         private val PERMISSION_PATTERN =
             Regex("permission to use ([\\w.-]+)", RegexOption.IGNORE_CASE)
     }
