@@ -6,8 +6,9 @@ import type {
   ApprovalOutcome,
   ApprovalRequest,
 } from "./approval-manager";
-import { parsePhoneTarget } from "./config";
+import { parsePhoneTarget, readPhoneLinkConfig } from "./config";
 import type { SessionStore } from "./session-store";
+import { TailscalePeerDiscovery } from "./tailnet-discovery";
 import type { AgentConfig, Logger, Session, SessionMessage } from "./types";
 
 /**
@@ -21,6 +22,7 @@ import type { AgentConfig, Logger, Session, SessionMessage } from "./types";
  */
 export const DISCOVERY_PORT = 8793;
 const DISCOVERY_INTERVAL_MS = 2000;
+export const TAILNET_REFRESH_INTERVAL_MS = 60_000;
 const RECONNECT_DELAY_MS = 3000;
 export const PHONE_HELLO_TIMEOUT_MS = 15_000;
 export const REFUSAL_RECONNECT_DELAY_MS = 60_000;
@@ -41,7 +43,14 @@ export interface PhoneLinkOptions {
   discoveryPort?: number;
   helloTimeoutMs?: number;
   reconnectDelayMs?: number;
+  targetRefreshIntervalMs?: number;
+  configFilePath?: string;
+  tailnetDiscovery?: TailnetPeerSource;
   now?: () => number;
+}
+
+export interface TailnetPeerSource {
+  discover(): Promise<string[]>;
 }
 
 interface PhoneAnnouncement {
@@ -98,10 +107,42 @@ function broadcastTargets(): string[] {
   return [...targets];
 }
 
+function normalizedHost(host: string): string {
+  return host.toLowerCase();
+}
+
+export function buildPhoneDialTargets(
+  phoneHosts: readonly string[],
+  discoveredTargets: readonly string[],
+  unavailableHosts: ReadonlySet<string> = new Set(),
+): PhoneAnnouncement[] {
+  const configured: PhoneAnnouncement[] = [];
+  const reservedHosts = new Set([...unavailableHosts].map(normalizedHost));
+  for (const configuredTarget of phoneHosts) {
+    const target = parsePhoneTarget(configuredTarget);
+    if (target) {
+      configured.push({ ...target, name: target.host });
+      reservedHosts.add(normalizedHost(target.host));
+    }
+  }
+
+  const discovered: PhoneAnnouncement[] = [];
+  for (const discoveredTarget of discoveredTargets) {
+    const target = parsePhoneTarget(discoveredTarget);
+    if (!target || reservedHosts.has(normalizedHost(target.host))) {
+      continue;
+    }
+    reservedHosts.add(normalizedHost(target.host));
+    discovered.push({ ...target, name: target.host });
+  }
+  return [...configured, ...discovered];
+}
+
 export class PhoneLink {
   private discovery?: UdpSocket;
   private socket?: TcpSocket;
   private discoveryTimer?: NodeJS.Timeout;
+  private targetRefreshTimer?: NodeJS.Timeout;
   private reconnectTimer?: NodeJS.Timeout;
   private helloTimer?: NodeJS.Timeout;
   private buffer = "";
@@ -115,14 +156,24 @@ export class PhoneLink {
   private readonly rejectedPhones = new Map<string, RejectedPhone>();
   private readonly retryAt = new Map<string, number>();
   private readonly now: () => number;
+  private readonly tailnetPeerSource: TailnetPeerSource;
+  private phoneHosts: string[];
+  private tailnetDiscoveryEnabled: boolean;
+  private discoveredPhoneTargets: string[] = [];
+  private targetRefreshPromise?: Promise<void>;
+  private targetRefreshGeneration = 0;
   private publishedSessions = new Map<string, Session>();
 
   constructor(private readonly options: PhoneLinkOptions) {
     this.now = options.now ?? Date.now;
+    this.phoneHosts = [...options.config.phoneHosts];
+    this.tailnetDiscoveryEnabled = options.config.tailnetDiscovery !== false;
+    this.tailnetPeerSource = options.tailnetDiscovery ?? new TailscalePeerDiscovery(options.logger);
   }
 
   start(): void {
     this.stopped = false;
+    this.targetRefreshGeneration += 1;
     const socket = createSocket({ type: "udp4", reuseAddr: true });
     this.discovery = socket;
     socket.on("error", (error) => {
@@ -143,6 +194,12 @@ export class PhoneLink {
       this.discoveryTimer = setInterval(() => this.announce(), DISCOVERY_INTERVAL_MS);
       this.discoveryTimer.unref();
     });
+    void this.refreshTargets();
+    this.targetRefreshTimer = setInterval(
+      () => void this.refreshTargets(),
+      this.options.targetRefreshIntervalMs ?? TAILNET_REFRESH_INTERVAL_MS,
+    );
+    this.targetRefreshTimer.unref();
   }
 
   stop(): void {
@@ -151,6 +208,11 @@ export class PhoneLink {
       clearInterval(this.discoveryTimer);
       this.discoveryTimer = undefined;
     }
+    if (this.targetRefreshTimer) {
+      clearInterval(this.targetRefreshTimer);
+      this.targetRefreshTimer = undefined;
+    }
+    this.targetRefreshGeneration += 1;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
@@ -185,6 +247,48 @@ export class PhoneLink {
     }
   }
 
+  async refreshTargets(): Promise<void> {
+    if (this.targetRefreshPromise) {
+      return this.targetRefreshPromise;
+    }
+    const refresh = this.doRefreshTargets();
+    this.targetRefreshPromise = refresh;
+    try {
+      await refresh;
+    } finally {
+      if (this.targetRefreshPromise === refresh) {
+        this.targetRefreshPromise = undefined;
+      }
+    }
+  }
+
+  private async doRefreshTargets(): Promise<void> {
+    if (this.options.configFilePath) {
+      try {
+        const config = readPhoneLinkConfig(this.options.configFilePath);
+        this.phoneHosts = config.phoneHosts;
+        this.tailnetDiscoveryEnabled = config.tailnetDiscovery;
+      } catch {
+        // Atomic saves can briefly hide the file; retain the last good dial settings.
+      }
+    }
+
+    const generation = this.targetRefreshGeneration;
+    let discoveredTargets: string[] = [];
+    if (this.tailnetDiscoveryEnabled) {
+      try {
+        discoveredTargets = await this.tailnetPeerSource.discover();
+      } catch {
+        // Discovery is optional and must not affect the daemon lifecycle.
+      }
+    }
+    if (this.stopped || generation !== this.targetRefreshGeneration) {
+      return;
+    }
+    this.discoveredPhoneTargets = discoveredTargets;
+    this.announce();
+  }
+
   private announce(): void {
     if (this.socket || !this.discovery) {
       return;
@@ -205,15 +309,44 @@ export class PhoneLink {
         }
       });
     }
-    for (const configuredTarget of this.options.config.phoneHosts) {
-      const target = parsePhoneTarget(configuredTarget);
-      if (target) {
-        this.connectToPhone({ ...target, name: target.host });
-      }
+    for (const target of buildPhoneDialTargets(
+      this.phoneHosts,
+      this.discoveredPhoneTargets,
+      this.backingOffHosts(),
+    )) {
+      this.connectToPhone(target);
       if (this.socket) {
         break;
       }
     }
+  }
+
+  private backingOffHosts(): Set<string> {
+    const hosts = new Set<string>();
+    const now = this.now();
+    for (const [target, retryAt] of this.rejectedPhones) {
+      if (retryAt.retryAt > now) {
+        const parsed = parsePhoneTarget(target);
+        if (parsed) {
+          hosts.add(parsed.host);
+        }
+      }
+    }
+    for (const [target, retryAt] of this.retryAt) {
+      if (retryAt > now) {
+        const parsed = parsePhoneTarget(target);
+        if (parsed) {
+          hosts.add(parsed.host);
+        }
+      }
+    }
+    if (this.connectedTo) {
+      const parsed = parsePhoneTarget(this.connectedTo);
+      if (parsed) {
+        hosts.add(parsed.host);
+      }
+    }
+    return hosts;
   }
 
   private connectToPhone(announcement: PhoneAnnouncement): void {

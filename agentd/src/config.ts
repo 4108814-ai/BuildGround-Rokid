@@ -26,6 +26,7 @@ function newConfig(): AgentConfig {
     machineId: randomBytes(16).toString("base64url"),
     machineName: os.hostname(),
     phoneHosts: [],
+    tailnetDiscovery: true,
     codex: {
       enabled: false,
       port: DEFAULT_CODEX_PORT,
@@ -102,7 +103,11 @@ function parseConfig(raw: string, filePath: string): {
   ) {
     throw new Error(`Invalid nexus-agentd config at ${filePath}`);
   }
-  const upgraded = missingMachineId || !hasPhoneHosts || !hasCodex;
+  const hasTailnetDiscovery = Object.prototype.hasOwnProperty.call(record, "tailnetDiscovery");
+  if (hasTailnetDiscovery && typeof record.tailnetDiscovery !== "boolean") {
+    throw new Error(`Invalid nexus-agentd config at ${filePath}`);
+  }
+  const upgraded = missingMachineId || !hasPhoneHosts || !hasCodex || !hasTailnetDiscovery;
   return {
     config: {
       token: record.token,
@@ -113,6 +118,8 @@ function parseConfig(raw: string, filePath: string): {
         : record.machineId as string,
       machineName: record.machineName,
       phoneHosts: (phoneHosts as string[] | undefined) ?? [],
+      tailnetDiscovery:
+        typeof record.tailnetDiscovery === "boolean" ? record.tailnetDiscovery : true,
       codex: codexRecord
         ? {
             enabled: codexRecord.enabled as boolean,
@@ -139,6 +146,17 @@ function writeConfig(filePath: string, config: AgentConfig): void {
 export function saveConfig(config: AgentConfig, stateDir = defaultStateDir()): void {
   mkdirSync(stateDir, { recursive: true });
   writeConfig(configPath(stateDir), config);
+}
+
+export function readPhoneLinkConfig(filePath: string): Pick<
+  AgentConfig,
+  "phoneHosts" | "tailnetDiscovery"
+> {
+  const config = parseConfig(readFileSync(filePath, "utf8"), filePath).config;
+  return {
+    phoneHosts: [...config.phoneHosts],
+    tailnetDiscovery: config.tailnetDiscovery,
+  };
 }
 
 export function ensureConfig(stateDir = defaultStateDir()): AgentConfig {

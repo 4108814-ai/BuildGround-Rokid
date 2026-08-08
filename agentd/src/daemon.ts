@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { ApprovalManager, approvalTimeoutFromEnv, type HookResponse } from "./approval-manager";
 import { CodexMonitor } from "./codex/monitor";
-import { defaultStateDir, ensureConfig } from "./config";
+import { configPath, defaultStateDir, ensureConfig } from "./config";
 import { discoverRecentSessions } from "./discovery";
 import { HookHttpServer } from "./http-server";
 import { FileLogger } from "./logger";
@@ -80,6 +80,7 @@ export async function startDaemon(): Promise<RunningDaemon> {
   wsHub = hub;
   const link = new PhoneLink({
     config,
+    configFilePath: configPath(stateDir),
     store: sessions,
     logger,
     detailProvider,

@@ -1,8 +1,13 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fsp = require("node:fs/promises");
 const net = require("node:net");
+const os = require("node:os");
+const path = require("node:path");
+const { configPath, ensureConfig, saveConfig } = require("../dist/config.js");
 const { SessionStore } = require("../dist/session-store.js");
 const {
+  buildPhoneDialTargets,
   MAX_PHONE_SESSIONS_PER_PROVIDER,
   PhoneLink,
   REFUSAL_RECONNECT_DELAY_MS,
@@ -15,6 +20,7 @@ const config = {
   machineId: "machine-phone-link",
   machineName: "phone-link-pc",
   phoneHosts: [],
+  tailnetDiscovery: false,
 };
 
 function loggerHarness() {
@@ -110,6 +116,95 @@ function createLink(overrides = {}) {
   });
   return { link, store, logs };
 }
+
+test("discovered targets are deduplicated by host against static and backing-off targets", () => {
+  const discovered = ["100.64.1.2:8792", "100.64.1.2:8792"];
+
+  assert.deepEqual(
+    buildPhoneDialTargets(["100.64.1.2"], discovered),
+    [{ host: "100.64.1.2", port: 8792, name: "100.64.1.2" }],
+  );
+  assert.deepEqual(
+    buildPhoneDialTargets(["100.64.1.2:18792"], discovered),
+    [{ host: "100.64.1.2", port: 18792, name: "100.64.1.2" }],
+  );
+  assert.deepEqual(buildPhoneDialTargets([], discovered), [
+    { host: "100.64.1.2", port: 8792, name: "100.64.1.2" },
+  ]);
+  assert.deepEqual(buildPhoneDialTargets([], discovered, new Set(["100.64.1.2"])), []);
+});
+
+test("disabled tailnet discovery does not invoke the peer scanner", async () => {
+  let scans = 0;
+  const { link, store } = createLink({
+    config: { ...config, tailnetDiscovery: false },
+    tailnetDiscovery: {
+      async discover() {
+        scans += 1;
+        return ["100.64.1.2:8792"];
+      },
+    },
+  });
+  try {
+    await link.refreshTargets();
+    assert.equal(scans, 0);
+  } finally {
+    link.stop();
+    store.dispose();
+  }
+});
+
+test("phone target refresh picks up disk changes and keeps the last good list on corruption", async () => {
+  const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "nexus-agentd-phone-link-"));
+  const sockets = [];
+  let connections = 0;
+  const server = net.createServer((socket) => {
+    sockets.push(socket);
+    connections += 1;
+    collectLines(socket);
+  });
+  const port = await listen(server);
+  const diskConfig = ensureConfig(tempDir);
+  diskConfig.tailnetDiscovery = false;
+  saveConfig(diskConfig, tempDir);
+  let now = 30_000;
+  let scans = 0;
+  const { link, store } = createLink({
+    config: diskConfig,
+    configFilePath: configPath(tempDir),
+    now: () => now,
+    reconnectDelayMs: 10_000,
+    tailnetDiscovery: {
+      async discover() {
+        scans += 1;
+        return [];
+      },
+    },
+  });
+
+  try {
+    link.start();
+    await link.refreshTargets();
+    diskConfig.phoneHosts = [`127.0.0.1:${port}`];
+    saveConfig(diskConfig, tempDir);
+
+    await link.refreshTargets();
+    await waitUntil(() => connections === 1, "hot-reloaded target was not dialed");
+    sockets[0].destroy();
+    await waitUntil(() => !link.socket, "first hot-reload connection did not close");
+
+    now += 10_000;
+    await fsp.writeFile(configPath(tempDir), "{partial");
+    await link.refreshTargets();
+    await waitUntil(() => connections === 2, "last good target was not retained");
+    assert.equal(scans, 0);
+  } finally {
+    link.stop();
+    store.dispose();
+    await closeServer(server, sockets);
+    await fsp.rm(tempDir, { recursive: true, force: true });
+  }
+});
 
 test("static phone targets dial and complete the existing handshake", async () => {
   const sockets = [];

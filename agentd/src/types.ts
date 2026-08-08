@@ -42,6 +42,7 @@ export interface AgentConfig {
   machineId: string;
   machineName: string;
   phoneHosts: string[];
+  tailnetDiscovery: boolean;
   codex: CodexConfig;
 }
 

@@ -78,16 +78,21 @@ replayed when a client resumes the thread.
 
 ## Away from home (Tailscale)
 
-Install Tailscale on the PC and phone, then read the phone's tailnet IP from the
-Tailscale app. Add it as a direct target and restart the daemon:
+Install Tailscale on the PC and phone. At startup and every 60 seconds, the daemon
+checks the local tailnet for online Android peers and tries their tailnet addresses
+on the phone listener port. If automatic discovery is unavailable, read the phone's
+tailnet IP from the Tailscale app and add it as a direct target:
 
 ```powershell
 agentd link-phone 100.x.y.z
 ```
 
-The daemon then dials the phone directly whenever LAN broadcast discovery cannot find
-it. A phone already linked at home accepts the tailnet dial without re-pairing because
-the daemon uses the same machine identity.
+The running daemon picks up direct-target changes on its next 60-second refresh, with no
+restart required. It then dials the phone directly whenever LAN broadcast discovery
+cannot find it. A phone already linked at home accepts the tailnet dial without
+re-pairing because the daemon uses the same machine identity. Set
+`"tailnetDiscovery": false` in `config.json` to disable the Tailscale scan without
+disabling direct targets or their hot reload.
 
 ## Running at logon
 
