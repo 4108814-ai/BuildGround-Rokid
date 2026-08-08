@@ -16,6 +16,9 @@
         <intent>
             <action android:name="com.anezium.rokidbus.action.HUB" />
         </intent>
+        <!-- Package visibility so the away-from-home setup can tell whether
+             Tailscale is already on this phone. -->
+        <package android:name="com.tailscale.ipn" />
     </queries>
 
     <application

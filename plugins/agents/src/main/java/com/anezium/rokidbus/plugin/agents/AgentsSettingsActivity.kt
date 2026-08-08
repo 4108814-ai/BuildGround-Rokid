@@ -41,9 +41,10 @@ class AgentsSettingsActivity : Activity() {
     private lateinit var machinesLine: TextView
     private lateinit var linkTitle: TextView
     private lateinit var linkSub: TextView
-    private lateinit var awayBlock: LinearLayout
-    private lateinit var awayDisclosure: TextView
+    private lateinit var manualBlock: LinearLayout
+    private lateinit var manualDisclosure: TextView
     private lateinit var tailscaleStatus: TextView
+    private lateinit var tailscaleDot: View
     private lateinit var tailscaleGet: Button
     private lateinit var openClawEnabled: Switch
     private lateinit var openClawHost: EditText
@@ -127,6 +128,10 @@ class AgentsSettingsActivity : Activity() {
             addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
             addView(agentdCard(), NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 22))
+            addView(NexusUi.sectionRow(this@AgentsSettingsActivity, "Away from home"), NexusUi.block())
+            addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
+            addView(awayCard(), NexusUi.block())
+            addView(BusTheme.gap(this@AgentsSettingsActivity, 22))
             addView(NexusUi.sectionRow(this@AgentsSettingsActivity, "OpenClaw"), NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
             addView(openClawCard(), NexusUi.block())
@@ -163,7 +168,7 @@ class AgentsSettingsActivity : Activity() {
             NexusUi.switchRow(
                 this@AgentsSettingsActivity,
                 "Monitor sessions",
-                "Watch the Claude Code and Codex sessions running on your computers",
+                "Watch the sessions running on your computers",
                 agentdEnabled,
             ),
             NexusUi.block(),
@@ -184,8 +189,6 @@ class AgentsSettingsActivity : Activity() {
         addView(NexusUi.divider(this@AgentsSettingsActivity))
         addView(linkCard(), NexusUi.block())
         addView(BusTheme.gap(this@AgentsSettingsActivity, 12))
-        addView(awayDisclosureRow(), NexusUi.block())
-        addView(awayBlock(), NexusUi.block())
         addView(
             NexusUi.textButton(this@AgentsSettingsActivity, "Forget computers", danger = true).apply {
                 setOnClickListener {
@@ -226,57 +229,65 @@ class AgentsSettingsActivity : Activity() {
         addView(NexusUi.chevron(this@AgentsSettingsActivity))
     }
 
-    private fun awayDisclosureRow(): TextView {
-        awayDisclosure = NexusUi.rowSub(this, AWAY_CLOSED).apply {
-            setPadding(0, NexusUi.dp(this@AgentsSettingsActivity, 6), 0, 0)
-            setOnClickListener {
-                val opening = awayBlock.visibility != View.VISIBLE
-                awayBlock.visibility = if (opening) View.VISIBLE else View.GONE
-                text = if (opening) AWAY_OPEN else AWAY_CLOSED
-            }
-        }
-        return awayDisclosure
-    }
-
-    /** Dialling out over a tailnet: the exception, folded away until asked for. */
-    private fun awayBlock(): LinearLayout {
-        tailscaleStatus = NexusUi.statusLine(this)
-        tailscaleGet = NexusUi.textButton(this, "Get Tailscale for this phone").apply {
+    /**
+     * Out of the house the link rides a tailnet. The guided road is Tailscale —
+     * status first, one button if it is missing, one paragraph for the computer —
+     * and the pasted pairing line stays behind a fold for whoever refuses it.
+     */
+    private fun awayCard(): LinearLayout = NexusUi.card(this).apply {
+        tailscaleStatus = NexusUi.statusLine(this@AgentsSettingsActivity)
+        tailscaleDot = NexusUi.dot(this@AgentsSettingsActivity)
+        tailscaleGet = NexusUi.textButton(this@AgentsSettingsActivity, "Get Tailscale for this phone").apply {
             setOnClickListener { openTailscaleInstall() }
         }
-        awayBlock = LinearLayout(this).apply {
+        addView(
+            NexusUi.cardBody(
+                this@AgentsSettingsActivity,
+                "Away from your Wi-Fi the link rides your Tailscale network: put " +
+                    "Tailscale on this phone and on the computer, sign in with the " +
+                    "same account on both, and the computer keeps finding this " +
+                    "phone by itself — nothing to declare, nothing to type.",
+            ),
+            NexusUi.block(),
+        )
+        addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
+        addView(connectionRow(tailscaleDot, tailscaleStatus), NexusUi.block())
+        addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
+        addView(tailscaleGet, NexusUi.block())
+        addView(
+            NexusUi.cardBody(
+                this@AgentsSettingsActivity,
+                "On the computer: Windows and macOS install it from " +
+                    "tailscale.com/download; Linux runs " +
+                    "“curl -fsSL https://tailscale.com/install.sh | sh” and then " +
+                    "“sudo tailscale up”. Sign in, and that is the whole setup.",
+            ),
+            NexusUi.block(),
+        )
+        addView(BusTheme.gap(this@AgentsSettingsActivity, 12))
+        addView(NexusUi.divider(this@AgentsSettingsActivity))
+        addView(manualDisclosureRow(), NexusUi.block())
+        addView(manualBlock(), NexusUi.block())
+        renderTailscaleState()
+    }
+
+    private fun manualDisclosureRow(): TextView {
+        manualDisclosure = NexusUi.rowSub(this, MANUAL_CLOSED).apply {
+            setPadding(0, NexusUi.dp(this@AgentsSettingsActivity, 6), 0, 0)
+            setOnClickListener {
+                val opening = manualBlock.visibility != View.VISIBLE
+                manualBlock.visibility = if (opening) View.VISIBLE else View.GONE
+                text = if (opening) MANUAL_OPEN else MANUAL_CLOSED
+            }
+        }
+        return manualDisclosure
+    }
+
+    /** Pasting the daemon's pairing line: the no-Tailscale fallback. */
+    private fun manualBlock(): LinearLayout {
+        manualBlock = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
-            addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
-            addView(
-                NexusUi.cardBody(
-                    this@AgentsSettingsActivity,
-                    "Away from home the link rides your Tailscale network. Put " +
-                        "Tailscale on this phone and on the computer, sign in with " +
-                        "the same account on both, and the computer keeps finding " +
-                        "this phone by itself — nothing to declare, nothing to type.",
-                ),
-                NexusUi.block(),
-            )
-            addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
-            addView(tailscaleStatus, NexusUi.block())
-            addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
-            addView(tailscaleGet, NexusUi.block())
-            addView(
-                NexusUi.cardBody(
-                    this@AgentsSettingsActivity,
-                    "On the computer: Windows and macOS install it from " +
-                        "tailscale.com/download; Linux runs " +
-                        "“curl -fsSL https://tailscale.com/install.sh | sh” and then " +
-                        "“sudo tailscale up”. Sign in, and that is the whole setup.",
-                ),
-                NexusUi.block(),
-            )
-            addView(BusTheme.gap(this@AgentsSettingsActivity, 16))
-            addView(
-                NexusUi.rowSub(this@AgentsSettingsActivity, "MANUAL PAIRING — WITHOUT TAILSCALE"),
-                NexusUi.block(),
-            )
             addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
             addView(agentdPairing, NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
@@ -292,8 +303,7 @@ class AgentsSettingsActivity : Activity() {
                 NexusUi.block(),
             )
         }
-        renderTailscaleState()
-        return awayBlock
+        return manualBlock
     }
 
     private fun tailscaleInstalled(): Boolean =
@@ -303,6 +313,7 @@ class AgentsSettingsActivity : Activity() {
         if (!::tailscaleStatus.isInitialized) return
         val installed = tailscaleInstalled()
         tailscaleStatus.text = if (installed) "TAILSCALE IS ON THIS PHONE" else "TAILSCALE NOT INSTALLED YET"
+        NexusUi.setDotColor(tailscaleDot, if (installed) NexusUi.GREEN else NexusUi.AMBER)
         tailscaleGet.visibility = if (installed) View.GONE else View.VISIBLE
     }
 
@@ -536,8 +547,8 @@ class AgentsSettingsActivity : Activity() {
     }
 
     private companion object {
-        const val AWAY_CLOSED = "AWAY FROM HOME ›"
-        const val AWAY_OPEN = "AWAY FROM HOME ⌄"
+        const val MANUAL_CLOSED = "MANUAL PAIRING ›"
+        const val MANUAL_OPEN = "MANUAL PAIRING ⌄"
         const val TAILSCALE_PACKAGE = "com.tailscale.ipn"
     }
 }
