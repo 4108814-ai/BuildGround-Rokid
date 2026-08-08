@@ -627,8 +627,13 @@ class RelayPluginService : NexusPluginService() {
          */
         const val LISTENING_CONTEXT_MESSAGES = 2
 
-        /** Long enough to read "Sent", short enough not to hold the wearer there. */
-        const val SENT_LINGER_MS = 1_200L
+        /**
+         * Long enough to read "Sent", short enough that the hand-back to the
+         * list happens before the wearer's own Back does. At 1.2s the switch
+         * landed exactly where most people tap — their Back then closed a list
+         * they had not seen yet (field report, 2026-08).
+         */
+        const val SENT_LINGER_MS = 850L
 
         // Time to re-read what you just said, scaled to how much of it there is.
         const val SEND_BASE_MS = 2_200L
