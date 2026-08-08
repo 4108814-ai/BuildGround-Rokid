@@ -275,9 +275,12 @@ class AgentsPluginService : NexusPluginService() {
 
     private fun moveSelection(delta: Int) {
         val sessions = AgentsRuntime.store.sessions.value
-        // One virtual row sits past the sessions: the start-an-agent door.
+        // One virtual row sits past the sessions: the start-an-agent door. The
+        // ring walks a circle, so the door is one tap UP from the top instead
+        // of the whole board away.
+        val count = sessions.size + 1
         val current = if (selectedKey == START_KEY) sessions.size else selectedIndexIn(sessions)
-        val next = (current + delta).coerceIn(0, sessions.size)
+        val next = ((current + delta) % count + count) % count
         selectedKey = if (next == sessions.size) START_KEY else sessions[next].key
         render(show = false)
     }

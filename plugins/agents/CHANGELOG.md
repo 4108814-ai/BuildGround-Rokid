@@ -15,6 +15,9 @@
 - Start a new session from a project: one prompt, Claude Code or Codex, and
   the daemon launches it inside the project folder. It appears on the board
   like any other session.
+- Walk computer, project, and the project's threads on the glasses, and start
+  an empty Codex thread from the ring: the board's last row is the door, one
+  tap up from the top.
 - Alert on the glasses with an interactive notice; the phone stays silent and
   the plugin holds no notification permission.
 - Let a computer link itself over the LAN, and refuse the ones that were not
