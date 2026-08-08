@@ -3,6 +3,7 @@ package com.anezium.rokidbus.glasses
 import android.os.Handler
 import android.view.KeyEvent
 import com.anezium.rokidbus.ink.InkProblem
+import com.anezium.rokidbus.ink.InkProblemCodes
 import com.anezium.rokidbus.ink.InkWireValidator
 import com.anezium.rokidbus.ink.RenderDocument
 import com.anezium.rokidbus.ink.RenderPatch
@@ -22,6 +23,8 @@ internal data class InkResyncRequest(
 internal class InkRendererLayer(
     private val main: Handler,
     private val onResyncNeeded: (InkResyncRequest) -> Unit,
+    private val onAction: (String, Map<String, Any?>) -> Unit,
+    private val onRendererError: (String, List<InkProblem>) -> Unit,
 ) {
     private val decoder: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "RokidNexusInkDecode").apply { isDaemon = true }
@@ -40,6 +43,15 @@ internal class InkRendererLayer(
         val patchJson = payload.patchJson
         if ((documentJson == null) == (patchJson == null)) {
             log("Ink payload rejected id=${surface.surfaceId}: expected exactly one document or patch")
+            onRendererError(
+                surface.surfaceId,
+                listOf(
+                    InkProblem(
+                        InkProblemCodes.WIRE_INVALID,
+                        "Expected exactly one Ink document or patch",
+                    ),
+                ),
+            )
             return
         }
         // A new full document replaces all queued work. Patches retain the
@@ -87,7 +99,10 @@ internal class InkRendererLayer(
                                 attachedView?.applyPatch(result.store, decoded.value.changes, payload.debugActions)
                                 onCommitted()
                             }
-                            is InkPatchApplyResult.Invalid -> logProblem("Ink patch rejected", result.problem)
+                            is InkPatchApplyResult.Invalid -> {
+                                logProblem("Ink patch rejected", result.problem)
+                                onRendererError(surface.surfaceId, listOf(result.problem))
+                            }
                             is InkPatchApplyResult.ResyncNeeded -> onResyncNeeded(
                                 InkResyncRequest(
                                     result.currentDocumentId,
@@ -98,7 +113,10 @@ internal class InkRendererLayer(
                             )
                         }
                     }
-                    is Decoded.Invalid -> decoded.problems.forEach { logProblem("Ink wire rejected", it) }
+                    is Decoded.Invalid -> {
+                        decoded.problems.forEach { logProblem("Ink wire rejected", it) }
+                        onRendererError(surface.surfaceId, decoded.problems)
+                    }
                 }
             }
         }
@@ -107,14 +125,17 @@ internal class InkRendererLayer(
     fun attach(view: InkHudView, debugActions: Boolean) {
         if (attachedView !== view) {
             attachedView?.clearProjection()
+            attachedView?.onAction = null
             attachedView = view
         }
+        view.onAction = onAction
         store?.let { view.show(it, debugActions) }
     }
 
     fun detach(view: InkHudView) {
         if (attachedView !== view) return
         cancelPendingDecodes()
+        view.onAction = null
         view.clearProjection()
         attachedView = null
     }
@@ -125,6 +146,7 @@ internal class InkRendererLayer(
         nextGeneration()
         store = null
         attachedView?.clearProjection()
+        attachedView?.onAction = null
     }
 
     fun destroy() {

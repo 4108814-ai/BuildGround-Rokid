@@ -78,6 +78,7 @@ object PathRules {
         BusPaths.TTS_STARTED, BusPaths.TTS_DONE,
         BusPaths.CAMERA_SNAPSHOT_RESULT, BusPaths.CAMERA_SNAPSHOT_ERROR,
         BusPaths.WIRELESS_ADB_REPLY,
+        BusPaths.INK_EVENT,
         -> true
         else -> false
     }
@@ -88,6 +89,7 @@ object PathRules {
         BusPaths.TTS_STARTED, BusPaths.TTS_DONE,
         BusPaths.CAMERA_SNAPSHOT_RESULT, BusPaths.CAMERA_SNAPSHOT_ERROR,
         BusPaths.WIRELESS_ADB_REPLY,
+        BusPaths.INK_EVENT,
         -> true
         else -> matchesPrefix(path, "/system/plugin")
     }
@@ -98,6 +100,8 @@ object PathRules {
         BusPaths.NOTICE_SHOW, BusPaths.NOTICE_UPDATE, BusPaths.NOTICE_HIDE,
         BusPaths.ACTIVITY_START, BusPaths.ACTIVITY_UPDATE, BusPaths.ACTIVITY_END,
         -> PluginCapability.SURFACES
+        BusPaths.INK_SHOW, BusPaths.INK_UPDATE, BusPaths.INK_HIDE ->
+            PluginCapability.INK_SURFACE
         "/audio/lease/acquire", "/audio/lease/release" -> PluginCapability.MICROPHONE
         "/stt/session/start", "/stt/session/stop" -> PluginCapability.STT
         BusPaths.TTS_SPEAK, BusPaths.TTS_STOP -> PluginCapability.TTS

@@ -9,6 +9,7 @@ import com.anezium.rokidbus.shared.ActivitySurfaceValidationResult
 import com.anezium.rokidbus.shared.BusCapabilityBits
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.LinkStateBits
+import com.anezium.rokidbus.shared.InkSurfaceContract
 import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import com.anezium.rokidbus.shared.NoticeSurfaceValidationResult
 import com.anezium.rokidbus.shared.PinSurfaceContract
@@ -55,6 +56,10 @@ class NexusPluginClient internal constructor(
     val supportsImageSurface: Boolean
         get() = currentLinkState and LinkStateBits.SPP_DATA_UP != 0 &&
             hubCapabilities and BusCapabilityBits.IMAGE_SURFACE != 0
+
+    val supportsInkSurface: Boolean
+        get() = currentLinkState and LinkStateBits.SPP_DATA_UP != 0 &&
+            hubCapabilities and BusCapabilityBits.INK_SURFACE != 0
 
     /**
      * Whether these glasses can show a pin — not whether one would appear this instant.
@@ -253,6 +258,10 @@ class NexusPluginClient internal constructor(
 
     internal fun isApprovedForTts(): Boolean = !closed && isApproved
     internal fun isApprovedForSnapshot(): Boolean = !closed && isApproved
+
+    internal fun reportInkError(surfaceId: String, problems: List<NexusInkProblem>) {
+        callbacks.onInkError(surfaceId, problems)
+    }
 
     internal fun registerAudioSession(session: NexusAudioSession): Boolean =
         synchronized(audioSessionLock) {
@@ -489,6 +498,10 @@ class NexusPluginClient internal constructor(
         if (routeSnapshotMessage(path, id, payload)) return
         if (routeSpeechMessage(path, payload)) return
         if (routeAudioMessage(path, payload)) return
+        if (path == BusPaths.INK_EVENT) {
+            routeInkMessage(payload)
+            return
+        }
         if (path == BusPaths.NOTICE_INPUT) {
             if (isApproved) {
                 callbacks.onNoticeInput(
@@ -693,6 +706,37 @@ class NexusPluginClient internal constructor(
             BusPaths.TTS_DONE -> session?.onDone(payload)
         }
         return consume
+    }
+
+    private fun routeInkMessage(payload: JSONObject) {
+        if (!isApproved) return
+        val surfaceId = payload.optString("surfaceId")
+        if (surfaceId.isBlank()) return
+        when (payload.optString("type")) {
+            InkSurfaceContract.EVENT_READY -> callbacks.onInkReady(surfaceId)
+            InkSurfaceContract.EVENT_ACTION -> {
+                val actionId = payload.optString("actionId")
+                if (actionId.isNotBlank()) {
+                    callbacks.onInkAction(
+                        surfaceId,
+                        actionId,
+                        payload.optJSONObject("dataset")?.let { JSONObject(it.toString()) } ?: JSONObject(),
+                    )
+                }
+            }
+            InkSurfaceContract.EVENT_CLOSED ->
+                NexusInkCloseReason.fromWire(payload.optString("reason"))
+                    ?.let { reason -> callbacks.onInkClosed(surfaceId, reason) }
+            InkSurfaceContract.EVENT_ERROR -> {
+                val array = payload.optJSONArray("problems") ?: return
+                val problems = buildList {
+                    for (index in 0 until array.length()) {
+                        array.optJSONObject(index)?.let(NexusInkProblem::fromJson)?.let(::add)
+                    }
+                }
+                if (problems.isNotEmpty()) callbacks.onInkError(surfaceId, problems)
+            }
+        }
     }
 
     private fun routeSpeechBinary(path: String): Boolean {

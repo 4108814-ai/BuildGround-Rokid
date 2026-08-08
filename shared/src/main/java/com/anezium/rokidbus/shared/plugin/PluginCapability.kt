@@ -10,6 +10,7 @@ enum class PluginCapability(val wireValue: String) {
     MEDIA_SYNC("mediasync"),
     ASSISTANT("assistant"),
     WIRELESS_DEBUGGING("wireless_debugging"),
+    INK_SURFACE("ink_surface"),
     ;
 
     companion object {

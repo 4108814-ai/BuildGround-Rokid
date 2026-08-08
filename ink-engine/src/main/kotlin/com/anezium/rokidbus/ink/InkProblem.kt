@@ -44,6 +44,7 @@ object InkProblemCodes {
     const val BUDGET_DEPTH = "INK_BUDGET_DEPTH"
     const val BUDGET_SIZE = "INK_BUDGET_SIZE"
     const val THREAD_INVALID = "INK_THREAD_INVALID"
+    const val SESSION_NOT_FOUND = "INK_SESSION_NOT_FOUND"
     const val WIRE_INVALID = "INK_WIRE_INVALID"
     const val WIRE_UNKNOWN_FIELD = "INK_WIRE_UNKNOWN_FIELD"
     const val WIRE_TYPE = "INK_WIRE_TYPE"

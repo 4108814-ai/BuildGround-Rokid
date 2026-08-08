@@ -55,7 +55,7 @@
                 android:value="3" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.CAPABILITIES"
-                android:value="surfaces,stt,tts" />
+                android:value="surfaces,stt,tts,ink_surface" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.RECEIVE_PREFIXES"
                 android:value="/plugin/hello,/system/plugin,/stt,/tts/started,/tts/done" />

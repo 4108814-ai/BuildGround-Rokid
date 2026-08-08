@@ -185,12 +185,46 @@ class PhonePluginRegistryTest {
         registry.close()
     }
 
+    @Test
+    fun `ink and card surfaces compete for the same external foreground owner`() {
+        val runtime = object : ExternalPluginRuntime {
+            override fun bind(principal: PhonePluginPrincipal) = true
+            override fun isRegistered(principal: PhonePluginPrincipal) = true
+            override fun deliver(
+                principal: PhonePluginPrincipal,
+                path: String,
+                id: String,
+                payload: JSONObject,
+            ) = true
+            override fun hideOwnedSurfaces(pluginId: String) = Unit
+            override fun unbind(principal: PhonePluginPrincipal) = Unit
+        }
+        val scheduler = object : ExternalPluginScheduler {
+            override fun schedule(key: String, delayMs: Long, action: () -> Unit) = Unit
+            override fun cancel(key: String) = Unit
+        }
+        val controller = ExternalPluginController(runtime, scheduler)
+        val registry = registry(externalController = controller)
+        val inkOwner = principal("inkowner", launchable = true, iconKey = "star")
+        val cardOwner = principal("cardowner", launchable = true, iconKey = "star")
+
+        assertTrue(registry.allowExternalSurface(inkOwner, BusPaths.INK_SHOW))
+        assertTrue(registry.allowExternalSurface(inkOwner, BusPaths.SURFACE_UPDATE))
+        assertFalse(registry.allowExternalSurface(cardOwner, BusPaths.SURFACE_SHOW))
+        assertFalse(registry.allowExternalSurface(cardOwner, BusPaths.INK_UPDATE))
+        controller.onPluginSelfHid(inkOwner.descriptor.id)
+        assertTrue(registry.allowExternalSurface(cardOwner, BusPaths.SURFACE_SHOW))
+        assertFalse(registry.allowExternalSurface(inkOwner, BusPaths.INK_SHOW))
+        registry.close()
+    }
+
     private fun registry(
         sendEnvelope: (BusEnvelope) -> String? = { null },
         capabilitiesProvider: () -> Int = { 0 },
         journal: PluginBusJournal? = null,
         catalogProvider: (() -> PluginCatalog)? = null,
         glyphReader: ((PhonePluginPrincipal) -> List<GlyphContract.CustomGlyph>)? = null,
+        externalController: ExternalPluginController? = null,
     ) = PhonePluginRegistry(
         context = RuntimeEnvironment.getApplication(),
         plugins = emptyList(),
@@ -198,6 +232,7 @@ class PhonePluginRegistryTest {
         capabilitiesProvider = capabilitiesProvider,
         logger = {},
         catalogProvider = catalogProvider,
+        externalController = externalController,
         journal = journal,
         glyphReader = glyphReader,
     )

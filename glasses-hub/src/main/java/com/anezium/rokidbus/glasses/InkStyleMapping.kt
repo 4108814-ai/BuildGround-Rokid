@@ -40,19 +40,28 @@ internal data class InkFlexStyle(
     companion object {
         fun from(style: Map<String, String>): InkFlexStyle {
             val shorthand = parseFlex(style["flex"])
+            // A container without display:flex is a block: children stack
+            // vertically full-width, and the flex container properties are
+            // inert — matching CSS and the official samples, which always
+            // declare display:flex before flex-direction.
+            val isFlex = style["display"]?.lowercase() == "flex"
             return InkFlexStyle(
-                direction = when (style["flex-direction"]?.lowercase()) {
-                    "row-reverse" -> InkFlexDirection.ROW_REVERSE
-                    "column" -> InkFlexDirection.COLUMN
-                    "column-reverse" -> InkFlexDirection.COLUMN_REVERSE
-                    else -> InkFlexDirection.ROW
+                direction = if (!isFlex) {
+                    InkFlexDirection.COLUMN
+                } else {
+                    when (style["flex-direction"]?.lowercase()) {
+                        "row-reverse" -> InkFlexDirection.ROW_REVERSE
+                        "column" -> InkFlexDirection.COLUMN
+                        "column-reverse" -> InkFlexDirection.COLUMN_REVERSE
+                        else -> InkFlexDirection.ROW
+                    }
                 },
-                wrap = when (style["flex-wrap"]?.lowercase()) {
+                wrap = when (style["flex-wrap"]?.lowercase().takeIf { isFlex }) {
                     "wrap" -> InkFlexWrap.WRAP
                     "wrap-reverse" -> InkFlexWrap.WRAP_REVERSE
                     else -> InkFlexWrap.NOWRAP
                 },
-                justify = when (style["justify-content"]?.lowercase()) {
+                justify = when (style["justify-content"]?.lowercase().takeIf { isFlex }) {
                     "flex-end", "end" -> InkJustify.END
                     "center" -> InkJustify.CENTER
                     "space-between" -> InkJustify.SPACE_BETWEEN

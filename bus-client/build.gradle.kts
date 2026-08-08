@@ -32,6 +32,7 @@ android {
 
 dependencies {
     api(project(":shared"))
+    implementation(project(":ink-engine"))
     implementation("androidx.core:core:1.13.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")

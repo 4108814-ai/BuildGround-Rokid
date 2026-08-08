@@ -101,8 +101,8 @@ object InkEngine {
         return InkCompileResult(document, session, problems.toList(), binding.evaluatedExpressionCount)
     }
 
-    internal const val MAX_PAGE_BYTES = 32 * 1024
-    internal const val MAX_DATA_BYTES = 16 * 1024
+    const val MAX_PAGE_BYTES = 32 * 1024
+    const val MAX_DATA_BYTES = 16 * 1024
 }
 
 /**
@@ -187,11 +187,26 @@ class InkSession internal constructor(
             return InkPatchResult(null, document, binding.problems, binding.evaluatedExpressionCount)
         }
         val patch = RenderDiffer.diff(document, next)
+        val wireProblems = InkWireValidator.validateDocument(next) +
+            InkWireValidator.validatePatch(patch)
+        if (wireProblems.any { it.severity == InkProblemSeverity.ERROR }) {
+            return InkPatchResult(
+                null,
+                document,
+                binding.problems + wireProblems,
+                binding.evaluatedExpressionCount,
+            )
+        }
         data = trialData
         cache = trialCache
         revision = targetRevision
         document = next
-        return InkPatchResult(patch, next, binding.problems, binding.evaluatedExpressionCount)
+        return InkPatchResult(
+            patch,
+            next,
+            binding.problems + wireProblems,
+            binding.evaluatedExpressionCount,
+        )
     }
 }
 

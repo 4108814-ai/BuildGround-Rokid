@@ -29,6 +29,8 @@ import kotlin.math.roundToInt
 
 /** Native View projection for one controller-owned Ink node store. */
 internal class InkHudView(context: Context) : FrameLayout(context) {
+    var onAction: ((String, Map<String, Any?>) -> Unit)? = null
+
     private data class Record(
         var node: RenderNode,
         var parentId: String?,
@@ -59,7 +61,6 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
     private var store: InkNodeStore? = null
     private var projectedDocumentId: String? = null
     private var projectedRevision = -1
-    private var debugActions = false
     private var containerWidth = 0
 
     init {
@@ -71,7 +72,6 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
     }
 
     fun show(next: InkNodeStore, debugActions: Boolean) {
-        this.debugActions = debugActions
         if (projectedDocumentId == next.documentId && projectedRevision == next.revision && registry.isNotEmpty()) {
             registry.keys.toList().forEach(::refreshAction)
             return
@@ -85,7 +85,6 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
     }
 
     fun applyPatch(next: InkNodeStore, changes: List<RenderChange>, debugActions: Boolean) {
-        this.debugActions = debugActions
         if (projectedDocumentId != next.documentId || projectedRevision != next.revision - 1) {
             show(next, debugActions)
             return
@@ -137,7 +136,12 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
             event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 &&
             event.keyCode in CONFIRM_KEYS
         ) {
-            actionableRecord()?.let(::debugAction)
+            val action = actionableRecord() ?: return false
+            emitAction(action)
+            return true
+        }
+        if (event.action == KeyEvent.ACTION_UP && event.keyCode in CONFIRM_KEYS && actionableRecord() != null) {
+            return true
         }
         return false
     }
@@ -303,14 +307,14 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
         record.node = next
         if (record.virtual) return
         val action = next.events["tap"]
-        val debugActionEnabled = action != null && debugActions
-        record.view.isFocusable = debugActionEnabled
-        record.view.isClickable = debugActionEnabled
+        val actionEnabled = action != null
+        record.view.isFocusable = actionEnabled
+        record.view.isClickable = actionEnabled
         record.view.contentDescription = next.attributes["id"]?.toString()
             ?: action?.actionId
             ?: next.type
         record.view.setOnClickListener(
-            if (debugActionEnabled) View.OnClickListener { debugAction(record) } else null,
+            if (actionEnabled) View.OnClickListener { emitAction(record) } else null,
         )
     }
 
@@ -749,10 +753,9 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
         return registry.values.firstOrNull { !it.virtual && "tap" in it.node.events }
     }
 
-    private fun debugAction(record: Record) {
-        if (!debugActions) return
+    private fun emitAction(record: Record) {
         val action = record.node.events["tap"] ?: return
-        log("Ink debug action id=${action.actionId} dataset=${record.node.dataset}")
+        onAction?.invoke(action.actionId, record.node.dataset)
     }
 
     private fun length(value: String?, percentBase: Float): Float = InkLengthResolver.resolve(

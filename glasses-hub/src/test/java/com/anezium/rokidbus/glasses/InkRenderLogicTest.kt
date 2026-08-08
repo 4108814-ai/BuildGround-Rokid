@@ -111,6 +111,7 @@ class InkRenderLogicTest {
     fun `flex mapping resolves directions wrapping alignment and shorthand`() {
         val mapped = InkFlexStyle.from(
             mapOf(
+                "display" to "flex",
                 "flex-direction" to "column-reverse",
                 "flex-wrap" to "wrap-reverse",
                 "justify-content" to "space-between",
@@ -130,6 +131,23 @@ class InkRenderLogicTest {
         assertEquals(0f, mapped.shrink)
         assertEquals("25%", mapped.basis)
         assertEquals("8rpx", mapped.gap)
+    }
+
+    @Test
+    fun `container without display flex is a block and ignores flex container properties`() {
+        val block = InkFlexStyle.from(
+            mapOf(
+                "flex-direction" to "row",
+                "justify-content" to "space-between",
+                "flex-wrap" to "wrap",
+            ),
+        )
+        assertEquals(InkFlexDirection.COLUMN, block.direction)
+        assertEquals(InkJustify.START, block.justify)
+        assertEquals(InkFlexWrap.NOWRAP, block.wrap)
+
+        val flexWithoutDirection = InkFlexStyle.from(mapOf("display" to "flex"))
+        assertEquals(InkFlexDirection.ROW, flexWithoutDirection.direction)
     }
 
     @Test

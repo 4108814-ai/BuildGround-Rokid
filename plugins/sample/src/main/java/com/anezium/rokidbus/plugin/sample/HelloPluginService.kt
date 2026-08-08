@@ -10,6 +10,9 @@ import android.os.Looper
 import android.view.KeyEvent
 import com.anezium.rokidbus.client.plugin.NexusCard
 import com.anezium.rokidbus.client.plugin.NexusImage
+import com.anezium.rokidbus.client.plugin.NexusInkCloseReason
+import com.anezium.rokidbus.client.plugin.NexusInkProblem
+import com.anezium.rokidbus.client.plugin.NexusInkSurfaceSession
 import com.anezium.rokidbus.client.plugin.NexusNotice
 import com.anezium.rokidbus.client.plugin.NexusNoticeAction
 import com.anezium.rokidbus.client.plugin.NexusNoticeImage
@@ -32,6 +35,8 @@ import com.anezium.rokidbus.client.plugin.NexusTtsSession
 import com.anezium.rokidbus.shared.ImageSurfaceContract
 import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
+import org.json.JSONArray
+import org.json.JSONObject
 
 class HelloPluginService : NexusPluginService() {
     private fun log(message: String) = android.util.Log.i("ROKIDBUS", message)
@@ -59,11 +64,14 @@ class HelloPluginService : NexusPluginService() {
 
     private val state = HelloPluginState()
     private var surface: NexusSurfaceSession? = null
+    private var inkSurface: NexusInkSurfaceSession? = null
     private var speech: NexusSpeechSession? = null
     private var tts: NexusTtsSession? = null
     private var stopSpeechWhenStarted = false
     private var showingImage = false
     private var pinStep = PIN_HIDDEN
+    private var showingInk = false
+    private var inkRevision = 0
     private val speechCallbacks = object : NexusSpeechCallbacks {
         override fun onSpeechStarted(realtime: Boolean) {
             val currentSpeech = speech ?: return
@@ -113,6 +121,10 @@ class HelloPluginService : NexusPluginService() {
         } else {
             stopSpeechWhenStarted = false
         }
+        inkSurface = nexusInkSurfaceSession(INK_SURFACE_ID)
+        inkRevision = 0
+        showingInk = showInkDemo()
+        if (showingInk) return
         surface = nexusSurfaceSession(SURFACE_ID)
         showingImage = showBundledImage()
         if (!showingImage) render(show = true)
@@ -126,14 +138,18 @@ class HelloPluginService : NexusPluginService() {
         tts?.close()
         tts = null
         stopSpeechWhenStarted = false
+        inkSurface?.hide()
+        inkSurface = null
         surface?.hide()
         surface = null
         showingImage = false
+        showingInk = false
         pinStep = PIN_HIDDEN
     }
 
     override fun onNexusInput(event: NexusInputEvent) {
         if (event.action != KeyEvent.ACTION_DOWN) return
+        if (showingInk) return
         when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_RIGHT,
             KeyEvent.KEYCODE_DPAD_DOWN,
@@ -239,6 +255,59 @@ class HelloPluginService : NexusPluginService() {
         if (show) surface?.showCard(card) else surface?.updateCard(card)
     }
 
+    override fun onNexusInkReady(surfaceId: String) {
+        log("Ink demo ready surface=$surfaceId")
+    }
+
+    override fun onNexusInkAction(surfaceId: String, actionId: String, dataset: JSONObject) {
+        if (surfaceId != INK_SURFACE_ID || actionId != INK_REFRESH_ACTION) return
+        inkRevision += 1
+        val next = 72 + inkRevision * 3
+        val result = inkSurface?.update(
+            JSONObject()
+                .put("metrics[0].value", next.toString())
+                .put("rows[0].value", "updated $inkRevision"),
+        )
+        log("Ink demo action source=${dataset.optString("source")} result=$result")
+    }
+
+    override fun onNexusInkClosed(surfaceId: String, reason: NexusInkCloseReason) {
+        if (surfaceId == INK_SURFACE_ID) showingInk = false
+        log("Ink demo closed surface=$surfaceId reason=$reason")
+    }
+
+    override fun onNexusInkError(surfaceId: String, problems: List<NexusInkProblem>) {
+        log(
+            "Ink demo error surface=$surfaceId " +
+                problems.joinToString { problem -> "${problem.code}:${problem.message}" },
+        )
+    }
+
+    private fun showInkDemo(): Boolean {
+        if (nexusClient?.supportsInkSurface != true) return false
+        val data = JSONObject()
+            .put("title", "Ink Surface")
+            .put(
+                "metrics",
+                JSONArray()
+                    .put(JSONObject().put("label", "SYNC").put("value", "72"))
+                    .put(JSONObject().put("label", "LINK").put("value", "SPP"))
+                    .put(JSONObject().put("label", "REV").put("value", "0")),
+            )
+            .put(
+                "rows",
+                JSONArray()
+                    .put(JSONObject().put("name", "Phone compile").put("value", "ready"))
+                    .put(JSONObject().put("name", "Glasses render").put("value", "native"))
+                    .put(JSONObject().put("name", "Tap action").put("value", "update")),
+            )
+        return inkSurface?.show(
+            page = INK_DEMO_PAGE,
+            data = data,
+            handlesBack = false,
+        ) == NexusSdkResult.SENT
+    }
+
     /**
      * The answer to a tap on a band that offers no choice. The demo notice
      * below carries actions, so this is here as the reference for the simpler
@@ -338,12 +407,50 @@ class HelloPluginService : NexusPluginService() {
     private companion object {
         const val ACTION_DEMO_NOTICE = "com.anezium.rokidbus.plugin.sample.DEMO_NOTICE"
         const val SURFACE_ID = "main"
+        const val INK_SURFACE_ID = "ink-demo"
+        const val INK_REFRESH_ACTION = "refreshMetrics"
         const val PIN_HIDDEN = 0
         const val PIN_SMALL = 1
         const val PIN_MEDIUM = 2
         const val DEMO_NOTICE = 3
         const val DEMO_NOTICE_PAGED = 4
         const val DEMO_NOTICE_IMAGE = 5
+
+        val INK_DEMO_PAGE = """
+            <script type="application/json" def>{"data":{}}</script>
+            <page>
+              <view class="page">
+                <text class="title">{{ title }}</text>
+                <view class="metrics">
+                  <view class="metric" wx:for="{{ metrics }}" wx:key="label">
+                    <text class="metric-label">{{ item.label }}</text>
+                    <text class="metric-value">{{ item.value }}</text>
+                  </view>
+                </view>
+                <view class="action" bindtap="refreshMetrics" data-source="sample">
+                  <text>Tap to update</text>
+                </view>
+                <view class="rows">
+                  <view class="row" wx:for="{{ rows }}" wx:key="name">
+                    <text>{{ item.name }}</text>
+                    <text class="row-value">{{ item.value }}</text>
+                  </view>
+                </view>
+              </view>
+            </page>
+            <style>
+              .page { display: flex; flex-direction: column; padding: 24rpx; gap: 18rpx; }
+              .title { font-size: 44rpx; font-weight: 700; }
+              .metrics { display: flex; flex-direction: row; gap: 12rpx; }
+              .metric { display: flex; flex-direction: column; flex-grow: 1; border-width: 1rpx; padding: 12rpx; }
+              .metric-label { font-size: 20rpx; opacity: 0.65; }
+              .metric-value { font-size: 34rpx; font-weight: 700; }
+              .action { border-width: 2rpx; padding: 14rpx; }
+              .rows { display: flex; flex-direction: column; gap: 8rpx; }
+              .row { display: flex; flex-direction: row; justify-content: space-between; }
+              .row-value { opacity: 0.7; }
+            </style>
+        """.trimIndent()
 
         /**
          * A band with more to say than one page holds. It offers no actions on

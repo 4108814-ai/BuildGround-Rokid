@@ -44,6 +44,10 @@ object BusPaths {
     const val SURFACE_UPDATE = "/surface/update"
     const val SURFACE_HIDE = "/surface/hide"
     const val SURFACE_INPUT = "/surface/input"
+    const val INK_SHOW = "/ink/show"
+    const val INK_UPDATE = "/ink/update"
+    const val INK_HIDE = "/ink/hide"
+    const val INK_EVENT = "/ink/event"
     const val PIN_SHOW = "/pin/show"
     const val PIN_HIDE = "/pin/hide"
     const val NOTICE_SHOW = "/notice/show"
@@ -182,6 +186,7 @@ object BusCapabilityBits {
     const val ACTIVITY_SURFACE = 1 shl 7
     const val PHONE_ASSISTED_SETUP = 1 shl 8
     const val TTS = 1 shl 9
+    const val INK_SURFACE = 1 shl 10
 }
 
 object LinkStateBits {

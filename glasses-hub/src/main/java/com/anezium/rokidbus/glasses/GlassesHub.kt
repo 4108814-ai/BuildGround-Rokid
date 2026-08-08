@@ -26,6 +26,7 @@ import com.anezium.rokidbus.shared.GlassesHubCapabilitiesContract
 import com.anezium.rokidbus.shared.GlassesRepairContract
 import com.anezium.rokidbus.shared.GlyphContract
 import com.anezium.rokidbus.shared.ImageSurfaceContract
+import com.anezium.rokidbus.ink.InkWire
 import com.anezium.rokidbus.shared.LinkStateBits
 import com.anezium.rokidbus.shared.NativeAppContract
 import com.anezium.rokidbus.shared.PhoneHubCapabilities
@@ -197,7 +198,10 @@ object GlassesHub {
 
     fun onSppConnected(connected: Boolean) {
         phoneConnected = connected || CxrBusBridge.isUp()
-        if (!phoneConnected) clearRemotePhoneCapabilities()
+        if (!phoneConnected) {
+            clearRemotePhoneCapabilities()
+            SurfaceController.onPhoneLinkLost()
+        }
         notifyLinkState()
         if (connected) {
             TtsController.onPhoneLinkAvailable()
@@ -209,7 +213,10 @@ object GlassesHub {
     fun onCxrState(connected: Boolean) {
         cxrUp = connected
         phoneConnected = connected || SppServerManager.isConnected()
-        if (!phoneConnected) clearRemotePhoneCapabilities()
+        if (!phoneConnected) {
+            clearRemotePhoneCapabilities()
+            SurfaceController.onPhoneLinkLost()
+        }
         notifyLinkState()
         if (connected) {
             TtsController.onPhoneLinkAvailable()
@@ -508,6 +515,9 @@ object GlassesHub {
     fun sendSurfaceInput(payload: JSONObject): String? =
         sendRemote(BusEnvelope(path = BusPaths.SURFACE_INPUT, payload = payload))
 
+    fun sendInkEvent(payload: JSONObject): String? =
+        sendRemote(BusEnvelope(path = BusPaths.INK_EVENT, payload = payload))
+
     fun resendCapabilitiesNow() {
         synchronized(setupCapabilitiesLock) {
             setupCapabilitiesFuture?.cancel(false)
@@ -576,11 +586,13 @@ object GlassesHub {
                 BusCapabilityBits.PIN_SURFACE or
                 BusCapabilityBits.NOTICE_SURFACE or
                 BusCapabilityBits.ACTIVITY_SURFACE or
+                BusCapabilityBits.INK_SURFACE or
                 (if (ttsAvailable) BusCapabilityBits.TTS else 0),
             imageSurfaceVersion = ImageSurfaceContract.VERSION,
             pinSurfaceVersion = PinSurfaceContract.VERSION,
             noticeSurfaceVersion = NoticeSurfaceContract.VERSION,
             activitySurfaceVersion = ActivitySurfaceContract.VERSION,
+            inkSurfaceVersion = InkWire.VERSION,
             maxImageBytes = ImageSurfaceContract.MAX_IMAGE_BYTES,
             versionName = BuildConfig.VERSION_NAME,
             setupComplete = onboardingState.stage == SelfArmOnboardingState.Stage.COMPLETE,
@@ -609,6 +621,7 @@ object GlassesHub {
                 "renderer capabilities announced imageVersion=${ImageSurfaceContract.VERSION} " +
                     "pinVersion=${PinSurfaceContract.VERSION} " +
                     "activityVersion=${ActivitySurfaceContract.VERSION} " +
+                    "inkVersion=${InkWire.VERSION} " +
                     "ttsVersion=${if (ttsAvailable) TtsContract.VERSION else 0}",
             )
         } else {

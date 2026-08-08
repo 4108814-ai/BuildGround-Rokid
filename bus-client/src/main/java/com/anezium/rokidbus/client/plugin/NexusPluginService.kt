@@ -39,6 +39,9 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
     protected fun nexusSurfaceSession(localSurfaceId: String): NexusSurfaceSession? =
         client?.surfaceSession(localSurfaceId)
 
+    protected fun nexusInkSurfaceSession(localSurfaceId: String): NexusInkSurfaceSession? =
+        client?.inkSurfaceSession(localSurfaceId)
+
     protected fun nexusAudioSession(callbacks: NexusAudioCallbacks): NexusAudioSession? =
         client?.audioSession(callbacks)
 
@@ -108,6 +111,13 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
     final override fun onNoticeClosed(reason: NexusNoticeCloseReason) = onNexusNoticeClosed(reason)
     final override fun onActivityAction(id: String) = onNexusActivityAction(id)
     final override fun onActivityClosed(reason: String) = onNexusActivityClosed(reason)
+    final override fun onInkReady(surfaceId: String) = onNexusInkReady(surfaceId)
+    final override fun onInkAction(surfaceId: String, actionId: String, dataset: JSONObject) =
+        onNexusInkAction(surfaceId, actionId, dataset)
+    final override fun onInkClosed(surfaceId: String, reason: NexusInkCloseReason) =
+        onNexusInkClosed(surfaceId, reason)
+    final override fun onInkError(surfaceId: String, problems: List<NexusInkProblem>) =
+        onNexusInkError(surfaceId, problems)
     final override fun onRegistrationState(result: Int) {
         if (result == PluginRegistrationResult.APPROVED) {
             onNexusRegistrationState(result)
@@ -156,6 +166,11 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
 
     /** This plugin's activity ended, once, whatever ended it. */
     protected open fun onNexusActivityClosed(reason: String) = Unit
+
+    protected open fun onNexusInkReady(surfaceId: String) = Unit
+    protected open fun onNexusInkAction(surfaceId: String, actionId: String, dataset: JSONObject) = Unit
+    protected open fun onNexusInkClosed(surfaceId: String, reason: NexusInkCloseReason) = Unit
+    protected open fun onNexusInkError(surfaceId: String, problems: List<NexusInkProblem>) = Unit
 
     protected open fun onNexusGlassesAiButton(active: Boolean) = Unit
     protected open fun onNexusRegistrationState(result: Int) = Unit

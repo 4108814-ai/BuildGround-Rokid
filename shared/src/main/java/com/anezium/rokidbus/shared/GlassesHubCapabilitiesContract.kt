@@ -1,5 +1,6 @@
 package com.anezium.rokidbus.shared
 
+import com.anezium.rokidbus.ink.InkWire
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.util.Locale
@@ -11,6 +12,7 @@ data class GlassesHubCapabilities(
     val pinSurfaceVersion: Int,
     val noticeSurfaceVersion: Int = 0,
     val activitySurfaceVersion: Int = 0,
+    val inkSurfaceVersion: Int = 0,
     val maxImageBytes: Int,
     val versionName: String?,
     val setupComplete: Boolean = false,
@@ -42,6 +44,7 @@ object GlassesHubCapabilitiesContract {
         pinSurfaceVersion: Int = 0,
         noticeSurfaceVersion: Int = 0,
         activitySurfaceVersion: Int = 0,
+        inkSurfaceVersion: Int = 0,
         maxImageBytes: Int,
         versionName: String?,
         setupComplete: Boolean = false,
@@ -63,6 +66,7 @@ object GlassesHubCapabilitiesContract {
         pinSurfaceVersion = pinSurfaceVersion,
         noticeSurfaceVersion = noticeSurfaceVersion,
         activitySurfaceVersion = activitySurfaceVersion,
+        inkSurfaceVersion = inkSurfaceVersion,
         maxImageBytes = maxImageBytes,
         versionName = normalizeVersionName(versionName),
         setupComplete = setupComplete,
@@ -86,6 +90,7 @@ object GlassesHubCapabilitiesContract {
         .put("pinSurfaceVersion", capabilities.pinSurfaceVersion)
         .put("noticeSurfaceVersion", capabilities.noticeSurfaceVersion)
         .put("activitySurfaceVersion", capabilities.activitySurfaceVersion)
+        .put("inkSurfaceVersion", capabilities.inkSurfaceVersion)
         .put("maxImageBytes", capabilities.maxImageBytes)
         .put("setupComplete", capabilities.setupComplete)
         .put("setupFailureState", capabilities.setupFailureState)
@@ -113,6 +118,7 @@ object GlassesHubCapabilitiesContract {
         pinSurfaceVersion = payload.optInt("pinSurfaceVersion", 0),
         noticeSurfaceVersion = payload.optInt("noticeSurfaceVersion", 0),
         activitySurfaceVersion = payload.optInt("activitySurfaceVersion", 0),
+        inkSurfaceVersion = payload.optInt("inkSurfaceVersion", 0),
         maxImageBytes = payload.optInt("maxImageBytes", 0),
         versionName = normalizeVersionName(payload.optString("versionName", "")),
         setupComplete = payload.optBoolean("setupComplete", false),
@@ -132,6 +138,11 @@ object GlassesHubCapabilitiesContract {
         maintenanceReady = payload.optBoolean("maintenanceReady", false),
         ttsVersion = payload.optInt("ttsVersion", 0),
     )
+
+    fun supportsInkSurface(capabilities: GlassesHubCapabilities): Boolean =
+        capabilities.protocolVersion == VERSION &&
+            capabilities.features and BusCapabilityBits.INK_SURFACE != 0 &&
+            capabilities.inkSurfaceVersion == InkWire.VERSION
 
     fun effectiveStage(capabilities: GlassesHubCapabilities): String =
         SetupStage.normalize(capabilities.setupStage).ifBlank {

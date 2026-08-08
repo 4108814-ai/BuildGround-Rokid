@@ -21,6 +21,10 @@ class PluginRoutePolicyTest {
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.SURFACES), "/surface/show"))
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.SURFACES), "/pin/show"))
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.SURFACES), "/pin/hide"))
+        assertEquals(
+            PluginRouteDecision.Allowed,
+            PluginRoutePolicy.authorize(plugin(PluginCapability.INK_SURFACE), "/ink/show"),
+        )
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.MICROPHONE), "/audio/lease/acquire"))
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.STT), "/stt/session/start"))
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.STT), "/stt/session/stop"))
@@ -36,6 +40,10 @@ class PluginRoutePolicyTest {
         )
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/surface/update") is PluginRouteDecision.Denied)
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/pin/show") is PluginRouteDecision.Denied)
+        assertEquals(
+            PluginRouteDecision.Denied("CAPABILITY_REQUIRED_INK_SURFACE"),
+            PluginRoutePolicy.authorize(plugin(PluginCapability.SURFACES), "/ink/update"),
+        )
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/audio/lease/release") is PluginRouteDecision.Denied)
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/stt/session/start") is PluginRouteDecision.Denied)
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/stt/session/stop") is PluginRouteDecision.Denied)
@@ -120,5 +128,22 @@ class PluginRoutePolicyTest {
         assertEquals("hello", result.getString("ownerPluginId"))
         assertEquals("main", result.getString("localSurfaceId"))
         assertEquals("hello:main", result.getString("surfaceId"))
+    }
+
+    @Test
+    fun `ink paths reuse the same owner namespace injection`() {
+        listOf("/ink/show", "/ink/update", "/ink/hide").forEach { path ->
+            assertEquals(
+                PluginRouteDecision.Allowed,
+                PluginRoutePolicy.authorize(plugin(PluginCapability.INK_SURFACE), path),
+            )
+            val result = PluginRoutePolicy.injectSurfaceOwner(
+                "hello",
+                JSONObject().put("surfaceId", "ink-main"),
+            )!!
+            assertEquals("hello", result.getString("ownerPluginId"))
+            assertEquals("ink-main", result.getString("localSurfaceId"))
+            assertEquals("hello:ink-main", result.getString("surfaceId"))
+        }
     }
 }

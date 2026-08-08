@@ -103,7 +103,8 @@ data class PluginCatalog(val entries: List<PluginCatalogEntry>) {
                             PluginGrantState.Disabled -> PluginCatalogState.DISABLED
                             is PluginGrantState.Approved -> if (
                                 principal.descriptor.launchable &&
-                                PluginCapability.SURFACES !in grant.capabilities
+                                PluginCapability.SURFACES !in grant.capabilities &&
+                                PluginCapability.INK_SURFACE !in grant.capabilities
                             ) {
                                 PluginCatalogState.MISSING_CAPABILITY
                             } else {

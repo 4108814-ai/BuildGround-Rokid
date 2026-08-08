@@ -146,6 +146,30 @@ class BindingSessionTest {
     }
 
     @Test
+    fun `wire budget failure leaves session state unchanged`() {
+        val result = compilePage(
+            """
+                <view>
+                  <view wx:for="{{items}}" wx:key="id"><text>{{item.value}}</text></view>
+                </view>
+            """,
+            data = JSONObject().put("items", JSONArray()),
+        )
+        val before = result.document!!.toWireJson()
+        val items = JSONArray().apply {
+            repeat(130) { index ->
+                put(JSONObject().put("id", index.toString()).put("value", "x"))
+            }
+        }
+
+        val patch = result.session!!.applyPatch(JSONObject().put("items", items))
+
+        assertTrue(patch.patch == null)
+        assertTrue(patch.problems.any { it.code == InkProblemCodes.BUDGET_NODES })
+        assertEquals(before, result.session.document.toWireJson())
+    }
+
+    @Test
     fun `sessions reject mutation from another thread`() {
         val result = compilePage("<text>{{value}}</text>", data = JSONObject().put("value", "a"))
         val otherThreadResult = AtomicReference<InkPatchResult>()

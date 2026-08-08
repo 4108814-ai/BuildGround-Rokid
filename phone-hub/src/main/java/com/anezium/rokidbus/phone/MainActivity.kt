@@ -491,7 +491,7 @@ class MainActivity : Activity() {
         PluginCatalogState.DISABLED -> "Installed · disabled"
         PluginCatalogState.DENIED -> "Access denied"
         PluginCatalogState.INVALID -> "Invalid plugin${entry.detail?.let { " · $it" }.orEmpty()}"
-        PluginCatalogState.MISSING_CAPABILITY -> "Missing surfaces access"
+        PluginCatalogState.MISSING_CAPABILITY -> "Missing surface access"
     }
 
     private fun openCatalogEntry(entry: PluginCatalogEntry) {

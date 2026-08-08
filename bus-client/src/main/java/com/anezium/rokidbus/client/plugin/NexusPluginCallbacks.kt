@@ -57,6 +57,11 @@ interface NexusPluginCallbacks {
      */
     fun onActivityClosed(reason: String) = Unit
 
+    fun onInkReady(surfaceId: String) = Unit
+    fun onInkAction(surfaceId: String, actionId: String, dataset: JSONObject) = Unit
+    fun onInkClosed(surfaceId: String, reason: NexusInkCloseReason) = Unit
+    fun onInkError(surfaceId: String, problems: List<NexusInkProblem>) = Unit
+
     fun onRegistrationState(result: Int)
     fun onMessage(path: String, id: String, payload: JSONObject) = Unit
     fun onBinary(path: String, id: String, payload: JSONObject, data: ByteArray) = Unit

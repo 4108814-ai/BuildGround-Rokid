@@ -41,4 +41,14 @@ class PluginCapabilityTest {
             PathRules.requiredCapability(BusPaths.WIRELESS_ADB_REQUEST),
         )
     }
+
+    @Test
+    fun `ink surface capability round trips additively`() {
+        val parsed = PluginCapability.parseList("surfaces,ink_surface") as CapabilityParseResult.Valid
+        assertEquals(
+            setOf(PluginCapability.SURFACES, PluginCapability.INK_SURFACE),
+            parsed.capabilities,
+        )
+        assertEquals("surfaces,ink_surface", PluginCapability.serialize(parsed.capabilities))
+    }
 }

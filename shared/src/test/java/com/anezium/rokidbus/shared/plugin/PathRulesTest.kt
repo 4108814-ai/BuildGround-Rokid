@@ -161,4 +161,13 @@ class PathRulesTest {
         assertTrue(PathRules.isOwnerScoped(BusPaths.WIRELESS_ADB_REPLY))
         assertNull(PathRules.requiredCapability(BusPaths.WIRELESS_ADB_REPLY))
     }
+
+    @Test
+    fun `ink lifecycle requires its distinct grant and events stay owner scoped`() {
+        assertEquals(PluginCapability.INK_SURFACE, PathRules.requiredCapability(BusPaths.INK_SHOW))
+        assertEquals(PluginCapability.INK_SURFACE, PathRules.requiredCapability(BusPaths.INK_UPDATE))
+        assertEquals(PluginCapability.INK_SURFACE, PathRules.requiredCapability(BusPaths.INK_HIDE))
+        assertTrue(PathRules.isDirectReply(BusPaths.INK_EVENT))
+        assertTrue(PathRules.isOwnerScoped(BusPaths.INK_EVENT))
+    }
 }

@@ -6,6 +6,7 @@ import com.anezium.rokidbus.shared.BusCapabilityBits
 import com.anezium.rokidbus.shared.BusEnvelope
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.GlyphContract
+import com.anezium.rokidbus.shared.ForegroundSurfacePathPolicy
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
 import com.anezium.rokidbus.shared.plugin.NexusPlugin
 import com.anezium.rokidbus.shared.plugin.NexusPluginHost
@@ -150,7 +151,7 @@ class PhonePluginRegistry(
         val externalActive = controller.activeId()
         if (externalActive == principal.descriptor.id) return true
         if (externalActive != null || activePluginId != null) return false
-        if (path != BusPaths.SURFACE_SHOW) return false
+        if (!ForegroundSurfacePathPolicy.isShow(path)) return false
         return controller.adopt(principal)
     }
 

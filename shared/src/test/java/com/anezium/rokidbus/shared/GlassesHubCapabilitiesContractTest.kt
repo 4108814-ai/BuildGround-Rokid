@@ -1,5 +1,6 @@
 package com.anezium.rokidbus.shared
 
+import com.anezium.rokidbus.ink.InkWire
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -15,11 +16,13 @@ class GlassesHubCapabilitiesContractTest {
                 BusCapabilityBits.PIN_SURFACE or
                 BusCapabilityBits.NOTICE_SURFACE or
                 BusCapabilityBits.ACTIVITY_SURFACE or
-                BusCapabilityBits.TTS,
+                BusCapabilityBits.TTS or
+                BusCapabilityBits.INK_SURFACE,
             imageSurfaceVersion = ImageSurfaceContract.VERSION,
             pinSurfaceVersion = PinSurfaceContract.VERSION,
             noticeSurfaceVersion = NoticeSurfaceContract.VERSION,
             activitySurfaceVersion = ActivitySurfaceContract.VERSION,
+            inkSurfaceVersion = InkWire.VERSION,
             maxImageBytes = ImageSurfaceContract.MAX_IMAGE_BYTES,
             versionName = " 1.0.1 ",
             setupComplete = true,
@@ -38,15 +41,19 @@ class GlassesHubCapabilitiesContractTest {
                 BusCapabilityBits.PIN_SURFACE or
                 BusCapabilityBits.NOTICE_SURFACE or
                 BusCapabilityBits.ACTIVITY_SURFACE or
-                BusCapabilityBits.TTS,
+                BusCapabilityBits.TTS or
+                BusCapabilityBits.INK_SURFACE,
             parsed.features,
         )
         assertEquals(PinSurfaceContract.VERSION, parsed.pinSurfaceVersion)
         assertEquals(NoticeSurfaceContract.VERSION, parsed.noticeSurfaceVersion)
         assertEquals(ActivitySurfaceContract.VERSION, parsed.activitySurfaceVersion)
         assertEquals(TtsContract.VERSION, parsed.ttsVersion)
+        assertEquals(InkWire.VERSION, parsed.inkSurfaceVersion)
+        assertTrue(GlassesHubCapabilitiesContract.supportsInkSurface(parsed))
         assertEquals(128, BusCapabilityBits.ACTIVITY_SURFACE)
         assertEquals(512, BusCapabilityBits.TTS)
+        assertEquals(1024, BusCapabilityBits.INK_SURFACE)
     }
 
     @Test
@@ -80,6 +87,7 @@ class GlassesHubCapabilitiesContractTest {
         assertEquals(0, parsed.pinSurfaceVersion)
         assertEquals(0, parsed.noticeSurfaceVersion)
         assertEquals(0, parsed.activitySurfaceVersion)
+        assertEquals(0, parsed.inkSurfaceVersion)
         assertEquals(0, parsed.ttsVersion)
         assertFalse(versionlessPayload.has("versionName"))
         assertFalse(versionlessPayload.getBoolean("setupComplete"))

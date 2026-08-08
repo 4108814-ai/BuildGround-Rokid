@@ -11,6 +11,7 @@ import com.anezium.rokidbus.shared.BusEnvelope
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.ImageSurfaceContract
 import com.anezium.rokidbus.shared.ImageSurfaceValidationResult
+import com.anezium.rokidbus.shared.InkSurfaceContract
 import com.anezium.rokidbus.shared.MediaArtworkContract
 import org.json.JSONObject
 import java.util.concurrent.CopyOnWriteArrayList
@@ -21,7 +22,12 @@ object SurfaceController {
     private const val PREF_DISPLAY_PATH = "display_path"
     private const val BACK_FAILSAFE_MS = 1_500L
     private val main = Handler(Looper.getMainLooper())
-    private val inkRendererLayer = InkRendererLayer(main, ::onInkResyncNeeded)
+    private val inkRendererLayer = InkRendererLayer(
+        main,
+        ::onInkResyncNeeded,
+        ::onInkAction,
+        ::onInkRendererError,
+    )
     private val orderingCoordinator = SurfaceOrderingCoordinator<JSONObject>()
     private val listeners = CopyOnWriteArrayList<(NexusSurface?) -> Unit>()
     private val readerScrollListeners = CopyOnWriteArrayList<(Int) -> Unit>()
@@ -280,6 +286,14 @@ object SurfaceController {
         runOnMain(::resetRingInputOnMain)
     }
 
+    fun onPhoneLinkLost() {
+        runOnMain {
+            val surface = active?.takeIf(NexusSurface::isInk) ?: return@runOnMain
+            sendInkClosed(surface.surfaceId, InkSurfaceContract.CLOSE_LINK_LOST)
+            hideLocalOnMain()
+        }
+    }
+
     fun forwardSurfaceInput(keyCode: Int, action: Int): Boolean {
         val surface = active ?: return false
         GlassesHub.sendSurfaceInput(
@@ -312,6 +326,7 @@ object SurfaceController {
         val completesRingHandoff =
             launcherShow && launcherReturnCoordinator.onSurfaceShown(surface.surfaceId)
         runOnMain {
+            notifyReplacedInk(surface)
             if (!surface.isInk) clearInkRenderer()
             val keepMediaDecode = surface.isMedia && surface.mediaArtworkMetadata != null &&
                 imageDecodeCoordinator.isCurrent(surface.surfaceId, surface.contentKey)
@@ -343,6 +358,9 @@ object SurfaceController {
             surface = surface,
             onCommitted = {
                 showOrUpdate(context, surface, launcherShow = launcherShow)
+                if (launcherShow) {
+                    sendInkEvent(surface.surfaceId, InkSurfaceContract.EVENT_READY)
+                }
             },
         )
     }
@@ -458,6 +476,9 @@ object SurfaceController {
             SurfaceOrderDecision.ApplyHide -> {
                 cancelBackFailsafeOnMain(surfaceId)
                 if (active?.surfaceId == surfaceId) {
+                    if (active?.isInk == true) {
+                        sendInkClosed(surfaceId, InkSurfaceContract.CLOSE_PLUGIN)
+                    }
                     imageDecodeCoordinator.invalidate(surfaceId)?.recycleSafely()
                     hideLocalOnMain()
                 }
@@ -494,6 +515,12 @@ object SurfaceController {
             ?.let(orderingCoordinator::deactivate)
     }
 
+    private fun notifyReplacedInk(next: NexusSurface) {
+        val previous = active?.takeIf(NexusSurface::isInk) ?: return
+        if (next.isInk && next.surfaceId == previous.surfaceId) return
+        sendInkClosed(previous.surfaceId, InkSurfaceContract.CLOSE_REPLACED)
+    }
+
     private fun clearInkRenderer() {
         inkRendererLayer.clear()
         if (inkFrameMeterRunning) {
@@ -518,7 +545,56 @@ object SurfaceController {
             "Ink resync needed current=${request.currentDocumentId}@${request.currentRevision} " +
                 "patch=${request.patchDocumentId}@${request.patchBaseRevision}",
         )
+        val surfaceId = active?.takeIf(NexusSurface::isInk)?.surfaceId ?: return
+        sendInkEvent(
+            surfaceId = surfaceId,
+            type = InkSurfaceContract.EVENT_RESYNC,
+            extra = JSONObject()
+                .put("documentId", request.currentDocumentId)
+                .put("revision", request.currentRevision)
+                .put("patchDocumentId", request.patchDocumentId)
+                .put("patchBaseRevision", request.patchBaseRevision),
+        )
         inkResyncListener?.invoke(request)
+    }
+
+    private fun onInkAction(actionId: String, dataset: Map<String, Any?>) {
+        val surfaceId = active?.takeIf(NexusSurface::isInk)?.surfaceId ?: return
+        sendInkEvent(
+            surfaceId = surfaceId,
+            type = InkSurfaceContract.EVENT_ACTION,
+            extra = JSONObject()
+                .put("actionId", actionId)
+                .put("dataset", JSONObject(dataset)),
+        )
+    }
+
+    private fun onInkRendererError(surfaceId: String, problems: List<com.anezium.rokidbus.ink.InkProblem>) {
+        problems.forEach { problem ->
+            log("Ink renderer error code=${problem.code} feature=${problem.feature.orEmpty()}")
+        }
+        sendInkClosed(surfaceId, InkSurfaceContract.CLOSE_RENDERER_ERROR)
+        if (active?.surfaceId == surfaceId) hideLocalOnMain()
+    }
+
+    private fun sendInkClosed(surfaceId: String, reason: String) {
+        sendInkEvent(
+            surfaceId = surfaceId,
+            type = InkSurfaceContract.EVENT_CLOSED,
+            extra = JSONObject().put("reason", reason),
+        )
+    }
+
+    private fun sendInkEvent(
+        surfaceId: String,
+        type: String,
+        extra: JSONObject = JSONObject(),
+    ) {
+        val payload = JSONObject(extra.toString())
+            .put("surfaceId", surfaceId)
+            .put("type", type)
+        val error = GlassesHub.sendInkEvent(payload)
+        if (error != null) log("Ink event send failed type=$type code=$error")
     }
 
     private fun JSONObject.toSurfaceOrder(): SurfaceOrder = SurfaceOrder(
@@ -578,8 +654,11 @@ object SurfaceController {
                 if (readerDirection != null) {
                     requestReaderScroll(readerDirection)
                 } else {
+                    // Route through the full key pipeline so the ink renderer's
+                    // local-consumption hook sees ring input like any other key.
                     resolution.events.forEach { event ->
-                        forwardSurfaceInput(event.keyCode, event.action)
+                        val now = SystemClock.uptimeMillis()
+                        handleKeyEvent(KeyEvent(now, now, event.action, event.keyCode, 0))
                     }
                 }
             }
@@ -618,6 +697,7 @@ object SurfaceController {
         if (surface.handlesBack) {
             armBackFailsafe(surface.surfaceId)
         } else {
+            if (surface.isInk) sendInkClosed(surface.surfaceId, InkSurfaceContract.CLOSE_USER)
             hideLocal()
         }
     }
@@ -636,6 +716,9 @@ object SurfaceController {
             cancelBackFailsafeOnMain()
             val runnable = Runnable {
                 if (active?.surfaceId == surfaceId) {
+                    if (active?.isInk == true) {
+                        sendInkClosed(surfaceId, InkSurfaceContract.CLOSE_USER)
+                    }
                     hideLocalOnMain()
                 }
                 if (backFailsafeSurfaceId == surfaceId) {

@@ -38,12 +38,14 @@ import com.anezium.rokidbus.shared.BusConstants
 import com.anezium.rokidbus.shared.BusEnvelope
 import com.anezium.rokidbus.shared.BusPaths
 import com.anezium.rokidbus.shared.FrameProtocol
+import com.anezium.rokidbus.shared.ForegroundSurfacePathPolicy
 import com.anezium.rokidbus.shared.GlassesHubCapabilitiesContract
 import com.anezium.rokidbus.shared.GlassesRepairContract
 import com.anezium.rokidbus.shared.ImageSurfaceContract
 import com.anezium.rokidbus.shared.SetupNoteContract
 import com.anezium.rokidbus.shared.ImageSurfaceMetadata
 import com.anezium.rokidbus.shared.ImageSurfaceValidationResult
+import com.anezium.rokidbus.shared.InkSurfaceContract
 import com.anezium.rokidbus.shared.LinkStateBits
 import com.anezium.rokidbus.shared.MediaArtworkContract
 import com.anezium.rokidbus.shared.NativeAppContract
@@ -67,6 +69,8 @@ import com.anezium.rokidbus.shared.WirelessAdbReply
 import com.anezium.rokidbus.shared.plugin.PathRules
 import com.anezium.rokidbus.shared.plugin.PluginCapability
 import com.anezium.rokidbus.shared.plugin.PluginCapability.Companion.serialize
+import com.anezium.rokidbus.ink.InkProblem
+import com.anezium.rokidbus.ink.InkProblemCodes
 import com.anezium.rokidbus.phone.speech.HubSecretStore
 import com.anezium.rokidbus.phone.speech.InternalAudioAccess
 import com.anezium.rokidbus.phone.speech.InternalAudioAcquireResult
@@ -98,6 +102,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.Closeable
 import java.io.File
@@ -212,6 +217,7 @@ class BusHubService : Service() {
     private val speechBusExecutor = SerialExecutor(executor)
     private val audioHandler = Handler(Looper.getMainLooper())
     private val pinHandler = Handler(Looper.getMainLooper())
+    private val inkResultHandler = Handler(Looper.getMainLooper())
     private val phonePinState = PhonePinState(nowMs = { SystemClock.elapsedRealtime() })
     private val pinExpiryTick = Runnable(::expireCanonicalPin)
     // The glasses own notice expiry because page engagement exists only where
@@ -243,6 +249,9 @@ class BusHubService : Service() {
     private val externalSurfaceSeq = ConcurrentHashMap<String, AtomicLong>()
     private val debugImageSeq = AtomicLong(System.currentTimeMillis())
     private val externalSurfaceIds = ConcurrentHashMap<String, MutableSet<String>>()
+    private val inkSurfaceCoordinator = PhoneInkSurfaceCoordinator(
+        postResult = { action -> inkResultHandler.post { action() } },
+    )
     private val imageSurfaceRateLimiter = ImageSurfaceRateLimiter()
     private val ttsRequestGate = PhoneTtsRequestGate()
     private lateinit var phoneTtsDispatcher: PhoneTtsDispatcher
@@ -299,6 +308,7 @@ class BusHubService : Service() {
     @Volatile private var remotePinSurfaceVersion = 0
     @Volatile private var remoteNoticeSurfaceVersion = 0
     @Volatile private var remoteActivitySurfaceVersion = 0
+    @Volatile private var remoteInkSurfaceVersion = 0
     @Volatile private var remoteMaxImageBytes = 0
     @Volatile private var remoteGlassesVersionName: String? = null
     @Volatile private var remoteGlassesSetupComplete = false
@@ -960,6 +970,7 @@ class BusHubService : Service() {
     override fun onDestroy() {
         stopPeriodicUpdateChecks()
         pinHandler.removeCallbacks(pinExpiryTick)
+        inkResultHandler.removeCallbacksAndMessages(null)
         activityHandler.removeCallbacks(activityExpiryTick)
         clearAllActivitiesForHubStop()
         sppLoopStop = true
@@ -987,6 +998,7 @@ class BusHubService : Service() {
         developerModeJournalSubscription = null
         if (::pluginGuardianCoordinator.isInitialized) pluginGuardianCoordinator.close()
         if (::pluginRegistry.isInitialized) pluginRegistry.close()
+        inkSurfaceCoordinator.close()
         if (::cameraCompanionController.isInitialized) cameraCompanionController.close()
         if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.close()
         if (::coreRemoteBridge.isInitialized) coreRemoteBridge.close()
@@ -1112,7 +1124,10 @@ class BusHubService : Service() {
         }
         val ownedEnvelope = if (
             sender.principal != null &&
-            PathRules.requiredCapability(envelope.path) == PluginCapability.SURFACES
+            PathRules.requiredCapability(envelope.path) in setOf(
+                PluginCapability.SURFACES,
+                PluginCapability.INK_SURFACE,
+            )
         ) {
             val payload = PluginRoutePolicy.injectSurfaceOwner(sender.principal.descriptor.id, envelope.payload)
             if (payload == null) {
@@ -1154,6 +1169,7 @@ class BusHubService : Service() {
                 BusPaths.NOTICE_SHOW, BusPaths.NOTICE_UPDATE, BusPaths.NOTICE_HIDE,
                 BusPaths.PIN_SHOW, BusPaths.PIN_HIDE,
                 BusPaths.ACTIVITY_START, BusPaths.ACTIVITY_UPDATE, BusPaths.ACTIVITY_END,
+                BusPaths.INK_SHOW, BusPaths.INK_UPDATE, BusPaths.INK_HIDE,
             ) &&
             ::externalPluginController.isInitialized
         ) {
@@ -1200,13 +1216,29 @@ class BusHubService : Service() {
         }
         if (
             sender.principal != null &&
-            (ownedEnvelope.path == BusPaths.SURFACE_SHOW || ownedEnvelope.path == BusPaths.SURFACE_UPDATE) &&
+            ForegroundSurfacePathPolicy.isShowOrUpdate(ownedEnvelope.path) &&
             ::pluginRegistry.isInitialized &&
             !pluginRegistry.allowExternalSurface(sender.principal, ownedEnvelope.path)
         ) {
             recordLocalRoute(ownedEnvelope, senderUid, sender, PluginBusJournal.Verdict.REJECTED, "SURFACE_BUSY")
-            deliverError(sender.replyBinder, ownedEnvelope.id, "SURFACE_BUSY")
+            if (PathRules.requiredCapability(ownedEnvelope.path) == PluginCapability.INK_SURFACE) {
+                deliverInkError(
+                    ownerFrom(ownedEnvelope),
+                    ownedEnvelope.id,
+                    sender.replyBinder,
+                    listOf(InkProblem("SURFACE_BUSY", "Another plugin owns the foreground surface")),
+                )
+            } else {
+                deliverError(sender.replyBinder, ownedEnvelope.id, "SURFACE_BUSY")
+            }
             log("surface rejected path=${ownedEnvelope.path} plugin=${sender.principal.descriptor.id} reason=foreground_busy")
+            return
+        }
+        if (ownedEnvelope.path == BusPaths.INK_SHOW ||
+            ownedEnvelope.path == BusPaths.INK_UPDATE ||
+            ownedEnvelope.path == BusPaths.INK_HIDE
+        ) {
+            handleLocalInk(ownedEnvelope, senderUid, sender)
             return
         }
         val authorizedEnvelope = if (
@@ -1217,23 +1249,11 @@ class BusHubService : Service() {
                 BusPaths.SURFACE_HIDE,
             )
         ) {
-            val payload = ownedEnvelope.payload
-            val wireSurfaceId = payload.getString("surfaceId")
-            val sequence = externalSurfaceSeq.computeIfAbsent(wireSurfaceId) {
-                AtomicLong(System.currentTimeMillis())
-            }.incrementAndGet()
-            val pluginSurfaces = externalSurfaceIds.computeIfAbsent(sender.principal.descriptor.id) {
-                ConcurrentHashMap.newKeySet()
-            }
-            if (ownedEnvelope.path == BusPaths.SURFACE_HIDE) {
-                pluginSurfaces.remove(wireSurfaceId)
-                if (pluginSurfaces.isEmpty() && ::externalPluginController.isInitialized) {
-                    externalPluginController.onPluginSelfHid(sender.principal.descriptor.id)
-                }
-            } else {
-                pluginSurfaces += wireSurfaceId
-            }
-            ownedEnvelope.copy(payload = payload.put("seq", sequence))
+            withExternalSurfaceMetadata(
+                ownedEnvelope,
+                sender.principal.descriptor.id,
+                closeOnHide = true,
+            )
         } else {
             ownedEnvelope
         }
@@ -1338,6 +1358,10 @@ class BusHubService : Service() {
             cameraCompanionController.onRemoteEnvelope(envelope)
         ) {
             recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
+            return
+        }
+        if (envelope.path == BusPaths.INK_EVENT) {
+            handleGlassesInkEvent(envelope)
             return
         }
         if (::pluginRegistry.isInitialized && pluginRegistry.handleRemote(envelope)) return
@@ -3001,19 +3025,369 @@ class BusHubService : Service() {
 
     private fun hideExternalSurfaces(pluginId: String) {
         val surfaceIds = externalSurfaceIds.remove(pluginId).orEmpty().toList()
-        surfaceIds.forEach { surfaceId ->
-            val sequence = externalSurfaceSeq.computeIfAbsent(surfaceId) {
-                AtomicLong(System.currentTimeMillis())
-            }.incrementAndGet()
-            sendRemote(
-                BusEnvelope(
-                    path = BusPaths.SURFACE_HIDE,
-                    payload = JSONObject()
-                        .put("surfaceId", surfaceId)
-                        .put("ownerPluginId", pluginId)
-                        .put("seq", sequence),
+        surfaceIds.forEach { surfaceId -> sendExternalSurfaceHide(pluginId, surfaceId) }
+        inkSurfaceCoordinator.clearOwner(pluginId) { owners ->
+            // A show may still be compiling when its plugin disconnects. The
+            // coordinator callback runs after that queued compile/publish, so
+            // it catches the surface that was not in the snapshot above.
+            owners.filterNot { it.wireSurfaceId in surfaceIds }.forEach { owner ->
+                forgetExternalSurface(owner.pluginId, owner.wireSurfaceId)
+                sendExternalSurfaceHide(owner.pluginId, owner.wireSurfaceId)
+            }
+        }
+    }
+
+    private fun sendExternalSurfaceHide(pluginId: String, surfaceId: String) {
+        val sequence = externalSurfaceSeq.computeIfAbsent(surfaceId) {
+            AtomicLong(System.currentTimeMillis())
+        }.incrementAndGet()
+        sendRemote(
+            BusEnvelope(
+                path = BusPaths.SURFACE_HIDE,
+                payload = JSONObject()
+                    .put("surfaceId", surfaceId)
+                    .put("ownerPluginId", pluginId)
+                    .put("seq", sequence),
+            ),
+        )
+    }
+
+    private fun forgetExternalSurface(pluginId: String, wireSurfaceId: String) {
+        val pluginSurfaces = externalSurfaceIds[pluginId] ?: return
+        pluginSurfaces.remove(wireSurfaceId)
+        if (pluginSurfaces.isEmpty()) externalSurfaceIds.remove(pluginId, pluginSurfaces)
+    }
+
+    private fun handleLocalInk(
+        envelope: BusEnvelope,
+        senderUid: Int,
+        sender: AuthorizedSender,
+    ) {
+        val owner = ownerFrom(envelope)
+        if (owner == null || sender.principal?.descriptor?.id != owner.pluginId) {
+            recordLocalRoute(
+                envelope,
+                senderUid,
+                sender,
+                PluginBusJournal.Verdict.REJECTED,
+                "INVALID_SURFACE_ID",
+            )
+            deliverError(sender.replyBinder, envelope.id, "INVALID_SURFACE_ID")
+            return
+        }
+        if (envelope.binary != null) {
+            rejectLocalInk(
+                envelope,
+                senderUid,
+                sender,
+                owner,
+                InkProblem(InkProblemCodes.WIRE_TYPE, "Ink commands do not accept binary data"),
+            )
+            return
+        }
+        if (envelope.path != BusPaths.INK_HIDE &&
+            capabilities() and BusCapabilityBits.INK_SURFACE == 0
+        ) {
+            rejectLocalInk(
+                envelope,
+                senderUid,
+                sender,
+                owner,
+                InkProblem(
+                    "CAPABILITY_NOT_AVAILABLE",
+                    "Ink Surface requires compatible glasses and the SPP data plane",
                 ),
             )
+            return
+        }
+
+        val callback: (PhoneInkCommandResult) -> Unit = { result ->
+            when (result) {
+                is PhoneInkCommandResult.Outgoing -> publishPhoneInk(result, envelope.id, sender.replyBinder)
+                is PhoneInkCommandResult.Noop -> Unit
+                is PhoneInkCommandResult.Error ->
+                    deliverInkError(result.owner, envelope.id, sender.replyBinder, result.problems)
+            }
+        }
+        val payload = JSONObject(envelope.payload.toString())
+        when (envelope.path) {
+            BusPaths.INK_SHOW -> {
+                val page = payload.opt("page") as? String
+                val rawData = payload.opt("data")
+                val data = when (rawData) {
+                    null, JSONObject.NULL -> null
+                    is JSONObject -> rawData
+                    else -> {
+                        rejectLocalInk(
+                            envelope,
+                            senderUid,
+                            sender,
+                            owner,
+                            InkProblem(InkProblemCodes.WIRE_TYPE, "Ink show data must be a JSON object"),
+                        )
+                        return
+                    }
+                }
+                if (page == null) {
+                    rejectLocalInk(
+                        envelope,
+                        senderUid,
+                        sender,
+                        owner,
+                        InkProblem(InkProblemCodes.WIRE_TYPE, "Ink show page must be a string"),
+                    )
+                    return
+                }
+                recordLocalRoute(envelope, senderUid, sender, PluginBusJournal.Verdict.OK)
+                inkSurfaceCoordinator.show(
+                    owner,
+                    page,
+                    data,
+                    payload.optBoolean("handlesBack", false),
+                    callback,
+                )
+            }
+            BusPaths.INK_UPDATE -> {
+                val data = payload.optJSONObject("data")
+                if (data == null) {
+                    rejectLocalInk(
+                        envelope,
+                        senderUid,
+                        sender,
+                        owner,
+                        InkProblem(InkProblemCodes.WIRE_TYPE, "Ink update data must be a JSON object"),
+                    )
+                    return
+                }
+                recordLocalRoute(envelope, senderUid, sender, PluginBusJournal.Verdict.OK)
+                inkSurfaceCoordinator.update(owner, data, callback)
+            }
+            BusPaths.INK_HIDE -> {
+                recordLocalRoute(envelope, senderUid, sender, PluginBusJournal.Verdict.OK)
+                inkSurfaceCoordinator.hide(owner, callback)
+            }
+        }
+    }
+
+    private fun rejectLocalInk(
+        envelope: BusEnvelope,
+        senderUid: Int,
+        sender: AuthorizedSender,
+        owner: PhoneInkSurfaceOwner,
+        problem: InkProblem,
+    ) {
+        recordLocalRoute(
+            envelope,
+            senderUid,
+            sender,
+            PluginBusJournal.Verdict.REJECTED,
+            problem.code,
+        )
+        deliverInkError(owner, envelope.id, sender.replyBinder, listOf(problem))
+    }
+
+    private fun publishPhoneInk(
+        result: PhoneInkCommandResult.Outgoing,
+        envelopeId: String,
+        replyBinder: IBinder?,
+    ) {
+        val envelope = withExternalSurfaceMetadata(
+            BusEnvelope(path = result.path, id = envelopeId, payload = result.payload),
+            result.owner.pluginId,
+            closeOnHide = false,
+        )
+        val error = sendRemote(envelope)
+        if (error != null) {
+            deliverInkError(
+                result.owner,
+                envelopeId,
+                replyBinder,
+                listOf(
+                    InkProblem(
+                        "CAPABILITY_NOT_AVAILABLE",
+                        "Ink Surface could not reach the glasses ($error)",
+                    ),
+                ),
+            )
+            result.replaced.forEach { replaced ->
+                deliverInkEvent(
+                    owner = replaced,
+                    type = InkSurfaceContract.EVENT_CLOSED,
+                    id = UUID.randomUUID().toString(),
+                    extra = JSONObject().put("reason", InkSurfaceContract.CLOSE_LINK_LOST),
+                )
+                releaseExternalSurface(replaced.pluginId, replaced.wireSurfaceId)
+            }
+            closeInkForLinkLoss(result.owner.pluginId)
+            return
+        }
+        result.replaced.forEach { replaced ->
+            deliverInkEvent(
+                owner = replaced,
+                type = InkSurfaceContract.EVENT_CLOSED,
+                id = UUID.randomUUID().toString(),
+                extra = JSONObject().put("reason", InkSurfaceContract.CLOSE_REPLACED),
+            )
+            releaseExternalSurface(replaced.pluginId, replaced.wireSurfaceId)
+        }
+    }
+
+    private fun handleGlassesInkEvent(envelope: BusEnvelope) {
+        if (envelope.binary != null) {
+            recordRemoteRoute(envelope, PluginBusJournal.Verdict.REJECTED, "INK_EVENT_BINARY")
+            return
+        }
+        val payload = JSONObject(envelope.payload.toString())
+        val surfaceId = payload.optString("surfaceId")
+        val type = payload.optString("type")
+        if (surfaceId.isBlank() || type !in setOf(
+                InkSurfaceContract.EVENT_READY,
+                InkSurfaceContract.EVENT_ACTION,
+                InkSurfaceContract.EVENT_CLOSED,
+                InkSurfaceContract.EVENT_RESYNC,
+            )
+        ) {
+            recordRemoteRoute(envelope, PluginBusJournal.Verdict.REJECTED, "INVALID_INK_EVENT")
+            return
+        }
+        if (type == InkSurfaceContract.EVENT_CLOSED &&
+            !InkSurfaceContract.isCloseReason(payload.optString("reason"))
+        ) {
+            recordRemoteRoute(envelope, PluginBusJournal.Verdict.REJECTED, "INVALID_INK_CLOSE_REASON")
+            return
+        }
+        if (type == InkSurfaceContract.EVENT_ACTION && payload.optString("actionId").isBlank()) {
+            recordRemoteRoute(envelope, PluginBusJournal.Verdict.REJECTED, "INVALID_INK_ACTION")
+            return
+        }
+        recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
+        inkSurfaceCoordinator.onRemoteEvent(surfaceId, type) { result ->
+            when (result) {
+                is PhoneInkRemoteEventResult.Forward -> when (type) {
+                    InkSurfaceContract.EVENT_READY -> deliverInkEvent(
+                        result.owner,
+                        type,
+                        envelope.id,
+                    )
+                    InkSurfaceContract.EVENT_ACTION -> deliverInkEvent(
+                        owner = result.owner,
+                        type = type,
+                        id = envelope.id,
+                        extra = JSONObject()
+                            .put("actionId", payload.optString("actionId"))
+                            .put("dataset", payload.optJSONObject("dataset") ?: JSONObject()),
+                    )
+                }
+                is PhoneInkRemoteEventResult.Closed -> {
+                    deliverInkEvent(
+                        owner = result.owner,
+                        type = type,
+                        id = envelope.id,
+                        extra = JSONObject().put("reason", payload.optString("reason")),
+                    )
+                    releaseExternalSurface(result.owner.pluginId, result.owner.wireSurfaceId)
+                }
+                is PhoneInkRemoteEventResult.Resync -> publishPhoneInk(
+                    result.outgoing,
+                    UUID.randomUUID().toString(),
+                    replyBinder = null,
+                )
+                PhoneInkRemoteEventResult.Ignore -> Unit
+            }
+        }
+    }
+
+    private fun deliverInkError(
+        owner: PhoneInkSurfaceOwner?,
+        id: String,
+        targetBinder: IBinder?,
+        problems: List<InkProblem>,
+    ) {
+        if (owner == null) {
+            deliverError(targetBinder, id, problems.firstOrNull()?.code ?: "INVALID_PAYLOAD")
+            return
+        }
+        deliverInkEvent(
+            owner = owner,
+            type = InkSurfaceContract.EVENT_ERROR,
+            id = id,
+            extra = JSONObject().put(
+                "problems",
+                JSONArray().also { array -> problems.forEach { array.put(it.toJsonObject()) } },
+            ),
+            targetBinder = targetBinder,
+        )
+    }
+
+    private fun deliverInkEvent(
+        owner: PhoneInkSurfaceOwner,
+        type: String,
+        id: String,
+        extra: JSONObject = JSONObject(),
+        targetBinder: IBinder? = null,
+    ) {
+        val payload = JSONObject(extra.toString())
+            .put("pluginId", owner.pluginId)
+            .put("surfaceId", owner.localSurfaceId)
+            .put("type", type)
+        deliverLocal(
+            BusEnvelope(path = BusPaths.INK_EVENT, id = id, payload = payload),
+            targetBinder = targetBinder,
+        )
+    }
+
+    private fun ownerFrom(envelope: BusEnvelope): PhoneInkSurfaceOwner? {
+        val pluginId = envelope.payload.optString("ownerPluginId")
+        val localSurfaceId = envelope.payload.optString("localSurfaceId")
+        val wireSurfaceId = envelope.payload.optString("surfaceId")
+        if (pluginId.isBlank() || localSurfaceId.isBlank() || wireSurfaceId != "$pluginId:$localSurfaceId") {
+            return null
+        }
+        return PhoneInkSurfaceOwner(pluginId, localSurfaceId, wireSurfaceId)
+    }
+
+    private fun withExternalSurfaceMetadata(
+        envelope: BusEnvelope,
+        pluginId: String,
+        closeOnHide: Boolean,
+    ): BusEnvelope {
+        val payload = JSONObject(envelope.payload.toString())
+        val wireSurfaceId = payload.getString("surfaceId")
+        val sequence = externalSurfaceSeq.computeIfAbsent(wireSurfaceId) {
+            AtomicLong(System.currentTimeMillis())
+        }.incrementAndGet()
+        val pluginSurfaces = externalSurfaceIds.computeIfAbsent(pluginId) {
+            ConcurrentHashMap.newKeySet()
+        }
+        if (envelope.path == BusPaths.SURFACE_HIDE) {
+            if (closeOnHide) releaseExternalSurface(pluginId, wireSurfaceId)
+        } else {
+            pluginSurfaces += wireSurfaceId
+        }
+        return envelope.copy(payload = payload.put("seq", sequence))
+    }
+
+    private fun releaseExternalSurface(pluginId: String, wireSurfaceId: String) {
+        val pluginSurfaces = externalSurfaceIds[pluginId] ?: return
+        pluginSurfaces.remove(wireSurfaceId)
+        if (pluginSurfaces.isNotEmpty()) return
+        externalSurfaceIds.remove(pluginId, pluginSurfaces)
+        if (::externalPluginController.isInitialized) {
+            externalPluginController.onPluginSelfHid(pluginId)
+        }
+    }
+
+    private fun closeInkForLinkLoss(pluginId: String) {
+        inkSurfaceCoordinator.clearOwner(pluginId) { owners ->
+            owners.forEach { owner ->
+                deliverInkEvent(
+                    owner = owner,
+                    type = InkSurfaceContract.EVENT_CLOSED,
+                    id = UUID.randomUUID().toString(),
+                    extra = JSONObject().put("reason", InkSurfaceContract.CLOSE_LINK_LOST),
+                )
+                releaseExternalSurface(owner.pluginId, owner.wireSurfaceId)
+            }
         }
     }
 
@@ -5089,6 +5463,19 @@ class BusHubService : Service() {
         if (::pluginGuardianCoordinator.isInitialized) {
             pluginGuardianCoordinator.onLinkStateChanged(state and transportBits != 0)
         }
+        if (previousTransportState and transportBits != 0 && state and transportBits == 0) {
+            inkSurfaceCoordinator.clearForLinkLoss { owners ->
+                owners.forEach { owner ->
+                    deliverInkEvent(
+                        owner = owner,
+                        type = InkSurfaceContract.EVENT_CLOSED,
+                        id = UUID.randomUUID().toString(),
+                        extra = JSONObject().put("reason", InkSurfaceContract.CLOSE_LINK_LOST),
+                    )
+                    releaseExternalSurface(owner.pluginId, owner.wireSurfaceId)
+                }
+            }
+        }
         if (::cameraCompanionController.isInitialized &&
             ((previousTransportState and transportBits) and state.inv()) != 0
         ) {
@@ -5097,6 +5484,7 @@ class BusHubService : Service() {
         if (state and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) == 0) {
             if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.onLinkLost()
             remoteImageSurfaceVersion = 0
+            remoteInkSurfaceVersion = 0
             remoteMaxImageBytes = 0
             // remotePinSurfaceVersion and remoteActivitySurfaceVersion deliberately survive,
             // for the same reason as the setup state below: support is a property of the
@@ -5177,6 +5565,9 @@ class BusHubService : Service() {
         ) {
             capabilities = capabilities or BusCapabilityBits.IMAGE_SURFACE
         }
+        if (PhoneInkCapabilityPolicy.isAvailable(remoteInkSurfaceVersion, linkState())) {
+            capabilities = capabilities or BusCapabilityBits.INK_SURFACE
+        }
         // Deliberately not gated on the link, unlike IMAGE_SURFACE above: the bit means
         // "these glasses can show a pin", not "a pin would go out this instant". A pin has
         // canonical phone-side state and a resend path, so one pushed while the glasses are
@@ -5244,9 +5635,11 @@ class BusHubService : Service() {
         val activitySupported = advertised.protocolVersion == GlassesHubCapabilitiesContract.VERSION &&
             advertised.features and BusCapabilityBits.ACTIVITY_SURFACE != 0 &&
             advertised.activitySurfaceVersion == ActivitySurfaceContract.VERSION
+        val acceptedInkVersion = PhoneInkCapabilityPolicy.acceptedVersion(advertised)
         remotePinSurfaceVersion = if (pinSupported) PinSurfaceContract.VERSION else 0
         remoteNoticeSurfaceVersion = if (noticeSupported) NoticeSurfaceContract.VERSION else 0
         remoteActivitySurfaceVersion = if (activitySupported) ActivitySurfaceContract.VERSION else 0
+        remoteInkSurfaceVersion = acceptedInkVersion
         remoteMaxImageBytes = if (imageSupported) advertised.maxImageBytes else 0
         updateRemoteGlassesAppState(
             advertised.versionName,
