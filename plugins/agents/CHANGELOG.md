@@ -8,6 +8,10 @@
 - Gather the three ways to link a computer — automatic on the home Wi-Fi,
   Tailscale from anywhere, a pasted pairing line — on one Add a computer
   screen, with a link window that shows its countdown and can be cancelled.
+  The OpenClaw gateway is configured there too.
+- Give each computer its own screen, and let the wearer walk its folders over
+  the link to anchor project folders — the ground the glasses will start
+  sessions from.
 - Alert on the glasses with an interactive notice; the phone stays silent and
   the plugin holds no notification permission.
 - Let a computer link itself over the LAN, and refuse the ones that were not

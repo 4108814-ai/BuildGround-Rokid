@@ -2,14 +2,11 @@ package com.anezium.rokidbus.plugin.agents
 
 import android.app.Activity
 import android.content.Intent
-import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
-import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
@@ -31,14 +28,6 @@ class AgentsSettingsActivity : Activity() {
     private lateinit var agentdConnection: TextView
     private lateinit var agentdDot: View
     private lateinit var computersList: LinearLayout
-    private lateinit var openClawFold: TextView
-    private lateinit var openClawBlock: LinearLayout
-    private lateinit var openClawEnabled: Switch
-    private lateinit var openClawHost: EditText
-    private lateinit var openClawPort: EditText
-    private lateinit var openClawToken: EditText
-    private lateinit var openClawConnection: TextView
-    private lateinit var openClawDot: View
 
     /** The machine whose row the wearer tapped open to reach its Forget. */
     private var expandedMachineId: String? = null
@@ -73,27 +62,9 @@ class AgentsSettingsActivity : Activity() {
                 AgentsMonitorService.reconcile(applicationContext)
             }
         }
-        openClawEnabled = NexusUi.switch(this).apply {
-            setOnCheckedChangeListener { _, checked ->
-                configStore.saveOpenClaw(configStore.load().openClaw, checked)
-                AgentsMonitorService.reconcile(applicationContext)
-            }
-        }
         agentdDot = NexusUi.dot(this)
-        openClawDot = NexusUi.dot(this)
         agentdConnection = NexusUi.statusLine(this).apply { text = "DISCONNECTED" }
         computersList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        openClawHost = NexusUi.field(this, "Host or ws(s)://host").apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-        }
-        openClawPort = NexusUi.field(this, "Port").apply {
-            inputType = InputType.TYPE_CLASS_NUMBER
-        }
-        openClawToken = NexusUi.field(this, "Gateway token").apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            typeface = Typeface.DEFAULT
-        }
-        openClawConnection = NexusUi.statusLine(this).apply { text = "DISCONNECTED" }
 
         val content = NexusUi.contentColumn(this).apply {
             addView(
@@ -113,9 +84,6 @@ class AgentsSettingsActivity : Activity() {
             addView(NexusUi.sectionRow(this@AgentsSettingsActivity, "Computers"), NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
             addView(computersCard(), NexusUi.block())
-            addView(BusTheme.gap(this@AgentsSettingsActivity, 22))
-            addView(openClawFoldRow(), NexusUi.block())
-            addView(openClawFoldBlock(), NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 24))
             addView(NexusUi.sectionRow(this@AgentsSettingsActivity, "Plugin"), NexusUi.block())
             addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
@@ -174,64 +142,6 @@ class AgentsSettingsActivity : Activity() {
     }
 
     /**
-     * OpenClaw is the odd one out — its own gateway, its own credentials — and
-     * most wearers never touch it, so it stays folded unless it is switched on.
-     */
-    private fun openClawFoldRow(): TextView {
-        openClawFold = NexusUi.rowSub(this, OPENCLAW_CLOSED).apply {
-            setPadding(0, NexusUi.dp(this@AgentsSettingsActivity, 6), 0, 0)
-            setOnClickListener { setOpenClawFold(open = openClawBlock.visibility != View.VISIBLE) }
-        }
-        return openClawFold
-    }
-
-    private fun openClawFoldBlock(): LinearLayout {
-        openClawBlock = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            visibility = View.GONE
-            addView(BusTheme.gap(this@AgentsSettingsActivity, 10))
-            addView(openClawCard(), NexusUi.block())
-        }
-        return openClawBlock
-    }
-
-    private fun setOpenClawFold(open: Boolean) {
-        openClawBlock.visibility = if (open) View.VISIBLE else View.GONE
-        openClawFold.text = if (open) OPENCLAW_OPEN else OPENCLAW_CLOSED
-    }
-
-    private fun openClawCard() = NexusUi.card(this).apply {
-        addView(
-            NexusUi.switchRow(
-                this@AgentsSettingsActivity,
-                "Monitor sessions",
-                "Watch the sessions on your OpenClaw gateway",
-                openClawEnabled,
-            ),
-            NexusUi.block(),
-        )
-        addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
-        addView(connectionRow(this@AgentsSettingsActivity, openClawDot, openClawConnection), NexusUi.block())
-        addView(NexusUi.divider(this@AgentsSettingsActivity))
-        addView(openClawHost, NexusUi.block())
-        addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
-        addView(openClawPort, NexusUi.block())
-        addView(BusTheme.gap(this@AgentsSettingsActivity, 8))
-        addView(openClawToken, NexusUi.block())
-        addView(BusTheme.gap(this@AgentsSettingsActivity, 12))
-        addView(
-            actionRow(
-                this@AgentsSettingsActivity,
-                primary = "Save",
-                onPrimary = { saveOpenClaw(test = false) },
-                secondary = "Test connection",
-                onSecondary = { saveOpenClaw(test = true) },
-            ),
-            NexusUi.block(),
-        )
-    }
-
-    /**
      * One row per computer this phone trusts. Tapping a row trades its chevron
      * for Forget, so removing a machine takes two deliberate taps and a
      * misplaced one costs nothing.
@@ -256,24 +166,23 @@ class AgentsSettingsActivity : Activity() {
                 connected -> "Connected · same Wi-Fi"
                 else -> lastSeenText(machine.lastSeenAtMs)
             }
+            val projects = configStore.projects(machine.machineId).size
             computersList.addView(
-                machineRow(
+                machineNavRow(
                     title = machine.name,
-                    sub = sub,
+                    sub = if (projects > 0) {
+                        "$sub · $projects ${if (projects == 1) "project" else "projects"}"
+                    } else {
+                        sub
+                    },
                     dotColor = if (connected) NexusUi.GREEN else NexusUi.INK3,
-                    expanded = expandedMachineId == machine.machineId,
-                    onToggle = {
-                        expandedMachineId =
-                            if (expandedMachineId == machine.machineId) null else machine.machineId
-                        renderComputers()
-                    },
-                    onForget = {
-                        AgentsMonitorService.forgetMachine(applicationContext, machine.machineId)
-                        expandedMachineId = null
-                        renderComputers()
-                        toast("${machine.name} forgotten.")
-                    },
-                ),
+                ) {
+                    startActivity(
+                        Intent(this, ComputerActivity::class.java)
+                            .putExtra(ComputerActivity.EXTRA_MACHINE_ID, machine.machineId)
+                            .putExtra(ComputerActivity.EXTRA_MACHINE_NAME, machine.name),
+                    )
+                },
                 NexusUi.block(),
             )
         }
@@ -300,6 +209,36 @@ class AgentsSettingsActivity : Activity() {
                 NexusUi.block(),
             )
         }
+    }
+
+    private fun machineNavRow(
+        title: String,
+        sub: String,
+        dotColor: Int,
+        onOpen: () -> Unit,
+    ) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(0, NexusUi.dp(this@AgentsSettingsActivity, 6), 0, NexusUi.dp(this@AgentsSettingsActivity, 6))
+        setOnClickListener { onOpen() }
+        val dot = NexusUi.dot(this@AgentsSettingsActivity)
+        NexusUi.setDotColor(dot, dotColor)
+        val dotSize = NexusUi.dp(this@AgentsSettingsActivity, 8)
+        addView(
+            dot,
+            LinearLayout.LayoutParams(dotSize, dotSize).apply {
+                marginEnd = NexusUi.dp(this@AgentsSettingsActivity, 10)
+            },
+        )
+        addView(
+            LinearLayout(this@AgentsSettingsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(NexusUi.rowTitle(this@AgentsSettingsActivity, title))
+                addView(NexusUi.rowSub(this@AgentsSettingsActivity, sub))
+            },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        addView(NexusUi.chevron(this@AgentsSettingsActivity))
     }
 
     private fun machineRow(
@@ -345,47 +284,14 @@ class AgentsSettingsActivity : Activity() {
     }
 
     private fun loadConfig() {
-        val config = configStore.load()
-        agentdEnabled.isChecked = config.agentdEnabled
-        openClawEnabled.isChecked = config.openClawEnabled
-        openClawHost.setText(config.openClaw?.host.orEmpty())
-        openClawPort.setText(
-            (config.openClaw?.port ?: OpenClawConfig.DEFAULT_PORT).toString(),
-        )
-        openClawToken.setText(config.openClaw?.token.orEmpty())
-        setOpenClawFold(open = config.openClawEnabled)
+        agentdEnabled.isChecked = configStore.load().agentdEnabled
         renderComputers()
-    }
-
-    private fun saveOpenClaw(test: Boolean) {
-        val host = openClawHost.text.toString().trim()
-        val port = openClawPort.text.toString().toIntOrNull()
-        val token = openClawToken.text.toString().trim()
-        if (host.isBlank() || port !in 1..65535 || token.isBlank()) {
-            toast("Enter a host, valid port, and token.")
-            return
-        }
-        val config = OpenClawConfig(host, checkNotNull(port), token)
-        configStore.saveOpenClaw(config, openClawEnabled.isChecked)
-        if (test) {
-            AgentsMonitorService.test(applicationContext, AgentProvider.OPENCLAW)
-            toast("Testing OpenClaw connection…")
-        } else {
-            AgentsMonitorService.reconcile(applicationContext)
-            toast("OpenClaw settings saved.")
-        }
     }
 
     private fun observeState() {
         uiScope.launch {
             AgentsRuntime.store.connections.collectLatest { states ->
                 renderMonitoring(states.getValue(AgentProvider.CLAUDE))
-                applyConnectionState(
-                    openClawDot,
-                    openClawConnection,
-                    states.getValue(AgentProvider.OPENCLAW),
-                    authFailure = "AUTH FAILED",
-                )
             }
         }
         uiScope.launch {
@@ -453,8 +359,6 @@ class AgentsSettingsActivity : Activity() {
     private companion object {
         /** List-row id for the hand-paired daemon entry, which has no machineId. */
         const val PAIRED_ROW_ID = "paired-daemon"
-        const val OPENCLAW_CLOSED = "OPENCLAW ›"
-        const val OPENCLAW_OPEN = "OPENCLAW ⌄"
     }
 }
 

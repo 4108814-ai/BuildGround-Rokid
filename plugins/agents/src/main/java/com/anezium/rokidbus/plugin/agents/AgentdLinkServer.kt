@@ -79,6 +79,10 @@ class AgentdLinkServer(
         send(AgentdProtocolCodec.approvalDecision(requestId, decision))
     }
 
+    fun requestFolders(requestId: String, path: String?) {
+        send(AgentdProtocolCodec.fsList(requestId, path))
+    }
+
     /** Callers are UI/service threads; Android forbids socket writes there. */
     private fun send(payload: String) {
         val connection = client ?: return
@@ -222,6 +226,7 @@ class AgentdLinkServer(
                 store.appendConversation(action.provider, action.sessionId, action.message)
             is AgentdAction.ApprovalRequested -> store.upsertApproval(action.approval)
             is AgentdAction.ApprovalResolved -> store.resolveApproval(action.requestId)
+            is AgentdAction.FolderListing -> store.setFsListing(action.listing)
             is AgentdAction.Send -> connection.send(action.text)
             is AgentdAction.Hello,
             is AgentdAction.HelloAcknowledged,

@@ -10,9 +10,19 @@ on the glasses.
 
 The settings screen reads top to bottom: Monitoring (one switch for the
 `nexus-agentd` link, which carries Claude Code and Codex, with a status line
-that counts the watched sessions), Computers (every linked machine with its
-state; tap a row to reach its own Forget), and OpenClaw, folded away unless
-it is switched on.
+that counts the watched sessions) and Computers (every linked machine with
+its state). Each computer has its own screen with its anchored projects and
+its Forget; the OpenClaw gateway is configured at the bottom of the Add a
+computer screen.
+
+### Projects
+
+A project is a folder on a linked computer, anchored from the computer's
+screen: the picker walks the computer's directories over the authenticated
+link (`fs_list`/`fs_listing`, directories only, no file names or contents)
+and stores the chosen `{name, path}` per machine on the phone. Projects are
+the ground the glasses-side flow will offer when starting a session on a
+computer.
 
 - Adding a computer happens on its own screen, reached from the Computers
   list. It opens on how to get `nexus-agentd` itself, then offers three

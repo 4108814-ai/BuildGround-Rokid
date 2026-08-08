@@ -286,7 +286,43 @@ class AgentsConfigStore(
             .remove(machineKey(machineId))
             .remove("$KEY_MACHINE_NAME_PREFIX$machineId")
             .remove("$KEY_MACHINE_SEEN_PREFIX$machineId")
+            .remove("$KEY_PROJECTS_PREFIX$machineId")
             .apply()
+    }
+
+    fun projects(machineId: String): List<AgentProject> {
+        val raw = prefs.getString("$KEY_PROJECTS_PREFIX$machineId", null) ?: return emptyList()
+        val array = runCatching { org.json.JSONArray(raw) }.getOrNull() ?: return emptyList()
+        return buildList {
+            for (index in 0 until array.length()) {
+                val json = array.optJSONObject(index) ?: continue
+                val name = json.nullableString("name", MAX_HUD_LABEL_CHARS) ?: continue
+                val path = json.nullableString("path", MAX_PATH_CHARS) ?: continue
+                add(AgentProject(name, path))
+            }
+        }
+    }
+
+    fun addProject(machineId: String, project: AgentProject) {
+        val current = projects(machineId).filterNot { it.path == project.path }
+        saveProjects(machineId, (current + project).takeLast(MAX_PROJECTS_PER_MACHINE))
+    }
+
+    fun removeProject(machineId: String, path: String) {
+        saveProjects(machineId, projects(machineId).filterNot { it.path == path })
+    }
+
+    private fun saveProjects(machineId: String, projects: List<AgentProject>) {
+        val key = "$KEY_PROJECTS_PREFIX$machineId"
+        if (projects.isEmpty()) {
+            prefs.edit().remove(key).apply()
+            return
+        }
+        val array = org.json.JSONArray()
+        projects.forEach { project ->
+            array.put(JSONObject().put("name", project.name).put("path", project.path))
+        }
+        prefs.edit().putString(key, array.toString()).apply()
     }
 
     fun cancelLinkWindow() {
@@ -342,6 +378,8 @@ class AgentsConfigStore(
         const val KEY_MACHINE_PREFIX = "machine.token."
         const val KEY_MACHINE_NAME_PREFIX = "machine.name."
         const val KEY_MACHINE_SEEN_PREFIX = "machine.seen."
+        const val KEY_PROJECTS_PREFIX = "machine.projects."
+        const val MAX_PROJECTS_PER_MACHINE = 30
         const val KEY_LINK_WINDOW_DEADLINE = "machine.link_window_deadline"
     }
 }

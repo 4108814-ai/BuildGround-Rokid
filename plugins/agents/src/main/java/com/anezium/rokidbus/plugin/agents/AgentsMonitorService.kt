@@ -86,6 +86,14 @@ class AgentsMonitorService : Service() {
             ACTION_DROP_MACHINE -> {
                 intent.getStringExtra(EXTRA_MACHINE_ID)?.let(linkServer::dropMachine)
             }
+            ACTION_FS_LIST -> {
+                val requestId = intent.getStringExtra(EXTRA_REQUEST_ID)
+                if (requestId != null) {
+                    val path = intent.getStringExtra(EXTRA_PATH)
+                    agentdClient.requestFolders(requestId, path)
+                    linkServer.requestFolders(requestId, path)
+                }
+            }
             ACTION_DECIDE_APPROVAL -> {
                 val requestId = intent.getStringExtra(EXTRA_REQUEST_ID)
                 val decision = ApprovalDecision.values()
@@ -247,8 +255,11 @@ class AgentsMonitorService : Service() {
             "com.anezium.rokidbus.plugin.agents.action.DECIDE_APPROVAL"
         const val ACTION_DROP_MACHINE =
             "com.anezium.rokidbus.plugin.agents.action.DROP_MACHINE"
+        const val ACTION_FS_LIST =
+            "com.anezium.rokidbus.plugin.agents.action.FS_LIST"
         const val EXTRA_SESSION_ID = "sessionId"
         const val EXTRA_MACHINE_ID = "machineId"
+        const val EXTRA_PATH = "path"
         const val EXTRA_REQUEST_ID = "requestId"
         const val EXTRA_DECISION = "decision"
         private const val MONITOR_NOTIFICATION_ID = 3101
@@ -314,6 +325,17 @@ class AgentsMonitorService : Service() {
                         .putExtra(EXTRA_MACHINE_ID, machineId),
                 )
             }
+        }
+
+        /** The wearer is browsing a linked computer's folders in the picker. */
+        fun requestFolders(context: Context, requestId: String, path: String?) {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, AgentsMonitorService::class.java)
+                    .setAction(ACTION_FS_LIST)
+                    .putExtra(EXTRA_REQUEST_ID, requestId)
+                    .putExtra(EXTRA_PATH, path),
+            )
         }
 
         fun test(context: Context, provider: AgentProvider) {

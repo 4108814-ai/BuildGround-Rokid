@@ -32,6 +32,7 @@ sealed interface AgentdAction {
     ) : AgentdAction
     data class ApprovalRequested(val approval: AgentApproval) : AgentdAction
     data class ApprovalResolved(val requestId: String) : AgentdAction
+    data class FolderListing(val listing: FsListing) : AgentdAction
     data class Send(val text: String) : AgentdAction
     data object Ignore : AgentdAction
 }
@@ -184,6 +185,33 @@ class AgentdProtocolCodec {
                 val requestId = json.identifierOrNull("requestId") ?: return AgentdAction.Ignore
                 AgentdAction.ApprovalResolved(requestId)
             }
+            // Folder listings carry no seq: each is the reply to one fs_list
+            // the wearer just asked for, matched back by its request id.
+            "fs_listing" -> {
+                val requestId = json.identifierOrNull("id", MAX_FS_REQUEST_ID_CHARS)
+                    ?: return AgentdAction.Ignore
+                val entriesJson = json.opt("entries") as? JSONArray
+                val entries = buildList {
+                    if (entriesJson != null) {
+                        for (index in 0 until minOf(entriesJson.length(), MAX_FS_ENTRIES)) {
+                            val entry = entriesJson.optJSONObject(index) ?: continue
+                            val name = entry.nullableString("name", MAX_HUD_LABEL_CHARS) ?: continue
+                            val path = entry.nullableString("path", MAX_PATH_CHARS) ?: continue
+                            add(FsEntry(name, path))
+                        }
+                    }
+                }
+                AgentdAction.FolderListing(
+                    FsListing(
+                        requestId = requestId,
+                        path = json.nullableString("path", MAX_PATH_CHARS),
+                        parent = json.nullableString("parent", MAX_PATH_CHARS),
+                        entries = entries,
+                        truncated = json.booleanOrNull("truncated") ?: false,
+                        error = json.nullableString("error", MAX_STATUS_DETAIL_CHARS),
+                    ),
+                )
+            }
             "ping" -> AgentdAction.Send(
                 JSONObject()
                     .put("type", "pong")
@@ -216,6 +244,13 @@ class AgentdProtocolCodec {
         fun detailOpen(sessionId: String): String = JSONObject()
             .put("type", "detail_open")
             .put("sessionId", sessionId)
+            .toString()
+
+        /** The wearer wants the folders at [path], or the roots when null. */
+        fun fsList(requestId: String, path: String?): String = JSONObject()
+            .put("type", "fs_list")
+            .put("id", requestId)
+            .apply { if (path != null) put("path", path) }
             .toString()
 
         /** The wearer answered a held tool call. */
@@ -347,6 +382,8 @@ internal const val MAX_WIRE_TYPE_CHARS = 64
 internal const val MAX_HUD_LABEL_CHARS = 160
 internal const val MAX_STATUS_DETAIL_CHARS = 512
 internal const val MAX_PATH_CHARS = 1_024
+internal const val MAX_FS_ENTRIES = 300
+internal const val MAX_FS_REQUEST_ID_CHARS = 64
 internal const val MAX_HUD_TEXT_CHARS = 4_096
 
 internal fun JSONObject.nullableString(

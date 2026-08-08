@@ -1,8 +1,10 @@
 package com.anezium.rokidbus.plugin.agents
 
 import android.app.Activity
+import android.graphics.Typeface
 import android.os.Bundle
 import android.text.Editable
+import android.text.InputType
 import android.text.TextWatcher
 import android.util.TypedValue
 import android.view.Gravity
@@ -11,6 +13,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import com.anezium.rokidbus.client.ui.BusTheme
@@ -21,6 +24,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -41,6 +45,12 @@ class AddComputerActivity : Activity() {
     private lateinit var tailscaleGet: Button
     private lateinit var pairingField: EditText
     private lateinit var pairingSummary: TextView
+    private lateinit var openClawEnabled: Switch
+    private lateinit var openClawHost: EditText
+    private lateinit var openClawPort: EditText
+    private lateinit var openClawToken: EditText
+    private lateinit var openClawConnection: TextView
+    private lateinit var openClawDot: View
     private var countdown: Job? = null
     private var knownMachines = 0
 
@@ -48,6 +58,21 @@ class AddComputerActivity : Activity() {
         super.onCreate(savedInstanceState)
         knownMachines = configStore.trustedMachines().size
         buildUi()
+        uiScope.launch {
+            AgentsRuntime.store.connections.collectLatest { states ->
+                val state = states.getValue(AgentProvider.OPENCLAW)
+                openClawConnection.text = state.displayText("AUTH FAILED")
+                NexusUi.setDotColor(
+                    openClawDot,
+                    when (state.state) {
+                        ConnectionState.CONNECTED -> NexusUi.GREEN
+                        ConnectionState.CONNECTING -> NexusUi.AMBER
+                        ConnectionState.AUTH_FAILED -> NexusUi.DANGER
+                        ConnectionState.DISCONNECTED -> NexusUi.INK3
+                    },
+                )
+            }
+        }
         uiScope.launch {
             AgentsRuntime.linkedMachines.collect { machineName ->
                 // Replay hands us the last machine that ever linked; only a
@@ -120,6 +145,29 @@ class AddComputerActivity : Activity() {
             })
         }
         pairingSummary = NexusUi.cardBody(this, "No daemon paired.")
+        val config = configStore.load()
+        openClawEnabled = NexusUi.switch(this).apply {
+            isChecked = config.openClawEnabled
+            setOnCheckedChangeListener { _, checked ->
+                configStore.saveOpenClaw(configStore.load().openClaw, checked)
+                AgentsMonitorService.reconcile(applicationContext)
+            }
+        }
+        openClawDot = NexusUi.dot(this)
+        openClawConnection = NexusUi.statusLine(this).apply { text = "DISCONNECTED" }
+        openClawHost = NexusUi.field(this, "Host or ws(s)://host").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setText(config.openClaw?.host.orEmpty())
+        }
+        openClawPort = NexusUi.field(this, "Port").apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText((config.openClaw?.port ?: OpenClawConfig.DEFAULT_PORT).toString())
+        }
+        openClawToken = NexusUi.field(this, "Gateway token").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            typeface = Typeface.DEFAULT
+            setText(config.openClaw?.token.orEmpty())
+        }
 
         val content = NexusUi.contentColumn(this).apply {
             addView(daemonCard(), NexusUi.block())
@@ -129,6 +177,8 @@ class AddComputerActivity : Activity() {
             addView(tailscaleCard(), NexusUi.block())
             addView(BusTheme.gap(this@AddComputerActivity, 14))
             addView(pairingCard(), NexusUi.block())
+            addView(BusTheme.gap(this@AddComputerActivity, 14))
+            addView(openClawCard(), NexusUi.block())
         }
         val root = NexusUi.fixedRoot(this).apply {
             addView(backHeader(), NexusUi.block())
@@ -248,6 +298,59 @@ class AddComputerActivity : Activity() {
             ),
             NexusUi.block(),
         )
+    }
+
+    /** Not a computer but a gateway: OpenClaw sessions arrive on their own connection. */
+    private fun openClawCard() = NexusUi.card(this).apply {
+        addView(NexusUi.rowTitle(this@AddComputerActivity, "A gateway — OpenClaw"), NexusUi.block())
+        addView(BusTheme.gap(this@AddComputerActivity, 6))
+        addView(
+            NexusUi.switchRow(
+                this@AddComputerActivity,
+                "Monitor sessions",
+                "Watch the sessions on your OpenClaw gateway",
+                openClawEnabled,
+            ),
+            NexusUi.block(),
+        )
+        addView(BusTheme.gap(this@AddComputerActivity, 8))
+        addView(connectionRow(this@AddComputerActivity, openClawDot, openClawConnection), NexusUi.block())
+        addView(NexusUi.divider(this@AddComputerActivity))
+        addView(openClawHost, NexusUi.block())
+        addView(BusTheme.gap(this@AddComputerActivity, 8))
+        addView(openClawPort, NexusUi.block())
+        addView(BusTheme.gap(this@AddComputerActivity, 8))
+        addView(openClawToken, NexusUi.block())
+        addView(BusTheme.gap(this@AddComputerActivity, 12))
+        addView(
+            actionRow(
+                this@AddComputerActivity,
+                primary = "Save",
+                onPrimary = { saveOpenClaw(test = false) },
+                secondary = "Test connection",
+                onSecondary = { saveOpenClaw(test = true) },
+            ),
+            NexusUi.block(),
+        )
+    }
+
+    private fun saveOpenClaw(test: Boolean) {
+        val host = openClawHost.text.toString().trim()
+        val port = openClawPort.text.toString().toIntOrNull()
+        val token = openClawToken.text.toString().trim()
+        if (host.isBlank() || port !in 1..65535 || token.isBlank()) {
+            toast("Enter a host, valid port, and token.")
+            return
+        }
+        val config = OpenClawConfig(host, checkNotNull(port), token)
+        configStore.saveOpenClaw(config, openClawEnabled.isChecked)
+        if (test) {
+            AgentsMonitorService.test(applicationContext, AgentProvider.OPENCLAW)
+            toast("Testing OpenClaw connection…")
+        } else {
+            AgentsMonitorService.reconcile(applicationContext)
+            toast("OpenClaw settings saved.")
+        }
     }
 
     private fun renderDoorState() {

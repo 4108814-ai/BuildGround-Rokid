@@ -42,6 +42,10 @@ class AgentdClient(
         sockets.current()?.send(AgentdProtocolCodec.approvalDecision(requestId, decision))
     }
 
+    fun requestFolders(requestId: String, path: String?) {
+        sockets.current()?.send(AgentdProtocolCodec.fsList(requestId, path))
+    }
+
     @Synchronized
     fun start(config: AgentdConfig) {
         loopJob?.cancel()
@@ -196,6 +200,9 @@ class AgentdClient(
                     }
                     is AgentdAction.ApprovalResolved -> {
                         if (connected.get()) store.resolveApproval(action.requestId)
+                    }
+                    is AgentdAction.FolderListing -> {
+                        if (connected.get()) store.setFsListing(action.listing)
                     }
                     is AgentdAction.Send -> {
                         if (action.text == AgentdProtocolCodec.REFRESH) {

@@ -40,6 +40,15 @@ class AgentSessionStore {
         _linkMachine.value = machine
     }
 
+    private val _fsListing = MutableStateFlow<FsListing?>(null)
+
+    /** The latest folder listing the daemon answered; matched by request id. */
+    val fsListing: StateFlow<FsListing?> = _fsListing.asStateFlow()
+
+    fun setFsListing(listing: FsListing) {
+        _fsListing.value = listing
+    }
+
     @Synchronized
     fun openConversation(session: AgentSession) {
         _conversation.value = AgentConversation(

@@ -78,6 +78,28 @@ enum class ApprovalDecision(val wireValue: String) {
     DENY("deny"),
 }
 
+/** One folder on a linked computer, offered by the daemon's fs browser. */
+data class FsEntry(
+    val name: String,
+    val path: String,
+)
+
+/** The daemon's answer to one fs_list request. */
+data class FsListing(
+    val requestId: String,
+    val path: String?,
+    val parent: String?,
+    val entries: List<FsEntry>,
+    val truncated: Boolean,
+    val error: String?,
+)
+
+/** A folder the wearer anchored as a project on one of their computers. */
+data class AgentProject(
+    val name: String,
+    val path: String,
+)
+
 /**
  * A tool call an agent is holding still for, waiting on the wearer.
  *
