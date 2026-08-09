@@ -201,6 +201,7 @@ object GlassesHub {
         if (!phoneConnected) {
             clearRemotePhoneCapabilities()
             SurfaceController.onPhoneLinkLost()
+            NoticeController.onPhoneLinkLost()
         }
         notifyLinkState()
         if (connected) {
@@ -216,6 +217,7 @@ object GlassesHub {
         if (!phoneConnected) {
             clearRemotePhoneCapabilities()
             SurfaceController.onPhoneLinkLost()
+            NoticeController.onPhoneLinkLost()
         }
         notifyLinkState()
         if (connected) {

@@ -90,8 +90,8 @@ internal class AssistantUiController(
 
     fun onClose() {
         cancelLauncherHint()
-        stopKeepalive()
         startNewState(flushTranscript = false)
+        hideNoticeIfShown()
         surfaceShown = false
         noticeShown = false
         noticeMode = AssistantNoticeMode.NONE

@@ -670,8 +670,10 @@ class AssistantUiControllerTest {
 
             controller.showTransient("Listeningâ€¦")
             assertTrue(controller.isEngagedNoticeEpisode)
+            renderer.calls.clear()
             controller.onClose()
             assertTrue(!controller.isEngagedNoticeEpisode)
+            assertEquals(listOf(RenderCall.HideNotice), renderer.calls)
         }
 
     private fun TestScope.controller(renderer: FakeRenderer): AssistantUiController =

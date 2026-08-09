@@ -527,6 +527,7 @@ internal object NoticeController {
             serviceContext = context.applicationContext
             this.sleepDisplay = sleepDisplay
             registerScreenOffReceiver(context.applicationContext)
+            state.activeNotice()?.let(::renewDisplayHold)
         }
     }
 
@@ -534,8 +535,17 @@ internal object NoticeController {
         runOnMain {
             clearPendingNoticeWake()
             noticeLockPending = false
+            DisplayWakePolicy.suspendDisplayHold(DisplayHoldReleaseReason.SERVICE_DESTROYED)
             sleepDisplay = null
             serviceContext = null
+        }
+    }
+
+    fun onPhoneLinkLost() {
+        runOnMain {
+            DisplayWakePolicy.releaseDisplayHold(DisplayHoldReleaseReason.LINK_LOSS)
+            discardPendingImage()
+            applyDecision(state.close(NoticeCloseReason.DISCONNECT))
         }
     }
 
@@ -841,6 +851,7 @@ internal object NoticeController {
     private fun applyDecision(decision: NoticeStateDecision) {
         when (decision) {
             is NoticeStateDecision.Shown -> {
+                beginDisplayHold(decision.notice)
                 log(
                     "notice state=shown seq=${decision.notice.seq} " +
                         "ttlMs=${decision.notice.content.ttlMs}",
@@ -849,10 +860,12 @@ internal object NoticeController {
                 notifyChanged()
             }
             is NoticeStateDecision.Updated -> {
+                renewDisplayHold(decision.notice)
                 scheduleExpiry(decision.notice)
                 notifyChanged()
             }
             is NoticeStateDecision.Answered -> {
+                renewDisplayHold(decision.notice)
                 // No expiry rescheduling: answering neither shortens nor extends
                 // the band's life, and the deadline it was already given still
                 // stands. The re-render is what makes the row leave the band.
@@ -865,6 +878,7 @@ internal object NoticeController {
                 notifyChanged()
             }
             is NoticeStateDecision.Closed -> {
+                DisplayWakePolicy.releaseDisplayHold(decision.reason.displayHoldReleaseReason())
                 clearPendingNoticeWake()
                 cancelExpiry()
                 main.removeCallbacks(ringTapExpiry)
@@ -883,6 +897,30 @@ internal object NoticeController {
             NoticeStateDecision.DroppedStale -> log("notice dropped stale")
             NoticeStateDecision.Ignored -> Unit
         }
+    }
+
+    private fun beginDisplayHold(notice: NexusNoticeSurface) {
+        DisplayWakePolicy.beginDisplayHold(
+            context = serviceContext,
+            ownerId = notice.surfaceId,
+            seq = notice.seq,
+            requested = NoticeDisplayHoldPolicy.noticeHoldsDisplay(
+                surfaceId = notice.surfaceId,
+                engaged = notice.content.interactive,
+            ),
+        )
+    }
+
+    private fun renewDisplayHold(notice: NexusNoticeSurface) {
+        DisplayWakePolicy.renewDisplayHold(
+            context = serviceContext,
+            ownerId = notice.surfaceId,
+            seq = notice.seq,
+            eligibleToStart = NoticeDisplayHoldPolicy.noticeHoldsDisplay(
+                surfaceId = notice.surfaceId,
+                engaged = notice.content.interactive,
+            ),
+        )
     }
 
     /** Tells the phone the slot is free, and why, so it can tell the owner. */
@@ -1073,6 +1111,14 @@ internal object NoticeController {
 
     private const val LOCK_SETTLE_RETRY_MS = 75L
     private const val LOCK_SETTLE_TIMEOUT_MS = 2_000L
+}
+
+private fun NoticeCloseReason.displayHoldReleaseReason(): DisplayHoldReleaseReason = when (this) {
+    NoticeCloseReason.USER -> DisplayHoldReleaseReason.NOTICE_USER
+    NoticeCloseReason.TIMEOUT -> DisplayHoldReleaseReason.NOTICE_TIMEOUT
+    NoticeCloseReason.OWNER -> DisplayHoldReleaseReason.NOTICE_OWNER
+    NoticeCloseReason.REPLACED -> DisplayHoldReleaseReason.NOTICE_REPLACED
+    NoticeCloseReason.DISCONNECT -> DisplayHoldReleaseReason.NOTICE_DISCONNECT
 }
 
 private fun Bitmap.recycleSafely() {

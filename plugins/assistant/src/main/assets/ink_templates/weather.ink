@@ -24,18 +24,14 @@
     </view>
     <view class="current">
       <text class="temperature">{{ temperature }}</text>
-      <view class="summary">
-        <text class="condition">{{ condition }}</text>
-        <view class="range" wx:if="{{ high || low }}">
-          <text class="detail" wx:if="{{ high }}">H {{ high }}</text>
-          <text class="detail" wx:if="{{ low }}">L {{ low }}</text>
-        </view>
-      </view>
-      <view class="details" wx:if="{{ precipitation || humidity || wind }}">
-        <text class="detail" wx:if="{{ precipitation }}">Precip {{ precipitation }}</text>
-        <text class="detail" wx:if="{{ humidity }}">Humidity {{ humidity }}</text>
-        <text class="detail" wx:if="{{ wind }}">Wind {{ wind }}</text>
-      </view>
+      <text class="condition">{{ condition }}</text>
+    </view>
+    <view class="facts" wx:if="{{ high || low || precipitation || humidity || wind }}">
+      <text class="fact" wx:if="{{ high }}">H {{ high }}</text>
+      <text class="fact" wx:if="{{ low }}">L {{ low }}</text>
+      <text class="fact" wx:if="{{ precipitation }}">{{ precipitation }}</text>
+      <text class="fact" wx:if="{{ humidity }}">{{ humidity }}</text>
+      <text class="fact" wx:if="{{ wind }}">{{ wind }}</text>
     </view>
     <chart
       wx:if="{{ hourly[1] }}"
@@ -80,57 +76,62 @@
 }
 .title {
   color: var(--color-primary);
-  font-size: 32rpx;
+  font-size: 30rpx;
   font-weight: 700;
-  line-height: 40rpx;
+  line-height: 38rpx;
+  flex-shrink: 1;
+  min-width: 0rpx;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .location {
   color: var(--color-text-secondary);
-  font-size: 22rpx;
-  line-height: 28rpx;
+  font-size: 21rpx;
+  line-height: 27rpx;
   opacity: 0.72;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .current {
   display: flex;
   flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20rpx;
+  align-items: baseline;
+  gap: 16rpx;
 }
+/* The temperature never wraps: it shrinks the condition instead, and the
+   condition ellipsizes, so a long forecast word can never break mid-syllable. */
 .temperature {
   color: var(--color-primary);
-  font-size: 76rpx;
+  font-size: 58rpx;
   font-weight: 700;
-  line-height: 82rpx;
+  line-height: 64rpx;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
-.summary {
+/* One gap value: the WXSS subset parses a single length, and a two-value
+   row/column gap silently resolves to none, gluing the facts together. */
+.facts {
   display: flex;
-  flex-direction: column;
-  gap: 4rpx;
-  flex-grow: 1;
-}
-.details {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4rpx;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 18rpx;
 }
 .condition {
   color: var(--color-text-primary);
-  font-size: 28rpx;
+  font-size: 26rpx;
   font-weight: 600;
-  line-height: 34rpx;
+  line-height: 32rpx;
+  flex-shrink: 1;
+  min-width: 0rpx;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
-.range {
-  display: flex;
-  flex-direction: row;
-  gap: 14rpx;
-}
-.detail {
+.fact {
   color: var(--color-text-secondary);
   font-size: 19rpx;
   line-height: 25rpx;
   opacity: 0.72;
+  white-space: nowrap;
 }
 .curve {
   width: 100%;
