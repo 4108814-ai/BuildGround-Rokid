@@ -37,11 +37,16 @@ class RenderTemplateToolTest {
         val properties = schema.getJSONObject("properties")
         val templateEnum = properties.getJSONObject("template").getJSONArray("enum")
 
+        // Strict providers require every property; optionals are nullable and
+        // free-form data travels as a JSON-encoded string.
         assertEquals("object", schema.getString("type"))
         assertEquals("string", properties.getJSONObject("template").getString("type"))
-        assertEquals("string", properties.getJSONObject("title").getString("type"))
-        assertEquals("object", properties.getJSONObject("data").getString("type"))
-        assertEquals(listOf("template", "data"), schema.getJSONArray("required").toStringList())
+        assertEquals(
+            listOf("string", "null"),
+            properties.getJSONObject("title").getJSONArray("type").toStringList(),
+        )
+        assertEquals("string", properties.getJSONObject("data").getString("type"))
+        assertEquals(listOf("template", "title", "data"), schema.getJSONArray("required").toStringList())
         assertFalse(schema.getBoolean("additionalProperties"))
         assertEquals(
             InkTemplateId.entries.map(InkTemplateId::wireValue),
@@ -89,6 +94,35 @@ class RenderTemplateToolTest {
         assertEquals(18, shown.getJSONArray("chartPoints").getJSONObject(1).getInt("value0"))
         assertFalse(shown.has("labels"))
         assertFalse(shown.has("series"))
+    }
+
+    @Test
+    fun `strict providers pass data as a JSON string and optionals as null`() = runTest {
+        val capabilities = FakeInkPageCapabilities()
+        val tool = RenderTemplateTool(
+            runtime = InkPageToolRuntime(capabilities),
+            templateLoader = InkTemplateLoader { "<page><text>metrics asset</text></page>" },
+        )
+        val phase = AssistantToolRegistry(
+            definitions = listOf(tool),
+            sessionContext = ::grantedSession,
+        ).newExecutionPhase(TOOLS_SUPPORTED)
+
+        val result = phase.execute(
+            AssistantToolCall(
+                callId = "strict",
+                name = RENDER_TEMPLATE_TOOL_NAME,
+                argumentsJson =
+                    """{"template":"metrics","title":null,"data":"{\"cells\":[{\"label\":\"CPU\",\"value\":\"42%\"},{\"label\":\"RAM\",\"value\":\"61%\"}]}"}""",
+            ),
+        )
+
+        assertEquals(AssistantToolResult.Json("{\"status\":\"shown\"}"), result)
+        val shown = checkNotNull(capabilities.shownData)
+        assertEquals("CPU", shown.getJSONArray("cells").getJSONObject(0).getString("label"))
+
+        val invalid = tool.validate("""{"template":"metrics","title":null,"data":"not json"}""")
+        assertTrue(invalid is AssistantToolValidation.Invalid)
     }
 
     @Test

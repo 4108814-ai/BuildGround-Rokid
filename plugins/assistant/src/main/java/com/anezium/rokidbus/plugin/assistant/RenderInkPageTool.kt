@@ -23,6 +23,15 @@ internal class RenderInkPageTool(
                 return AssistantToolValidation.Invalid()
             }
         }
+        // Strict-schema providers require every property, so optionals arrive
+        // as JSON null, and free-form objects arrive JSON-encoded in a string.
+        if (arguments.opt("title") === JSONObject.NULL) arguments.remove("title")
+        if (arguments.opt("data") === JSONObject.NULL) arguments.remove("data")
+        (arguments.opt("data") as? String)?.let { encoded ->
+            val parsed = runCatching { JSONObject(encoded) }.getOrNull()
+                ?: return AssistantToolValidation.Invalid()
+            arguments.put("data", parsed)
+        }
         val page = arguments.opt("page")
         if (page !is String || page.isBlank()) return AssistantToolValidation.Invalid()
         if (arguments.has("title") && arguments.opt("title") !is String) {
@@ -54,7 +63,7 @@ internal const val TOOL_ERROR_INK_SURFACE_UNAVAILABLE = "ink_surface_unavailable
 internal const val TOOL_ERROR_SURFACE_BUSY = "surface_busy"
 
 internal val RENDER_INK_PAGE_PARAMETERS_SCHEMA = AssistantToolJsonSchema(
-    """{"type":"object","properties":{"page":{"type":"string","minLength":1},"title":{"type":"string"},"data":{"type":"object"}},"required":["page"],"additionalProperties":false}""",
+    """{"type":"object","properties":{"page":{"type":"string"},"title":{"type":["string","null"]},"data":{"type":["string","null"],"description":"Optional JSON-encoded object of initial page data"}},"required":["page","title","data"],"additionalProperties":false}""",
 )
 
 internal val RENDER_INK_PAGE_TOOL_DESCRIPTION = """

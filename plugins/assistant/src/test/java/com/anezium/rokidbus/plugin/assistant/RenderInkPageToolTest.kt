@@ -47,11 +47,28 @@ class RenderInkPageToolTest {
         val schema = tool.parametersSchema.toJsonObject()
         val properties = schema.getJSONObject("properties")
 
+        // Strict providers require every property; optionals are nullable and
+        // free-form data travels as a JSON-encoded string.
         assertEquals("object", schema.getString("type"))
         assertEquals("string", properties.getJSONObject("page").getString("type"))
-        assertEquals("string", properties.getJSONObject("title").getString("type"))
-        assertEquals("object", properties.getJSONObject("data").getString("type"))
-        assertEquals("page", schema.getJSONArray("required").getString(0))
+        assertEquals(
+            listOf("string", "null"),
+            List(properties.getJSONObject("title").getJSONArray("type").length()) { index ->
+                properties.getJSONObject("title").getJSONArray("type").getString(index)
+            },
+        )
+        assertEquals(
+            listOf("string", "null"),
+            List(properties.getJSONObject("data").getJSONArray("type").length()) { index ->
+                properties.getJSONObject("data").getJSONArray("type").getString(index)
+            },
+        )
+        assertEquals(
+            listOf("page", "title", "data"),
+            List(schema.getJSONArray("required").length()) { index ->
+                schema.getJSONArray("required").getString(index)
+            },
+        )
         assertFalse(schema.getBoolean("additionalProperties"))
 
         val phase = registry(capabilities).newExecutionPhase(TOOLS_SUPPORTED)

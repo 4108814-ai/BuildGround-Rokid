@@ -525,6 +525,27 @@ internal class RenderTemplateTool(
             ?: return AssistantToolValidation.Invalid()
         val problems = mutableListOf<InkTemplateProblem>()
 
+        // Strict-schema providers require every property, so optionals arrive
+        // as JSON null, and free-form objects arrive JSON-encoded in a string.
+        if (arguments.opt("title") === JSONObject.NULL) arguments.remove("title")
+        if (arguments.opt("data") === JSONObject.NULL) arguments.remove("data")
+        (arguments.opt("data") as? String)?.let { encoded ->
+            val parsed = runCatching { JSONObject(encoded) }.getOrNull()
+                ?: return AssistantToolValidation.Invalid(
+                    invalidTemplateDataError(
+                        arguments.optString("template"),
+                        listOf(
+                            InkTemplateProblem(
+                                code = TEMPLATE_PROBLEM_WRONG_TYPE,
+                                path = "data",
+                                message = "data must be a JSON-encoded object",
+                            ),
+                        ),
+                    ),
+                )
+            arguments.put("data", parsed)
+        }
+
         validateShape(
             value = arguments,
             path = ROOT_PATH,
@@ -602,7 +623,7 @@ internal const val TEMPLATE_PROBLEM_LENGTH_MISMATCH = "length_mismatch"
 internal const val TEMPLATE_PROBLEM_UNKNOWN_TEMPLATE = "unknown_template"
 
 internal val RENDER_TEMPLATE_PARAMETERS_SCHEMA = AssistantToolJsonSchema(
-    """{"type":"object","properties":{"template":{"type":"string","enum":["weather","chart","metrics","ranking","comparison","schedule","steps"]},"title":{"type":"string","minLength":1},"data":{"type":"object"}},"required":["template","data"],"additionalProperties":false}""",
+    """{"type":"object","properties":{"template":{"type":"string","enum":["weather","chart","metrics","ranking","comparison","schedule","steps"]},"title":{"type":["string","null"]},"data":{"type":"string","description":"JSON-encoded object matching the chosen template's data schema"}},"required":["template","title","data"],"additionalProperties":false}""",
 )
 
 internal val RENDER_TEMPLATE_TOOL_DESCRIPTION = """
