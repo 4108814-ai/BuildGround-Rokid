@@ -30,6 +30,8 @@
           <text class="detail" wx:if="{{ high }}">H {{ high }}</text>
           <text class="detail" wx:if="{{ low }}">L {{ low }}</text>
         </view>
+      </view>
+      <view class="details" wx:if="{{ precipitation || humidity || wind }}">
         <text class="detail" wx:if="{{ precipitation }}">Precip {{ precipitation }}</text>
         <text class="detail" wx:if="{{ humidity }}">Humidity {{ humidity }}</text>
         <text class="detail" wx:if="{{ wind }}">Wind {{ wind }}</text>
@@ -72,7 +74,8 @@
 .header {
   display: flex;
   flex-direction: row;
-  align-items: baseline;
+  align-items: flex-end;
+  justify-content: space-between;
   gap: 12rpx;
 }
 .title {
@@ -91,7 +94,8 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 24rpx;
+  justify-content: space-between;
+  gap: 20rpx;
 }
 .temperature {
   color: var(--color-primary);
@@ -104,6 +108,12 @@
   flex-direction: column;
   gap: 4rpx;
   flex-grow: 1;
+}
+.details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4rpx;
 }
 .condition {
   color: var(--color-text-primary);
