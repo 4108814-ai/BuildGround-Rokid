@@ -1,4 +1,4 @@
-plugins {
+﻿plugins {
     id("com.android.application")
 }
 
@@ -54,7 +54,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     testImplementation("junit:junit:4.13.2")
     // Plain-JUnit ink tests exercise wire JSON against the real org.json, not the
-    // throwing android.jar stubs — same arrangement as :shared.
+    // throwing android.jar stubs â€” same arrangement as :shared.
     testImplementation("org.json:json:20240303")
     testImplementation("org.robolectric:robolectric:4.13")
 }
