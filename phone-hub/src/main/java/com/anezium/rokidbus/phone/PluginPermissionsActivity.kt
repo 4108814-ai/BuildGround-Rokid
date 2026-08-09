@@ -6,7 +6,6 @@ import com.anezium.rokidbus.client.ui.PluginCustomIcon
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.os.Bundle
@@ -15,7 +14,6 @@ import android.view.ViewGroup
 import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.Switch
 import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
 import com.anezium.rokidbus.shared.plugin.PluginCapability
@@ -290,17 +288,9 @@ class PluginPermissionsActivity : Activity() {
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
             )
             addView(
-                Switch(this@PluginPermissionsActivity).apply {
+                NexusUi.switch(this@PluginPermissionsActivity).apply {
                     isChecked = capability in selected && !unavailable
                     isEnabled = !unavailable
-                    thumbTintList = ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(NexusUi.GREEN, NexusUi.INK3),
-                    )
-                    trackTintList = ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(NexusUi.GREEN_DIM, NexusUi.LINE),
-                    )
                     setOnCheckedChangeListener { _, checked ->
                         if (checked) selected += capability else selected -= capability
                         if (live) applyDecision(principal) { grantStore.approve(principal, selected.toSet()) }

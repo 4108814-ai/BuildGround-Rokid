@@ -17,6 +17,22 @@ data class TimedLine(
     val text: String,
 )
 
+enum class ReaderSegmentKind(val wireValue: String) {
+    HEADER("header"),
+    PROSE("prose"),
+    ASIDE("aside");
+
+    companion object {
+        fun fromWireValue(value: String): ReaderSegmentKind? = entries.firstOrNull { it.wireValue == value }
+    }
+}
+
+data class ReaderSegment(
+    val kind: ReaderSegmentKind,
+    val text: String,
+    val emphasis: Boolean = false,
+)
+
 /**
  * One card body row. Plain rows carry only [text]; board rows add a route
  * [badge] and a [trail] of wait times so the HUD can lay them out with
@@ -186,6 +202,7 @@ data class NexusSurface(
     val mediaArtworkMetadata: SurfaceImageMetadata? = null,
     val imageMetadata: SurfaceImageMetadata? = null,
     val imageBitmap: Bitmap? = null,
+    val readerSegments: List<ReaderSegment> = emptyList(),
 ) {
     val isTimed: Boolean
         get() = kind == KIND_TIMED_LINES && timedLines.isNotEmpty()
@@ -193,25 +210,41 @@ data class NexusSurface(
         get() = kind == KIND_MEDIA && mediaTitle.isNotBlank()
     val isImage: Boolean
         get() = kind == KIND_IMAGE && imageMetadata != null
+    val isReader: Boolean
+        get() = kind == KIND_READER
 
     companion object {
         const val KIND_CARD = "card"
+        const val KIND_READER = "reader"
         const val KIND_TIMED_LINES = "timed-lines"
         const val KIND_MEDIA = "media"
         const val KIND_IMAGE = "image"
 
+        private const val MAX_TITLE_CHARS = 120
+        private const val MAX_LINE_CHARS = 240
+        private const val MAX_CONTENT_KEY_CHARS = 128
+        private const val MAX_READER_SEGMENTS = 240
+        private const val MAX_READER_SEGMENT_CHARS = 4_096
+        private const val MAX_READER_TOTAL_CHARS = 40_000
+
         fun fromPayload(payload: JSONObject, previous: NexusSurface? = null): NexusSurface {
             val kind = payload.optString("kind", KIND_CARD).ifBlank { KIND_CARD }
-            require(kind == KIND_CARD || kind == KIND_TIMED_LINES || kind == KIND_MEDIA || kind == KIND_IMAGE) {
+            require(
+                kind == KIND_CARD || kind == KIND_READER || kind == KIND_TIMED_LINES ||
+                    kind == KIND_MEDIA || kind == KIND_IMAGE,
+            ) {
                 "Unknown surface kind: $kind"
             }
             val surfaceId = payload.getString("surfaceId")
-            val contentKey = payload.optString("contentKey")
+            val contentKey = payload.optString("contentKey").let { value ->
+                if (kind == KIND_READER) value.take(MAX_CONTENT_KEY_CHARS) else value
+            }
             val canMergePrevious = previous != null &&
                 previous.surfaceId == surfaceId &&
                 previous.kind == kind &&
                 (contentKey.isBlank() || previous.contentKey == contentKey)
             val linesPresent = payload.has("lines")
+            val segmentsPresent = payload.has("segments")
             val artworkPresent = payload.has("artwork")
             val mediaArtworkMetadata = when {
                 kind != KIND_MEDIA -> null
@@ -232,16 +265,22 @@ data class NexusSurface(
                 seq = payload.optLong("seq", 0L),
                 kind = kind,
                 contentKey = contentKey.ifBlank { previous?.takeIf { canMergePrevious }?.contentKey.orEmpty() },
-                title = payload.optString("title").ifBlank { previous?.takeIf { canMergePrevious }?.title.orEmpty() },
+                title = payload.optString("title")
+                    .ifBlank { previous?.takeIf { canMergePrevious }?.title.orEmpty() }
+                    .let { value -> if (kind == KIND_READER) value.take(MAX_TITLE_CHARS) else value },
                 subtitle = if (kind == KIND_IMAGE) {
                     payload.optString("caption")
                 } else {
                     payload.optString("subtitle").ifBlank {
                         previous?.takeIf { canMergePrevious }?.subtitle.orEmpty()
-                    }
+                    }.let { value -> if (kind == KIND_READER) value.take(MAX_LINE_CHARS) else value }
                 },
-                footer = payload.optString("footer").ifBlank { previous?.takeIf { canMergePrevious }?.footer.orEmpty() },
-                rows = if (!linesPresent && canMergePrevious) {
+                footer = payload.optString("footer")
+                    .ifBlank { previous?.takeIf { canMergePrevious }?.footer.orEmpty() }
+                    .let { value -> if (kind == KIND_READER) value.take(MAX_LINE_CHARS) else value },
+                rows = if (kind == KIND_READER) {
+                    emptyList()
+                } else if (!linesPresent && canMergePrevious) {
                     previous?.rows.orEmpty()
                 } else payload.optJSONArray("lines")?.let { array ->
                     buildList {
@@ -270,7 +309,9 @@ data class NexusSurface(
                         }
                     }
                 }.orEmpty(),
-                timedLines = if (!linesPresent && canMergePrevious) {
+                timedLines = if (kind == KIND_READER) {
+                    emptyList()
+                } else if (!linesPresent && canMergePrevious) {
                     previous?.timedLines.orEmpty()
                 } else payload.optJSONArray("lines")?.let { array ->
                     buildList {
@@ -287,25 +328,37 @@ data class NexusSurface(
                         }
                     }
                 }.orEmpty(),
-                anchor = payload.optJSONObject("anchor")?.let { anchor ->
-                    SurfaceAnchor(
-                        positionMs = anchor.optLong("positionMs", 0L),
-                        playing = anchor.optBoolean("playing", false),
-                        sentAtElapsedRealtime = anchor.optLong("sentAtElapsedRealtime", 0L),
-                        durationMs = anchor.optLong("durationMs", -1L).takeIf { it > 0L },
-                        playbackSpeed = anchor.optDouble("playbackSpeed", 1.0)
-                            .toFloat()
-                            .coerceIn(0f, 4f),
-                    )
+                anchor = if (kind == KIND_READER) {
+                    null
+                } else {
+                    payload.optJSONObject("anchor")?.let { anchor ->
+                        SurfaceAnchor(
+                            positionMs = anchor.optLong("positionMs", 0L),
+                            playing = anchor.optBoolean("playing", false),
+                            sentAtElapsedRealtime = anchor.optLong("sentAtElapsedRealtime", 0L),
+                            durationMs = anchor.optLong("durationMs", -1L).takeIf { it > 0L },
+                            playbackSpeed = anchor.optDouble("playbackSpeed", 1.0)
+                                .toFloat()
+                                .coerceIn(0f, 4f),
+                        )
+                    }
                 },
                 handlesBack = payload.optBoolean("handlesBack", false),
-                mediaTitle = payload.optString("mediaTitle")
+                mediaTitle = if (kind == KIND_READER) {
+                    ""
+                } else payload.optString("mediaTitle")
                     .ifBlank { previous?.takeIf { canMergePrevious }?.mediaTitle.orEmpty() },
-                mediaArtist = payload.optString("mediaArtist")
+                mediaArtist = if (kind == KIND_READER) {
+                    ""
+                } else payload.optString("mediaArtist")
                     .ifBlank { previous?.takeIf { canMergePrevious }?.mediaArtist.orEmpty() },
-                mediaAlbum = payload.optString("mediaAlbum")
+                mediaAlbum = if (kind == KIND_READER) {
+                    ""
+                } else payload.optString("mediaAlbum")
                     .ifBlank { previous?.takeIf { canMergePrevious }?.mediaAlbum.orEmpty() },
-                artwork = when {
+                artwork = if (kind == KIND_READER) {
+                    null
+                } else when {
                     artworkPresent -> MonoArtwork.fromPayload(payload.optJSONObject("artwork"))
                     canMergePrevious -> previous?.artwork
                     else -> null
@@ -313,7 +366,36 @@ data class NexusSurface(
                 mediaArtworkMetadata = mediaArtworkMetadata,
                 imageMetadata = if (kind == KIND_IMAGE) SurfaceImageMetadata.fromPayload(payload) else null,
                 imageBitmap = preservedImageBitmap,
+                readerSegments = when {
+                    kind != KIND_READER -> emptyList()
+                    !segmentsPresent && canMergePrevious -> previous?.readerSegments.orEmpty()
+                    else -> parseReaderSegments(payload)
+                },
             )
+        }
+
+        private fun parseReaderSegments(payload: JSONObject): List<ReaderSegment> {
+            val array = payload.optJSONArray("segments") ?: return emptyList()
+            var totalChars = 0
+            return buildList {
+                for (index in 0 until array.length()) {
+                    if (size >= MAX_READER_SEGMENTS) break
+                    val item = array.optJSONObject(index) ?: continue
+                    val segmentKind = ReaderSegmentKind.fromWireValue(item.optString("kind")) ?: continue
+                    val remainingChars = (MAX_READER_TOTAL_CHARS - totalChars).coerceAtLeast(0)
+                    val text = item.optString("text")
+                        .take(MAX_READER_SEGMENT_CHARS)
+                        .take(remainingChars)
+                    add(
+                        ReaderSegment(
+                            kind = segmentKind,
+                            text = text,
+                            emphasis = item.optBoolean("emphasis", false),
+                        ),
+                    )
+                    totalChars += text.length
+                }
+            }
         }
     }
 }

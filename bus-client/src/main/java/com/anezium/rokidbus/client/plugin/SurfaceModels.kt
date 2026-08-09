@@ -121,6 +121,69 @@ data class NexusCard(
         }
 }
 
+enum class NexusReaderSegmentKind(val wireValue: String) {
+    /** One quiet line introducing a speaking turn: "CX · il y a 5 min". */
+    HEADER("header"),
+
+    /** Full-width prose; the renderer wraps it, no line clamp. */
+    PROSE("prose"),
+
+    /** One small dim line between turns: collapsed tool calls, events. */
+    ASIDE("aside"),
+}
+
+data class NexusReaderSegment(
+    val kind: NexusReaderSegmentKind,
+    val text: String,
+    /** On a HEADER: the leading token (before the first "·") is drawn
+     *  bright — the wearer's own turns. Ignored on other kinds. */
+    val emphasis: Boolean = false,
+)
+
+data class NexusReader(
+    val title: String,
+    val subtitle: String? = null,
+    val footer: String? = null,
+    val contentKey: String? = null,
+    /** True hands BACK to the plugin instead of the hub hiding the surface. */
+    val handlesBack: Boolean = false,
+    val segments: List<NexusReaderSegment>,
+) {
+    init {
+        require(title.isNotBlank() && title.length <= MAX_TITLE_CHARS)
+        require(subtitle == null || subtitle.length <= MAX_LINE_CHARS)
+        require(footer == null || footer.length <= MAX_LINE_CHARS)
+        require(contentKey == null || contentKey.length <= MAX_CONTENT_KEY_CHARS)
+        require(segments.size in 1..MAX_READER_SEGMENTS)
+        require(segments.all { it.text.length <= MAX_READER_SEGMENT_CHARS })
+        require(segments.sumOf { it.text.length } <= MAX_READER_TOTAL_CHARS)
+    }
+
+    internal fun toPayload(surfaceId: String): JSONObject = JSONObject()
+        .put("surfaceId", surfaceId)
+        .put("kind", "reader")
+        .put("handlesBack", handlesBack)
+        .put("title", title)
+        .put(
+            "segments",
+            JSONArray().also { array ->
+                segments.forEach { segment ->
+                    array.put(
+                        JSONObject()
+                            .put("kind", segment.kind.wireValue)
+                            .put("text", segment.text)
+                            .apply { if (segment.emphasis) put("emphasis", true) },
+                    )
+                }
+            },
+        )
+        .apply {
+            subtitle?.let { put("subtitle", it) }
+            footer?.let { put("footer", it) }
+            contentKey?.let { put("contentKey", it) }
+        }
+}
+
 data class NexusTimedLine(val timeMs: Long, val text: String) {
     init {
         require(timeMs >= 0)
@@ -425,6 +488,10 @@ class NexusSurfaceSession internal constructor(
 
     fun showCard(card: NexusCard): NexusSdkResult = sendSurface(BusPaths.SURFACE_SHOW, card.toPayload(localSurfaceId))
     fun updateCard(card: NexusCard): NexusSdkResult = sendSurface(BusPaths.SURFACE_UPDATE, card.toPayload(localSurfaceId))
+    fun showReader(reader: NexusReader): NexusSdkResult =
+        sendSurface(BusPaths.SURFACE_SHOW, reader.toPayload(localSurfaceId))
+    fun updateReader(reader: NexusReader): NexusSdkResult =
+        sendSurface(BusPaths.SURFACE_UPDATE, reader.toPayload(localSurfaceId))
     fun showImage(image: NexusImage, bytes: ByteArray): NexusSdkResult =
         sendImage(BusPaths.SURFACE_SHOW, image, bytes)
     fun updateImage(image: NexusImage, bytes: ByteArray): NexusSdkResult =
@@ -566,6 +633,9 @@ private const val MAX_TRAIL_ITEM_CHARS = 24
 private const val MAX_LINES = 64
 private const val MAX_TIMED_LINES = 2_000
 private const val MAX_CONTENT_KEY_CHARS = 128
+private const val MAX_READER_SEGMENTS = 240
+private const val MAX_READER_SEGMENT_CHARS = 4_096
+private const val MAX_READER_TOTAL_CHARS = 40_000
 private const val MAX_ARTWORK_DIMENSION = 192
 private const val MAX_SURFACE_PAYLOAD_BYTES = 64 * 1024
 

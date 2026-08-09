@@ -1,0 +1,114 @@
+{
+  "Version": "1.82.5-tb1d05f0f8-g22c60f316",
+  "TUN": true,
+  "BackendState": "Running",
+  "Self": {
+    "ID": "n-self",
+    "HostName": "workstation",
+    "OS": "windows",
+    "TailscaleIPs": ["100.70.0.1", "fd7a:115c:a1e0::1"],
+    "Online": true
+  },
+  "Peer": {
+    "nodekey:android-1": {
+      "ID": "n-android-1",
+      "HostName": "phone-1",
+      "DNSName": "phone-1.example.ts.net.",
+      "OS": "android",
+      "TailscaleIPs": ["fd7a:115c:a1e0::101", "100.64.0.1"],
+      "Online": true,
+      "Active": true
+    },
+    "nodekey:android-2": {
+      "ID": "n-android-2",
+      "HostName": "phone-2",
+      "OS": "android",
+      "TailscaleIPs": ["100.64.0.2"],
+      "Online": true
+    },
+    "nodekey:android-3": {
+      "ID": "n-android-3",
+      "HostName": "phone-3",
+      "OS": "android",
+      "TailscaleIPs": ["100.64.0.3"],
+      "Online": true
+    },
+    "nodekey:android-4": {
+      "ID": "n-android-4",
+      "HostName": "phone-4",
+      "OS": "android",
+      "TailscaleIPs": ["100.64.0.4"],
+      "Online": true
+    },
+    "nodekey:android-5": {
+      "ID": "n-android-5",
+      "HostName": "phone-5",
+      "OS": "android",
+      "TailscaleIPs": ["100.64.0.5"],
+      "Online": true
+    },
+    "nodekey:android-6": {
+      "ID": "n-android-6",
+      "HostName": "phone-6",
+      "OS": "android",
+      "TailscaleIPs": ["100.64.0.6"],
+      "Online": true
+    },
+    "nodekey:android-7": {
+      "ID": "n-android-7",
+      "HostName": "phone-7",
+      "OS": "android",
+      "TailscaleIPs": ["100.64.0.7"],
+      "Online": true
+    },
+    "nodekey:android-8": {
+      "ID": "n-android-8",
+      "HostName": "phone-8",
+      "OS": "android",
+      "TailscaleIPs": ["100.64.0.8"],
+      "Online": true
+    },
+    "nodekey:android-9": {
+      "ID": "n-android-9",
+      "HostName": "phone-9",
+      "OS": "android",
+      "TailscaleIPs": ["100.64.0.9"],
+      "Online": true
+    },
+    "nodekey:android-10": {
+      "ID": "n-android-10",
+      "HostName": "phone-10",
+      "OS": "android",
+      "TailscaleIPs": ["100.64.0.10"],
+      "Online": true
+    },
+    "nodekey:offline-android": {
+      "ID": "n-offline-android",
+      "HostName": "offline-phone",
+      "OS": "android",
+      "TailscaleIPs": ["100.65.0.1"],
+      "Online": false
+    },
+    "nodekey:linux": {
+      "ID": "n-linux",
+      "HostName": "server",
+      "OS": "linux",
+      "TailscaleIPs": ["100.65.0.2"],
+      "Online": true
+    },
+    "nodekey:ipv6-only": {
+      "ID": "n-ipv6-only",
+      "HostName": "ipv6-phone",
+      "OS": "android",
+      "TailscaleIPs": ["fd7a:115c:a1e0::202"],
+      "Online": true
+    },
+    "nodekey:outside-cgnat": {
+      "ID": "n-outside-cgnat",
+      "HostName": "other-phone",
+      "OS": "android",
+      "TailscaleIPs": ["100.128.0.1"],
+      "Online": true
+    }
+  }
+}

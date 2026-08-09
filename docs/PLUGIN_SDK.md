@@ -194,6 +194,92 @@ finds itself reaching for a colour is working around the tier.
 a list with sub lines and a rail, the four tones, body rows with their label
 column. Open it in a browser.
 
+### Reader surfaces
+
+Use a reader for a long, continuous document such as an agent conversation.
+Unlike a card, it has no row layout or three-line prose clamp: send semantic
+segments and let the glasses renderer wrap and scroll them.
+
+```kotlin
+enum class NexusReaderSegmentKind {
+    HEADER,
+    PROSE,
+    ASIDE,
+}
+
+data class NexusReaderSegment(
+    val kind: NexusReaderSegmentKind,
+    val text: String,
+    val emphasis: Boolean = false,
+)
+
+data class NexusReader(
+    val title: String,
+    val subtitle: String? = null,
+    val footer: String? = null,
+    val contentKey: String? = null,
+    val segments: List<NexusReaderSegment>,
+)
+
+fun NexusSurfaceSession.showReader(reader: NexusReader): NexusSdkResult
+```
+
+`HEADER` introduces a speaking turn. Put the speaker token before the first
+`·`; setting `emphasis` makes that token bright for the wearer's own turns.
+`PROSE` is full-width body text with no line clamp, and an empty prose segment
+creates a paragraph break. `ASIDE` is one muted event line; include your own
+prefix such as `⋯ ` when wanted.
+
+```kotlin
+surface?.showReader(
+    NexusReader(
+        title = "Conversation",
+        subtitle = "3 turns",
+        footer = "tap · back",
+        contentKey = "conversation-42",
+        segments = listOf(
+            NexusReaderSegment(
+                NexusReaderSegmentKind.HEADER,
+                "YOU · now",
+                emphasis = true,
+            ),
+            NexusReaderSegment(
+                NexusReaderSegmentKind.PROSE,
+                "Summarize the renderer contract.",
+            ),
+            NexusReaderSegment(
+                NexusReaderSegmentKind.HEADER,
+                "CX · now",
+            ),
+            NexusReaderSegment(
+                NexusReaderSegmentKind.PROSE,
+                "The glasses own wrapping, scroll position, and paging input.",
+            ),
+            NexusReaderSegment(
+                NexusReaderSegmentKind.ASIDE,
+                "⋯ read BUSSPEC.md",
+            ),
+        ),
+    ),
+)
+```
+
+The model validates locally: `title` is required, non-blank, and at most 120
+characters; `subtitle` and `footer` are at most 240; `contentKey` is at most
+128; there are 1 through 240 segments; each segment text is at most 4,096
+characters; and all segment text together is at most 40,000 characters. Null
+shell fields and false `emphasis` are omitted from the wire payload.
+
+`showReader` uses the existing `surfaces` grant and the same result mapping as
+`showCard`; there is no reader-specific capability or grant. Call it again on
+the same session to replace the complete document. The renderer initially opens
+at the bottom; an update stays pinned there when the wearer was already near the
+end, otherwise it restores the previous offset.
+
+Reader navigation is renderer-owned. Directional keys and media next/previous
+scroll locally and never reach `onNexusInput`; confirmation (ENTER or
+DPAD_CENTER) and BACK keep the ordinary surface callback behavior.
+
 ### Live activities
 
 Activities reuse the existing `surfaces` grant and plugin API version 3. They

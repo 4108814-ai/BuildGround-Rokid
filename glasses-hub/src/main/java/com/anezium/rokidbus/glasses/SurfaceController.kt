@@ -23,6 +23,7 @@ object SurfaceController {
     private val main = Handler(Looper.getMainLooper())
     private val orderingCoordinator = SurfaceOrderingCoordinator<JSONObject>()
     private val listeners = CopyOnWriteArrayList<(NexusSurface?) -> Unit>()
+    private val readerScrollListeners = CopyOnWriteArrayList<(Int) -> Unit>()
     private val inputDedupe = DpadPairDedupe()
     private val suppressedDpadUps = mutableSetOf<Int>()
     private val ringInputPolicy = RingSurfaceInputPolicy()
@@ -60,6 +61,11 @@ object SurfaceController {
         listeners += listener
         listener(active)
         return { listeners.remove(listener) }
+    }
+
+    internal fun observeReaderScroll(listener: (Int) -> Unit): () -> Unit {
+        readerScrollListeners += listener
+        return { readerScrollListeners.remove(listener) }
     }
 
     fun handleSurfaceEnvelope(context: Context, envelope: BusEnvelope): Boolean {
@@ -199,6 +205,7 @@ object SurfaceController {
 
     fun handleKeyEvent(event: KeyEvent): Boolean {
         val surface = active ?: return false
+        if (surface.isReader) return handleReaderKeyEvent(surface, event)
         if (shouldSuppressDpadEvent(event)) {
             return true
         }
@@ -215,13 +222,46 @@ object SurfaceController {
     }
 
     fun handleRingKey(keyCode: Int, eventTimeMs: Long): Boolean {
-        if (active == null) return false
+        val surface = active ?: return false
+        if (surface.isReader) {
+            readerScrollDirection(keyCode)?.let { direction ->
+                val dedupeKey = if (direction > 0) {
+                    KeyEvent.KEYCODE_DPAD_RIGHT
+                } else {
+                    KeyEvent.KEYCODE_DPAD_LEFT
+                }
+                if (inputDedupe.onKey(dedupeKey, KeyEvent.ACTION_DOWN, 0, eventTimeMs) != null) {
+                    requestReaderScroll(direction)
+                }
+                return true
+            }
+        }
         applyRingResolution(ringInputPolicy.onKeyDown(keyCode, eventTimeMs))
         if (keyCode == RingSurfaceInputPolicy.RING_KEYCODE_TAP) {
             main.removeCallbacks(ringTapExpiry)
             main.postDelayed(ringTapExpiry, RingTapPolicy.DEFAULT_WINDOW_MS + 1L)
         }
         return true
+    }
+
+    private fun handleReaderKeyEvent(surface: NexusSurface, event: KeyEvent): Boolean {
+        if (event.keyCode in READER_SCROLL_KEYS) {
+            if (event.keyCode in DPAD_DIRECTION_KEYS && shouldSuppressDpadEvent(event)) return true
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                readerScrollDirection(event.keyCode)?.let(::requestReaderScroll)
+            }
+            return true
+        }
+        if ((event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP) &&
+            event.keyCode in READER_FORWARDED_KEYS
+        ) {
+            forwardSurfaceInput(event.keyCode, event.action)
+        }
+        if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            handleBackDown(surface)
+            return true
+        }
+        return event.keyCode in READER_FORWARDED_KEYS
     }
 
     fun cancelRingInput() {
@@ -460,10 +500,20 @@ object SurfaceController {
 
     private fun applyRingResolution(resolution: RingSurfaceInputPolicy.Resolution?) {
         when (resolution) {
-            is RingSurfaceInputPolicy.Resolution.Forward ->
-                resolution.events.forEach { event ->
-                    forwardSurfaceInput(event.keyCode, event.action)
+            is RingSurfaceInputPolicy.Resolution.Forward -> {
+                val readerDirection = active?.takeIf { it.isReader }?.let {
+                    resolution.events.firstNotNullOfOrNull { event ->
+                        readerScrollDirection(event.keyCode)
+                    }
                 }
+                if (readerDirection != null) {
+                    requestReaderScroll(readerDirection)
+                } else {
+                    resolution.events.forEach { event ->
+                        forwardSurfaceInput(event.keyCode, event.action)
+                    }
+                }
+            }
             RingSurfaceInputPolicy.Resolution.Back -> {
                 val surface = active ?: return
                 forwardSurfaceInput(KeyEvent.KEYCODE_BACK, KeyEvent.ACTION_DOWN)
@@ -473,6 +523,26 @@ object SurfaceController {
             null,
             -> Unit
         }
+    }
+
+    private fun requestReaderScroll(direction: Int) {
+        runOnMain {
+            readerScrollListeners.forEach { listener ->
+                runCatching { listener(direction) }
+            }
+        }
+    }
+
+    private fun readerScrollDirection(keyCode: Int): Int? = when (keyCode) {
+        KeyEvent.KEYCODE_DPAD_RIGHT,
+        KeyEvent.KEYCODE_DPAD_DOWN,
+        KeyEvent.KEYCODE_MEDIA_NEXT,
+        -> 1
+        KeyEvent.KEYCODE_DPAD_LEFT,
+        KeyEvent.KEYCODE_DPAD_UP,
+        KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+        -> -1
+        else -> null
     }
 
     private fun handleBackDown(surface: NexusSurface) {
@@ -573,5 +643,16 @@ object SurfaceController {
         KeyEvent.KEYCODE_DPAD_RIGHT,
         KeyEvent.KEYCODE_DPAD_UP,
         KeyEvent.KEYCODE_DPAD_DOWN,
+    )
+
+    private val READER_SCROLL_KEYS = DPAD_DIRECTION_KEYS + setOf(
+        KeyEvent.KEYCODE_MEDIA_NEXT,
+        KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+    )
+
+    private val READER_FORWARDED_KEYS = setOf(
+        KeyEvent.KEYCODE_BACK,
+        KeyEvent.KEYCODE_ENTER,
+        KeyEvent.KEYCODE_DPAD_CENTER,
     )
 }

@@ -166,6 +166,9 @@ Surface kinds v1:
   `tone` is one of `alert`, `normal` (the default), `dim`, or `body`; a `body`
   row wraps as prose and puts its `badge` in a label column beside it. See
   [surface-list-rows.html](docs/surface-list-rows.html).
+- `reader`: `title`, optional `subtitle`/`footer`/`contentKey`, and a complete
+  `segments` document. The renderer owns wrapping and scrolling; see the reader
+  contract below.
 - `timed-lines`: `title`, optional `subtitle`/`footer`, full `lines` as
   `{ "timeMs": 1234, "text": "..." }`, and an `anchor`.
 - `media`: `title`/`subtitle` shell labels, `mediaTitle`, optional
@@ -220,6 +223,51 @@ Stable image error codes returned on `/error` are:
 - `INVALID_IMAGE`: metadata, MIME, dimensions, body, or SHA-256 validation failed.
 - `IMAGE_TOO_LARGE`: the compressed body exceeds 65,536 bytes.
 - `IMAGE_RATE_LIMITED`: the per-surface 150 ms interval has not elapsed.
+
+### Reader surface
+
+A reader is a continuous long-form document rather than a table of card rows.
+The plugin sends the whole document and does not pre-wrap, clamp, window, or
+page it:
+
+```json
+{
+  "surfaceId": "conversation",
+  "kind": "reader",
+  "title": "Conversation",
+  "subtitle": "3 turns",
+  "footer": "tap · back",
+  "contentKey": "conversation-42",
+  "segments": [
+    { "kind": "header", "text": "CX · 5 min ago", "emphasis": true },
+    { "kind": "prose", "text": "The complete response wraps on the glasses." },
+    { "kind": "aside", "text": "⋯ searched 3 sources" }
+  ]
+}
+```
+
+`title` is required, non-blank, and at most 120 characters. `subtitle` and
+`footer` are optional and at most 240 characters each; `contentKey` is optional
+and at most 128 characters. `segments` contains 1 through 240 objects. Every
+segment has a known `kind` and `text` of at most 4,096 characters, and the sum
+of all segment text is at most 40,000 characters. Null shell fields are omitted,
+as is `emphasis` when false. The phone adds verified ownership and the monotonic
+wire `seq` in the same way it does for a card.
+
+Segment kinds are:
+
+- `header`: a quiet line introducing a turn. When `emphasis` is true, the
+  leading token before the first `·` is rendered bright; otherwise it uses the
+  normal text colour. The leading token is bold in both cases.
+- `prose`: full-width body text with renderer-owned wrapping and no line clamp.
+  An empty prose segment is retained as a paragraph break.
+- `aside`: a small muted event line. It has no renderer-added prefix.
+
+Receivers skip unknown segment kinds for forward compatibility and defensively
+truncate all reader fields to these caps rather than rejecting or crashing the
+active HUD. Reader surfaces carry no card lines, timed lines, media, artwork, or
+image. `contentKey`, replacement, sequencing, and stale-message handling are the
+same as for `card`.
 
 ## Pin protocol v1
 
@@ -421,6 +469,11 @@ Surface input payload:
 
 The back key hides the surface locally on glasses and is still reported to the phone
 as `/surface/input` so the active plugin can close its own state.
+
+For a `reader`, the hub owns reader scrolling; plugins receive ENTER (including
+the DPAD_CENTER confirmation alias) and BACK only. DPAD directions and
+MEDIA_NEXT/MEDIA_PREVIOUS scroll by a renderer-defined viewport step and are
+consumed on the glasses instead of producing `/surface/input` events.
 
 ## Notice protocol v1
 
