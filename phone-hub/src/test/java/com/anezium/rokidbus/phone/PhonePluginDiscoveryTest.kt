@@ -5,7 +5,11 @@ import com.anezium.rokidbus.shared.BusConstants
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+// Robolectric for real ComponentName equality; the JUnit android.jar stubs throw on it.
+@RunWith(RobolectricTestRunner::class)
 class PhonePluginDiscoveryTest {
     private fun record(
         packageName: String = "dev.example.hello",

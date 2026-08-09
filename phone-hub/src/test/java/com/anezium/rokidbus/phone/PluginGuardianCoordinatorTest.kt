@@ -36,6 +36,13 @@ class PluginGuardianCoordinatorTest {
         }
     }
 
+    // Robolectric's instrumented ServiceConnection drops the interface's default methods,
+    // so an interface-dispatched onBindingDied throws NoSuchMethodError; resolve it on the
+    // concrete connection class instead.
+    private fun ServiceConnection.fireBindingDied(name: ComponentName) {
+        javaClass.getMethod("onBindingDied", ComponentName::class.java).invoke(this, name)
+    }
+
     private val target = PluginGuardianTarget(
         grantKey = PluginGrantKey("dev.example.relay", "relay", "digest"),
         component = ComponentName("dev.example.relay", "dev.example.relay.RelayGuardianService"),
@@ -72,7 +79,7 @@ class PluginGuardianCoordinatorTest {
         assertEquals(0, context.unbindCount)
         assertEquals(1, context.connections.size)
 
-        firstConnection.onBindingDied(target.component)
+        firstConnection.fireBindingDied(target.component)
         idleMain()
         assertEquals(1, context.unbindCount)
         assertEquals(1, context.connections.size)

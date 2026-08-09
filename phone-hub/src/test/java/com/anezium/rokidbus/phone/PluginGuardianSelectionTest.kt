@@ -5,7 +5,11 @@ import com.anezium.rokidbus.shared.plugin.PluginCapability
 import com.anezium.rokidbus.shared.plugin.PluginDescriptor
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+// Robolectric for real ComponentName equality; the JUnit android.jar stubs throw on it.
+@RunWith(RobolectricTestRunner::class)
 class PluginGuardianSelectionTest {
     @Test
     fun `only installed principals with an approved grant and guardian are selected`() {
