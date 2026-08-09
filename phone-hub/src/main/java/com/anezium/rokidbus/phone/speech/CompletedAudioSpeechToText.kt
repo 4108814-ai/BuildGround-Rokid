@@ -353,6 +353,7 @@ internal class ApiCompletedAudioSpeechToTextEngine(
             "ja" to "ja-JP",
             "ko" to "ko-KR",
             "nl" to "nl-NL",
+            "pl" to "pl-PL",
             "ru" to "ru-RU",
         )
     }
