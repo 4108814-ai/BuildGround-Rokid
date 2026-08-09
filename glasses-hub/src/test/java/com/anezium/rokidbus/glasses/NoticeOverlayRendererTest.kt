@@ -1,6 +1,7 @@
 package com.anezium.rokidbus.glasses
 
 import android.view.WindowManager
+import com.anezium.rokidbus.shared.NoticeSurfaceContent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -75,5 +76,41 @@ class NoticeOverlayRendererTest {
             noticeWindowFlags(displayHoldActive = false) and
                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0,
         )
+    }
+
+    @Test
+    fun `Ink morph dismissal fades in place while ordinary dismissal still slides`() {
+        assertEquals(
+            NoticeDismissMotion.INK_FADE_IN_PLACE,
+            noticeDismissMotion(inkMorphActive = true),
+        )
+        assertEquals(
+            NoticeDismissMotion.SLIDE_AND_FADE,
+            noticeDismissMotion(inkMorphActive = false),
+        )
+    }
+
+    @Test
+    fun `a newer notice cannot inherit or tear down an outgoing notice morph`() {
+        val token = NoticeInkMorphToken(
+            surfaceId = "assistant:notice",
+            seq = 7L,
+            ownerPluginId = "assistant",
+            bandHeightPx = 84,
+            initialAlpha = 1f,
+        )
+        val outgoing = NexusNoticeSurface(
+            surfaceId = "assistant:notice",
+            seq = 7L,
+            content = NoticeSurfaceContent("Thinking", null, null),
+            expiresAtMs = 1_000L,
+            hardExpiresAtMs = 2_000L,
+            ownerPluginId = "assistant",
+        )
+
+        assertTrue(token.matches(outgoing))
+        assertFalse(token.matches(outgoing.copy(seq = 8L)))
+        assertFalse(token.matches(outgoing.copy(surfaceId = "relay:notice")))
+        assertFalse(token.matches(outgoing.copy(ownerPluginId = "relay")))
     }
 }

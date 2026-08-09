@@ -339,6 +339,7 @@ object SurfaceController {
         seq: Long,
         widthPx: Int,
         heightPx: Int,
+        onReleased: () -> Unit,
     ) {
         val current = active
         if (
@@ -357,8 +358,28 @@ object SurfaceController {
                 displayTransitioning = inkDisplayTransitioning,
             )
         ) {
+            runCatching(onReleased)
+                .onFailure { logError("Ink first-frame commit failed", it) }
             sendInkEvent(surfaceId, InkSurfaceContract.EVENT_READY)
         }
+    }
+
+    internal fun isInkPresentationPending(surfaceId: String, seq: Long): Boolean =
+        inkPresentationGate.isPending(surfaceId, seq)
+
+    internal fun inkPresentationGeneration(surfaceId: String, seq: Long): Long? =
+        inkPresentationGate.pendingGeneration(surfaceId, seq)
+
+    internal fun onInkFirstFrameTimeout(surfaceId: String, seq: Long): Boolean {
+        val current = active
+        if (
+            current?.isInk != true || current.surfaceId != surfaceId || current.seq != seq ||
+            !inkPresentationGate.forceRelease(surfaceId, seq)
+        ) {
+            return false
+        }
+        sendInkEvent(surfaceId, InkSurfaceContract.EVENT_READY)
+        return true
     }
 
     internal fun setInkResyncListener(listener: ((InkResyncRequest) -> Unit)?) {
@@ -498,7 +519,14 @@ object SurfaceController {
     }
 
     private fun displaySurface(context: Context, surface: NexusSurface, forcedPath: SurfaceDisplayPath?) {
-        when (forcedPath ?: displayPath(context)) {
+        val path = surfaceDisplayPath(surface, forcedPath ?: displayPath(context))
+        if (surface.isInk) {
+            if (!SurfaceOverlayRenderer.show(context, surface)) {
+                log("Ink surface overlay unavailable")
+            }
+            return
+        }
+        when (path) {
             SurfaceDisplayPath.ACTIVITY -> showActivity(context, surface)
             SurfaceDisplayPath.OVERLAY -> {
                 if (!SurfaceOverlayRenderer.show(context, surface)) {

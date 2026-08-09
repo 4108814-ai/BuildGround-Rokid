@@ -24,6 +24,21 @@ class NoticeStateMachineTest {
     }
 
     @Test
+    fun `show retains the owner used to match a notice to its Ink card`() {
+        val state = NoticeStateMachine()
+
+        val decision = state.show(
+            "assistant:notice",
+            seq = 1,
+            content = content(),
+            nowMs = 0L,
+            ownerPluginId = "assistant",
+        )
+
+        assertEquals("assistant", (decision as NoticeStateDecision.Shown).notice.ownerPluginId)
+    }
+
+    @Test
     fun `a stale sequence is dropped and leaves the slot alone`() {
         val state = NoticeStateMachine()
         state.show("relay:notice", seq = 5, content = content(), nowMs = 0L)

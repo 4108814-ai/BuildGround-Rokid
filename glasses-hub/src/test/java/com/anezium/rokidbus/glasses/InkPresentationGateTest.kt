@@ -1,5 +1,6 @@
 package com.anezium.rokidbus.glasses
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -73,6 +74,59 @@ class InkPresentationGateTest {
                 displayTransitioning = false,
             ),
         )
+    }
+
+    @Test
+    fun `matching timeout force releases once and rejects a late draw`() {
+        val gate = InkPresentationGate()
+        gate.arm(SURFACE_ID, seq = 15L)
+
+        assertTrue(gate.isPending(SURFACE_ID, 15L))
+        assertTrue(gate.forceRelease(SURFACE_ID, 15L))
+        assertFalse(gate.isPending(SURFACE_ID, 15L))
+        assertFalse(gate.forceRelease(SURFACE_ID, 15L))
+        assertFalse(gate.releaseAfterDraw(SURFACE_ID, 15L, widthPx = 441, heightPx = 420))
+    }
+
+    @Test
+    fun `timeout releases a frame blocked by display transition`() {
+        val gate = InkPresentationGate()
+        gate.arm(SURFACE_ID, seq = 16L)
+
+        assertFalse(
+            gate.releaseAfterDraw(
+                SURFACE_ID,
+                16L,
+                widthPx = 441,
+                heightPx = 420,
+                displayTransitioning = true,
+            ),
+        )
+        assertTrue(gate.forceRelease(SURFACE_ID, 16L))
+    }
+
+    @Test
+    fun `retained sequence rejects stale draw and stale timeout`() {
+        val gate = InkPresentationGate()
+        gate.arm(SURFACE_ID, seq = 17L)
+        val generation = gate.pendingGeneration(SURFACE_ID, 17L)
+        gate.retainForSurface(SURFACE_ID, seq = 18L)
+
+        assertEquals(generation, gate.pendingGeneration(SURFACE_ID, 18L))
+        assertFalse(gate.forceRelease(SURFACE_ID, 17L))
+        assertFalse(gate.releaseAfterDraw(SURFACE_ID, 17L, widthPx = 441, heightPx = 420))
+        assertTrue(gate.forceRelease(SURFACE_ID, 18L))
+    }
+
+    @Test
+    fun `fresh same ID show gets a distinct presentation generation`() {
+        val gate = InkPresentationGate()
+        gate.arm(SURFACE_ID, seq = 19L)
+        val first = gate.pendingGeneration(SURFACE_ID, 19L)
+
+        gate.arm(SURFACE_ID, seq = 20L)
+
+        assertFalse(first == gate.pendingGeneration(SURFACE_ID, 20L))
     }
 
     private companion object {

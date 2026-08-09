@@ -40,6 +40,7 @@ internal data class NexusNoticeSurface(
      * messaging plugin that is two replies sent.
      */
     val answered: Boolean = false,
+    val ownerPluginId: String = "",
 ) {
     /**
      * The actions still on offer. An answered band shows none: the question has
@@ -259,6 +260,7 @@ internal class NoticeStateMachine {
         content: NoticeSurfaceContent,
         nowMs: Long,
         imageBitmap: Bitmap? = null,
+        ownerPluginId: String = "",
     ): NoticeStateDecision {
         if (seq <= latestSeq) return NoticeStateDecision.DroppedStale
         latestSeq = seq
@@ -272,6 +274,7 @@ internal class NoticeStateMachine {
             ),
             hardExpiresAtMs = nowMs + NoticeSurfaceContract.MAX_LIFETIME_MS,
             imageBitmap = imageBitmap,
+            ownerPluginId = ownerPluginId,
         )
         active = notice
         return NoticeStateDecision.Shown(notice)
@@ -522,6 +525,45 @@ internal object NoticeController {
 
     fun activeNotice(): NexusNoticeSurface? = state.activeNotice()
 
+    internal fun prepareInkMorph(ownerPluginId: String): NoticeInkMorphToken? {
+        if (Looper.myLooper() != Looper.getMainLooper() || ownerPluginId.isBlank()) return null
+        val notice = visibleNotice()?.takeIf { it.ownerPluginId == ownerPluginId } ?: return null
+        return NoticeOverlayRenderer.beginInkMorph(notice)
+    }
+
+    internal fun startInkMorphFade(token: NoticeInkMorphToken): Boolean =
+        NoticeOverlayRenderer.startInkMorphFade(token)
+
+    internal fun closeForInkMorph(token: NoticeInkMorphToken): Boolean {
+        if (Looper.myLooper() != Looper.getMainLooper()) return false
+        val current = state.activeNotice()
+        if (current == null) return true
+        if (
+            current.surfaceId != token.surfaceId || current.seq != token.seq ||
+            current.ownerPluginId != token.ownerPluginId
+        ) {
+            return false
+        }
+        applyDecision(state.close(NoticeCloseReason.OWNER))
+        return true
+    }
+
+    internal fun finishInkMorph(token: NoticeInkMorphToken) {
+        NoticeOverlayRenderer.finishInkMorph(token)
+    }
+
+    internal fun cancelInkMorph(token: NoticeInkMorphToken) {
+        val current = state.activeNotice()
+        if (
+            current != null && current.surfaceId == token.surfaceId &&
+            current.seq == token.seq && current.ownerPluginId == token.ownerPluginId
+        ) {
+            NoticeOverlayRenderer.cancelInkMorph(token)
+        } else {
+            NoticeOverlayRenderer.finishInkMorph(token)
+        }
+    }
+
     fun onServiceConnected(context: Context, sleepDisplay: () -> Boolean) {
         runOnMain {
             serviceContext = context.applicationContext
@@ -742,6 +784,7 @@ internal object NoticeController {
             return
         }
         val seq = envelope.payload.optLong("seq", Long.MIN_VALUE)
+        val ownerPluginId = envelope.payload.optString("ownerPluginId")
         val image = validation.content.image
         if (image != null) {
             val bytes = envelope.binary ?: return
@@ -774,6 +817,7 @@ internal object NoticeController {
                                 seq = seq,
                                 content = validation.content,
                                 imageBitmap = decoded,
+                                ownerPluginId = ownerPluginId,
                             )
                             imageDecodeCoordinator.invalidate(surfaceId)
                                 ?.takeUnless { it === decoded }
@@ -787,7 +831,13 @@ internal object NoticeController {
         imageDecodeCoordinator.invalidate()?.let { pending ->
             if (pending !== state.activeNotice()?.imageBitmap) pending.recycleSafely()
         }
-        showValidated(context, surfaceId, seq, validation.content)
+        showValidated(
+            context,
+            surfaceId,
+            seq,
+            validation.content,
+            ownerPluginId = ownerPluginId,
+        )
     }
 
     private fun showValidated(
@@ -796,6 +846,7 @@ internal object NoticeController {
         seq: Long,
         content: NoticeSurfaceContent,
         imageBitmap: Bitmap? = null,
+        ownerPluginId: String = "",
     ) {
         val previous = state.activeNotice()
         val decision = state.show(
@@ -804,6 +855,7 @@ internal object NoticeController {
             content,
             SystemClock.elapsedRealtime(),
             imageBitmap,
+            ownerPluginId,
         )
         // A different plugin taking the slot is a close for the one that had it,
         // and its owner is owed the reason.

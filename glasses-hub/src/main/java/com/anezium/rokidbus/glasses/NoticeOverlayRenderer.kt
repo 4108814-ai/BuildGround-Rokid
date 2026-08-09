@@ -56,6 +56,25 @@ internal fun noticeBandHeightCeiling(
     topInsetPx: Int,
 ): Int = ((displayHeightPx * heightFraction).toInt() - topInsetPx).coerceAtLeast(0)
 
+internal enum class NoticeDismissMotion {
+    SLIDE_AND_FADE,
+    INK_FADE_IN_PLACE,
+}
+
+internal fun noticeDismissMotion(inkMorphActive: Boolean): NoticeDismissMotion =
+    if (inkMorphActive) NoticeDismissMotion.INK_FADE_IN_PLACE else NoticeDismissMotion.SLIDE_AND_FADE
+
+internal data class NoticeInkMorphToken(
+    val surfaceId: String,
+    val seq: Long,
+    val ownerPluginId: String,
+    val bandHeightPx: Int,
+    val initialAlpha: Float,
+) {
+    fun matches(notice: NexusNoticeSurface): Boolean =
+        surfaceId == notice.surfaceId && seq == notice.seq && ownerPluginId == notice.ownerPluginId
+}
+
 /**
  * The notice band: a transient panel across the top that arrives, says its
  * piece, and leaves.
@@ -89,6 +108,7 @@ object NoticeOverlayRenderer {
     private var exitRunning = false
     private var renderedSeq: Long? = null
     private var displayHoldActive = false
+    private var inkMorph: NoticeInkMorphToken? = null
 
     private val slide = HudMotionValue(0f) { offset -> band?.translationY = offset }
     private val fade = HudMotionValue(0f) { alpha ->
@@ -128,10 +148,67 @@ object NoticeOverlayRenderer {
 
     fun isShown(): Boolean = container != null
 
+    internal fun beginInkMorph(notice: NexusNoticeSurface): NoticeInkMorphToken? {
+        val view = band ?: return null
+        if (
+            container == null || exitRunning || renderedSeq != notice.seq ||
+            notice.ownerPluginId.isBlank() || view.width <= 0 || view.height <= 0 ||
+            fade.current <= 0f
+        ) {
+            return null
+        }
+        val token = NoticeInkMorphToken(
+            surfaceId = notice.surfaceId,
+            seq = notice.seq,
+            ownerPluginId = notice.ownerPluginId,
+            bandHeightPx = view.height,
+            initialAlpha = fade.current,
+        )
+        inkMorph = token
+        bandHeightPx = view.height
+        exitRunning = false
+        slide.snapTo(0f)
+        fade.cancel()
+        return token
+    }
+
+    internal fun startInkMorphFade(token: NoticeInkMorphToken): Boolean {
+        if (inkMorph != token || container == null || band == null) return false
+        return runCatching {
+            slide.snapTo(0f)
+            fade.animateTo(0f, HudMotion.MICRO_MS, HudMotion.enter)
+            true
+        }.onFailure {
+            fade.snapTo(0f)
+            logError("Notice Ink morph fade could not start", it)
+        }.getOrDefault(false)
+    }
+
+    internal fun finishInkMorph(token: NoticeInkMorphToken): Boolean {
+        if (inkMorph != token) return false
+        fade.snapTo(0f)
+        inkMorph = null
+        teardown()
+        return true
+    }
+
+    internal fun cancelInkMorph(token: NoticeInkMorphToken): Boolean {
+        if (inkMorph != token) return false
+        inkMorph = null
+        fade.snapTo(token.initialAlpha)
+        return true
+    }
+
     private fun render(notice: NexusNoticeSurface?) {
         if (notice == null) {
             dismiss()
             return
+        }
+        val interruptedInkMorph = inkMorph?.matches(notice) == false
+        if (interruptedInkMorph) {
+            inkMorph = null
+            fade.cancel()
+            slide.snapTo(0f)
         }
         setDisplayHold(
             NoticeDisplayHoldPolicy.noticeHoldsDisplay(
@@ -143,7 +220,11 @@ object NoticeOverlayRenderer {
         scrim?.alpha = noticeBackdropAlpha(fade.current, backdrop)
         val activeService = service ?: return
         val view = ensureWindow(activeService) ?: return
-        val motion = noticeRenderMotion(fade.current, exitRunning)
+        val motion = if (interruptedInkMorph) {
+            NoticeRenderMotion.REENTER
+        } else {
+            noticeRenderMotion(fade.current, exitRunning)
+        }
         val fadeWasRunning = fade.isRunning
         renderedSeq = notice.seq
         view.render(notice)
@@ -176,8 +257,12 @@ object NoticeOverlayRenderer {
     }
 
     private fun dismiss() {
+        if (container == null) {
+            setDisplayHold(false)
+            return
+        }
+        if (noticeDismissMotion(inkMorph != null) == NoticeDismissMotion.INK_FADE_IN_PLACE) return
         setDisplayHold(false)
-        if (container == null) return
         exitRunning = true
         slide.animateTo(-bandHeightPx.toFloat(), HudMotion.EXIT_MS, HudMotion.exit)
         fade.animateTo(0f, HudMotion.EXIT_MS, HudMotion.exit) { teardown() }
@@ -211,11 +296,11 @@ object NoticeOverlayRenderer {
         root.addView(
             view,
             FrameLayout.LayoutParams(
-                (metrics.widthPixels * BAND_WIDTH_FRACTION).toInt(),
+                HudBandGeometry.widthPx(metrics.widthPixels),
                 FrameLayout.LayoutParams.WRAP_CONTENT,
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                topMargin = BusTheme.dp(service, EDGE_MARGIN_DP + hudTopInsetDp)
+                topMargin = HudBandGeometry.topPx(service, hudTopInsetDp)
             },
         )
         if (runCatching { manager.addView(root, params(service)) }.isFailure) {
@@ -235,7 +320,7 @@ object NoticeOverlayRenderer {
         band?.let { currentBand ->
             currentBand.setHudTopInsetDp(hudTopInsetDp)
             val layout = currentBand.layoutParams as? FrameLayout.LayoutParams ?: return@let
-            layout.topMargin = BusTheme.dp(currentBand.context, EDGE_MARGIN_DP + hudTopInsetDp)
+            layout.topMargin = HudBandGeometry.topPx(currentBand.context, hudTopInsetDp)
             currentBand.layoutParams = layout
         }
         container?.requestLayout()
@@ -274,6 +359,7 @@ object NoticeOverlayRenderer {
         container = null
         scrim = null
         band = null
+        inkMorph = null
         backdrop = false
         exitRunning = false
         displayHoldActive = false
@@ -700,9 +786,6 @@ object NoticeOverlayRenderer {
             pageCountChanged(count)
         }
     }
-
-    private const val EDGE_MARGIN_DP = 12
-    private const val BAND_WIDTH_FRACTION = 0.92f
 
     // Eight lines preserve the compact band exactly. Pageable long notices can
     // grow to fourteen measured lines under the taller ceiling; an image still

@@ -20,6 +20,7 @@ class InkRenderLogicTest {
                 .put("surfaceId", "ink")
                 .put("seq", 1)
                 .put("kind", NexusSurface.KIND_INK)
+                .put("ownerPluginId", "assistant")
                 .put(
                     "ink",
                     JSONObject()
@@ -33,6 +34,7 @@ class InkRenderLogicTest {
         assertEquals(raw, surface.ink!!.documentJson)
         assertTrue(surface.ink.debugActions)
         assertTrue(surface.ink.debugFrameMeter)
+        assertEquals("assistant", surface.ownerPluginId)
     }
 
     @Test

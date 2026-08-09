@@ -23,6 +23,11 @@ class SurfaceActivity : Activity() {
         hudView = SurfaceHudView(this)
         setContentView(hudView)
         unsubscribe = SurfaceController.observe { surface ->
+            if (surface?.isInk == true) {
+                hudView.render(null)
+                if (!isFinishing) finish()
+                return@observe
+            }
             hudView.render(surface)
             if (surface == null && !isFinishing) finish()
         }

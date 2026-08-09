@@ -13,11 +13,25 @@ import android.text.style.RelativeSizeSpan
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
+import kotlin.math.roundToInt
 
 class SurfaceHudView(context: Context) : LinearLayout(context) {
+    private data class ActiveInkMorph(
+        val surfaceId: String,
+        var seq: Long,
+        val notice: NoticeInkMorphToken,
+        val state: InkCardMorphState = InkCardMorphState(),
+    )
+
+    private data class PendingInkFallback(
+        val surfaceId: String,
+        var seq: Long,
+    )
+
     private val titleView = monoText(17f, BusTheme.text, bold = true)
     private val subtitleView = monoText(11f, BusTheme.muted)
     private val previousView = monoText(15f, BusTheme.dim)
@@ -43,6 +57,16 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         setPadding(px(4), px(4), px(4), px(4))
     }
     private val inkView = InkHudView(context).apply { visibility = GONE }
+    private val inkCardHost = InkCardClipHost(context).apply {
+        visibility = GONE
+        addView(
+            inkView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+    }
     private val footerView = monoText(10.5f, BusTheme.dim).apply {
         gravity = Gravity.CENTER
         textAlignment = TEXT_ALIGNMENT_CENTER
@@ -53,6 +77,16 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
     private var pendingListLayoutListener: View.OnLayoutChangeListener? = null
     private var insetUnsubscribe: (() -> Unit)? = null
     private var stopObservingReaderScroll: (() -> Unit)? = null
+    private var hudTopInsetDp = 0
+    private var inkPresentationSurfaceId: String? = null
+    private var inkPresentationGeneration: Long? = null
+    private var activeInkMorph: ActiveInkMorph? = null
+    private var pendingInkFallback: PendingInkFallback? = null
+    private var inkMorphTimeout: Runnable? = null
+    private val inkClipMotion = HudMotionValue(0f) { height ->
+        inkCardHost.revealTo(height.roundToInt())
+    }
+    private val inkAlphaMotion = HudMotionValue(1f) { alpha -> inkView.alpha = alpha }
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -90,7 +124,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         addView(imageView, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply {
             topMargin = px(8)
         })
-        addView(inkView, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply {
+        addView(inkCardHost, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply {
             topMargin = px(8)
         })
         addView(previousView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
@@ -115,12 +149,39 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
 
     fun render(next: NexusSurface?) {
         removeCallbacks(ticker)
+        val pendingGeneration = next?.takeIf(NexusSurface::isInk)?.let {
+            SurfaceController.inkPresentationGeneration(it.surfaceId, it.seq)
+        }
+        val keepsPresentation = shouldKeepInkPresentation(
+            nextIsInk = next?.isInk == true,
+            nextSurfaceId = next?.surfaceId.orEmpty(),
+            presentationSurfaceId = inkPresentationSurfaceId,
+            pendingGeneration = pendingGeneration,
+            presentationGeneration = inkPresentationGeneration,
+        )
+        if (!keepsPresentation) {
+            cancelInkPresentation()
+            inkPresentationSurfaceId = null
+            inkPresentationGeneration = null
+        }
         surface = next
         if (next == null) {
             clear()
             return
         }
         renderNow(next)
+        if (next.isInk) {
+            activeInkMorph
+                ?.takeIf {
+                    it.surfaceId == next.surfaceId &&
+                        it.state.phase == InkCardMorphPhase.WAITING_FOR_FIRST_FRAME
+                }
+                ?.seq = next.seq
+            pendingInkFallback
+                ?.takeIf { it.surfaceId == next.surfaceId }
+                ?.seq = next.seq
+            if (!keepsPresentation) prepareInkPresentation(next)
+        }
         if (shouldTick(next)) {
             postDelayed(ticker, tickDelay(next))
         }
@@ -136,7 +197,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
             seq = drawn.seq,
             widthPx = inkView.width,
             heightPx = inkView.height,
-        )
+        ) { onInkFirstFrame(drawn.surfaceId, drawn.seq) }
     }
 
     override fun onAttachedToWindow() {
@@ -154,6 +215,9 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         insetUnsubscribe = null
         removeCallbacks(ticker)
         invalidatePendingListLayout()
+        cancelInkPresentation()
+        inkPresentationSurfaceId = null
+        inkPresentationGeneration = null
         stopObservingReaderScroll?.invoke()
         stopObservingReaderScroll = null
         SurfaceController.detachInkRenderer(inkView)
@@ -161,12 +225,21 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
     }
 
     private fun applyHudTopInset(value: Int) {
-        setPadding(px(18), px(16 + HudTopInset.sanitize(value)), px(18), px(12))
+        hudTopInsetDp = HudTopInset.sanitize(value)
+        if (surface?.isInk == true) {
+            applyInkCardHost()
+        } else {
+            applyFullBleedHost()
+        }
         requestLayout()
     }
 
     private fun renderNow(surface: NexusSurface) {
         invalidatePendingListLayout()
+        when (surfaceHudMode(surface.kind)) {
+            SurfaceHudMode.INK_CARD -> applyInkCardHost()
+            SurfaceHudMode.FULL_BLEED -> applyFullBleedHost()
+        }
         titleView.text = surface.title
         titleView.visibility = visibleIf(surface.title.isNotBlank())
         subtitleView.text = surface.subtitle
@@ -186,12 +259,17 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
     }
 
     private fun renderInk(surface: NexusSurface) {
+        hideReader()
         mediaView.visibility = GONE
         imageView.visibility = GONE
+        titleView.visibility = GONE
+        subtitleView.visibility = GONE
         previousView.visibility = GONE
         currentView.visibility = GONE
         boardView.visibility = GONE
         nextView.visibility = GONE
+        footerView.visibility = GONE
+        inkCardHost.visibility = VISIBLE
         inkView.visibility = VISIBLE
         SurfaceController.attachInkRenderer(inkView, surface.ink?.debugActions == true)
     }
@@ -199,6 +277,229 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
     private fun hideInk() {
         SurfaceController.detachInkRenderer(inkView)
         inkView.visibility = GONE
+        inkCardHost.visibility = GONE
+        resetInkReveal()
+    }
+
+    private fun applyFullBleedHost() {
+        applyHostChrome(SurfaceHudMode.FULL_BLEED)
+    }
+
+    private fun applyHostChrome(mode: SurfaceHudMode) {
+        val chrome = surfaceHostChrome(mode, hudTopInsetDp)
+        val fill = chrome.backgroundColor
+        if (fill == null) background = null else setBackgroundColor(fill)
+        setPadding(
+            px(chrome.paddingLeftDp),
+            px(chrome.paddingTopDp),
+            px(chrome.paddingRightDp),
+            px(chrome.paddingBottomDp),
+        )
+    }
+
+    private fun applyInkCardHost() {
+        applyHostChrome(SurfaceHudMode.INK_CARD)
+        val metrics = resources.displayMetrics
+        val topPx = HudBandGeometry.topPx(context, hudTopInsetDp)
+        val layout = (inkCardHost.layoutParams as? LayoutParams)
+            ?: LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT)
+        layout.width = HudBandGeometry.widthPx(metrics.widthPixels)
+        layout.height = LayoutParams.WRAP_CONTENT
+        layout.weight = 0f
+        layout.gravity = Gravity.CENTER_HORIZONTAL
+        layout.topMargin = topPx
+        inkCardHost.layoutParams = layout
+        inkCardHost.heightCapPx = HudBandGeometry.availableHeightPx(
+            displayHeightPx = metrics.heightPixels,
+            topPx = topPx,
+        )
+    }
+
+    private fun prepareInkPresentation(surface: NexusSurface) {
+        inkPresentationSurfaceId = surface.surfaceId
+        inkPresentationGeneration =
+            SurfaceController.inkPresentationGeneration(surface.surfaceId, surface.seq)
+        if (!SurfaceController.isInkPresentationPending(surface.surfaceId, surface.seq)) {
+            resetInkReveal()
+            return
+        }
+        val notice = runCatching { NoticeController.prepareInkMorph(surface.ownerPluginId) }
+            .onFailure { logError("Ink card morph notice preparation failed", it) }
+            .getOrNull()
+        if (notice == null) {
+            resetInkReveal()
+            val fallback = PendingInkFallback(surface.surfaceId, surface.seq)
+            pendingInkFallback = fallback
+            scheduleInkReadyFallback(fallback)
+            return
+        }
+
+        val morph = ActiveInkMorph(surface.surfaceId, surface.seq, notice)
+        activeInkMorph = morph
+        inkClipMotion.snapTo(notice.bandHeightPx.toFloat())
+        inkAlphaMotion.snapTo(0f)
+        val timeout = Runnable {
+            if (activeInkMorph === morph) {
+                commitInkMorphInstant(morph, reason = "first_frame_timeout", releaseGate = true)
+            }
+        }
+        inkMorphTimeout = timeout
+        postDelayed(timeout, 500L)
+    }
+
+    private fun onInkFirstFrame(surfaceId: String, seq: Long) {
+        if (inkPresentationSurfaceId == surfaceId) clearInkMorphTimeout()
+        pendingInkFallback?.takeIf { it.surfaceId == surfaceId }?.let {
+            pendingInkFallback = null
+            logMorphDecision(
+                decision = "instant",
+                reason = "no_matching_band",
+                bandPx = 0,
+                cardPx = inkCardHost.height,
+            )
+            return
+        }
+        val morph = activeInkMorph?.takeIf {
+            it.surfaceId == surfaceId && it.state.phase == InkCardMorphPhase.WAITING_FOR_FIRST_FRAME
+        } ?: return
+        morph.seq = seq
+        try {
+            clearInkMorphTimeout()
+            val cardHeightPx = inkCardHost.height
+            if (cardHeightPx <= 0 || morph.notice.bandHeightPx <= 0) {
+                commitInkMorphInstant(morph, reason = "invalid_bounds", releaseGate = false)
+                return
+            }
+            if (!HudMotion.enabled) {
+                commitInkMorphInstant(morph, reason = "motion_disabled", releaseGate = false)
+                return
+            }
+            if (cardHeightPx == morph.notice.bandHeightPx) {
+                commitInkMorphInstant(morph, reason = "no_clip_delta", releaseGate = false)
+                return
+            }
+            if (!morph.state.startAnimation()) return
+
+            inkClipMotion.snapTo(morph.notice.bandHeightPx.toFloat())
+            inkAlphaMotion.snapTo(0f)
+            inkAlphaMotion.animateTo(1f, HudMotion.MICRO_MS, HudMotion.enter)
+            if (!NoticeController.startInkMorphFade(morph.notice)) {
+                commitInkMorphInstant(morph, reason = "notice_unavailable", releaseGate = false)
+                return
+            }
+            if (!NoticeController.closeForInkMorph(morph.notice)) {
+                commitInkMorphInstant(morph, reason = "notice_replaced", releaseGate = false)
+                return
+            }
+            inkClipMotion.animateTo(
+                target = cardHeightPx.toFloat(),
+                durationMs = HudMotion.STANDARD_MS,
+                interpolator = HudMotion.enter,
+            ) {
+                completeInkMorph(morph, cardHeightPx)
+            }
+            logMorphDecision(
+                decision = "animate",
+                reason = "first_frame",
+                bandPx = morph.notice.bandHeightPx,
+                cardPx = cardHeightPx,
+            )
+        } catch (error: Throwable) {
+            logError("Ink card morph animator unavailable", error)
+            commitInkMorphInstant(morph, reason = "animator_unavailable", releaseGate = false)
+        }
+    }
+
+    private fun completeInkMorph(morph: ActiveInkMorph, cardHeightPx: Int) {
+        if (activeInkMorph !== morph || !morph.state.completeAnimation()) return
+        inkClipMotion.snapTo(cardHeightPx.toFloat())
+        inkAlphaMotion.snapTo(1f)
+        inkCardHost.revealFully()
+        activeInkMorph = null
+        runCatching { NoticeController.finishInkMorph(morph.notice) }
+            .onFailure { logError("Ink card morph notice teardown failed", it) }
+    }
+
+    private fun commitInkMorphInstant(
+        morph: ActiveInkMorph,
+        reason: String,
+        releaseGate: Boolean,
+    ) {
+        if (activeInkMorph !== morph || !morph.state.commitInstant()) return
+        clearInkMorphTimeout()
+        inkClipMotion.cancel()
+        inkAlphaMotion.cancel()
+        inkCardHost.revealFully()
+        inkView.alpha = 1f
+        logMorphDecision(
+            decision = "instant",
+            reason = reason,
+            bandPx = morph.notice.bandHeightPx,
+            cardPx = inkCardHost.height,
+        )
+        activeInkMorph = null
+        runCatching { NoticeController.closeForInkMorph(morph.notice) }
+            .onFailure { logError("Ink card morph notice close failed", it) }
+        runCatching { NoticeController.finishInkMorph(morph.notice) }
+            .onFailure { logError("Ink card morph notice teardown failed", it) }
+        if (releaseGate) {
+            SurfaceController.onInkFirstFrameTimeout(morph.surfaceId, morph.seq)
+        }
+    }
+
+    private fun cancelInkPresentation() {
+        clearInkMorphTimeout()
+        pendingInkFallback = null
+        val morph = activeInkMorph
+        activeInkMorph = null
+        inkClipMotion.cancel()
+        inkAlphaMotion.cancel()
+        if (morph != null) {
+            morph.state.cancel()
+            runCatching { NoticeController.cancelInkMorph(morph.notice) }
+                .onFailure { logError("Ink card morph notice restore failed", it) }
+        }
+        resetInkReveal()
+    }
+
+    private fun clearInkMorphTimeout() {
+        inkMorphTimeout?.let(::removeCallbacks)
+        inkMorphTimeout = null
+    }
+
+    private fun scheduleInkReadyFallback(fallback: PendingInkFallback) {
+        val timeout = Runnable {
+            if (pendingInkFallback !== fallback) return@Runnable
+            val current = surface?.takeIf { it.isInk && it.surfaceId == fallback.surfaceId }
+                ?: return@Runnable
+            fallback.seq = current.seq
+            pendingInkFallback = null
+            logMorphDecision(
+                decision = "instant",
+                reason = "no_matching_band",
+                bandPx = 0,
+                cardPx = inkCardHost.height,
+            )
+            SurfaceController.onInkFirstFrameTimeout(current.surfaceId, current.seq)
+        }
+        inkMorphTimeout = timeout
+        postDelayed(timeout, 500L)
+    }
+
+    private fun resetInkReveal() {
+        inkClipMotion.cancel()
+        inkAlphaMotion.cancel()
+        inkCardHost.revealFully()
+        inkView.alpha = 1f
+    }
+
+    private fun logMorphDecision(
+        decision: String,
+        reason: String,
+        bandPx: Int,
+        cardPx: Int,
+    ) {
+        log("morph decision=$decision reason=$reason bandPx=$bandPx cardPx=$cardPx")
     }
 
     private fun renderTimed(surface: NexusSurface) {
@@ -655,6 +956,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
 
     private fun clear() {
         invalidatePendingListLayout()
+        applyFullBleedHost()
         titleView.text = ""
         subtitleView.text = ""
         previousView.text = ""

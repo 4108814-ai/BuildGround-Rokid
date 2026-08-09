@@ -211,6 +211,7 @@ data class NexusSurface(
     val imageBitmap: Bitmap? = null,
     val readerSegments: List<ReaderSegment> = emptyList(),
     val ink: InkSurfacePayload? = null,
+    val ownerPluginId: String = "",
 ) {
     val isTimed: Boolean
         get() = kind == KIND_TIMED_LINES && timedLines.isNotEmpty()
@@ -394,6 +395,8 @@ data class NexusSurface(
                 } else {
                     null
                 },
+                ownerPluginId = payload.optString("ownerPluginId")
+                    .ifBlank { previous?.takeIf { canMergePrevious }?.ownerPluginId.orEmpty() },
             )
         }
 

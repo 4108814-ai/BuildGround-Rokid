@@ -5,22 +5,31 @@ internal class InkPresentationGate {
     private data class PendingShow(
         val surfaceId: String,
         val seq: Long,
+        val generation: Long,
     )
 
     private var pending: PendingShow? = null
+    private var nextGeneration = 0L
 
     fun arm(surfaceId: String, seq: Long) {
-        pending = PendingShow(surfaceId, seq)
+        nextGeneration += 1L
+        pending = PendingShow(surfaceId, seq, nextGeneration)
     }
 
     fun retainForSurface(surfaceId: String, seq: Long) {
         val current = pending ?: return
         pending = if (current.surfaceId == surfaceId) {
-            PendingShow(surfaceId, seq)
+            current.copy(seq = seq)
         } else {
             null
         }
     }
+
+    fun isPending(surfaceId: String, seq: Long): Boolean =
+        pending?.let { it.surfaceId == surfaceId && it.seq == seq } == true
+
+    fun pendingGeneration(surfaceId: String, seq: Long): Long? =
+        pending?.takeIf { it.surfaceId == surfaceId && it.seq == seq }?.generation
 
     fun releaseAfterDraw(
         surfaceId: String,
@@ -30,8 +39,14 @@ internal class InkPresentationGate {
         displayTransitioning: Boolean = false,
     ): Boolean {
         if (widthPx <= 0 || heightPx <= 0) return false
-        if (pending != PendingShow(surfaceId, seq)) return false
+        if (!isPending(surfaceId, seq)) return false
         if (displayTransitioning) return false
+        pending = null
+        return true
+    }
+
+    fun forceRelease(surfaceId: String, seq: Long): Boolean {
+        if (!isPending(surfaceId, seq)) return false
         pending = null
         return true
     }

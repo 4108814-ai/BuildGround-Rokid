@@ -16,7 +16,10 @@ object SurfaceOverlayRenderer {
         this.service = service
         windowManager = service.getSystemService(WindowManager::class.java)
         SurfaceController.activeSurface()?.let { active ->
-            if (SurfaceController.displayPath(service) == SurfaceDisplayPath.OVERLAY) {
+            if (
+                surfaceDisplayPath(active, SurfaceController.displayPath(service)) ==
+                SurfaceDisplayPath.OVERLAY
+            ) {
                 show(service, active)
             }
         }

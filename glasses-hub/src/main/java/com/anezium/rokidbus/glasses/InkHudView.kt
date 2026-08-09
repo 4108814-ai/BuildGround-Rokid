@@ -68,7 +68,6 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
     private var pendingGeometryReapply: Runnable? = null
 
     init {
-        setBackgroundColor(BusTheme.glassesBg)
         clipChildren = false
         clipToPadding = false
         addView(rootFlex, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
