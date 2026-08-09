@@ -148,6 +148,27 @@ internal class RelayDiagnosticsRepository(
         persistence.save(current)
     }
 
+    /**
+     * Every phone notification lands here, so this update may not pay the
+     * full-snapshot serialization on each call: the in-memory state is always
+     * exact, but disk sees it at most once per [minSaveIntervalMs] — or with
+     * whichever ordinary record()/update() comes first, since those persist
+     * the same current snapshot anyway.
+     */
+    @Synchronized
+    fun updateLazily(
+        minSaveIntervalMs: Long,
+        nowMs: Long,
+        transform: (RelayDiagnosticsSnapshot) -> RelayDiagnosticsSnapshot,
+    ) {
+        current = transform(current).copy(events = ring.snapshot())
+        if (nowMs - lastLazySaveMs in 0 until minSaveIntervalMs) return
+        lastLazySaveMs = nowMs
+        persistence.save(current)
+    }
+
+    private var lastLazySaveMs = Long.MIN_VALUE
+
     companion object {
         const val DEFAULT_EVENT_CAPACITY = 192
     }

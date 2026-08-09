@@ -134,13 +134,17 @@ internal object RelayDiagnostics {
     @Synchronized
     fun recordRawNotificationPosted(context: Context) {
         val now = System.currentTimeMillis()
-        repository(context).update { it.copy(lastRawNotificationPostedWallMs = now) }
+        repository(context).updateLazily(HOT_PATH_SAVE_INTERVAL_MS, now) {
+            it.copy(lastRawNotificationPostedWallMs = now)
+        }
     }
 
     @Synchronized
     fun recordAcceptedCapture(context: Context) {
         val now = System.currentTimeMillis()
-        repository(context).update { it.copy(lastAcceptedCaptureWallMs = now) }
+        repository(context).updateLazily(HOT_PATH_SAVE_INTERVAL_MS, now) {
+            it.copy(lastAcceptedCaptureWallMs = now)
+        }
     }
 
     @Synchronized
@@ -384,6 +388,9 @@ internal object RelayDiagnostics {
     }
 
     private const val PREFS = "relay_diagnostics"
+
+    /** The listener sees every notification on the phone; disk must not (issue #11). */
+    private const val HOT_PATH_SAVE_INTERVAL_MS = 60_000L
 }
 
 private class SharedPreferencesRelayDiagnosticsPersistence(

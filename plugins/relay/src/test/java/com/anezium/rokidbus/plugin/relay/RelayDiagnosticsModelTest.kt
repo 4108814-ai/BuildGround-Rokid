@@ -38,6 +38,31 @@ class RelayDiagnosticsModelTest {
     }
 
     @Test
+    fun `lazy updates keep memory exact but rate-limit disk writes`() {
+        val persistence = MemoryPersistence()
+        val repository = RelayDiagnosticsRepository(persistence, capacity = 4)
+        val baseline = persistence.saveCount
+
+        repository.updateLazily(60_000L, nowMs = 1_000L) { it.copy(lastRawNotificationPostedWallMs = 1_000L) }
+        repository.updateLazily(60_000L, nowMs = 2_000L) { it.copy(lastRawNotificationPostedWallMs = 2_000L) }
+        repository.updateLazily(60_000L, nowMs = 3_000L) { it.copy(lastRawNotificationPostedWallMs = 3_000L) }
+
+        assertEquals(baseline + 1, persistence.saveCount)
+        assertEquals(3_000L, repository.snapshot().lastRawNotificationPostedWallMs)
+
+        // An ordinary record carries the withheld hot fields to disk with it.
+        repository.record(event(10L))
+        assertEquals(3_000L, RelayDiagnosticsRepository(persistence, capacity = 4).snapshot().lastRawNotificationPostedWallMs)
+
+        // Past the interval, the hot path persists again on its own.
+        repository.updateLazily(60_000L, nowMs = 62_000L) { it.copy(lastRawNotificationPostedWallMs = 62_000L) }
+        assertEquals(
+            62_000L,
+            RelayDiagnosticsRepository(persistence, capacity = 4).snapshot().lastRawNotificationPostedWallMs,
+        )
+    }
+
+    @Test
     fun `persisted free form data cannot enter an event or copied diagnostics`() {
         val unsafe = listOf(
             "10|LISTENER|LISTENER_CONNECTED|0|1",
