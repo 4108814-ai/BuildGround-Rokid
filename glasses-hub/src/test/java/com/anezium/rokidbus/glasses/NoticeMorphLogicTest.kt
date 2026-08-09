@@ -2,7 +2,6 @@ package com.anezium.rokidbus.glasses
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -22,33 +21,26 @@ class NoticeMorphLogicTest {
     }
 
     @Test
-    fun `one progress value drives only transform and crossfade`() {
-        val inkLayout = HudBounds(left = 18, top = 24, right = 462, bottom = 612)
+    fun `one progress value drives bounds and the content crossfade`() {
         val start = HudBounds(left = 20, top = 12, right = 460, bottom = 92)
-        val target = HudBounds(left = 28, top = 40, right = 452, bottom = 260)
+        val target = HudBounds(left = 18, top = 24, right = 462, bottom = 612)
 
-        val startFrame = requireNotNull(
-            noticeMorphFrame(inkLayout, start, target, progress = 0f, initialNoticeAlpha = 0.8f),
+        assertEquals(
+            NoticeMorphFrame(start, noticeAlpha = 0.8f, inkAlpha = 0f),
+            noticeMorphFrame(start, target, progress = 0f, initialNoticeAlpha = 0.8f),
         )
-        val middleFrame = requireNotNull(
-            noticeMorphFrame(inkLayout, start, target, progress = 0.5f, initialNoticeAlpha = 0.8f),
+        assertEquals(
+            NoticeMorphFrame(
+                bounds = HudBounds(left = 19, top = 18, right = 461, bottom = 352),
+                noticeAlpha = 0.4f,
+                inkAlpha = 0.5f,
+            ),
+            noticeMorphFrame(start, target, progress = 0.5f, initialNoticeAlpha = 0.8f),
         )
-        val endFrame = requireNotNull(
-            noticeMorphFrame(inkLayout, start, target, progress = 1f, initialNoticeAlpha = 0.8f),
+        assertEquals(
+            NoticeMorphFrame(target, noticeAlpha = 0f, inkAlpha = 1f),
+            noticeMorphFrame(start, target, progress = 1f, initialNoticeAlpha = 0.8f),
         )
-
-        assertEquals(inkLayout, startFrame.layoutBounds)
-        assertEquals(inkLayout, middleFrame.layoutBounds)
-        assertEquals(inkLayout, endFrame.layoutBounds)
-        assertEquals(start, startFrame.visualContentBounds(target))
-        assertEquals(HudBounds(24, 26, 456, 176), middleFrame.visualContentBounds(target))
-        assertEquals(target, endFrame.visualContentBounds(target))
-        assertEquals(0.8f, startFrame.noticeAlpha, 0f)
-        assertEquals(0f, startFrame.inkAlpha, 0f)
-        assertEquals(0.4f, middleFrame.noticeAlpha, 0f)
-        assertEquals(0.5f, middleFrame.inkAlpha, 0f)
-        assertEquals(0f, endFrame.noticeAlpha, 0f)
-        assertEquals(1f, endFrame.inkAlpha, 0f)
     }
 
     @Test
@@ -58,23 +50,13 @@ class NoticeMorphLogicTest {
             HudBounds(left = 20, top = 32, right = 220, bottom = 132),
             screen.relativeTo(originX = 4, originY = 8),
         )
-        val layout = HudBounds(0, 0, 480, 640)
-        val target = HudBounds(0, 0, 1, 1)
-        assertEquals(screen, requireNotNull(noticeMorphFrame(layout, screen, target, -2f)).visualContentBounds(target))
-        assertEquals(target, requireNotNull(noticeMorphFrame(layout, screen, target, 2f)).visualContentBounds(target))
-        assertNull(noticeMorphFrame(layout, HudBounds(0, 0, 0, 1), target, 0f))
-    }
-
-    @Test
-    fun `notice cannot complete before the ink first-frame signal`() {
-        val lifecycle = NoticeMorphLifecycle()
-
-        assertFalse(lifecycle.onAnimationComplete())
-        assertEquals(NoticeMorphPhase.WAITING_FOR_FIRST_FRAME, lifecycle.phase)
-        assertTrue(lifecycle.onFirstFrame())
-        assertEquals(NoticeMorphPhase.ANIMATING, lifecycle.phase)
-        assertTrue(lifecycle.onAnimationComplete())
-        assertEquals(NoticeMorphPhase.COMPLETE, lifecycle.phase)
-        assertFalse(lifecycle.onFirstFrame())
+        assertEquals(
+            screen,
+            noticeMorphFrame(screen, HudBounds(0, 0, 1, 1), progress = -2f).bounds,
+        )
+        assertEquals(
+            HudBounds(0, 0, 1, 1),
+            noticeMorphFrame(screen, HudBounds(0, 0, 1, 1), progress = 2f).bounds,
+        )
     }
 }

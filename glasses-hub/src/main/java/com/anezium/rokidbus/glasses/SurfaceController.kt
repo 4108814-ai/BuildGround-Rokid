@@ -31,7 +31,6 @@ object SurfaceController {
     private val orderingCoordinator = SurfaceOrderingCoordinator<JSONObject>()
     private val listeners = CopyOnWriteArrayList<(NexusSurface?) -> Unit>()
     private val readerScrollListeners = CopyOnWriteArrayList<(Int) -> Unit>()
-    private val inkReadyListeners = CopyOnWriteArrayList<(String) -> Unit>()
     private val inputDedupe = DpadPairDedupe()
     private val suppressedDpadUps = mutableSetOf<Int>()
     private val ringInputPolicy = RingSurfaceInputPolicy()
@@ -43,7 +42,6 @@ object SurfaceController {
     private var backFailsafeSurfaceId: String? = null
     private var backFailsafe: Runnable? = null
     private var inkFrameMeterRunning = false
-    @Volatile private var readyInkSurfaceId: String? = null
     @Volatile private var inkResyncListener: ((InkResyncRequest) -> Unit)? = null
     @Volatile private var active: NexusSurface? = null
 
@@ -78,13 +76,6 @@ object SurfaceController {
         readerScrollListeners += listener
         return { readerScrollListeners.remove(listener) }
     }
-
-    internal fun observeInkReady(listener: (String) -> Unit): () -> Unit {
-        inkReadyListeners += listener
-        return { inkReadyListeners.remove(listener) }
-    }
-
-    internal fun isInkReady(surfaceId: String): Boolean = readyInkSurfaceId == surfaceId
 
     fun handleSurfaceEnvelope(context: Context, envelope: BusEnvelope): Boolean {
         return when (envelope.path) {
@@ -363,14 +354,11 @@ object SurfaceController {
         surface: NexusSurface,
         launcherShow: Boolean,
     ) {
-        if (launcherShow) readyInkSurfaceId = null
         inkRendererLayer.submit(
             surface = surface,
             onCommitted = {
                 showOrUpdate(context, surface, launcherShow = launcherShow)
                 if (launcherShow) {
-                    readyInkSurfaceId = surface.surfaceId
-                    inkReadyListeners.forEach { it(surface.surfaceId) }
                     sendInkEvent(surface.surfaceId, InkSurfaceContract.EVENT_READY)
                 }
             },
@@ -534,7 +522,6 @@ object SurfaceController {
     }
 
     private fun clearInkRenderer() {
-        readyInkSurfaceId = null
         inkRendererLayer.clear()
         if (inkFrameMeterRunning) {
             HudFrameMeter.stop()

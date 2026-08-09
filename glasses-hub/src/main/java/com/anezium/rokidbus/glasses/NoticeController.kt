@@ -495,7 +495,6 @@ internal object NoticeController {
         Thread(runnable, "RokidNexusNoticeImageDecode").apply { isDaemon = true }
     }
     private var expiry: Runnable? = null
-    private var activeInkHandoff: NoticeBandSnapshot? = null
     private var cameraOverlayActive = false
     private var serviceContext: Context? = null
     private var sleepDisplay: (() -> Boolean)? = null
@@ -537,52 +536,26 @@ internal object NoticeController {
         return NoticeOverlayRenderer.handoffSnapshot(notice)
     }
 
-    /** Freeze the identity-checked real notice until Ink reports its first frame. */
-    fun beginHandoff(snapshot: NoticeBandSnapshot): Boolean {
+    /**
+     * Removes the real notice immediately and closes its slot exactly once.
+     * A timeout or owner hide winning after capture makes this a harmless miss.
+     */
+    fun closeForHandoff(snapshot: NoticeBandSnapshot): Boolean {
         if (Looper.myLooper() != Looper.getMainLooper()) return false
-        if (!matchesCurrentHandoff(snapshot)) return false
-        val active = activeInkHandoff
-        if (active != null && active != snapshot) return false
-        if (!NoticeOverlayRenderer.beginHandoff(snapshot.seq)) return false
-        activeInkHandoff = snapshot
-        cancelExpiry()
-        log("notice morph seq=${snapshot.seq} event=waiting_first_frame")
-        return true
-    }
-
-    fun applyHandoffProgress(snapshot: NoticeBandSnapshot, progress: Float): Boolean {
-        if (Looper.myLooper() != Looper.getMainLooper()) return false
-        if (activeInkHandoff != snapshot || !matchesCurrentHandoff(snapshot)) return false
-        val alpha = snapshot.alpha * (1f - progress.coerceIn(0f, 1f))
-        return NoticeOverlayRenderer.applyHandoffAlpha(snapshot.seq, alpha)
-    }
-
-    /** Close the notice slot only after the cross-fade has made its window invisible. */
-    fun completeHandoff(snapshot: NoticeBandSnapshot): Boolean {
-        if (Looper.myLooper() != Looper.getMainLooper()) return false
-        if (activeInkHandoff != snapshot || !matchesCurrentHandoff(snapshot)) return false
+        val current = state.activeNotice() ?: return false
+        if (
+            current.surfaceId != snapshot.surfaceId ||
+            current.seq != snapshot.seq ||
+            current.ownerPluginId != snapshot.ownerPluginId ||
+            !noticeMatchesInkOwner(current.ownerPluginId, snapshot.ownerPluginId)
+        ) {
+            return false
+        }
         if (!NoticeOverlayRenderer.removeForHandoff(snapshot.seq)) return false
-        activeInkHandoff = null
         val decision = state.close(NoticeCloseReason.HANDOFF)
         if (decision !is NoticeStateDecision.Closed) return false
         applyDecision(decision)
         return true
-    }
-
-    fun cancelHandoff(snapshot: NoticeBandSnapshot) {
-        if (Looper.myLooper() != Looper.getMainLooper()) return
-        if (activeInkHandoff != snapshot) return
-        activeInkHandoff = null
-        NoticeOverlayRenderer.cancelHandoff(snapshot.seq, snapshot.alpha)
-        state.activeNotice()?.takeIf { it.seq == snapshot.seq }?.let(::scheduleExpiry)
-    }
-
-    private fun matchesCurrentHandoff(snapshot: NoticeBandSnapshot): Boolean {
-        val current = state.activeNotice() ?: return false
-        return current.surfaceId == snapshot.surfaceId &&
-            current.seq == snapshot.seq &&
-            current.ownerPluginId == snapshot.ownerPluginId &&
-            noticeMatchesInkOwner(current.ownerPluginId, snapshot.ownerPluginId)
     }
 
     fun onServiceConnected(context: Context, sleepDisplay: () -> Boolean) {
@@ -906,18 +879,6 @@ internal object NoticeController {
     }
 
     private fun applyDecision(decision: NoticeStateDecision) {
-        activeInkHandoff?.let { handoff ->
-            val superseded = when (decision) {
-                is NoticeStateDecision.Shown -> decision.notice.seq != handoff.seq
-                is NoticeStateDecision.Updated -> decision.notice.seq != handoff.seq
-                is NoticeStateDecision.Closed -> true
-                else -> false
-            }
-            if (superseded) {
-                activeInkHandoff = null
-                NoticeOverlayRenderer.cancelHandoff(handoff.seq, handoff.alpha)
-            }
-        }
         when (decision) {
             is NoticeStateDecision.Shown -> {
                 log(

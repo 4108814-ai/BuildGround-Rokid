@@ -262,37 +262,24 @@ class AssistantUiControllerTest {
         }
 
     @Test
-    fun `ink no-show fallback withdraws ink before hiding the notice at idle`() =
+    fun `ink answer waits for handoff then falls back once without stale keepalive`() =
         runTest {
             val renderer = FakeRenderer(supportsNotice = true)
-            var noShowFallbacks = 0
-            val controller = AssistantUiController(
-                scope = this,
-                renderer = renderer,
-                cancelPipeline = {},
-                resetCapture = {},
-                onInkNoShow = { noShowFallbacks += 1 },
-            )
+            val controller = controller(renderer)
             controller.onOpen()
             controller.cancelLauncherHint()
             controller.showTransient("Thinking…")
             renderer.calls.clear()
 
-            controller.onInkAnswerPending()
+            controller.onInkAnswerShown()
             advanceTimeBy(AssistantUiController.INK_HANDOFF_FALLBACK_MS - 1)
             runCurrent()
 
-            assertEquals(0, noShowFallbacks)
-            assertTrue(renderer.calls.none { it == RenderCall.HideNotice })
+            assertTrue(renderer.calls.isEmpty())
 
             advanceTimeBy(1)
             runCurrent()
 
-            assertEquals(1, noShowFallbacks)
-            assertTrue(renderer.calls.none { it == RenderCall.HideNotice })
-
-            renderer.calls.clear()
-            controller.onSurfaceHidden()
             assertEquals(listOf(RenderCall.HideNotice), renderer.calls)
 
             advanceTimeBy(AssistantUiController.NOTICE_KEEPALIVE_INTERVAL_MS * 2)
@@ -306,55 +293,20 @@ class AssistantUiControllerTest {
         }
 
     @Test
-    fun `ink first frame cancels no-show fallback and never hides the notice phone-side`() =
+    fun `owner close from ink handoff cancels the phone fallback`() =
         runTest {
             val renderer = FakeRenderer(supportsNotice = true)
-            var noShowFallbacks = 0
-            val controller = AssistantUiController(
-                scope = this,
-                renderer = renderer,
-                cancelPipeline = {},
-                resetCapture = {},
-                onInkNoShow = { noShowFallbacks += 1 },
-            )
+            val controller = controller(renderer)
             controller.onOpen()
             controller.cancelLauncherHint()
             controller.showTransient("Thinking…")
             renderer.calls.clear()
 
-            controller.onInkAnswerPending()
             controller.onInkAnswerShown()
-            advanceTimeBy(AssistantUiController.INK_HANDOFF_FALLBACK_MS * 2)
-            runCurrent()
-
-            assertEquals(0, noShowFallbacks)
-            assertTrue(renderer.calls.isEmpty())
-            controller.onClose()
-        }
-
-    @Test
-    fun `owner close while ink is pending cancels the no-show fallback`() =
-        runTest {
-            val renderer = FakeRenderer(supportsNotice = true)
-            var noShowFallbacks = 0
-            val controller = AssistantUiController(
-                scope = this,
-                renderer = renderer,
-                cancelPipeline = {},
-                resetCapture = {},
-                onInkNoShow = { noShowFallbacks += 1 },
-            )
-            controller.onOpen()
-            controller.cancelLauncherHint()
-            controller.showTransient("Thinking...")
-            renderer.calls.clear()
-
-            controller.onInkAnswerPending()
             controller.onNoticeClosed(NexusNoticeCloseReason.OWNER)
             advanceTimeBy(AssistantUiController.INK_HANDOFF_FALLBACK_MS * 2)
             runCurrent()
 
-            assertEquals(0, noShowFallbacks)
             assertTrue(renderer.calls.isEmpty())
             controller.onClose()
         }
