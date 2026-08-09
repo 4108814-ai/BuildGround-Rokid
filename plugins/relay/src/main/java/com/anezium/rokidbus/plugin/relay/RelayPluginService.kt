@@ -4,6 +4,9 @@ import android.view.KeyEvent
 import com.anezium.rokidbus.client.plugin.NexusCard
 import com.anezium.rokidbus.client.plugin.NexusCardLine
 import com.anezium.rokidbus.client.plugin.NexusPluginService
+import com.anezium.rokidbus.client.plugin.NexusReader
+import com.anezium.rokidbus.client.plugin.NexusReaderSegment
+import com.anezium.rokidbus.client.plugin.NexusReaderSegmentKind
 import com.anezium.rokidbus.client.plugin.NexusRowTone
 import com.anezium.rokidbus.client.plugin.NexusSdkResult
 import com.anezium.rokidbus.client.plugin.NexusSpeechCallbacks
@@ -253,7 +256,7 @@ class RelayPluginService : NexusPluginService() {
         )
     }
 
-    /** Returns whether the glasses took the card; the countdown depends on it. */
+    /** Returns whether the glasses took the surface; the countdown depends on it. */
     private fun renderThread(show: Boolean): Boolean {
         // Not while confirming a send: the repository has already dropped the
         // conversation, so refreshing here would lose the entry mid-render and
@@ -266,14 +269,35 @@ class RelayPluginService : NexusPluginService() {
             return false
         }
         val snapshot = entry.snapshot
+        if (threadMode == ThreadMode.READING) {
+            val document = RelayReaderDocument.from(
+                snapshot = snapshot,
+                threadStatus = threadStatus,
+                canReply = ReplyRepository.contains(entry.id),
+            )
+            return sendReader(
+                NexusReader(
+                    title = document.title,
+                    footer = document.footer,
+                    contentKey = document.contentKey,
+                    handlesBack = document.handlesBack,
+                    segments = document.segments.map { segment ->
+                        NexusReaderSegment(
+                            kind = when (segment.kind) {
+                                RelayReaderSegmentKind.HEADER -> NexusReaderSegmentKind.HEADER
+                                RelayReaderSegmentKind.PROSE -> NexusReaderSegmentKind.PROSE
+                                RelayReaderSegmentKind.ASIDE -> NexusReaderSegmentKind.ASIDE
+                            },
+                            text = segment.text,
+                            emphasis = segment.emphasis,
+                        )
+                    },
+                ),
+                show = show,
+            )
+        }
         val rows = when (threadMode) {
-            // The conversation as a conversation: each message keeps its speaker
-            // in the label column and its own text beside it, instead of a wall
-            // where every line restates the name.
-            ThreadMode.READING -> buildList {
-                addAll(messageRows(snapshot.renderedText, snapshot.sender))
-                threadStatus?.let { add(noteRow(it)) }
-            }
+            ThreadMode.READING -> emptyList()
             // Mid-dictation the wearer's own words are the only thing moving, so
             // they get the emphasis and the speaker column says whose they are.
             ThreadMode.LISTENING -> buildList {
@@ -318,11 +342,7 @@ class RelayPluginService : NexusPluginService() {
         }.takeLast(RelayInboxCatalog.MAX_CARD_LINES)
 
         val instruction = when (threadMode) {
-            ThreadMode.READING -> if (ReplyRepository.contains(entry.id)) {
-                "tap to reply · back to inbox"
-            } else {
-                "read only · back to inbox"
-            }
+            ThreadMode.READING -> error("Reading threads render as reader surfaces")
             ThreadMode.LISTENING -> "speak now · back cancels"
             ThreadMode.REVIEW -> "scroll · tap · back cancels"
             ThreadMode.VOICE_FAILURE -> "tap to try again · back cancels"
@@ -586,6 +606,13 @@ class RelayPluginService : NexusPluginService() {
     private fun sendCard(card: NexusCard, show: Boolean): Boolean {
         val session = surface ?: return false
         val result = if (show) session.showCard(card) else session.updateCard(card)
+        return result == NexusSdkResult.SENT
+    }
+
+    /** Returns whether the glasses actually took it. */
+    private fun sendReader(reader: NexusReader, show: Boolean): Boolean {
+        val session = surface ?: return false
+        val result = if (show) session.showReader(reader) else session.updateReader(reader)
         return result == NexusSdkResult.SENT
     }
 
