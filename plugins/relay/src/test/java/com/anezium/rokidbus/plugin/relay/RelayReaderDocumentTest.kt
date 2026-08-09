@@ -97,6 +97,72 @@ class RelayReaderDocumentTest {
     }
 
     @Test
+    fun `a spaceless message hard-splits at the segment cap`() {
+        val message = "x".repeat(RelayReaderDocument.MAX_SEGMENT_CHARS + 1)
+
+        val prose = document(sender = "Alice", text = "Alice: $message")
+            .segments
+            .filter { it.kind == RelayReaderSegmentKind.PROSE }
+
+        assertEquals(2, prose.size)
+        assertEquals(RelayReaderDocument.MAX_SEGMENT_CHARS, prose[0].text.length)
+        assertEquals(1, prose[1].text.length)
+        assertEquals(message, prose.joinToString("") { it.text })
+    }
+
+    @Test
+    fun `an emoji straddling the segment cap is never torn apart`() {
+        // One astral emoji (two UTF-16 units) positioned so the cap lands
+        // between its surrogates; a torn pair renders as garbage on the HUD.
+        val message = "x".repeat(RelayReaderDocument.MAX_SEGMENT_CHARS - 1) + "😀" + "y".repeat(10)
+
+        val prose = document(sender = "Alice", text = "Alice: $message")
+            .segments
+            .filter { it.kind == RelayReaderSegmentKind.PROSE }
+
+        assertTrue(prose.all { it.text.length <= RelayReaderDocument.MAX_SEGMENT_CHARS })
+        prose.forEach { segment ->
+            assertFalse(Character.isHighSurrogate(segment.text.last()))
+            assertFalse(Character.isLowSurrogate(segment.text.first()))
+        }
+        assertEquals(message, prose.joinToString("") { it.text })
+    }
+
+    @Test
+    fun `a thread of many tiny messages is capped by segment count`() {
+        // Far more messages than MAX_SEGMENTS; each parses into one prose
+        // segment, so the newest window must fit exactly under the cap.
+        val lines = (1..2_000).joinToString("\n") { index -> "Alice: m$index" }
+
+        val document = document(sender = "Alice", text = lines)
+
+        assertTrue(document.segments.size <= RelayReaderDocument.MAX_SEGMENTS)
+        val prose = document.segments.filter { it.kind == RelayReaderSegmentKind.PROSE }
+        assertEquals("m2000", prose.last().text)
+        assertEquals("m${2_000 - prose.size + 1}", prose.first().text)
+    }
+
+    @Test
+    fun `group headers survive dropping the front of a speaker run`() {
+        // Enough of Alice's messages that the budget drops some of hers: the
+        // kept remainder of her run must still open with her header.
+        val aliceLines = (1..300).joinToString("\n") { index -> "Alice: a$index" }
+        val document = document(sender = "Friends", text = "$aliceLines\nBob: reply")
+
+        assertTrue(document.segments.size <= RelayReaderDocument.MAX_SEGMENTS)
+        assertEquals(RelayReaderSegmentKind.HEADER, document.segments.first().kind)
+        assertEquals("Alice", document.segments.first().text)
+        val bobHeader = document.segments.indexOfFirst {
+            it.kind == RelayReaderSegmentKind.HEADER && it.text == "Bob"
+        }
+        assertTrue(bobHeader > 0)
+        assertEquals(
+            segment(RelayReaderSegmentKind.PROSE, "reply"),
+            document.segments[bobHeader + 1],
+        )
+    }
+
+    @Test
     fun `thread status is the final aside`() {
         val document = document(threadStatus = "Reply is no longer available.")
 
