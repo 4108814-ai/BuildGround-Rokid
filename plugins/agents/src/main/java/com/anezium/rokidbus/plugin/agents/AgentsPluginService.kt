@@ -841,6 +841,7 @@ class AgentsPluginService : NexusPluginService() {
             title = session?.displayTitle?.singleLine(110) ?: "Conversation",
             subtitle = conversationSubtitle(session, conversation),
             footer = "swipe scroll · 2-tap back",
+            handlesBack = true,
             contentKey = listOf(
                 conversation.sessionKey,
                 conversation.messages.size,

@@ -145,6 +145,8 @@ data class NexusReader(
     val subtitle: String? = null,
     val footer: String? = null,
     val contentKey: String? = null,
+    /** True hands BACK to the plugin instead of the hub hiding the surface. */
+    val handlesBack: Boolean = false,
     val segments: List<NexusReaderSegment>,
 ) {
     init {
@@ -160,6 +162,7 @@ data class NexusReader(
     internal fun toPayload(surfaceId: String): JSONObject = JSONObject()
         .put("surfaceId", surfaceId)
         .put("kind", "reader")
+        .put("handlesBack", handlesBack)
         .put("title", title)
         .put(
             "segments",
