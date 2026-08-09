@@ -1,5 +1,6 @@
 package com.anezium.rokidbus.plugin.relay
 
+import android.app.NotificationManager
 import android.content.ComponentName
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -8,13 +9,21 @@ import android.util.Log
 class RelayNotificationListener : NotificationListenerService() {
     private val runtime by lazy { RelayNoticeRuntime(applicationContext) }
 
+    override fun onCreate() {
+        super.onCreate()
+        NotificationControl.instanceCreated(this)
+    }
+
     override fun onListenerConnected() {
         super.onListenerConnected()
         NotificationControl.attach(this)
+        RelayDiagnostics.recordListenerConnected(this)
+        RelayGuardianService.requestImmediateHealthEvaluation()
         rebuildFromActiveNotifications()
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        RelayDiagnostics.recordRawNotificationPosted(this)
         sbn ?: return
         ingest(sbn, mayShow = true)
     }
@@ -37,17 +46,31 @@ class RelayNotificationListener : NotificationListenerService() {
      * so is everything it authorised.
      */
     override fun onListenerDisconnected() {
+        RelayDiagnostics.recordListenerDisconnected(this)
         ReplyRepository.clear()
         NotificationControl.detach(this)
         runtime.shutdown()
         Log.w(TAG, "notification listener disconnected")
         super.onListenerDisconnected()
-        requestRebind(ComponentName(this, RelayNotificationListener::class.java))
+        if (!RelayGuardianService.requestImmediateHealthEvaluation()) {
+            val component = ComponentName(this, RelayNotificationListener::class.java)
+            val manager = getSystemService(NotificationManager::class.java)
+            val accessGranted = try {
+                manager?.isNotificationListenerAccessGranted(component) == true
+            } catch (_: RuntimeException) {
+                false
+            }
+            RelayDiagnostics.recordAccessState(this, accessGranted)
+            if (accessGranted) requestRebind(component)
+        }
     }
 
     override fun onDestroy() {
         NotificationControl.detach(this)
+        NotificationControl.instanceDestroyed(this)
+        RelayDiagnostics.recordListenerDestroyed(this)
         runtime.shutdown()
+        RelayGuardianService.requestImmediateHealthEvaluation()
         super.onDestroy()
     }
 
@@ -104,6 +127,7 @@ class RelayNotificationListener : NotificationListenerService() {
 
         val capture = ReplyRepository.capture(this, sbn, action)
             ?: return finish("capture_failed", accepted = false)
+        RelayDiagnostics.recordAcceptedCapture(this)
         // The inbox, if it is open, is the only thing that will show this: the
         // band stands down while it holds the bus.
         NotificationControl.notifyCaptured()

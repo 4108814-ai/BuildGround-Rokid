@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <permission
+        android:name="com.anezium.rokidbus.permission.BIND_PLUGIN_GUARDIAN"
+        android:protectionLevel="signature" />
+
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -68,6 +72,11 @@
         </service>
 
         <service
+            android:name=".RelayGuardianService"
+            android:exported="true"
+            android:permission="com.anezium.rokidbus.permission.BIND_PLUGIN_GUARDIAN" />
+
+        <service
             android:name=".RelayPluginService"
             android:exported="true"
             android:foregroundServiceType="specialUse">
@@ -107,6 +116,9 @@
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.LAUNCHABLE"
                 android:value="true" />
+            <meta-data
+                android:name="com.anezium.rokidbus.plugin.GUARDIAN_SERVICE"
+                android:value="com.anezium.rokidbus.plugin.relay.RelayGuardianService" />
         </service>
     </application>
 </manifest>

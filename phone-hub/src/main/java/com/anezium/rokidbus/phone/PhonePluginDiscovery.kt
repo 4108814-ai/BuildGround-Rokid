@@ -16,6 +16,7 @@ data class PhonePluginPrincipal(
     val uid: Int,
     val signingDigestSha256: String,
     val descriptor: PluginDescriptor,
+    val guardianServiceComponent: ComponentName? = null,
 )
 
 sealed interface PhonePluginCandidate {
@@ -113,6 +114,7 @@ class PhonePluginDiscovery(private val packageManager: PackageManager) {
             BusConstants.META_PLUGIN_RECEIVE_PREFIXES,
             BusConstants.META_PLUGIN_SETTINGS_ACTIVITY,
             BusConstants.META_PLUGIN_LAUNCHABLE,
+            BusConstants.META_PLUGIN_GUARDIAN_SERVICE,
         )
 
         fun evaluate(records: List<PackageRecord>): List<PhonePluginCandidate> {
@@ -169,6 +171,10 @@ class PhonePluginDiscovery(private val packageManager: PackageManager) {
                 return invalid("UNSUPPORTED_API", descriptor.displayName)
             }
             val digest = signingCertificateSha256(record.signingCertificates.single())
+            val guardianServiceComponent = record.metadata
+                .lastOrNull { (key, _) -> key == BusConstants.META_PLUGIN_GUARDIAN_SERVICE }
+                ?.second
+                ?.let { className -> guardianComponent(record.packageName, className) }
             return PhonePluginCandidate.Valid(
                 PhonePluginPrincipal(
                     packageName = record.packageName,
@@ -176,8 +182,20 @@ class PhonePluginDiscovery(private val packageManager: PackageManager) {
                     uid = record.uid,
                     signingDigestSha256 = digest,
                     descriptor = descriptor,
+                    guardianServiceComponent = guardianServiceComponent,
                 ),
             )
+        }
+
+        internal fun guardianComponent(packageName: String, declaredClassName: String): ComponentName? {
+            val className = declaredClassName.trim()
+            if (className.isEmpty() || className.any(Char::isWhitespace) || '/' in className) return null
+            val qualifiedClassName = when {
+                className.startsWith('.') -> packageName + className
+                '.' in className -> className
+                else -> "$packageName.$className"
+            }
+            return ComponentName(packageName, qualifiedClassName)
         }
 
         private fun <K> invalidateConflicts(

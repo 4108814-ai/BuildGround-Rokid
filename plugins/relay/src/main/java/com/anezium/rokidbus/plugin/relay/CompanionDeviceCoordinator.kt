@@ -10,6 +10,7 @@ import android.companion.AssociationRequest
 import android.companion.BluetoothDeviceFilter
 import android.companion.BluetoothLeDeviceFilter
 import android.companion.CompanionDeviceManager
+import android.companion.ObservingDevicePresenceRequest
 import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
@@ -210,13 +211,12 @@ object CompanionDeviceCoordinator {
         }
     }
 
-    /** Returns the associated device address, or null when the result is not a success. */
+    /** Returns the associated device address when Android supplied one. */
     fun handleAssociationResult(context: Context, resultCode: Int, data: Intent?): String? {
         if (resultCode != Activity.RESULT_OK) return null
-        val address = extractAddress(data) ?: return null
         startObserving(context)
         Log.i(TAG, "companion device associated")
-        return address
+        return extractAddress(data)
     }
 
     /**
@@ -227,17 +227,71 @@ object CompanionDeviceCoordinator {
      * watching the glasses come and go.
      */
     fun startObserving(context: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
-        val manager = manager(context) ?: return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            RelayDiagnostics.recordCompanionObservation(
+                context,
+                RelayObservationPath.NONE,
+                registered = false,
+            )
+            return
+        }
+        if (!context.packageManager.hasSystemFeature(PackageManager.FEATURE_COMPANION_DEVICE_SETUP)) {
+            RelayDiagnostics.recordCompanionObservation(
+                context,
+                CompanionObservationPolicy.pathFor(Build.VERSION.SDK_INT),
+                registered = false,
+            )
+            return
+        }
+        val manager = manager(context) ?: run {
+            RelayDiagnostics.recordCompanionObservation(
+                context,
+                CompanionObservationPolicy.pathFor(Build.VERSION.SDK_INT),
+                registered = false,
+            )
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+            val associations = runCatching { manager.myAssociations }.getOrElse {
+                Log.w(TAG, "read associations for presence failed: ${it.javaClass.simpleName}")
+                emptyList()
+            }
+            var registered = false
+            associations.forEach { association ->
+                val request = ObservingDevicePresenceRequest.Builder()
+                    .setAssociationId(association.id)
+                    .build()
+                runCatching {
+                    manager.startObservingDevicePresence(request)
+                }.onSuccess {
+                    registered = true
+                }.onFailure {
+                    Log.w(TAG, "observe presence by association failed: ${it.javaClass.simpleName}")
+                }
+            }
+            RelayDiagnostics.recordCompanionObservation(
+                context,
+                RelayObservationPath.ASSOCIATION_ID,
+                registered,
+            )
+            return
+        }
+        var registered = false
         associatedAddresses(context).forEach { address ->
             runCatching {
                 @Suppress("DEPRECATION")
                 manager.startObservingDevicePresence(address)
+            }.onSuccess {
+                registered = true
             }.onFailure {
-                val deviceDiscriminator = address.replace(":", "").takeLast(4)
-                Log.w(TAG, "observe presence failed [$deviceDiscriminator]: ${it.message}")
+                Log.w(TAG, "observe presence by address failed: ${it.javaClass.simpleName}")
             }
         }
+        RelayDiagnostics.recordCompanionObservation(
+            context,
+            RelayObservationPath.ADDRESS,
+            registered,
+        )
     }
 
     /** Only the associations that carry an address; see [hasAssociation] for why that differs. */

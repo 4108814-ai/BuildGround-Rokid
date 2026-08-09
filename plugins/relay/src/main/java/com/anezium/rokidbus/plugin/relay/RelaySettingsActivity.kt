@@ -1,6 +1,9 @@
 package com.anezium.rokidbus.plugin.relay
 
 import android.app.Activity
+import android.app.ApplicationExitInfo
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
@@ -18,6 +21,9 @@ import android.widget.TextView
 import android.widget.Toast
 import com.anezium.rokidbus.client.ui.BusTheme
 import com.anezium.rokidbus.client.ui.NexusUi
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
 
 class RelaySettingsActivity : Activity() {
@@ -25,6 +31,7 @@ class RelaySettingsActivity : Activity() {
     private val settings by lazy { RelaySettings(this) }
     private lateinit var content: LinearLayout
     private var unobserveData: (() -> Unit)? = null
+    private var unobserveDiagnostics: (() -> Unit)? = null
     private var unobserveHarness: (() -> Unit)? = null
     private var harnessExpanded = false
 
@@ -55,6 +62,7 @@ class RelaySettingsActivity : Activity() {
         super.onStart()
         CompanionDeviceCoordinator.startObserving(this)
         unobserveData = observeData { main.post(::render) }
+        unobserveDiagnostics = RelayDiagnostics.observe { main.post(::render) }
         unobserveHarness = FakeNotificationHarness.observe { main.post(::render) }
         render()
     }
@@ -90,6 +98,8 @@ class RelaySettingsActivity : Activity() {
     override fun onStop() {
         unobserveData?.invoke()
         unobserveData = null
+        unobserveDiagnostics?.invoke()
+        unobserveDiagnostics = null
         unobserveHarness?.invoke()
         unobserveHarness = null
         super.onStop()
@@ -191,6 +201,11 @@ class RelaySettingsActivity : Activity() {
         }
 
         content.addView(BusTheme.gap(this, 24))
+        content.addView(NexusUi.sectionRow(this, "Diagnostics"), NexusUi.block())
+        content.addView(BusTheme.gap(this, 10))
+        content.addView(diagnosticsCard(), NexusUi.block())
+
+        content.addView(BusTheme.gap(this, 24))
         content.addView(NexusUi.sectionRow(this, "Plugin"), NexusUi.block())
         content.addView(BusTheme.gap(this, 10))
         content.addView(
@@ -260,6 +275,164 @@ class RelaySettingsActivity : Activity() {
             )
         }
     }
+
+    private fun diagnosticsCard(): LinearLayout = NexusUi.card(this).apply {
+        val snapshot = RelayDiagnostics.snapshot(this@RelaySettingsActivity)
+        addView(NexusUi.cardTitle(this@RelaySettingsActivity, "Relay health"))
+        addView(BusTheme.gap(this@RelaySettingsActivity, 5))
+        addView(
+            NexusUi.cardBody(
+                this@RelaySettingsActivity,
+                "Capture, repair, guardian, and companion state. The copied history contains no message or device data.",
+            ),
+        )
+        addView(NexusUi.divider(this@RelaySettingsActivity))
+        addView(diagnosticsRow(
+            "Notification access",
+            if (snapshot.notificationAccessGranted) "Granted" else "Not granted",
+        ))
+        addView(BusTheme.gap(this@RelaySettingsActivity, 9))
+        addView(diagnosticsRow(
+            "Listener",
+            if (snapshot.listenerConnected) {
+                "Connected ${formatWallTime(snapshot.listenerConnectedSinceWallMs)} · gen ${snapshot.listenerConnectGeneration}"
+            } else {
+                "Disconnected · gen ${snapshot.listenerConnectGeneration}"
+            },
+        ))
+        addView(BusTheme.gap(this@RelaySettingsActivity, 9))
+        addView(diagnosticsRow(
+            "Last disconnect",
+            formatWallTime(snapshot.lastListenerDisconnectedWallMs),
+        ))
+        addView(BusTheme.gap(this@RelaySettingsActivity, 9))
+        addView(diagnosticsRow(
+            "Last raw callback",
+            formatWallTime(snapshot.lastRawNotificationPostedWallMs),
+        ))
+        addView(BusTheme.gap(this@RelaySettingsActivity, 9))
+        addView(diagnosticsRow(
+            "Last accepted capture",
+            formatWallTime(snapshot.lastAcceptedCaptureWallMs),
+        ))
+        addView(NexusUi.divider(this@RelaySettingsActivity))
+        addView(diagnosticsRow(
+            "Guardian bound",
+            yesNo(snapshot.guardianBound),
+        ))
+        addView(BusTheme.gap(this@RelaySettingsActivity, 9))
+        addView(diagnosticsRow(
+            "Last repair",
+            "${formatWallTime(snapshot.lastRepairAttemptWallMs)} · ${formatState(snapshot.lastRepairResult.toString())}",
+        ))
+        addView(BusTheme.gap(this@RelaySettingsActivity, 9))
+        addView(diagnosticsRow(
+            "Last process exit",
+            formatProcessExitReason(snapshot.lastProcessExitReason),
+        ))
+        addView(BusTheme.gap(this@RelaySettingsActivity, 9))
+        addView(diagnosticsRow(
+            "Force-stopped before start",
+            snapshot.forceStoppedBeforeStart?.let(::yesNo) ?: "Not recorded",
+        ))
+        addView(NexusUi.divider(this@RelaySettingsActivity))
+        addView(diagnosticsRow(
+            "Linked",
+            yesNo(CompanionDeviceCoordinator.hasAssociation(this@RelaySettingsActivity)),
+        ))
+        addView(BusTheme.gap(this@RelaySettingsActivity, 9))
+        addView(diagnosticsRow(
+            "Observation registered",
+            "${yesNo(snapshot.companionObservationRegistered)} · " +
+                formatState(snapshot.companionObservationPath.toString()),
+        ))
+        addView(BusTheme.gap(this@RelaySettingsActivity, 9))
+        addView(diagnosticsRow(
+            "Companion service bound",
+            yesNo(snapshot.companionServiceBound),
+        ))
+        addView(BusTheme.gap(this@RelaySettingsActivity, 12))
+        addView(
+            NexusUi.outlinePillButton(
+                this@RelaySettingsActivity,
+                "Copy diagnostics",
+            ).apply {
+                setOnClickListener {
+                    val clipboard = getSystemService(ClipboardManager::class.java)
+                    clipboard?.setPrimaryClip(
+                        ClipData.newPlainText(
+                            "Relay diagnostics",
+                            RelayDiagnostics.export(this@RelaySettingsActivity),
+                        ),
+                    )
+                    showTransientMessage("Diagnostics copied")
+                }
+            },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+    }
+
+    private fun diagnosticsRow(label: String, value: String): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        addView(
+            NexusUi.rowLabel(this@RelaySettingsActivity, label),
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        addView(
+            NexusUi.rowValue(this@RelaySettingsActivity).apply {
+                text = value
+                maxLines = 2
+            },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f),
+        )
+    }
+
+    private fun formatWallTime(wallTimeMs: Long): String {
+        if (wallTimeMs <= 0L) return "Never"
+        return SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(wallTimeMs))
+    }
+
+    private fun formatProcessExitReason(reason: Int?): String {
+        if (reason == null) return "Not recorded"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            when (reason) {
+                ApplicationExitInfo.REASON_PACKAGE_STATE_CHANGE -> return "Package state change"
+                ApplicationExitInfo.REASON_PACKAGE_UPDATED -> return "Package updated"
+            }
+        }
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            reason == ApplicationExitInfo.REASON_FREEZER
+        ) {
+            return "Freezer"
+        }
+        return when (reason) {
+            ApplicationExitInfo.REASON_UNKNOWN -> "Unknown"
+            ApplicationExitInfo.REASON_EXIT_SELF -> "Self exit"
+            ApplicationExitInfo.REASON_SIGNALED -> "Signal"
+            ApplicationExitInfo.REASON_LOW_MEMORY -> "Low memory"
+            ApplicationExitInfo.REASON_CRASH -> "Crash"
+            ApplicationExitInfo.REASON_CRASH_NATIVE -> "Native crash"
+            ApplicationExitInfo.REASON_ANR -> "ANR"
+            ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> "Initialization failure"
+            ApplicationExitInfo.REASON_PERMISSION_CHANGE -> "Permission change"
+            ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "Excessive resource use"
+            ApplicationExitInfo.REASON_USER_REQUESTED -> "User requested"
+            ApplicationExitInfo.REASON_USER_STOPPED -> "User stopped"
+            ApplicationExitInfo.REASON_DEPENDENCY_DIED -> "Dependency died"
+            ApplicationExitInfo.REASON_OTHER -> "Other"
+            else -> "Reason $reason"
+        }
+    }
+
+    private fun formatState(state: String): String =
+        state.lowercase(Locale.US).replace('_', ' ')
+
+    private fun yesNo(value: Boolean): String = if (value) "Yes" else "No"
 
     private fun showTransientMessage(message: String) {
         main.post {
