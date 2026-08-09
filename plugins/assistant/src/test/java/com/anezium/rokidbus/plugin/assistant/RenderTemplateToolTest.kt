@@ -154,7 +154,13 @@ class RenderTemplateToolTest {
                 InkTemplateId.WEATHER,
                 """{"temperature":"18 C","condition":"Clear"}""",
                 TEMPLATE_PROBLEM_MISSING_KEY,
-                "data.forecast",
+                "data",
+            ),
+            InvalidCase(
+                InkTemplateId.WEATHER,
+                """{"temperature":"18 C","condition":"Clear","hourly":[{"label":"03:00","temp":"18"},{"label":"06:00","temp":17}]}""",
+                TEMPLATE_PROBLEM_WRONG_TYPE,
+                "data.hourly[0].temp",
             ),
             InvalidCase(
                 InkTemplateId.CHART,

@@ -7,10 +7,11 @@
     "condition": "Clear",
     "high": "",
     "low": "",
-    "forecast": [
-      { "label": "Now", "temperature": "18°", "condition": "Clear" },
-      { "label": "Later", "temperature": "16°", "condition": "Calm" }
-    ]
+    "precipitation": "",
+    "humidity": "",
+    "wind": "",
+    "hourly": [],
+    "forecast": []
   }
 }
 </script>
@@ -26,12 +27,24 @@
       <view class="summary">
         <text class="condition">{{ condition }}</text>
         <view class="range" wx:if="{{ high || low }}">
-          <text class="range-value" wx:if="{{ high }}">H {{ high }}</text>
-          <text class="range-value" wx:if="{{ low }}">L {{ low }}</text>
+          <text class="detail" wx:if="{{ high }}">H {{ high }}</text>
+          <text class="detail" wx:if="{{ low }}">L {{ low }}</text>
         </view>
+        <text class="detail" wx:if="{{ precipitation }}">Precip {{ precipitation }}</text>
+        <text class="detail" wx:if="{{ humidity }}">Humidity {{ humidity }}</text>
+        <text class="detail" wx:if="{{ wind }}">Wind {{ wind }}</text>
       </view>
     </view>
-    <view class="forecast">
+    <chart
+      wx:if="{{ hourly[1] }}"
+      class="curve"
+      type="area"
+      series="temp"
+      data="{{ hourly }}"
+      smooth="true"
+      animate="true"
+      show-value-labels="true" />
+    <view class="forecast" wx:if="{{ forecast[0] }}">
       <view class="forecast-cell" wx:for="{{ forecast }}">
         <text class="forecast-label">{{ item.label }}</text>
         <text class="forecast-temperature">{{ item.temperature }}</text>
@@ -45,7 +58,7 @@
 .page {
   display: flex;
   flex-direction: column;
-  gap: 18rpx;
+  gap: 16rpx;
   width: 100%;
   box-sizing: border-box;
   padding: 18rpx;
@@ -58,14 +71,15 @@
 }
 .header {
   display: flex;
-  flex-direction: column;
-  gap: 4rpx;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 12rpx;
 }
 .title {
   color: var(--color-primary);
-  font-size: 36rpx;
+  font-size: 32rpx;
   font-weight: 700;
-  line-height: 44rpx;
+  line-height: 40rpx;
 }
 .location {
   color: var(--color-text-secondary);
@@ -77,18 +91,18 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 20rpx;
+  gap: 24rpx;
 }
 .temperature {
   color: var(--color-primary);
-  font-size: 72rpx;
+  font-size: 76rpx;
   font-weight: 700;
-  line-height: 78rpx;
+  line-height: 82rpx;
 }
 .summary {
   display: flex;
   flex-direction: column;
-  gap: 8rpx;
+  gap: 4rpx;
   flex-grow: 1;
 }
 .condition {
@@ -102,11 +116,15 @@
   flex-direction: row;
   gap: 14rpx;
 }
-.range-value {
+.detail {
   color: var(--color-text-secondary);
-  font-size: 20rpx;
-  line-height: 26rpx;
+  font-size: 19rpx;
+  line-height: 25rpx;
   opacity: 0.72;
+}
+.curve {
+  width: 100%;
+  height: 190rpx;
 }
 .forecast {
   display: flex;

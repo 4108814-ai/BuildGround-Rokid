@@ -32,6 +32,8 @@ internal fun interface InkTemplateLoader {
 internal object InkTemplateLimits {
     const val WEATHER_FORECAST_MIN = 1
     const val WEATHER_FORECAST_MAX = 5
+    const val WEATHER_HOURLY_MIN = 2
+    const val WEATHER_HOURLY_MAX = 24
     const val CHART_SERIES_MIN = 1
     const val CHART_SERIES_MAX = 4
     const val CHART_POINTS_MIN = 1
@@ -112,7 +114,7 @@ internal class InkTemplateValidator {
             value = data,
             path = DATA_PATH,
             allowed = WEATHER_KEYS,
-            required = setOf("temperature", "condition", "forecast"),
+            required = setOf("temperature", "condition"),
             problems = problems,
         )
         optionalString(data, "location", DATA_PATH, problems)
@@ -120,27 +122,77 @@ internal class InkTemplateValidator {
         requiredString(data, "condition", DATA_PATH, problems)
         optionalString(data, "high", DATA_PATH, problems)
         optionalString(data, "low", DATA_PATH, problems)
+        optionalString(data, "precipitation", DATA_PATH, problems)
+        optionalString(data, "humidity", DATA_PATH, problems)
+        optionalString(data, "wind", DATA_PATH, problems)
 
-        val forecast = requiredArray(data, "forecast", DATA_PATH, problems) ?: return
-        validateCount(
-            array = forecast,
-            path = "$DATA_PATH.forecast",
-            minimum = InkTemplateLimits.WEATHER_FORECAST_MIN,
-            maximum = InkTemplateLimits.WEATHER_FORECAST_MAX,
-            problems = problems,
-        )
-        forEachObject(forecast, "$DATA_PATH.forecast", problems) { item, itemPath ->
-            validateShape(
-                value = item,
-                path = itemPath,
-                allowed = WEATHER_FORECAST_KEYS,
-                required = setOf("label", "temperature"),
+        if (!data.has("forecast") && !data.has("hourly")) {
+            problems += InkTemplateProblem(
+                code = TEMPLATE_PROBLEM_MISSING_KEY,
+                path = DATA_PATH,
+                message = "Weather needs forecast periods, an hourly curve, or both",
+            )
+            return
+        }
+        (data.opt("forecast") as? JSONArray)?.let { forecast ->
+            validateCount(
+                array = forecast,
+                path = "$DATA_PATH.forecast",
+                minimum = InkTemplateLimits.WEATHER_FORECAST_MIN,
+                maximum = InkTemplateLimits.WEATHER_FORECAST_MAX,
                 problems = problems,
             )
-            requiredString(item, "label", itemPath, problems)
-            requiredString(item, "temperature", itemPath, problems)
-            optionalString(item, "condition", itemPath, problems)
-        }
+            forEachObject(forecast, "$DATA_PATH.forecast", problems) { item, itemPath ->
+                validateShape(
+                    value = item,
+                    path = itemPath,
+                    allowed = WEATHER_FORECAST_KEYS,
+                    required = setOf("label", "temperature"),
+                    problems = problems,
+                )
+                requiredString(item, "label", itemPath, problems)
+                requiredString(item, "temperature", itemPath, problems)
+                optionalString(item, "condition", itemPath, problems)
+            }
+        } ?: if (data.has("forecast")) {
+            problems += InkTemplateProblem(
+                code = TEMPLATE_PROBLEM_WRONG_TYPE,
+                path = "$DATA_PATH.forecast",
+                message = "forecast must be an array",
+            )
+        } else Unit
+        (data.opt("hourly") as? JSONArray)?.let { hourly ->
+            validateCount(
+                array = hourly,
+                path = "$DATA_PATH.hourly",
+                minimum = InkTemplateLimits.WEATHER_HOURLY_MIN,
+                maximum = InkTemplateLimits.WEATHER_HOURLY_MAX,
+                problems = problems,
+            )
+            forEachObject(hourly, "$DATA_PATH.hourly", problems) { item, itemPath ->
+                validateShape(
+                    value = item,
+                    path = itemPath,
+                    allowed = WEATHER_HOURLY_KEYS,
+                    required = setOf("label", "temp"),
+                    problems = problems,
+                )
+                requiredString(item, "label", itemPath, problems)
+                if (item.opt("temp") !is Number) {
+                    problems += InkTemplateProblem(
+                        code = TEMPLATE_PROBLEM_WRONG_TYPE,
+                        path = "$itemPath.temp",
+                        message = "temp must be a number",
+                    )
+                }
+            }
+        } ?: if (data.has("hourly")) {
+            problems += InkTemplateProblem(
+                code = TEMPLATE_PROBLEM_WRONG_TYPE,
+                path = "$DATA_PATH.hourly",
+                message = "hourly must be an array",
+            )
+        } else Unit
     }
 
     private fun validateChart(
@@ -491,8 +543,12 @@ internal class InkTemplateValidator {
     private companion object {
         const val DATA_PATH = "data"
 
-        val WEATHER_KEYS = setOf("location", "temperature", "condition", "high", "low", "forecast")
+        val WEATHER_KEYS = setOf(
+            "location", "temperature", "condition", "high", "low",
+            "precipitation", "humidity", "wind", "forecast", "hourly",
+        )
         val WEATHER_FORECAST_KEYS = setOf("label", "temperature", "condition")
+        val WEATHER_HOURLY_KEYS = setOf("label", "temp")
         val CHART_KEYS = setOf("type", "labels", "series", "caption")
         val CHART_TYPES = setOf("line", "area", "bar", "pie")
         val CHART_SERIES_KEYS = setOf("label", "values")
@@ -628,7 +684,7 @@ internal val RENDER_TEMPLATE_PARAMETERS_SCHEMA = AssistantToolJsonSchema(
 
 internal val RENDER_TEMPLATE_TOOL_DESCRIPTION = """
     Render a fast, prevalidated Ink layout on the glasses. Prefer this over render_ink_page when one of these shapes fits. Arguments are {template, title?: nonblank string, data}; localize all supplied strings.
-    weather - current conditions plus a compact forecast. data: {location?:string, temperature:string, condition:string, high?:string, low?:string, forecast:[{label:string, temperature:string, condition?:string}]} (1-5 forecasts).
+    weather - current conditions with an hourly temperature curve and/or period cells; prefer hourly when you have it. data: {location?:string, temperature:string, condition:string, high?:string, low?:string, precipitation?:string, humidity?:string, wind?:string, hourly?:[{label:string, temp:number}] (2-24), forecast?:[{label:string, temperature:string, condition?:string}] (1-5)} - at least one of hourly/forecast.
     chart - line, area, bar, or pie visualization. data: {type:"line"|"area"|"bar"|"pie", labels:string[1..64], series:[{label:string, values:number[labels.length]}], caption?:string} (1-4 series; pie requires 1 with non-negative values and at least one >0).
     metrics - bordered value cells for a numeric/status snapshot. data: {cells:[{label:string, value:string, detail?:string}]} (2-6 cells).
     ranking - ordered results with values. data: {rows:[{label:string, value:string, detail?:string}]} (1-10 rows).

@@ -47,7 +47,7 @@ internal class InkChartView(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val geometry = InkChartLogic.geometry(displayed, width.toFloat(), height.toFloat())
-        drawFrame(canvas)
+        drawFrame(canvas, geometry)
         when (displayed.type) {
             InkChartType.PIE -> drawPie(canvas, geometry)
             InkChartType.RADAR -> drawRadar(canvas, geometry)
@@ -56,6 +56,7 @@ internal class InkChartView(
             InkChartType.AREA,
             -> drawCartesian(canvas, geometry)
         }
+        drawTextMarks(canvas, geometry)
     }
 
     override fun onInkVisibilityChanged(visible: Boolean) {
@@ -71,10 +72,24 @@ internal class InkChartView(
         super.onDetachedFromWindow()
     }
 
-    private fun drawFrame(canvas: Canvas) {
+    private fun drawFrame(canvas: Canvas, geometry: InkChartGeometry) {
         paint.resetStroke(palette.dim, 1f)
-        canvas.drawLine(width * 0.08f, height * 0.9f, width * 0.96f, height * 0.9f, paint)
-        canvas.drawLine(width * 0.08f, height * 0.08f, width * 0.08f, height * 0.9f, paint)
+        canvas.drawLine(geometry.plotLeft, geometry.plotBottom, geometry.plotRight, geometry.plotBottom, paint)
+        canvas.drawLine(geometry.plotLeft, geometry.plotTop, geometry.plotLeft, geometry.plotBottom, paint)
+    }
+
+    private fun drawTextMarks(canvas: Canvas, geometry: InkChartGeometry) {
+        if (geometry.valueLabels.isEmpty() && geometry.axisLabels.isEmpty()) return
+        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = android.graphics.Typeface.MONOSPACE
+            textAlign = Paint.Align.CENTER
+            textSize = (height * 0.11f).coerceIn(12f, 22f)
+        }
+        text.color = palette.text
+        geometry.valueLabels.forEach { mark -> canvas.drawText(mark.text, mark.x, mark.y, text) }
+        text.color = palette.muted
+        text.textSize = (height * 0.095f).coerceIn(11f, 19f)
+        geometry.axisLabels.forEach { mark -> canvas.drawText(mark.text, mark.x, mark.y, text) }
     }
 
     private fun drawCartesian(canvas: Canvas, geometry: InkChartGeometry) {
@@ -89,8 +104,8 @@ internal class InkChartView(
                     pathEffect = null
                 }
                 val area = Path(path).apply {
-                    lineTo(series.points.last().x, height * 0.9f)
-                    lineTo(series.points.first().x, height * 0.9f)
+                    lineTo(series.points.last().x, geometry.plotBottom)
+                    lineTo(series.points.first().x, geometry.plotBottom)
                     close()
                 }
                 canvas.drawPath(area, fill)
@@ -100,7 +115,7 @@ internal class InkChartView(
             series.averageY?.let { y ->
                 paint.resetStroke(palette.muted, 1f)
                 paint.pathEffect = DashPathEffect(floatArrayOf(6f, 5f), 0f)
-                canvas.drawLine(width * 0.08f, y, width * 0.96f, y, paint)
+                canvas.drawLine(geometry.plotLeft, y, geometry.plotRight, y, paint)
             }
         }
     }
@@ -108,13 +123,13 @@ internal class InkChartView(
     private fun drawBars(canvas: Canvas, geometry: InkChartGeometry) {
         val count = geometry.series.maxOfOrNull { it.points.size }?.coerceAtLeast(1) ?: 1
         val seriesCount = geometry.series.size.coerceAtLeast(1)
-        val slot = width * 0.88f / count
+        val slot = (geometry.plotRight - geometry.plotLeft) / count
         geometry.series.forEachIndexed { seriesIndex, series ->
             configureSeries(series)
             val barWidth = slot * 0.72f / seriesCount
             series.points.forEachIndexed { index, point ->
-                val left = width * 0.08f + index * slot + seriesIndex * barWidth + slot * 0.14f
-                val baseline = height * 0.9f
+                val left = geometry.plotLeft + index * slot + seriesIndex * barWidth + slot * 0.14f
+                val baseline = geometry.plotBottom
                 paint.style = Paint.Style.STROKE
                 canvas.drawRect(left, min(point.y, baseline), left + barWidth, baseline, paint)
                 drawMarker(canvas, InkChartCoordinate(left + barWidth / 2f, point.y), series.marker, series.strokeWidth + 2f)

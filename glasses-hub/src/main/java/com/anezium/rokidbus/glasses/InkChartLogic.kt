@@ -27,6 +27,7 @@ internal data class InkChartModel(
     val animate: Boolean,
     val showAverage: Boolean,
     val horizontalBars: Boolean,
+    val showValueLabels: Boolean = false,
 )
 
 internal data class InkChartCoordinate(val x: Float, val y: Float)
@@ -47,10 +48,18 @@ internal data class InkChartSliceGeometry(
     val strokeWidth: Float,
 )
 
+internal data class InkChartTextMark(val x: Float, val y: Float, val text: String)
+
 internal data class InkChartGeometry(
     val series: List<InkChartSeriesGeometry> = emptyList(),
     val slices: List<InkChartSliceGeometry> = emptyList(),
     val radarAxes: List<Pair<InkChartCoordinate, InkChartCoordinate>> = emptyList(),
+    val valueLabels: List<InkChartTextMark> = emptyList(),
+    val axisLabels: List<InkChartTextMark> = emptyList(),
+    val plotLeft: Float = 0f,
+    val plotRight: Float = 0f,
+    val plotTop: Float = 0f,
+    val plotBottom: Float = 0f,
 )
 
 internal object InkChartLogic {
@@ -107,18 +116,38 @@ internal object InkChartLogic {
             animate = attributes["animate"] == true,
             showAverage = attributes["show-average"] == true || attributes["showAverage"] == true,
             horizontalBars = attributes["direction"]?.toString()?.equals("horizontal", true) == true,
+            showValueLabels = attributes["show-value-labels"] == true,
         )
     }
 
     fun geometry(model: InkChartModel, width: Float, height: Float): InkChartGeometry {
+        val first = model.series.firstOrNull()
+        val hasAxisLabels = model.type in setOf(InkChartType.LINE, InkChartType.AREA, InkChartType.BAR) &&
+            first?.points?.any { it.label.isNotBlank() } == true
+        val hasValueLabels = model.showValueLabels &&
+            model.type in setOf(InkChartType.LINE, InkChartType.AREA, InkChartType.BAR)
         val left = width * 0.08f
         val right = width * 0.96f
-        val top = height * 0.08f
-        val bottom = height * 0.9f
+        val top = if (hasValueLabels) height * 0.18f else height * 0.08f
+        val bottom = if (hasAxisLabels) height * 0.78f else height * 0.9f
         return when (model.type) {
-            InkChartType.PIE -> pieGeometry(model)
-            InkChartType.RADAR -> radarGeometry(model, left, top, right, bottom)
+            InkChartType.PIE -> pieGeometry(model).copy(
+                plotLeft = left,
+                plotRight = right,
+                plotTop = top,
+                plotBottom = bottom,
+            )
+            InkChartType.RADAR -> radarGeometry(model, left, top, right, bottom).copy(
+                plotLeft = left,
+                plotRight = right,
+                plotTop = top,
+                plotBottom = bottom,
+            )
             else -> InkChartGeometry(
+                plotLeft = left,
+                plotRight = right,
+                plotTop = top,
+                plotBottom = bottom,
                 series = model.series.mapIndexed { index, series ->
                     val visual = visual(index, series.requestedWidth)
                     val points = series.points.map { point ->
@@ -140,9 +169,44 @@ internal object InkChartLogic {
                         },
                     )
                 },
+                // Labels come from the first series only: on monochrome optics,
+                // stacked per-series numbers would be indistinguishable noise.
+                valueLabels = if (hasValueLabels && first != null) {
+                    strided(first.points).map { point ->
+                        InkChartTextMark(
+                            x = map(point.x, model.minimumX, model.maximumX, left, right),
+                            y = map(point.y, model.minimumY, model.maximumY, bottom, top) - height * 0.07f,
+                            text = compactNumber(point.y),
+                        )
+                    }
+                } else {
+                    emptyList()
+                },
+                axisLabels = if (hasAxisLabels && first != null) {
+                    strided(first.points.filter { it.label.isNotBlank() }).map { point ->
+                        InkChartTextMark(
+                            x = map(point.x, model.minimumX, model.maximumX, left, right),
+                            y = height * 0.97f,
+                            text = point.label,
+                        )
+                    }
+                } else {
+                    emptyList()
+                },
             )
         }
     }
+
+    private fun strided(points: List<InkChartPoint>): List<InkChartPoint> {
+        if (points.size <= MAX_TEXT_MARKS) return points
+        val stride = (points.size + MAX_TEXT_MARKS - 1) / MAX_TEXT_MARKS
+        return points.filterIndexed { index, _ -> index % stride == 0 }
+    }
+
+    private fun compactNumber(value: Double): String =
+        if (value == value.toLong().toDouble()) value.toLong().toString() else "%.1f".format(value)
+
+    private const val MAX_TEXT_MARKS = 8
 
     fun interpolate(from: InkChartModel, target: InkChartModel, progress: Float): InkChartModel {
         if (from.type != target.type) return target
