@@ -119,7 +119,7 @@
                 android:value="3" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.CAPABILITIES"
-                android:value="surfaces,microphone,stt,tts,assistant,camera" />
+                android:value="surfaces,microphone,stt,tts,assistant,camera,ink_surface" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.RECEIVE_PREFIXES"
                 android:value="/plugin/assistant,/system/plugin,/stt,/tts/started,/tts/done,/camera/snapshot/result,/camera/snapshot/error" />

@@ -8,6 +8,9 @@ import com.anezium.rokidbus.client.plugin.NexusAudioFormat
 import com.anezium.rokidbus.client.plugin.NexusAudioSession
 import com.anezium.rokidbus.client.plugin.NexusAudioStopReason
 import com.anezium.rokidbus.client.plugin.NexusCard
+import com.anezium.rokidbus.client.plugin.NexusInkCloseReason
+import com.anezium.rokidbus.client.plugin.NexusInkProblem
+import com.anezium.rokidbus.client.plugin.NexusInkSurfaceSession
 import com.anezium.rokidbus.client.plugin.NexusNotice
 import com.anezium.rokidbus.client.plugin.NexusNoticeCloseReason
 import com.anezium.rokidbus.client.plugin.NexusNoticeUpdate
@@ -29,6 +32,7 @@ import com.anezium.rokidbus.client.plugin.ttsSession
 import com.anezium.rokidbus.shared.LinkStateBits
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
 import com.anezium.rokidbus.shared.plugin.PluginCapability
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -58,7 +62,10 @@ class AssistantPluginService : NexusPluginService() {
     private val conversationThreading by lazy { AssistantConversationThreading(threadStore) }
     private val assistantToolRegistry by lazy {
         AssistantToolRegistry(
-            definitions = listOf(TakePhotoTool(createTakePhotoToolCapabilities())) +
+            definitions = listOf(
+                TakePhotoTool(createTakePhotoToolCapabilities()),
+                RenderInkPageTool(createRenderInkPageToolCapabilities()),
+            ) +
                 assistantProductivityTools(
                     noteStore = noteStore,
                     reminderStore = reminderStore,
@@ -115,6 +122,10 @@ class AssistantPluginService : NexusPluginService() {
     private val transcriber by lazy { OpenAiTranscriber(authStore::apiKey) }
 
     private var surface: NexusSurfaceSession? = null
+    private var inkSurface: NexusInkSurfaceSession? = null
+    private var pendingInkShow: PendingInkShow? = null
+    private var inkSurfaceActive = false
+    private var inkShownRequestId: String? = null
     private var speechSession: NexusSpeechSession? = null
     private var audioSession: NexusAudioSession? = null
     private var snapshotSession: NexusSnapshotSession? = null
@@ -185,6 +196,7 @@ class AssistantPluginService : NexusPluginService() {
 
     override fun onNexusOpen() {
         surface = nexusSurfaceSession(SURFACE_ID)
+        inkSurface = nexusInkSurfaceSession(INK_SURFACE_ID)
         uiController.onOpen()
         scheduleAccountContextSyncIfStale()
     }
@@ -194,7 +206,9 @@ class AssistantPluginService : NexusPluginService() {
         captureTriggerGate.resetSession()
         resetCapture()
         cancelPipeline()
+        clearInkSurface(hide = true)
         closeAnswerSpeechSession()
+        inkSurface = null
         surface = null
     }
 
@@ -214,6 +228,43 @@ class AssistantPluginService : NexusPluginService() {
     override fun onNexusNoticeClosed(reason: NexusNoticeCloseReason) {
         if (reason == NexusNoticeCloseReason.USER) stopAnswerSpeech()
         uiController.onNoticeClosed(reason)
+    }
+
+    override fun onNexusInkReady(surfaceId: String) {
+        if (surfaceId != INK_SURFACE_ID) return
+        val pending = pendingInkShow
+        if (pending == null || !isRenderInkSessionActive(pending.session)) {
+            clearInkSurface(hide = true)
+            return
+        }
+        pendingInkShow = null
+        if (pending.continuation.isActive) {
+            pending.continuation.resume(RenderInkPageShowResult.Shown)
+        }
+    }
+
+    override fun onNexusInkAction(surfaceId: String, actionId: String, dataset: JSONObject) {
+        if (surfaceId != INK_SURFACE_ID) return
+        Log.i(TAG, "ink action id=$actionId datasetFields=${dataset.length()}")
+    }
+
+    override fun onNexusInkClosed(surfaceId: String, reason: NexusInkCloseReason) {
+        if (surfaceId != INK_SURFACE_ID) return
+        Log.i(TAG, "ink closed reason=$reason")
+        clearInkSurface(hide = false)
+    }
+
+    override fun onNexusInkError(surfaceId: String, problems: List<NexusInkProblem>) {
+        if (surfaceId != INK_SURFACE_ID) return
+        Log.w(TAG, "ink rejected codes=${problems.joinToString { it.code }}")
+        inkSurfaceActive = false
+        inkShownRequestId = null
+        uiController.onSurfaceHidden()
+        val pending = pendingInkShow
+        pendingInkShow = null
+        if (pending?.continuation?.isActive == true) {
+            pending.continuation.resume(RenderInkPageShowResult.Rejected(problems))
+        }
     }
 
     override fun onNexusGlassesAiButton(active: Boolean) {
@@ -246,6 +297,7 @@ class AssistantPluginService : NexusPluginService() {
         uiController.onClose()
         resetCapture()
         cancelPipeline()
+        clearInkSurface(hide = true)
         closeAnswerSpeechSession()
         serviceScope.cancel()
         super.onDestroy()
@@ -259,6 +311,7 @@ class AssistantPluginService : NexusPluginService() {
 
     private fun beginCapture() {
         uiController.beginGestureFlow()
+        clearInkSurface(hide = true)
         if (captureActive) return
         if (!authStore.hasUsableAuth()) {
             resetCapture()
@@ -676,6 +729,102 @@ class AssistantPluginService : NexusPluginService() {
             }
         }
 
+    private fun createRenderInkPageToolCapabilities(): RenderInkPageToolCapabilities =
+        object : RenderInkPageToolCapabilities {
+            override fun currentSession(): RenderInkPageToolSession? {
+                val requestId = currentRequestId ?: return null
+                val generation = currentAssistantGeneration ?: return null
+                return RenderInkPageToolSession(requestId, generation)
+            }
+
+            override fun isSessionActive(session: RenderInkPageToolSession): Boolean =
+                isRenderInkSessionActive(session)
+
+            override fun supportsInkSurface(): Boolean =
+                nexusClient?.supportsInkSurface == true
+
+            override suspend fun showInkPage(
+                session: RenderInkPageToolSession,
+                page: String,
+                data: JSONObject?,
+            ): RenderInkPageShowResult = awaitInkPageShow(session, page, data)
+
+            override fun markInkShown(session: RenderInkPageToolSession): Boolean {
+                if (!isRenderInkSessionActive(session) || !inkSurfaceActive) {
+                    clearInkSurface(hide = true)
+                    return false
+                }
+                inkShownRequestId = session.requestId
+                return true
+            }
+        }
+
+    private suspend fun awaitInkPageShow(
+        session: RenderInkPageToolSession,
+        page: String,
+        data: JSONObject?,
+    ): RenderInkPageShowResult = suspendCancellableCoroutine { continuation ->
+        if (!isRenderInkSessionActive(session)) {
+            continuation.resume(RenderInkPageShowResult.Failed(TOOL_ERROR_CANCELLED))
+            return@suspendCancellableCoroutine
+        }
+        val sessionSurface = inkSurface
+            ?: nexusInkSurfaceSession(INK_SURFACE_ID)?.also { inkSurface = it }
+        if (sessionSurface == null) {
+            continuation.resume(RenderInkPageShowResult.Failed(TOOL_ERROR_INK_RENDER_FAILED))
+            return@suspendCancellableCoroutine
+        }
+        if (pendingInkShow != null) {
+            continuation.resume(RenderInkPageShowResult.Failed(TOOL_ERROR_SURFACE_BUSY))
+            return@suspendCancellableCoroutine
+        }
+
+        val pending = PendingInkShow(session, continuation)
+        pendingInkShow = pending
+        continuation.invokeOnCancellation {
+            if (pendingInkShow === pending) {
+                pendingInkShow = null
+                val shouldHide = inkSurfaceActive
+                inkSurfaceActive = false
+                inkShownRequestId = null
+                if (shouldHide) inkSurface?.hide()
+            }
+        }
+
+        val result = sessionSurface.show(page = page, data = data, handlesBack = false)
+        if (result == NexusSdkResult.SENT) {
+            inkSurfaceActive = true
+        } else if (pendingInkShow === pending) {
+            pendingInkShow = null
+            if (continuation.isActive) {
+                continuation.resume(
+                    RenderInkPageShowResult.Failed(inkShowStartToolErrorCode(result)),
+                )
+            }
+        }
+    }
+
+    private fun isRenderInkSessionActive(session: RenderInkPageToolSession): Boolean =
+        currentRequestId == session.requestId &&
+            currentAssistantGeneration == session.generation &&
+            captureGeneration == session.generation &&
+            pipelineJob?.isActive == true &&
+            isNexusSessionOpen
+
+    private fun clearInkSurface(hide: Boolean) {
+        val hadInk = inkSurfaceActive || inkShownRequestId != null
+        val shouldHide = hide && inkSurfaceActive
+        inkSurfaceActive = false
+        inkShownRequestId = null
+        val pending = pendingInkShow
+        pendingInkShow = null
+        if (pending?.continuation?.isActive == true) {
+            pending.continuation.resume(RenderInkPageShowResult.Failed(TOOL_ERROR_CANCELLED))
+        }
+        if (shouldHide) inkSurface?.hide()
+        if (hadInk || pending != null) uiController.onSurfaceHidden()
+    }
+
     private suspend fun captureSnapshotJpeg(): TakePhotoCaptureResult =
         suspendCancellableCoroutine { continuation ->
             var createdSession: NexusSnapshotSession? = null
@@ -768,6 +917,7 @@ class AssistantPluginService : NexusPluginService() {
 
     private fun showAnswer(text: String) {
         val plain = stripHudMarkdown(text)
+        if (inkShownRequestId == currentRequestId && !uiController.isNoticeBandMode) return
         uiController.showAnswer(
             body = plain,
             legacyCardLines = wrapHudText(plain),
@@ -872,12 +1022,13 @@ class AssistantPluginService : NexusPluginService() {
     private fun assistantToolSessionContext(): AssistantToolSessionContext =
         AssistantToolSessionContext(
             active = isNexusSessionOpen,
-            grantedCapabilities = if (
-                nexusClient?.hasCapability(PluginCapability.CAMERA) == true
-            ) {
-                setOf(PluginCapability.CAMERA.wireValue)
-            } else {
-                emptySet()
+            grantedCapabilities = buildSet {
+                if (nexusClient?.hasCapability(PluginCapability.CAMERA) == true) {
+                    add(PluginCapability.CAMERA.wireValue)
+                }
+                if (nexusClient?.hasCapability(PluginCapability.INK_SURFACE) == true) {
+                    add(PluginCapability.INK_SURFACE.wireValue)
+                }
             },
         )
 
@@ -893,6 +1044,7 @@ class AssistantPluginService : NexusPluginService() {
     companion object {
         private const val TAG = "NexusAssistant"
         private const val SURFACE_ID = "assistant"
+        private const val INK_SURFACE_ID = "assistant-ink"
         private const val AI_ASSIST_OPEN_PATH = "/system/plugin/ai-assist"
         private const val AI_ASSIST_OPEN_TYPE = "ai_assist"
         private const val FALLBACK_CAPTURE_DURATION_MS = 6_000L
@@ -919,11 +1071,25 @@ class AssistantPluginService : NexusPluginService() {
                     return@launch
                 }
                 service.stopAnswerSpeech()
+                service.clearInkSurface(hide = true)
                 service.launchAssistantPipeline(question)
             }
             return true
         }
     }
+}
+
+private data class PendingInkShow(
+    val session: RenderInkPageToolSession,
+    val continuation: CancellableContinuation<RenderInkPageShowResult>,
+)
+
+internal fun inkShowStartToolErrorCode(result: NexusSdkResult): String = when (result) {
+    NexusSdkResult.CAPABILITY_NOT_GRANTED -> TOOL_ERROR_NOT_AUTHORIZED
+    NexusSdkResult.CAPABILITY_NOT_AVAILABLE -> TOOL_ERROR_INK_SURFACE_UNAVAILABLE
+    NexusSdkResult.SURFACE_BUSY -> TOOL_ERROR_SURFACE_BUSY
+    NexusSdkResult.NOT_REGISTERED -> TOOL_ERROR_CANCELLED
+    else -> TOOL_ERROR_INK_RENDER_FAILED
 }
 
 internal fun shouldUseRawCaptureFallback(result: NexusSdkResult): Boolean =
