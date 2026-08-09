@@ -30,6 +30,7 @@ internal class AssistantUiController(
     private val renderer: AssistantUiRenderer,
     private val cancelPipeline: () -> Unit,
     private val resetCapture: () -> Unit,
+    private val onInkNoShow: () -> Unit = {},
     private val launcherHintDelayMs: Long = LAUNCHER_HINT_DELAY_MS,
     private val errorNoticeDurationMs: Long = ERROR_NOTICE_DURATION_MS,
     private val inkHandoffFallbackMs: Long = INK_HANDOFF_FALLBACK_MS,
@@ -40,6 +41,8 @@ internal class AssistantUiController(
     private var noticeHideJob: Job? = null
     private var transcriptUpdateJob: Job? = null
     private var keepaliveJob: Job? = null
+    private var inkHandoffFallbackJob: Job? = null
+    private var inkFallbackAwaitingIdle = false
     private var lastInFlightBody: String? = null
     private var lastInFlightUsesLines = false
 
@@ -62,6 +65,7 @@ internal class AssistantUiController(
     fun onOpen() {
         cancelLauncherHint()
         stopKeepalive()
+        cancelInkHandoffFallback()
         startNewState(flushTranscript = false)
         surfaceShown = false
         noticeShown = false
@@ -81,6 +85,7 @@ internal class AssistantUiController(
     fun onClose() {
         cancelLauncherHint()
         stopKeepalive()
+        cancelInkHandoffFallback()
         startNewState(flushTranscript = false)
         surfaceShown = false
         noticeShown = false
@@ -218,30 +223,47 @@ internal class AssistantUiController(
     fun onSurfaceHidden() {
         surfaceShown = false
         answerCardStarted = false
+        if (inkFallbackAwaitingIdle) {
+            inkFallbackAwaitingIdle = false
+            hideNoticeIfShown()
+        }
     }
 
     /**
-     * An Ink page produced for this answer now owns its visual presentation.
-     * Stop updating the in-flight notice and let the glasses retire it during
-     * the visual handoff. A bounded fallback handles an absent close event
-     * without marking the card tier active: later errors remain notices.
+     * The Ink request is in flight, but the notice remains the painted safety
+     * layer until the glasses report a committed first frame.
      */
-    fun onInkAnswerShown() {
-        cancelLauncherHint()
-        stopKeepalive()
-        val stateVersion = startNewState(flushTranscript = false)
+    fun onInkAnswerPending() {
+        cancelInkHandoffFallback()
         if (!noticeShown) return
-        noticeHideJob = scope.launch {
+        val stateVersion = noticeStateVersion
+        inkHandoffFallbackJob = scope.launch {
             delay(inkHandoffFallbackMs)
-            noticeHideJob = null
-            if (noticeStateVersion == stateVersion) {
-                hideNoticeIfShown()
+            inkHandoffFallbackJob = null
+            if (noticeStateVersion == stateVersion && noticeShown) {
+                // The surface is withdrawn first. The band is hidden only from
+                // onSurfaceHidden, after the launcher/idle layer is underneath.
+                inkFallbackAwaitingIdle = true
+                onInkNoShow()
             }
         }
     }
 
+    /** Ink is painted; the glasses now own the notice cross-fade and close. */
+    fun onInkAnswerShown() {
+        cancelLauncherHint()
+        cancelInkHandoffFallback()
+        stopKeepalive()
+        startNewState(flushTranscript = false)
+    }
+
+    fun onInkAnswerFailed() {
+        cancelInkHandoffFallback()
+    }
+
     fun onNoticeClosed(reason: NexusNoticeCloseReason) {
         stopKeepalive()
+        cancelInkHandoffFallback()
         startNewState(flushTranscript = false)
         noticeShown = false
         if (reason == NexusNoticeCloseReason.USER) {
@@ -372,6 +394,7 @@ internal class AssistantUiController(
             discardPendingTranscript()
         }
         noticeStateVersion += 1
+        cancelInkHandoffFallback()
         noticeHideJob?.cancel()
         noticeHideJob = null
         // Whatever the voice was reading belongs to the state we are leaving. Callers that own an
@@ -379,6 +402,12 @@ internal class AssistantUiController(
         // cannot hold open a band that has moved on.
         spokenAnswerBody = null
         return noticeStateVersion
+    }
+
+    private fun cancelInkHandoffFallback() {
+        inkHandoffFallbackJob?.cancel()
+        inkHandoffFallbackJob = null
+        inkFallbackAwaitingIdle = false
     }
 
     private fun truncateTranscriptTail(text: String): String {
@@ -445,7 +474,7 @@ internal class AssistantUiController(
     internal companion object {
         const val LAUNCHER_HINT_DELAY_MS = 400L
         const val ERROR_NOTICE_DURATION_MS = 2_500L
-        const val INK_HANDOFF_FALLBACK_MS = 2_000L
+        const val INK_HANDOFF_FALLBACK_MS = 10_000L
         const val TRANSCRIPT_UPDATE_INTERVAL_MS = 300L
         const val NOTICE_KEEPALIVE_INTERVAL_MS = 3_000L
         const val ANSWER_TTL_PER_CHAR_MS = 75L

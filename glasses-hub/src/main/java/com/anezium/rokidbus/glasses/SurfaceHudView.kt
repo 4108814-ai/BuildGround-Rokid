@@ -17,6 +17,16 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
 
+/** Applies only render properties; the Ink view keeps its measured and laid-out final bounds. */
+internal fun applyNoticeMorphTransform(view: View, frame: NoticeMorphFrame) {
+    view.pivotX = frame.pivotX
+    view.pivotY = frame.pivotY
+    view.scaleX = frame.scaleX
+    view.scaleY = frame.scaleY
+    view.translationX = frame.translationX
+    view.translationY = frame.translationY
+}
+
 class SurfaceHudView(context: Context) : LinearLayout(context) {
     private data class PendingInkHandoff(
         val surfaceId: String,
@@ -25,10 +35,11 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
 
     private data class ActiveNoticeMorph(
         val surfaceId: String,
-        val placeholder: View,
+        val snapshot: NoticeBandSnapshot,
+        val inkLayout: HudBounds,
         val start: HudBounds,
         val target: HudBounds,
-        val initialNoticeAlpha: Float,
+        val lifecycle: NoticeMorphLifecycle = NoticeMorphLifecycle(),
     )
 
     private val titleView = monoText(17f, BusTheme.text, bold = true)
@@ -66,6 +77,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
     private var pendingListLayoutListener: View.OnLayoutChangeListener? = null
     private var insetUnsubscribe: (() -> Unit)? = null
     private var stopObservingReaderScroll: (() -> Unit)? = null
+    private var inkReadyUnsubscribe: (() -> Unit)? = null
     private var pendingInkHandoff: PendingInkHandoff? = null
     private var activeNoticeMorph: ActiveNoticeMorph? = null
     private val noticeMorphProgress = HudMotionValue(1f, ::applyNoticeMorphProgress)
@@ -160,6 +172,8 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         stopObservingReaderScroll = SurfaceController.observeReaderScroll { direction ->
             if (surface?.isReader == true) readerView.smoothScrollByViewport(direction)
         }
+        inkReadyUnsubscribe?.invoke()
+        inkReadyUnsubscribe = SurfaceController.observeInkReady(::onInkFirstFrameReady)
     }
 
     override fun onDetachedFromWindow() {
@@ -169,6 +183,8 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         invalidatePendingListLayout()
         cancelPendingInkHandoff()
         cancelNoticeMorph()
+        inkReadyUnsubscribe?.invoke()
+        inkReadyUnsubscribe = null
         stopObservingReaderScroll?.invoke()
         stopObservingReaderScroll = null
         SurfaceController.detachInkRenderer(inkView)
@@ -219,7 +235,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
     private fun maybeScheduleInkHandoff(surface: NexusSurface) {
         val ownerPluginId = surface.ownerPluginId
         if (!NoticeController.hasMorphCandidate(ownerPluginId)) {
-            setInkContentAlpha(1f)
+            resetInkMorphTransform()
             return
         }
         setInkContentAlpha(0f)
@@ -227,10 +243,10 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
             override fun onPreDraw(): Boolean {
                 cancelPendingInkHandoff()
                 if (this@SurfaceHudView.surface?.surfaceId != surface.surfaceId) {
-                    setInkContentAlpha(1f)
+                    resetInkMorphTransform()
                     return true
                 }
-                beginInkHandoff(surface.surfaceId, ownerPluginId)
+                prepareInkHandoff(surface.surfaceId, ownerPluginId)
                 return true
             }
         }
@@ -239,84 +255,85 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         invalidate()
     }
 
-    private fun beginInkHandoff(surfaceId: String, ownerPluginId: String) {
+    private fun prepareInkHandoff(surfaceId: String, ownerPluginId: String) {
         val targetOnScreen = inkView.primaryContentBoundsOnScreen()
         val snapshot = NoticeController.handoffSnapshot(ownerPluginId)
         if (targetOnScreen == null || targetOnScreen.isEmpty || snapshot == null) {
-            setInkContentAlpha(1f)
+            log("notice morph id=$surfaceId event=instant reason=no_measured_band")
+            resetInkMorphTransform()
             return
         }
         val hostLocation = IntArray(2)
         getLocationOnScreen(hostLocation)
         val start = snapshot.bounds.relativeTo(hostLocation[0], hostLocation[1])
         val target = targetOnScreen.relativeTo(hostLocation[0], hostLocation[1])
-        val placeholder = NoticeOverlayRenderer.NoticeBandView(context).apply {
-            render(
-                titleText = snapshot.title,
-                bodyText = snapshot.body,
-                footerText = snapshot.footer,
-                leadingGlyph = null,
-            )
-            alpha = 0f
-        }
-        overlay.add(placeholder)
-        layoutMorphPlaceholder(placeholder, start)
-        if (!NoticeController.closeForHandoff(snapshot)) {
-            overlay.remove(placeholder)
-            setInkContentAlpha(1f)
+        val inkLayout = HudBounds(inkView.left, inkView.top, inkView.right, inkView.bottom)
+        val initialFrame = noticeMorphFrame(
+            inkLayout = inkLayout,
+            start = start,
+            target = target,
+            progress = 0f,
+            initialNoticeAlpha = snapshot.alpha,
+        )
+        if (initialFrame == null || !NoticeController.beginHandoff(snapshot)) {
+            log("notice morph id=$surfaceId event=instant reason=handoff_unavailable")
+            resetInkMorphTransform()
             return
         }
         activeNoticeMorph = ActiveNoticeMorph(
             surfaceId = surfaceId,
-            placeholder = placeholder,
+            snapshot = snapshot,
+            inkLayout = inkLayout,
             start = start,
             target = target,
-            initialNoticeAlpha = snapshot.alpha,
         )
         noticeMorphProgress.snapTo(0f)
+        if (SurfaceController.isInkReady(surfaceId)) onInkFirstFrameReady(surfaceId)
+    }
+
+    private fun onInkFirstFrameReady(surfaceId: String) {
+        val morph = activeNoticeMorph?.takeIf { it.surfaceId == surfaceId } ?: return
+        if (!morph.lifecycle.onFirstFrame()) return
+        log("notice morph id=$surfaceId event=first_frame")
         noticeMorphProgress.animateTo(
             target = 1f,
             durationMs = HudMotion.STANDARD_MS,
             interpolator = HudMotion.enter,
         ) {
-            completeNoticeMorph(surfaceId)
+            if (morph.lifecycle.onAnimationComplete()) completeNoticeMorph(surfaceId)
         }
     }
 
     private fun applyNoticeMorphProgress(progress: Float) {
         val morph = activeNoticeMorph ?: return
         val frame = noticeMorphFrame(
+            inkLayout = morph.inkLayout,
             start = morph.start,
             target = morph.target,
             progress = progress,
-            initialNoticeAlpha = morph.initialNoticeAlpha,
-        )
-        layoutMorphPlaceholder(morph.placeholder, frame.bounds)
-        morph.placeholder.alpha = frame.noticeAlpha
+            initialNoticeAlpha = morph.snapshot.alpha,
+        ) ?: return
+        applyNoticeMorphTransform(inkView, frame)
         setInkContentAlpha(frame.inkAlpha)
-    }
-
-    private fun layoutMorphPlaceholder(view: View, bounds: HudBounds) {
-        if (bounds.isEmpty) return
-        view.measure(
-            MeasureSpec.makeMeasureSpec(bounds.width, MeasureSpec.EXACTLY),
-            MeasureSpec.makeMeasureSpec(bounds.height, MeasureSpec.EXACTLY),
-        )
-        view.layout(bounds.left, bounds.top, bounds.right, bounds.bottom)
+        NoticeController.applyHandoffProgress(morph.snapshot, progress)
     }
 
     private fun completeNoticeMorph(surfaceId: String) {
         val morph = activeNoticeMorph?.takeIf { it.surfaceId == surfaceId } ?: return
-        overlay.remove(morph.placeholder)
         activeNoticeMorph = null
-        setInkContentAlpha(1f)
+        resetInkMorphTransform()
+        NoticeController.completeHandoff(morph.snapshot)
+        log("notice morph id=$surfaceId event=complete")
     }
 
     private fun cancelNoticeMorph() {
         noticeMorphProgress.cancel()
-        activeNoticeMorph?.placeholder?.let(overlay::remove)
+        activeNoticeMorph?.let { morph ->
+            morph.lifecycle.cancel()
+            NoticeController.cancelHandoff(morph.snapshot)
+        }
         activeNoticeMorph = null
-        setInkContentAlpha(1f)
+        resetInkMorphTransform()
     }
 
     private fun cancelPendingInkHandoff() {
@@ -332,6 +349,14 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         subtitleView.alpha = alpha
         inkView.alpha = alpha
         footerView.alpha = alpha
+    }
+
+    private fun resetInkMorphTransform() {
+        inkView.scaleX = 1f
+        inkView.scaleY = 1f
+        inkView.translationX = 0f
+        inkView.translationY = 0f
+        setInkContentAlpha(1f)
     }
 
     private fun renderTimed(surface: NexusSurface) {

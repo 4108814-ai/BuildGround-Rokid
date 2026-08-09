@@ -138,15 +138,46 @@ object NoticeOverlayRenderer {
         )
     }
 
-    /** Handoff alone bypasses the ordinary exit; the placeholder owns that same frame. */
+    /** Hold the real notice steady while the surface waits for its committed first frame. */
+    fun beginHandoff(expectedSeq: Long): Boolean {
+        val view = band ?: return false
+        if (container == null || renderedSeq != expectedSeq || exitRunning) return false
+        slide.cancel()
+        fade.cancel()
+        view.alpha = fade.current
+        scrim?.alpha = noticeBackdropAlpha(fade.current, backdrop)
+        log("renderer seq=$expectedSeq event=handoff_begin")
+        return true
+    }
+
+    /** The surface's one motion value drives this window's cross-fade without window IPC. */
+    fun applyHandoffAlpha(expectedSeq: Long, alpha: Float): Boolean {
+        val view = band ?: return false
+        if (container == null || renderedSeq != expectedSeq || exitRunning) return false
+        val value = alpha.coerceIn(0f, 1f)
+        view.alpha = value
+        scrim?.alpha = noticeBackdropAlpha(value, backdrop)
+        return true
+    }
+
+    /** Restore the still-live notice when the incoming surface is replaced or withdrawn. */
+    fun cancelHandoff(expectedSeq: Long, alpha: Float): Boolean {
+        if (container == null || renderedSeq != expectedSeq) return false
+        exitRunning = false
+        fade.snapTo(alpha.coerceIn(0f, 1f))
+        log("renderer seq=$expectedSeq event=handoff_cancel")
+        return true
+    }
+
+    /** Handoff removal happens only after the real notice has reached alpha zero. */
     fun removeForHandoff(expectedSeq: Long): Boolean {
         val root = container ?: return false
         if (renderedSeq != expectedSeq) return false
         val seq = renderedSeq ?: -1L
         slide.cancel()
         fade.cancel()
-        // ViewRoot removal may be deferred. Stop drawing first so a compositor
-        // frame can never contain both this band and the surface placeholder.
+        // ViewRoot removal may be deferred. It is already transparent, but stop
+        // drawing as well so a stale compositor transaction cannot revive it.
         root.visibility = View.INVISIBLE
         runCatching { windowManager?.removeViewImmediate(root) }
             .onFailure { logError("Notice overlay handoff removal failed", it) }

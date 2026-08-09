@@ -135,6 +135,7 @@ class AssistantPluginService : NexusPluginService() {
     private var inkSurface: NexusInkSurfaceSession? = null
     private var pendingInkShow: PendingInkShow? = null
     private var inkSurfaceActive = false
+    private var inkNoShowHidePending = false
     private var inkShownRequestId: String? = null
     private var speechSession: NexusSpeechSession? = null
     private var audioSession: NexusAudioSession? = null
@@ -196,6 +197,7 @@ class AssistantPluginService : NexusPluginService() {
         },
         cancelPipeline = ::cancelPipeline,
         resetCapture = ::resetCapture,
+        onInkNoShow = ::hideInkAfterNoShow,
     )
 
     override fun onCreate() {
@@ -205,6 +207,7 @@ class AssistantPluginService : NexusPluginService() {
     }
 
     override fun onNexusOpen() {
+        inkNoShowHidePending = false
         surface = nexusSurfaceSession(SURFACE_ID)
         inkSurface = nexusInkSurfaceSession(INK_SURFACE_ID)
         uiController.onOpen()
@@ -212,6 +215,7 @@ class AssistantPluginService : NexusPluginService() {
     }
 
     override fun onNexusClose() {
+        inkNoShowHidePending = false
         uiController.onClose()
         captureTriggerGate.resetSession()
         resetCapture()
@@ -248,6 +252,7 @@ class AssistantPluginService : NexusPluginService() {
             return
         }
         pendingInkShow = null
+        uiController.onInkAnswerShown()
         if (pending.continuation.isActive) {
             pending.continuation.resume(InkPageShowResult.Shown)
         }
@@ -261,12 +266,16 @@ class AssistantPluginService : NexusPluginService() {
     override fun onNexusInkClosed(surfaceId: String, reason: NexusInkCloseReason) {
         if (surfaceId != INK_SURFACE_ID) return
         Log.i(TAG, "ink closed reason=$reason")
+        val completesNoShowFallback = inkNoShowHidePending
+        inkNoShowHidePending = false
         clearInkSurface(hide = false)
+        if (completesNoShowFallback) uiController.onSurfaceHidden()
     }
 
     override fun onNexusInkError(surfaceId: String, problems: List<NexusInkProblem>) {
         if (surfaceId != INK_SURFACE_ID) return
         Log.w(TAG, "ink rejected codes=${problems.joinToString { it.code }}")
+        inkNoShowHidePending = false
         inkSurfaceActive = false
         inkShownRequestId = null
         uiController.onSurfaceHidden()
@@ -765,8 +774,7 @@ class AssistantPluginService : NexusPluginService() {
                     return false
                 }
                 inkShownRequestId = session.requestId
-                uiController.onInkAnswerShown()
-                Log.i(TAG, "Ink answer shown; notice stream stopped for glasses handoff")
+                Log.i(TAG, "Ink answer ready; glasses owns notice handoff")
                 return true
             }
         }
@@ -796,6 +804,7 @@ class AssistantPluginService : NexusPluginService() {
         continuation.invokeOnCancellation {
             if (pendingInkShow === pending) {
                 pendingInkShow = null
+                uiController.onInkAnswerFailed()
                 val shouldHide = inkSurfaceActive
                 inkSurfaceActive = false
                 inkShownRequestId = null
@@ -803,11 +812,13 @@ class AssistantPluginService : NexusPluginService() {
             }
         }
 
+        uiController.onInkAnswerPending()
         val result = sessionSurface.show(page = page, data = data, handlesBack = false)
         if (result == NexusSdkResult.SENT) {
             inkSurfaceActive = true
         } else if (pendingInkShow === pending) {
             pendingInkShow = null
+            uiController.onInkAnswerFailed()
             if (continuation.isActive) {
                 continuation.resume(
                     InkPageShowResult.Failed(inkShowStartToolErrorCode(result)),
@@ -835,6 +846,23 @@ class AssistantPluginService : NexusPluginService() {
         }
         if (shouldHide) inkSurface?.hide()
         if (hadInk || pending != null) uiController.onSurfaceHidden()
+    }
+
+    /** Keep the notice painted until the glasses confirm the blank Ink surface is gone. */
+    private fun hideInkAfterNoShow() {
+        val pending = pendingInkShow
+        pendingInkShow = null
+        if (pending?.continuation?.isActive == true) {
+            pending.continuation.resume(InkPageShowResult.Failed(TOOL_ERROR_INK_RENDER_FAILED))
+        }
+        inkShownRequestId = null
+        if (!inkSurfaceActive) {
+            uiController.onSurfaceHidden()
+            return
+        }
+        inkSurfaceActive = false
+        inkNoShowHidePending = true
+        inkSurface?.hide()
     }
 
     private suspend fun captureSnapshotJpeg(): TakePhotoCaptureResult =
