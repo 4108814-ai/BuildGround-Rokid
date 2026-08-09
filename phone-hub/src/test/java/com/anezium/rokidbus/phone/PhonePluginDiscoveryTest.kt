@@ -1,10 +1,15 @@
 package com.anezium.rokidbus.phone
 
+import android.content.ComponentName
 import com.anezium.rokidbus.shared.BusConstants
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+// Robolectric for real ComponentName equality; the JUnit android.jar stubs throw on it.
+@RunWith(RobolectricTestRunner::class)
 class PhonePluginDiscoveryTest {
     private fun record(
         packageName: String = "dev.example.hello",
@@ -50,6 +55,39 @@ class PhonePluginDiscoveryTest {
         assertEquals(2131230890, principal.descriptor.iconDrawableResId)
         assertEquals(2131230891, principal.descriptor.glyphsResId)
         assertEquals(64, principal.signingDigestSha256.length)
+    }
+
+    @Test
+    fun `guardian metadata resolves a relative service in the plugin package`() {
+        val result = PhonePluginDiscovery.evaluate(
+            listOf(
+                record(
+                    extraMetadata = listOf(
+                        BusConstants.META_PLUGIN_GUARDIAN_SERVICE to ".RelayGuardianService",
+                    ),
+                ),
+            ),
+        ).single() as PhonePluginCandidate.Valid
+
+        assertEquals(
+            ComponentName("dev.example.hello", "dev.example.hello.RelayGuardianService"),
+            result.principal.guardianServiceComponent,
+        )
+    }
+
+    @Test
+    fun `invalid guardian metadata does not create a bind target`() {
+        val result = PhonePluginDiscovery.evaluate(
+            listOf(
+                record(
+                    extraMetadata = listOf(
+                        BusConstants.META_PLUGIN_GUARDIAN_SERVICE to "invalid/service",
+                    ),
+                ),
+            ),
+        ).single() as PhonePluginCandidate.Valid
+
+        assertEquals(null, result.principal.guardianServiceComponent)
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.anezium.rokidbus.plugin.relay
 import android.companion.AssociationInfo
 import android.companion.CompanionDeviceService
 import android.companion.DevicePresenceEvent
+import android.os.Build
 import android.util.Log
 
 /**
@@ -16,7 +17,20 @@ import android.util.Log
  */
 @Suppress("NewApi")
 class RelayCompanionService : CompanionDeviceService() {
+    override fun onCreate() {
+        super.onCreate()
+        RelayDiagnostics.recordCompanionServiceBound(this, bound = true)
+        RelaySettingsActivity.notifyDataChanged()
+    }
+
+    override fun onDestroy() {
+        RelayDiagnostics.recordCompanionServiceBound(this, bound = false)
+        RelaySettingsActivity.notifyDataChanged()
+        super.onDestroy()
+    }
+
     override fun onDevicePresenceEvent(event: DevicePresenceEvent) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.BAKLAVA) return
         when (event.event) {
             DevicePresenceEvent.EVENT_BLE_APPEARED,
             DevicePresenceEvent.EVENT_BT_CONNECTED,
@@ -30,9 +44,15 @@ class RelayCompanionService : CompanionDeviceService() {
         }
     }
 
-    override fun onDeviceAppeared(associationInfo: AssociationInfo) = logAppeared()
+    override fun onDeviceAppeared(associationInfo: AssociationInfo) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        logAppeared()
+    }
 
-    override fun onDeviceDisappeared(associationInfo: AssociationInfo) = logDisappeared()
+    override fun onDeviceDisappeared(associationInfo: AssociationInfo) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        logDisappeared()
+    }
 
     @Deprecated("Pre-T presence callback; AssociationInfo variant forwards here")
     override fun onDeviceAppeared(address: String) = logAppeared()
@@ -41,10 +61,16 @@ class RelayCompanionService : CompanionDeviceService() {
     override fun onDeviceDisappeared(address: String) = logDisappeared()
 
     private fun logAppeared() {
+        RelayDiagnostics.recordCompanionPresence(this, appeared = true)
+        RelayGuardianService.requestImmediateHealthEvaluation()
+        RelaySettingsActivity.notifyDataChanged()
         Log.i(TAG, "companion device appeared")
     }
 
     private fun logDisappeared() {
+        RelayDiagnostics.recordCompanionPresence(this, appeared = false)
+        RelayGuardianService.requestImmediateHealthEvaluation()
+        RelaySettingsActivity.notifyDataChanged()
         Log.i(TAG, "companion device disappeared")
     }
 

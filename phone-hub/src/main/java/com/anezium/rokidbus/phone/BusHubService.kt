@@ -265,6 +265,7 @@ class BusHubService : Service() {
     private lateinit var externalPluginController: ExternalPluginController
     private lateinit var cameraConsumerReadiness: CameraConsumerReadiness
     private lateinit var cameraCompanionController: CameraCompanionController
+    private lateinit var pluginGuardianCoordinator: PluginGuardianCoordinator
     private lateinit var mediaSyncCoordinator: MediaSyncCoordinator
     private lateinit var manualPairingEngine: GlassesManualPairingEngine
     private var manualPairingEngineSubscription: Closeable? = null
@@ -719,6 +720,11 @@ class BusHubService : Service() {
             reconcileGrants = pluginGrantStore::reconcile,
         )
         executor.execute { pluginGrantReconciler.reconcile() }
+        pluginGuardianCoordinator = PluginGuardianCoordinator(
+            context = applicationContext,
+            targetProvider = ::approvedGuardianTargets,
+            logger = ::log,
+        )
         cameraConsumerReadiness = CameraConsumerReadiness(
             installedPrincipals = ::installedPluginPrincipals,
             grantState = pluginGrantStore::stateFor,
@@ -965,6 +971,7 @@ class BusHubService : Service() {
         phoneBatteryBadgeSubscription = null
         developerModeJournalSubscription?.close()
         developerModeJournalSubscription = null
+        if (::pluginGuardianCoordinator.isInitialized) pluginGuardianCoordinator.close()
         if (::pluginRegistry.isInitialized) pluginRegistry.close()
         if (::cameraCompanionController.isInitialized) cameraCompanionController.close()
         if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.close()
@@ -2814,6 +2821,9 @@ class BusHubService : Service() {
         pluginDiscovery.discover().mapNotNull { candidate ->
             (candidate as? PhonePluginCandidate.Valid)?.principal
         }
+
+    private fun approvedGuardianTargets(): List<PluginGuardianTarget> =
+        selectApprovedGuardianTargets(installedPluginPrincipals(), pluginGrantStore::stateFor)
 
     private fun isExternalPrincipalRegistered(principal: PhonePluginPrincipal): Boolean =
         registrations.any { it.principal?.grantKey() == principal.grantKey() }
@@ -4980,6 +4990,9 @@ class BusHubService : Service() {
         val previousTransportState = lastTransportLinkState
         lastTransportLinkState = state
         val transportBits = LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP
+        if (::pluginGuardianCoordinator.isInitialized) {
+            pluginGuardianCoordinator.onLinkStateChanged(state and transportBits != 0)
+        }
         if (::cameraCompanionController.isInitialized &&
             ((previousTransportState and transportBits) and state.inv()) != 0
         ) {

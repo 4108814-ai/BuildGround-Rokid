@@ -9,12 +9,34 @@ internal object NotificationControl {
     @Volatile
     private var listener: RelayNotificationListener? = null
 
+    @Volatile
+    private var liveInstance: RelayNotificationListener? = null
+
+    fun instanceCreated(service: RelayNotificationListener) {
+        liveInstance = service
+    }
+
+    fun instanceDestroyed(service: RelayNotificationListener) {
+        if (liveInstance === service) liveInstance = null
+    }
+
     fun attach(service: RelayNotificationListener) {
+        liveInstance = service
         listener = service
     }
 
     fun detach(service: RelayNotificationListener) {
         if (listener === service) listener = null
+    }
+
+    fun isListenerConnected(): Boolean = listener != null
+
+    fun hasLiveListenerInstance(): Boolean = liveInstance != null
+
+    fun requestListenerUnbind(): Boolean {
+        val current = liveInstance ?: return false
+        current.requestUnbind()
+        return true
     }
 
     /**
