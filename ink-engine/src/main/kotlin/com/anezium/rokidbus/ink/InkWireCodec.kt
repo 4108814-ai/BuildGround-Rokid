@@ -32,6 +32,10 @@ object InkWireLimits {
     const val MAX_DATASET_KEY_CHARS = 64
     const val MAX_DATASET_BYTES = 4 * 1024
     const val MAX_JSON_VALUE_DEPTH = 16
+    const val MAX_CHART_SERIES = InkComponentContract.MAX_CHART_SERIES
+    const val MAX_CHART_POINTS = InkComponentContract.MAX_CHART_POINTS
+    const val MAX_CANVAS_COMMANDS = InkComponentContract.MAX_CANVAS_COMMANDS
+    const val MAX_LOTTIE_JSON_BYTES = InkComponentContract.MAX_LOTTIE_JSON_BYTES
 }
 
 object InkWireCodec {
@@ -550,6 +554,7 @@ object InkWireValidator {
             validateName(name, "$path.a.$name", problems)
             validateJsonValue(value, "$path.a.$name", problems)
         }
+        problems += InkComponentContract.validate(node, path)
         if (node.style.size > InkWireLimits.MAX_STYLES) {
             problems += wireProblem(InkProblemCodes.BUDGET_SIZE, "Node style count exceeds ${InkWireLimits.MAX_STYLES}", "$path.s")
         }
@@ -669,24 +674,10 @@ object InkWireValidator {
         }
     }
 
-    private val NODE_TYPES = setOf("#text", "view", "text", "image", "scroll-view")
-    private val COMMON_ATTRIBUTES = setOf("id")
-    private val ATTRIBUTE_ALLOWLIST = mapOf(
-        "#text" to emptySet(),
-        "view" to COMMON_ATTRIBUTES,
-        "text" to COMMON_ATTRIBUTES,
-        "image" to COMMON_ATTRIBUTES + setOf("src", "mode"),
-        "scroll-view" to COMMON_ATTRIBUTES + setOf(
-            "scroll-x",
-            "scroll-y",
-            "scroll-top",
-            "scroll-left",
-            "scroll-into-view",
-            "auto-scroll",
-            "scroll-speed",
-            "scroll-direction",
-        ),
-    )
+    private val NODE_TYPES = InkComponentContract.supportedComponents + "#text"
+    private val ATTRIBUTE_ALLOWLIST = InkComponentContract.supportedComponents.associateWith(
+        InkComponentContract::attributesFor,
+    ) + ("#text" to emptySet())
     private val NAME = Regex("[A-Za-z][A-Za-z0-9:_-]{0,63}")
     private val DATASET_NAME = Regex("[A-Za-z0-9_:-]{1,64}")
 }

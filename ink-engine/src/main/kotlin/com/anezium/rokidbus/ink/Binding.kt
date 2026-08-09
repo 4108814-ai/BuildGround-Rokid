@@ -339,8 +339,7 @@ internal class BindingRenderer(
     }
 
     private fun normalizeAttribute(tag: String, name: String, value: Any?): Any? {
-        if (tag != "scroll-view") return value
-        return when (name) {
+        if (tag == "scroll-view") return when (name) {
             "scroll-x", "scroll-y", "auto-scroll" -> when (value) {
                 is Boolean -> value
                 is String -> value.equals("true", ignoreCase = true)
@@ -354,7 +353,44 @@ internal class BindingRenderer(
             }
             else -> value
         }
+        val booleanAttributes = when (tag) {
+            "chart" -> setOf("animate", "smooth", "show-average", "showAverage", "show-value-labels")
+            "lottie-view" -> setOf("auto-play", "loop")
+            "progress" -> setOf("show-info", "active")
+            "nx-canvas" -> setOf("loop")
+            else -> emptySet()
+        }
+        if (name in booleanAttributes) return when (value) {
+            is Boolean -> value
+            is String -> value.equals("true", ignoreCase = true)
+            is Number -> value.toInt() != 0
+            else -> value
+        }
+        val numberAttributes = when (tag) {
+            "chart" -> setOf("width", "height")
+            "lottie-view" -> setOf("speed", "progress")
+            "progress" -> setOf("percent", "stroke-width", "duration")
+            "nx-canvas" -> setOf("fps", "width", "height")
+            else -> emptySet()
+        }
+        if (name in numberAttributes && value is String) return value.toDoubleOrNull() ?: value
+        val jsonAttributes = when (tag) {
+            "chart" -> setOf("data", "series", "y-axis", "yAxis", "x-axis", "xAxis")
+            "nx-canvas" -> setOf("commands", "frames")
+            else -> emptySet()
+        }
+        if (name in jsonAttributes && value is String) return parseAttributeJson(value) ?: value
+        return value
     }
+
+    private fun parseAttributeJson(value: String): Any? = runCatching {
+        val trimmed = value.trim()
+        when {
+            trimmed.startsWith("{") -> org.json.JSONObject(trimmed).toInkObject()
+            trimmed.startsWith("[") -> org.json.JSONObject().put("value", org.json.JSONArray(trimmed)).toInkObject()["value"]
+            else -> null
+        }
+    }.getOrNull()
 
     private fun directive(node: TemplateNode.Element, name: String): BindingValue? =
         WxmlParser.findDirective(node.attributes, name)

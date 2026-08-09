@@ -97,8 +97,13 @@ object InkEngine {
         if (document == null || problems.any { it.severity == InkProblemSeverity.ERROR }) {
             return InkCompileResult(null, null, problems.toList(), binding.evaluatedExpressionCount)
         }
+        problems += InkWireValidator.validateDocument(document)
+        problems += InkComponentContract.compatibilityWarnings(document)
+        if (problems.any { it.severity == InkProblemSeverity.ERROR }) {
+            return InkCompileResult(null, null, problems.distinct(), binding.evaluatedExpressionCount)
+        }
         val session = InkSession(markup.roots, styles.rules, blocks.metadata, data, cache, document)
-        return InkCompileResult(document, session, problems.toList(), binding.evaluatedExpressionCount)
+        return InkCompileResult(document, session, problems.distinct(), binding.evaluatedExpressionCount)
     }
 
     const val MAX_PAGE_BYTES = 32 * 1024

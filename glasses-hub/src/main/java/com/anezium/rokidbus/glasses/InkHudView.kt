@@ -58,6 +58,7 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
     private val rootAbsolute = FrameLayout(context)
     private val registry = linkedMapOf<String, Record>()
     private val motion = InkMotionAdapter()
+    private val frameGate = InkFrameGate()
     private var store: InkNodeStore? = null
     private var projectedDocumentId: String? = null
     private var projectedRevision = -1
@@ -112,7 +113,11 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
 
     fun clearProjection() {
         motion.cancelAll()
-        registry.values.forEach { it.view.animate().cancel() }
+        registry.values.forEach {
+            it.view.animate().cancel()
+            (it.view as? InkAnimatedLeaf)?.cancelInkAnimation()
+        }
+        frameGate.clear()
         rootFlex.removeAllViews()
         rootAbsolute.removeAllViews()
         registry.clear()
@@ -172,7 +177,7 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
         refreshAction(node.id)
         when (node.type) {
             "text" -> node.children.forEach { registerVirtualTree(it, node.id, node.id) }
-            "image", "#text" -> Unit
+            "image", "chart", "lottie-view", "progress", "nx-canvas", "#text" -> Unit
             else -> node.children.forEachIndexed { index, child -> addSubtree(child, node.id, index) }
         }
         if (node.type == "text") refreshTextOwner(node.id)
@@ -188,6 +193,14 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
         "image" -> InkImagePlaceholderView(context).apply {
             reference = node.attributes["src"]?.toString().orEmpty()
         }.let { Record(node, parentId, it) }
+        "chart" -> InkChartView(context, palette).apply { updateNode(node) }
+            .let { Record(node, parentId, it) }
+        "lottie-view" -> InkLottieView(context, palette, frameGate).apply { updateNode(node) }
+            .let { Record(node, parentId, it) }
+        "progress" -> InkProgressView(context, palette).apply { updateNode(node) }
+            .let { Record(node, parentId, it) }
+        "nx-canvas" -> InkNxCanvasView(context, palette, frameGate).apply { updateNode(node) }
+            .let { Record(node, parentId, it) }
         "text", "#text" -> monoHudText(context, DEFAULT_TEXT_SP, BusTheme.text).apply {
             text = node.text.orEmpty()
         }.let { Record(node, parentId, it) }
@@ -239,7 +252,10 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
         if (root?.virtual == false) (root.view.parent as? ViewGroup)?.removeView(root.view)
         descendants.forEach { id ->
             motion.cancelNode(id)
-            registry.remove(id)?.view?.animate()?.cancel()
+            registry.remove(id)?.view?.let { view ->
+                view.animate().cancel()
+                (view as? InkAnimatedLeaf)?.cancelInkAnimation()
+            }
         }
     }
 
@@ -272,6 +288,12 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
         }
         if (record.view is InkImagePlaceholderView) {
             record.view.reference = next.attributes["src"]?.toString().orEmpty()
+        }
+        when (val view = record.view) {
+            is InkChartView -> view.updateNode(next)
+            is InkLottieView -> view.updateNode(next)
+            is InkProgressView -> view.updateNode(next)
+            is InkNxCanvasView -> view.updateNode(next)
         }
         refreshAction(nodeId)
     }
@@ -325,7 +347,9 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
         applyLayoutStyle(record, skip)
         applyDecoration(view, style)
         if (view is TextView) applyTextStyle(view, style)
-        view.visibility = if (style["display"] == "none") GONE else VISIBLE
+        val visible = style["display"] != "none"
+        view.visibility = if (visible) VISIBLE else GONE
+        (view as? InkAnimatedLeaf)?.onInkVisibilityChanged(visible)
         if (view is ViewGroup) {
             val clips = view is InkScrollContainer || style["overflow"] == "hidden"
             view.clipChildren = clips
@@ -342,13 +366,14 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
         val widthBase = parent?.width?.takeIf { it > 0 }?.toFloat() ?: inkWidth()
         val heightBase = parent?.height?.takeIf { it > 0 }?.toFloat() ?: height.toFloat().coerceAtLeast(1f)
         val params = view.layoutParams ?: return
+        val replaced = view is InkChartView || view is InkLottieView || view is InkProgressView || view is InkNxCanvasView
         if ("width" !in skip) {
             params.width = style["width"]?.let { length(it, widthBase).roundToInt() }
-                ?: ViewGroup.LayoutParams.WRAP_CONTENT
+                ?: if (replaced) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT
         }
         if ("height" !in skip) {
             params.height = style["height"]?.let { length(it, heightBase).roundToInt() }
-                ?: ViewGroup.LayoutParams.WRAP_CONTENT
+                ?: if (replaced) defaultReplacedHeight(record) else ViewGroup.LayoutParams.WRAP_CONTENT
         }
         if (params is FlexboxLayout.LayoutParams) {
             val flex = InkFlexStyle.from(style)
@@ -772,6 +797,15 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
         node.attributes["scroll-x"] == true && node.attributes["scroll-y"] != true
 
     private fun px(dp: Int): Int = (dp * resources.displayMetrics.density + 0.5f).toInt()
+
+    private fun defaultReplacedHeight(record: Record): Int {
+        val authored = (record.node.attributes["height"] as? Number)?.toFloat()
+        if (authored != null) return (authored * resources.displayMetrics.density).roundToInt()
+        return when (record.node.type) {
+            "progress" -> px(if (record.node.attributes["show-info"] == true) 28 else 18)
+            else -> px(128)
+        }
+    }
 
     private data class TransformAnimation(
         val component: String,

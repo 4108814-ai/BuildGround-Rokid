@@ -47,6 +47,7 @@ dependencies {
     implementation(project(":bus-client"))
     implementation(project(":ink-engine"))
     implementation("com.google.android.flexbox:flexbox:3.0.0")
+    implementation("com.airbnb.android:lottie:6.7.1")
     implementation("com.rokid.cxr:cxr-service-bridge:1.0-20260522.063600-105")
     implementation("dev.mobile:dadb:1.2.10")
     implementation("com.flyfishxu:kadb:2.1.1")

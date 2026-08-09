@@ -1,0 +1,4 @@
+<view>
+  <chart type="funnel" series="value" data="{{ funnel }}"></chart>
+  <chart type="scatter" series="value" data="{{ scatter }}"></chart>
+</view>

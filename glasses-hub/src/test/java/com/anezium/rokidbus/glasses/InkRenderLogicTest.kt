@@ -208,6 +208,84 @@ class InkRenderLogicTest {
         assertEquals(12f, transform.rotationDegrees)
     }
 
+    @Test
+    fun `chart geometry maps axes and gives every series monochrome visual identity`() {
+        val model = InkChartLogic.parse(
+            mapOf(
+                "type" to "line",
+                "series" to listOf(
+                    mapOf("yName" to "a", "xName" to "x"),
+                    mapOf("yName" to "b", "xName" to "x"),
+                    mapOf("yName" to "c", "xName" to "x"),
+                    mapOf("yName" to "d", "xName" to "x"),
+                ),
+                "data" to listOf(
+                    mapOf("x" to 0, "a" to 0, "b" to 2, "c" to 4, "d" to 6),
+                    mapOf("x" to 10, "a" to 10, "b" to 8, "c" to 6, "d" to 4),
+                ),
+                "xAxis" to mapOf("minimum" to 0, "maximum" to 10),
+                "yAxis" to mapOf("minimum" to 0, "maximum" to 10),
+                "showAverage" to true,
+            ),
+        )
+
+        val geometry = InkChartLogic.geometry(model, 400f, 200f)
+        assertEquals(4, geometry.series.size)
+        assertEquals(4, geometry.series.map { it.dash }.distinct().size)
+        assertEquals(4, geometry.series.map { it.marker }.distinct().size)
+        assertEquals(4, geometry.series.map { it.strokeWidth }.distinct().size)
+        assertEquals(32f, geometry.series.first().points.first().x, 0.01f)
+        assertEquals(180f, geometry.series.first().points.first().y, 0.01f)
+        // Average is intentionally single-series only.
+        assertNull(geometry.series.first().averageY)
+    }
+
+    @Test
+    fun `chart interpolation retargets matching values in place`() {
+        val from = InkChartLogic.parse(
+            mapOf("series" to "value", "data" to listOf(mapOf("value" to 0), mapOf("value" to 10))),
+        )
+        val target = InkChartLogic.parse(
+            mapOf("series" to "value", "data" to listOf(mapOf("value" to 10), mapOf("value" to 30))),
+        )
+
+        val halfway = InkChartLogic.interpolate(from, target, 0.5f)
+        assertEquals(listOf(5.0, 20.0), halfway.series.single().points.map { it.y })
+    }
+
+    @Test
+    fun `canvas command logic validates exact names and caps sequence fps`() {
+        val commands = listOf(
+            mapOf("name" to "beginPath", "args" to emptyList<Any?>()),
+            mapOf("name" to "moveTo", "args" to listOf(0, 0)),
+            mapOf("name" to "lineTo", "args" to listOf(20, 20)),
+            mapOf("name" to "stroke", "args" to emptyList<Any?>()),
+        )
+        assertTrue(InkNxCanvasLogic.validateCommands(commands).isEmpty())
+        val program = InkNxCanvasLogic.parse(
+            mapOf("frames" to listOf(commands, commands), "fps" to 120, "loop" to false),
+        )!!
+        assertEquals(2, program.frames.size)
+        assertEquals(30, program.fps)
+        assertTrue(!program.loop)
+
+        assertEquals(
+            listOf("command 0 has unsupported name 'drawImage'"),
+            InkNxCanvasLogic.validateCommands(listOf(mapOf("name" to "drawImage", "args" to emptyList<Any?>()))),
+        )
+    }
+
+    @Test
+    fun `progress geometry clamps values and reserves label width`() {
+        assertEquals(100f, InkProgressLogic.normalizePercent(140), 0f)
+        assertEquals(0f, InkProgressLogic.normalizePercent(-2), 0f)
+        val geometry = InkProgressLogic.geometry(25f, 200f, 24f, 8f, showInfo = true)
+        assertEquals(4f, geometry.trackStart, 0.01f)
+        assertEquals(148f, geometry.trackEnd, 0.01f)
+        assertEquals(40f, geometry.fillEnd, 0.01f)
+        assertEquals(12f, geometry.centerY, 0.01f)
+    }
+
     private fun store(root: RenderNode): InkNodeStore = InkNodeStore.from(
         RenderDocument(listOf(root), documentId = "doc", revision = 0),
     )

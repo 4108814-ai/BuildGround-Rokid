@@ -1,0 +1,9 @@
+<view>
+  <chart type="line" series="{{ line.series }}" data="{{ line.data }}" animate="true"
+    y-axis="{{ line.yAxis }}" x-axis="{{ line.xAxis }}" width="350" height="120"></chart>
+  <chart type="area" series="score" data="{{ retention }}" smooth="true" animate="true"></chart>
+  <chart type="bar" series="value" data="{{ channels }}" direction="vertical"
+    show-value-labels="true" value-label-format="grouped"></chart>
+  <chart type="pie" series="value" data="{{ sources }}"></chart>
+  <chart type="radar" series="value" data="{{ radar }}"></chart>
+</view>

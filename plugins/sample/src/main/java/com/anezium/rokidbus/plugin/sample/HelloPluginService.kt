@@ -266,7 +266,9 @@ class HelloPluginService : NexusPluginService() {
         val result = inkSurface?.update(
             JSONObject()
                 .put("metrics[0].value", next.toString())
-                .put("rows[0].value", "updated $inkRevision"),
+                .put("metrics[2].value", inkRevision.toString())
+                .put("rows[0].value", "updated $inkRevision")
+                .put("chartPoints", demoChartPoints(inkRevision)),
         )
         log("Ink demo action source=${dataset.optString("source")} result=$result")
     }
@@ -301,6 +303,7 @@ class HelloPluginService : NexusPluginService() {
                     .put(JSONObject().put("name", "Glasses render").put("value", "native"))
                     .put(JSONObject().put("name", "Tap action").put("value", "update")),
             )
+            .put("chartPoints", demoChartPoints(0))
         return inkSurface?.show(
             page = INK_DEMO_PAGE,
             data = data,
@@ -427,6 +430,8 @@ class HelloPluginService : NexusPluginService() {
                     <text class="metric-value">{{ item.value }}</text>
                   </view>
                 </view>
+                <chart class="live-chart" type="line" series="value" data="{{ chartPoints }}"
+                  animate="true" smooth="true" show-average="true" />
                 <view class="action" bindtap="refreshMetrics" data-source="sample">
                   <text>Tap to update</text>
                 </view>
@@ -445,12 +450,26 @@ class HelloPluginService : NexusPluginService() {
               .metric { display: flex; flex-direction: column; flex-grow: 1; border-width: 1rpx; padding: 12rpx; }
               .metric-label { font-size: 20rpx; opacity: 0.65; }
               .metric-value { font-size: 34rpx; font-weight: 700; }
+              .live-chart { width: 100%; height: 160rpx; }
               .action { border-width: 2rpx; padding: 14rpx; }
               .rows { display: flex; flex-direction: column; gap: 8rpx; }
               .row { display: flex; flex-direction: row; justify-content: space-between; }
               .row-value { opacity: 0.7; }
             </style>
         """.trimIndent()
+
+        private val CHART_VALUES = intArrayOf(48, 55, 51, 62, 58, 68, 72, 66, 76, 73, 82, 78)
+
+        private fun demoChartPoints(revision: Int): JSONArray = JSONArray().also { points ->
+            repeat(7) { index ->
+                val sourceIndex = (revision + index) % CHART_VALUES.size
+                points.put(
+                    JSONObject()
+                        .put("label", "T${revision + index}")
+                        .put("value", CHART_VALUES[sourceIndex]),
+                )
+            }
+        }
 
         /**
          * A band with more to say than one page holds. It offers no actions on

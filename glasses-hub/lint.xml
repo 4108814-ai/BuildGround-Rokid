@@ -12,4 +12,10 @@
     <issue id="ProtectedPermissions">
         <ignore path="src/main/AndroidManifest.xml" />
     </issue>
+
+    <!-- The check only fires now that Lottie pulls appcompat onto the classpath;
+         this pre-existing plain ImageView never ran under an AppCompat theme. -->
+    <issue id="AppCompatCustomView">
+        <ignore path="src/main/java/com/anezium/rokidbus/glasses/NoticeOverlayRenderer.kt" />
+    </issue>
 </lint>

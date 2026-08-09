@@ -236,8 +236,7 @@ internal class WxmlParser(
                 name.startsWith("data-") && name.length > 5 ||
                 (name.startsWith("bind") || name.startsWith("catch")) && name.length > 4 ||
                 normalizeDirective(name) != null ||
-                tag == "image" && name in IMAGE_ATTRIBUTES ||
-                tag == "scroll-view" && name in SCROLL_ATTRIBUTES
+                name in InkComponentContract.attributesFor(tag)
             if (!allowed) {
                 problems += InkProblem(
                     InkProblemCodes.ATTRIBUTE_UNSUPPORTED,
@@ -395,19 +394,8 @@ internal class WxmlParser(
     }
 
     companion object {
-        private val SUPPORTED_COMPONENTS = setOf("view", "text", "image", "scroll-view")
+        private val SUPPORTED_COMPONENTS = InkComponentContract.supportedComponents
         private val COMMON_ATTRIBUTES = setOf("id", "class", "style")
-        private val IMAGE_ATTRIBUTES = setOf("src", "mode")
-        private val SCROLL_ATTRIBUTES = setOf(
-            "scroll-x",
-            "scroll-y",
-            "scroll-top",
-            "scroll-left",
-            "scroll-into-view",
-            "auto-scroll",
-            "scroll-speed",
-            "scroll-direction",
-        )
         private val CONDITIONAL_DIRECTIVES = setOf("if", "elif", "else")
 
         fun normalizeDirective(attribute: String): String? = when {
