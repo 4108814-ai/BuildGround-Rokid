@@ -1,6 +1,7 @@
 package com.anezium.rokidbus.glasses
 
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.SystemClock
@@ -124,6 +125,18 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
             postDelayed(ticker, tickDelay(next))
         }
         requestFocus()
+    }
+
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        val drawn = surface?.takeIf(NexusSurface::isInk) ?: return
+        if (!inkView.isLayoutSettledForDraw()) return
+        SurfaceController.onInkFrameDrawn(
+            surfaceId = drawn.surfaceId,
+            seq = drawn.seq,
+            widthPx = width,
+            heightPx = height,
+        )
     }
 
     override fun onAttachedToWindow() {

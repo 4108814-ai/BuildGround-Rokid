@@ -1,6 +1,8 @@
 package com.anezium.rokidbus.glasses
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NoticeOverlayRendererTest {
@@ -31,6 +33,62 @@ class NoticeOverlayRendererTest {
         assertEquals(
             NoticeRenderMotion.UPDATE,
             noticeRenderMotion(fadeAlpha = 1f, exitRunning = false),
+        )
+    }
+
+    @Test
+    fun `only an assistant conversational notice holds the display`() {
+        assertTrue(
+            NoticeDisplayHoldPolicy.noticeHoldsDisplay(
+                surfaceId = "assistant:notice",
+                wakeDisplay = false,
+            ),
+        )
+        assertFalse(
+            NoticeDisplayHoldPolicy.noticeHoldsDisplay(
+                surfaceId = "assistant:notice",
+                wakeDisplay = true,
+            ),
+        )
+        assertFalse(
+            NoticeDisplayHoldPolicy.noticeHoldsDisplay(
+                surfaceId = "relay:notice",
+                wakeDisplay = false,
+            ),
+        )
+        assertFalse(
+            NoticeDisplayHoldPolicy.noticeHoldsDisplay(
+                surfaceId = "assistant:activity",
+                wakeDisplay = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `display hold stays continuous from assistant notice through surface handoff`() {
+        assertTrue(
+            NoticeDisplayHoldPolicy.displayHeld(
+                noticeHolding = true,
+                surfaceHolding = false,
+            ),
+        )
+        assertTrue(
+            NoticeDisplayHoldPolicy.displayHeld(
+                noticeHolding = true,
+                surfaceHolding = true,
+            ),
+        )
+        assertTrue(
+            NoticeDisplayHoldPolicy.displayHeld(
+                noticeHolding = false,
+                surfaceHolding = true,
+            ),
+        )
+        assertFalse(
+            NoticeDisplayHoldPolicy.displayHeld(
+                noticeHolding = false,
+                surfaceHolding = false,
+            ),
         )
     }
 }

@@ -1004,9 +1004,11 @@ internal object NoticeController {
     private fun maybeSleepDisplay(closeReason: NoticeCloseReason) {
         // A USER or TIMEOUT close ends the wake episode whether or not the sleep
         // below runs: the band is gone, so nothing is owed standby after this.
-        // Only an OWNER hide keeps the episode alive, because owners hide and
-        // show in sequence and the next band continues the same interruption.
-        val episodeEnds = closeReason != NoticeCloseReason.OWNER
+        // An OWNER hide with no active surface keeps the episode alive because
+        // owners hide and show bands in sequence. A foreground surface instead
+        // completes that handoff and owns its own display hold.
+        val surfaceActive = SurfaceController.activeSurface() != null
+        val episodeEnds = NoticeSleepPolicy.episodeEnds(closeReason, surfaceActive)
         try {
             val context = serviceContext ?: return
             val sleep = sleepDisplay ?: return
@@ -1021,7 +1023,7 @@ internal object NoticeController {
                     episodeOwnsWake = episodeOwnsWake,
                     isInteractive = power.isInteractive,
                     launcherShown = LauncherOverlayRenderer.isShown(),
-                    surfaceActive = SurfaceController.activeSurface() != null,
+                    surfaceActive = surfaceActive,
                     activityPresenting = ActivityController.isPresenting(),
                     cameraOverlayActive = cameraOverlayActive,
                 )

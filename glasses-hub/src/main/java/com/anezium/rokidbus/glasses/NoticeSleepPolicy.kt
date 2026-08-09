@@ -19,6 +19,10 @@ internal sealed interface NoticeSleepDecision {
 
 /** Pure close-time policy for returning a notice-owned wake episode to standby. */
 internal object NoticeSleepPolicy {
+    /** A surface handoff ends notice ownership; an owner replacing its own band does not. */
+    fun episodeEnds(closeReason: NoticeCloseReason, surfaceActive: Boolean): Boolean =
+        closeReason != NoticeCloseReason.OWNER || surfaceActive
+
     fun decide(
         closeReason: NoticeCloseReason,
         episodeOwnsWake: Boolean,
@@ -28,6 +32,8 @@ internal object NoticeSleepPolicy {
         activityPresenting: Boolean,
         cameraOverlayActive: Boolean,
     ): NoticeSleepDecision = when {
+        surfaceActive ->
+            NoticeSleepDecision.Skip(NoticeSleepRefusal.SURFACE_ACTIVE)
         closeReason != NoticeCloseReason.USER && closeReason != NoticeCloseReason.TIMEOUT ->
             NoticeSleepDecision.Skip(NoticeSleepRefusal.CLOSE_REASON)
         !episodeOwnsWake ->
@@ -36,8 +42,6 @@ internal object NoticeSleepPolicy {
             NoticeSleepDecision.Skip(NoticeSleepRefusal.DISPLAY_NOT_INTERACTIVE)
         launcherShown ->
             NoticeSleepDecision.Skip(NoticeSleepRefusal.LAUNCHER_SHOWN)
-        surfaceActive ->
-            NoticeSleepDecision.Skip(NoticeSleepRefusal.SURFACE_ACTIVE)
         activityPresenting ->
             NoticeSleepDecision.Skip(NoticeSleepRefusal.ACTIVITY_PRESENTING)
         cameraOverlayActive ->

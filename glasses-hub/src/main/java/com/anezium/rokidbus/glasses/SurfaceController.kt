@@ -29,6 +29,7 @@ object SurfaceController {
         ::onInkRendererError,
     )
     private val orderingCoordinator = SurfaceOrderingCoordinator<JSONObject>()
+    private val inkPresentationGate = InkPresentationGate()
     private val listeners = CopyOnWriteArrayList<(NexusSurface?) -> Unit>()
     private val readerScrollListeners = CopyOnWriteArrayList<(Int) -> Unit>()
     private val inputDedupe = DpadPairDedupe()
@@ -313,6 +314,25 @@ object SurfaceController {
         inkRendererLayer.detach(view)
     }
 
+    internal fun onInkFrameDrawn(
+        surfaceId: String,
+        seq: Long,
+        widthPx: Int,
+        heightPx: Int,
+    ) {
+        val current = active
+        if (
+            current?.isInk != true ||
+            current.surfaceId != surfaceId ||
+            current.seq != seq
+        ) {
+            return
+        }
+        if (inkPresentationGate.releaseAfterDraw(surfaceId, seq, widthPx, heightPx)) {
+            sendInkEvent(surfaceId, InkSurfaceContract.EVENT_READY)
+        }
+    }
+
     internal fun setInkResyncListener(listener: ((InkResyncRequest) -> Unit)?) {
         inkResyncListener = listener
     }
@@ -357,10 +377,10 @@ object SurfaceController {
         inkRendererLayer.submit(
             surface = surface,
             onCommitted = {
-                showOrUpdate(context, surface, launcherShow = launcherShow)
                 if (launcherShow) {
-                    sendInkEvent(surface.surfaceId, InkSurfaceContract.EVENT_READY)
+                    inkPresentationGate.arm(surface.surfaceId, surface.seq)
                 }
+                showOrUpdate(context, surface, launcherShow = launcherShow)
             },
         )
     }
@@ -516,12 +536,18 @@ object SurfaceController {
     }
 
     private fun notifyReplacedInk(next: NexusSurface) {
+        if (next.isInk) {
+            inkPresentationGate.retainForSurface(next.surfaceId, next.seq)
+        } else {
+            inkPresentationGate.cancel()
+        }
         val previous = active?.takeIf(NexusSurface::isInk) ?: return
         if (next.isInk && next.surfaceId == previous.surfaceId) return
         sendInkClosed(previous.surfaceId, InkSurfaceContract.CLOSE_REPLACED)
     }
 
     private fun clearInkRenderer() {
+        inkPresentationGate.cancel()
         inkRendererLayer.clear()
         if (inkFrameMeterRunning) {
             HudFrameMeter.stop()

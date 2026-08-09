@@ -2,6 +2,8 @@ package com.anezium.rokidbus.glasses
 
 import com.anezium.rokidbus.shared.NoticeCloseReason
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NoticeSleepPolicyTest {
@@ -46,6 +48,48 @@ class NoticeSleepPolicyTest {
         assertSkipped(
             NoticeSleepRefusal.SURFACE_ACTIVE,
             decide(NoticeCloseReason.USER, surfaceActive = true),
+        )
+    }
+
+    @Test
+    fun `surface handoff blocks sleep even without notice wake ownership`() {
+        assertSkipped(
+            NoticeSleepRefusal.SURFACE_ACTIVE,
+            decide(
+                NoticeCloseReason.OWNER,
+                episodeOwnsWake = false,
+                surfaceActive = true,
+            ),
+        )
+        assertSkipped(
+            NoticeSleepRefusal.SURFACE_ACTIVE,
+            decide(
+                NoticeCloseReason.TIMEOUT,
+                episodeOwnsWake = false,
+                surfaceActive = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `owner hide ends a notice wake episode only when a surface takes over`() {
+        assertFalse(
+            NoticeSleepPolicy.episodeEnds(
+                NoticeCloseReason.OWNER,
+                surfaceActive = false,
+            ),
+        )
+        assertTrue(
+            NoticeSleepPolicy.episodeEnds(
+                NoticeCloseReason.OWNER,
+                surfaceActive = true,
+            ),
+        )
+        assertTrue(
+            NoticeSleepPolicy.episodeEnds(
+                NoticeCloseReason.USER,
+                surfaceActive = false,
+            ),
         )
     }
 

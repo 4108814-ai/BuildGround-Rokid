@@ -63,6 +63,7 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
     private var projectedDocumentId: String? = null
     private var projectedRevision = -1
     private var containerWidth = 0
+    private val layoutSettlePolicy = InkLayoutSettlePolicy()
 
     init {
         setBackgroundColor(BusTheme.glassesBg)
@@ -82,6 +83,7 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
         projectedDocumentId = next.documentId
         projectedRevision = next.revision
         next.rootNodes().forEachIndexed { index, node -> addSubtree(node, null, index) }
+        layoutSettlePolicy.onProjectionChanged()
         requestLayout()
     }
 
@@ -124,6 +126,7 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
         store = null
         projectedDocumentId = null
         projectedRevision = -1
+        layoutSettlePolicy.onProjectionChanged()
     }
 
     fun handleInkKeyEvent(event: KeyEvent): Boolean {
@@ -151,12 +154,25 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
         return false
     }
 
-    override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
-        super.onSizeChanged(width, height, oldWidth, oldHeight)
-        if (width <= 0 || width == containerWidth) return
-        containerWidth = width
-        registry.values.filterNot(Record::virtual).forEach { applyStyle(it) }
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        if (
+            layoutSettlePolicy.onPostLayout(width, height) ==
+            InkLayoutSettleAction.REAPPLY_GEOMETRY
+        ) {
+            // Parent Flexboxes now have their stretched final bounds. Resolve
+            // every percentage/rpx value against those bounds, then give the
+            // tree one clean measure/layout before presentation is acknowledged.
+            containerWidth = width
+            registry.values.filterNot(Record::virtual).forEach { applyStyle(it) }
+            rootFlex.requestLayout()
+            rootAbsolute.requestLayout()
+            requestLayout()
+        }
     }
+
+    internal fun isLayoutSettledForDraw(): Boolean =
+        layoutSettlePolicy.canDraw(width, height)
 
     override fun onDetachedFromWindow() {
         clearProjection()

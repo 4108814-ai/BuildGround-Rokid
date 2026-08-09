@@ -21,6 +21,17 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
+import com.anezium.rokidbus.shared.NoticeSurfaceContract
+
+internal object NoticeDisplayHoldPolicy {
+    private const val ASSISTANT_NOTICE_ID = "assistant:${NoticeSurfaceContract.LOCAL_SURFACE_ID}"
+
+    fun noticeHoldsDisplay(surfaceId: String, wakeDisplay: Boolean): Boolean =
+        surfaceId == ASSISTANT_NOTICE_ID && !wakeDisplay
+
+    fun displayHeld(noticeHolding: Boolean, surfaceHolding: Boolean): Boolean =
+        noticeHolding || surfaceHolding
+}
 
 internal fun noticeBackdropAlpha(fadeAlpha: Float, backdrop: Boolean): Float =
     if (backdrop) fadeAlpha else 0f
@@ -56,8 +67,11 @@ internal fun noticeBandHeightCeiling(
  * Like the pin and like Relay's own overlay, the window is never focusable and
  * never touchable: it does not steal focus from what is underneath, and the
  * touchpad keeps working for everything the notice has not explicitly claimed.
- * The window never keeps the screen on. Wake requests are owned separately by
- * [NoticeController], so the renderer cannot extend a notice's wake episode.
+ * Ordinary notices never keep the screen on. The assistant's conversational
+ * band is the one foreground bridge to a pending Ink answer: it holds only
+ * until that band starts dismissing, while the Ink surface takes over with its
+ * existing foreground window flag. Wake requests remain separately owned by
+ * [NoticeController].
  */
 object NoticeOverlayRenderer {
     private var service: AccessibilityService? = null
@@ -72,6 +86,7 @@ object NoticeOverlayRenderer {
     private var hudTopInsetDp = 0
     private var exitRunning = false
     private var renderedSeq: Long? = null
+    private var displayHoldActive = false
 
     private val slide = HudMotionValue(0f) { offset -> band?.translationY = offset }
     private val fade = HudMotionValue(0f) { alpha ->
@@ -116,6 +131,12 @@ object NoticeOverlayRenderer {
             dismiss()
             return
         }
+        setDisplayHold(
+            NoticeDisplayHoldPolicy.noticeHoldsDisplay(
+                surfaceId = notice.surfaceId,
+                wakeDisplay = notice.content.wakeDisplay,
+            ),
+        )
         backdrop = notice.content.backdrop
         scrim?.alpha = noticeBackdropAlpha(fade.current, backdrop)
         val activeService = service ?: return
@@ -153,6 +174,7 @@ object NoticeOverlayRenderer {
     }
 
     private fun dismiss() {
+        setDisplayHold(false)
         if (container == null) return
         exitRunning = true
         slide.animateTo(-bandHeightPx.toFloat(), HudMotion.EXIT_MS, HudMotion.exit)
@@ -217,11 +239,8 @@ object NoticeOverlayRenderer {
         container?.requestLayout()
     }
 
-    private fun params(context: Context) = WindowManager.LayoutParams(
-        WindowManager.LayoutParams.MATCH_PARENT,
-        WindowManager.LayoutParams.MATCH_PARENT,
-        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+    private fun params(context: Context): WindowManager.LayoutParams {
+        val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
             // The ROM sleeps the display five seconds after the last input
             // (vendor-set screen_off_timeout), which is shorter than a notice's
@@ -229,12 +248,31 @@ object NoticeOverlayRenderer {
             // The window exists exactly as long as the notice, and the
             // notice-close path puts the display back to sleep itself, so
             // holding the screen here cannot outlive what warrants it.
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
-        PixelFormat.TRANSLUCENT,
-    ).apply { gravity = Gravity.TOP or Gravity.START }
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        return WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            flags,
+            PixelFormat.TRANSLUCENT,
+        ).apply { gravity = Gravity.TOP or Gravity.START }
+    }
+
+    private fun setDisplayHold(active: Boolean) {
+        if (displayHoldActive == active) return
+        displayHoldActive = active
+        val manager = windowManager ?: return
+        val root = container ?: return
+        runCatching { manager.updateViewLayout(root, params(root.context)) }
+            .onFailure { logError("Notice display hold update failed", it) }
+    }
 
     private fun teardown() {
-        val root = container ?: return
+        val root = container
+        if (root == null) {
+            displayHoldActive = false
+            return
+        }
         val seq = renderedSeq ?: -1L
         runCatching { windowManager?.removeView(root) }
             .onFailure { logError("Notice overlay removal failed", it) }
@@ -243,6 +281,7 @@ object NoticeOverlayRenderer {
         band = null
         backdrop = false
         exitRunning = false
+        displayHoldActive = false
         slide.snapTo(0f)
         fade.snapTo(0f)
         renderedSeq = null
