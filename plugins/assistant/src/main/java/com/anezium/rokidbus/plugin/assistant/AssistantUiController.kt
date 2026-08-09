@@ -219,6 +219,18 @@ internal class AssistantUiController(
         answerCardStarted = false
     }
 
+    /**
+     * An Ink page produced for this answer now owns its visual presentation.
+     * Retire the in-flight notice without marking the card tier active: later
+     * errors are still discrete notices and must not replace the Ink surface.
+     */
+    fun onInkAnswerShown() {
+        cancelLauncherHint()
+        stopKeepalive()
+        startNewState(flushTranscript = false)
+        hideNoticeIfShown()
+    }
+
     fun onNoticeClosed(reason: NexusNoticeCloseReason) {
         stopKeepalive()
         startNewState(flushTranscript = false)

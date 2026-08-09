@@ -765,6 +765,8 @@ class AssistantPluginService : NexusPluginService() {
                     return false
                 }
                 inkShownRequestId = session.requestId
+                uiController.onInkAnswerShown()
+                Log.i(TAG, "Ink answer shown; redundant notice stream dismissed")
                 return true
             }
         }
@@ -927,7 +929,7 @@ class AssistantPluginService : NexusPluginService() {
 
     private fun showAnswer(text: String) {
         val plain = stripHudMarkdown(text)
-        if (inkShownRequestId == currentRequestId && !uiController.isNoticeBandMode) return
+        if (inkAnswerOwnsPresentation(inkShownRequestId, currentRequestId)) return
         uiController.showAnswer(
             body = plain,
             legacyCardLines = wrapHudText(plain),
@@ -1094,6 +1096,11 @@ private data class PendingInkShow(
     val session: InkPageToolSession,
     val continuation: CancellableContinuation<InkPageShowResult>,
 )
+
+internal fun inkAnswerOwnsPresentation(
+    inkShownRequestId: String?,
+    currentRequestId: String?,
+): Boolean = currentRequestId != null && inkShownRequestId == currentRequestId
 
 internal fun inkShowStartToolErrorCode(result: NexusSdkResult): String = when (result) {
     NexusSdkResult.CAPABILITY_NOT_GRANTED -> TOOL_ERROR_NOT_AUTHORIZED

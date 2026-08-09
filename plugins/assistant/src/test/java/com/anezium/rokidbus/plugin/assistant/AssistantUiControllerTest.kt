@@ -262,6 +262,35 @@ class AssistantUiControllerTest {
         }
 
     @Test
+    fun `ink answer dismisses the in-flight notice and its keepalive`() =
+        runTest {
+            val renderer = FakeRenderer(supportsNotice = true)
+            val controller = controller(renderer)
+            controller.onOpen()
+            controller.cancelLauncherHint()
+            controller.showTransient("Thinking…")
+            renderer.calls.clear()
+
+            controller.onInkAnswerShown()
+            advanceTimeBy(AssistantUiController.NOTICE_KEEPALIVE_INTERVAL_MS * 2)
+            runCurrent()
+
+            assertEquals(listOf(RenderCall.HideNotice), renderer.calls)
+            // Ink does not turn the card tier on: a later discrete failure may
+            // still use the notice tier without replacing the Ink surface.
+            assertTrue(controller.isNoticeBandMode)
+            controller.onClose()
+        }
+
+    @Test
+    fun `only the current request's ink page owns answer presentation`() {
+        assertTrue(inkAnswerOwnsPresentation("request-1", "request-1"))
+        assertTrue(!inkAnswerOwnsPresentation("request-1", "request-2"))
+        assertTrue(!inkAnswerOwnsPresentation(null, "request-1"))
+        assertTrue(!inkAnswerOwnsPresentation(null, null))
+    }
+
+    @Test
     fun `answers stay on the notice band with head truncation and no success hide`() =
         runTest {
             val renderer = FakeRenderer(supportsNotice = true)

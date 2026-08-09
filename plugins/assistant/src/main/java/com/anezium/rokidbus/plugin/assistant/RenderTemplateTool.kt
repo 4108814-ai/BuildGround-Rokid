@@ -683,7 +683,7 @@ internal val RENDER_TEMPLATE_PARAMETERS_SCHEMA = AssistantToolJsonSchema(
 )
 
 internal val RENDER_TEMPLATE_TOOL_DESCRIPTION = """
-    Render a fast, prevalidated Ink layout on the glasses. Prefer this over render_ink_page when one of these shapes fits. Arguments are {template, title?: nonblank string, data}; localize all supplied strings.
+    Render a fast, prevalidated Ink layout on the glasses. Whenever your answer contains numbers, times, temperatures, forecasts, comparisons, rankings, schedules, or step progress, CALL this tool alongside a concise spoken answer instead of listing the values in prose. Prefer this over render_ink_page when one of these shapes fits. Arguments are {template, title?: nonblank string, data}; localize all supplied strings.
     weather - current conditions with an hourly temperature curve and/or period cells; prefer hourly when you have it. data: {location?:string, temperature:string, condition:string, high?:string, low?:string, precipitation?:string, humidity?:string, wind?:string, hourly?:[{label:string, temp:number}] (2-24), forecast?:[{label:string, temperature:string, condition?:string}] (1-5)} - at least one of hourly/forecast.
     chart - line, area, bar, or pie visualization. data: {type:"line"|"area"|"bar"|"pie", labels:string[1..64], series:[{label:string, values:number[labels.length]}], caption?:string} (1-4 series; pie requires 1 with non-negative values and at least one >0).
     metrics - bordered value cells for a numeric/status snapshot. data: {cells:[{label:string, value:string, detail?:string}]} (2-6 cells).
