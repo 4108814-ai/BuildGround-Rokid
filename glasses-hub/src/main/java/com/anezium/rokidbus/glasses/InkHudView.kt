@@ -126,6 +126,21 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
         projectedRevision = -1
     }
 
+    /** The first authored root is the Ink card the notice grows into. */
+    fun primaryContentBoundsOnScreen(): HudBounds? {
+        val rootId = store?.rootNodes()?.firstOrNull()?.id ?: return null
+        val rootView = registry[rootId]?.takeUnless(Record::virtual)?.view ?: return null
+        if (!rootView.isLaidOut || rootView.width <= 0 || rootView.height <= 0) return null
+        val location = IntArray(2)
+        rootView.getLocationOnScreen(location)
+        return HudBounds(
+            left = location[0],
+            top = location[1],
+            right = location[0] + rootView.width,
+            bottom = location[1] + rootView.height,
+        )
+    }
+
     fun handleInkKeyEvent(event: KeyEvent): Boolean {
         val directional = event.keyCode in DIRECTION_KEYS
         if (directional) {

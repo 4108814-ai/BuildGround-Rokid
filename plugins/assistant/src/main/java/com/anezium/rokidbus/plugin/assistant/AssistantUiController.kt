@@ -32,6 +32,7 @@ internal class AssistantUiController(
     private val resetCapture: () -> Unit,
     private val launcherHintDelayMs: Long = LAUNCHER_HINT_DELAY_MS,
     private val errorNoticeDurationMs: Long = ERROR_NOTICE_DURATION_MS,
+    private val inkHandoffFallbackMs: Long = INK_HANDOFF_FALLBACK_MS,
     private val transcriptUpdateIntervalMs: Long = TRANSCRIPT_UPDATE_INTERVAL_MS,
     private val keepaliveIntervalMs: Long = NOTICE_KEEPALIVE_INTERVAL_MS,
 ) {
@@ -221,14 +222,22 @@ internal class AssistantUiController(
 
     /**
      * An Ink page produced for this answer now owns its visual presentation.
-     * Retire the in-flight notice without marking the card tier active: later
-     * errors are still discrete notices and must not replace the Ink surface.
+     * Stop updating the in-flight notice and let the glasses retire it during
+     * the visual handoff. A bounded fallback handles an absent close event
+     * without marking the card tier active: later errors remain notices.
      */
     fun onInkAnswerShown() {
         cancelLauncherHint()
         stopKeepalive()
-        startNewState(flushTranscript = false)
-        hideNoticeIfShown()
+        val stateVersion = startNewState(flushTranscript = false)
+        if (!noticeShown) return
+        noticeHideJob = scope.launch {
+            delay(inkHandoffFallbackMs)
+            noticeHideJob = null
+            if (noticeStateVersion == stateVersion) {
+                hideNoticeIfShown()
+            }
+        }
     }
 
     fun onNoticeClosed(reason: NexusNoticeCloseReason) {
@@ -436,6 +445,7 @@ internal class AssistantUiController(
     internal companion object {
         const val LAUNCHER_HINT_DELAY_MS = 400L
         const val ERROR_NOTICE_DURATION_MS = 2_500L
+        const val INK_HANDOFF_FALLBACK_MS = 2_000L
         const val TRANSCRIPT_UPDATE_INTERVAL_MS = 300L
         const val NOTICE_KEEPALIVE_INTERVAL_MS = 3_000L
         const val ANSWER_TTL_PER_CHAR_MS = 75L

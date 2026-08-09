@@ -111,6 +111,49 @@ object NoticeOverlayRenderer {
 
     fun isShown(): Boolean = container != null
 
+    internal fun handoffSnapshot(notice: NexusNoticeSurface): NoticeBandSnapshot? {
+        val view = band ?: return null
+        if (
+            container == null || exitRunning || renderedSeq != notice.seq ||
+            view.width <= 0 || view.height <= 0 || fade.current <= 0f
+        ) {
+            return null
+        }
+        val location = IntArray(2)
+        view.getLocationOnScreen(location)
+        return NoticeBandSnapshot(
+            surfaceId = notice.surfaceId,
+            seq = notice.seq,
+            ownerPluginId = notice.ownerPluginId,
+            title = notice.content.title,
+            body = noticeBodyText(notice.content),
+            footer = notice.content.footer,
+            bounds = HudBounds(
+                left = location[0],
+                top = location[1],
+                right = location[0] + view.width,
+                bottom = location[1] + view.height,
+            ),
+            alpha = fade.current,
+        )
+    }
+
+    /** Handoff alone bypasses the ordinary exit; the placeholder owns that same frame. */
+    fun removeForHandoff(expectedSeq: Long): Boolean {
+        val root = container ?: return false
+        if (renderedSeq != expectedSeq) return false
+        val seq = renderedSeq ?: -1L
+        slide.cancel()
+        fade.cancel()
+        // ViewRoot removal may be deferred. Stop drawing first so a compositor
+        // frame can never contain both this band and the surface placeholder.
+        root.visibility = View.INVISIBLE
+        runCatching { windowManager?.removeViewImmediate(root) }
+            .onFailure { logError("Notice overlay handoff removal failed", it) }
+        clearRendererState(seq, event = "handoff_teardown")
+        return true
+    }
+
     private fun render(notice: NexusNoticeSurface?) {
         if (notice == null) {
             dismiss()
@@ -238,6 +281,10 @@ object NoticeOverlayRenderer {
         val seq = renderedSeq ?: -1L
         runCatching { windowManager?.removeView(root) }
             .onFailure { logError("Notice overlay removal failed", it) }
+        clearRendererState(seq, event = "teardown")
+    }
+
+    private fun clearRendererState(seq: Long, event: String) {
         container = null
         scrim = null
         band = null
@@ -247,7 +294,7 @@ object NoticeOverlayRenderer {
         fade.snapTo(0f)
         renderedSeq = null
         log(
-            "renderer seq=$seq event=teardown attached=${container != null} " +
+            "renderer seq=$seq event=$event attached=${container != null} " +
                 "fadeRunning=${fade.isRunning}",
         )
     }

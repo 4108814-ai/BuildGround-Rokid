@@ -18,6 +18,7 @@ class InkRenderLogicTest {
         val surface = NexusSurface.fromPayload(
             JSONObject()
                 .put("surfaceId", "ink")
+                .put("ownerPluginId", "assistant")
                 .put("seq", 1)
                 .put("kind", NexusSurface.KIND_INK)
                 .put(
@@ -33,6 +34,7 @@ class InkRenderLogicTest {
         assertEquals(raw, surface.ink!!.documentJson)
         assertTrue(surface.ink.debugActions)
         assertTrue(surface.ink.debugFrameMeter)
+        assertEquals("assistant", surface.ownerPluginId)
     }
 
     @Test
