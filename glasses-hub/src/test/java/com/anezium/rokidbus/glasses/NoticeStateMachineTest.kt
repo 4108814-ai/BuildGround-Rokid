@@ -156,24 +156,6 @@ class NoticeStateMachineTest {
     }
 
     @Test
-    fun `handoff closes exactly once and carries its distinct wire reason`() {
-        val state = NoticeStateMachine()
-        state.show(
-            "assistant:notice",
-            seq = 1,
-            content = content(),
-            nowMs = 0L,
-            ownerPluginId = "assistant",
-        )
-
-        val decision = state.close(NoticeCloseReason.HANDOFF)
-
-        assertEquals(NoticeCloseReason.HANDOFF, (decision as NoticeStateDecision.Closed).reason)
-        assertEquals("handoff", decision.reason.wireValue)
-        assertTrue(state.close(NoticeCloseReason.HANDOFF) is NoticeStateDecision.Ignored)
-    }
-
-    @Test
     fun `expiry only fires for the sequence that scheduled it`() {
         val state = NoticeStateMachine()
         state.show("relay:notice", seq = 1, content = content(ttlMs = 8_000L), nowMs = 0L)

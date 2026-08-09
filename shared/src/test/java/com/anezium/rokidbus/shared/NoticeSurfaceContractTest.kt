@@ -610,15 +610,6 @@ class NoticeSurfaceContractTest {
         assertEquals(NoticeCloseReason.TIMEOUT, NoticeCloseReason.fromWireValue("timeout"))
     }
 
-    @Test
-    fun `handoff close stays distinct on wire and parses as owner for sdk compatibility`() {
-        val payload = NoticeSurfaceContract.closedPayload("assistant:notice", NoticeCloseReason.HANDOFF)
-
-        assertEquals("assistant:notice", payload.optString("noticeId"))
-        assertEquals("handoff", payload.optString("reason"))
-        assertEquals(NoticeCloseReason.OWNER, NoticeCloseReason.fromWireValue("handoff"))
-    }
-
     private fun showPayload() = JSONObject()
         .put("kind", "notice")
         .put("title", "Marie")

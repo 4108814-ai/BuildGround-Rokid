@@ -262,7 +262,7 @@ class AssistantUiControllerTest {
         }
 
     @Test
-    fun `ink answer waits for handoff then falls back once without stale keepalive`() =
+    fun `ink answer dismisses the in-flight notice and its keepalive`() =
         runTest {
             val renderer = FakeRenderer(supportsNotice = true)
             val controller = controller(renderer)
@@ -272,16 +272,6 @@ class AssistantUiControllerTest {
             renderer.calls.clear()
 
             controller.onInkAnswerShown()
-            advanceTimeBy(AssistantUiController.INK_HANDOFF_FALLBACK_MS - 1)
-            runCurrent()
-
-            assertTrue(renderer.calls.isEmpty())
-
-            advanceTimeBy(1)
-            runCurrent()
-
-            assertEquals(listOf(RenderCall.HideNotice), renderer.calls)
-
             advanceTimeBy(AssistantUiController.NOTICE_KEEPALIVE_INTERVAL_MS * 2)
             runCurrent()
 
@@ -289,25 +279,6 @@ class AssistantUiControllerTest {
             // Ink does not turn the card tier on: a later discrete failure may
             // still use the notice tier without replacing the Ink surface.
             assertTrue(controller.isNoticeBandMode)
-            controller.onClose()
-        }
-
-    @Test
-    fun `owner close from ink handoff cancels the phone fallback`() =
-        runTest {
-            val renderer = FakeRenderer(supportsNotice = true)
-            val controller = controller(renderer)
-            controller.onOpen()
-            controller.cancelLauncherHint()
-            controller.showTransient("Thinking…")
-            renderer.calls.clear()
-
-            controller.onInkAnswerShown()
-            controller.onNoticeClosed(NexusNoticeCloseReason.OWNER)
-            advanceTimeBy(AssistantUiController.INK_HANDOFF_FALLBACK_MS * 2)
-            runCurrent()
-
-            assertTrue(renderer.calls.isEmpty())
             controller.onClose()
         }
 

@@ -12,25 +12,11 @@ import android.text.style.RelativeSizeSpan
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
-import android.view.ViewTreeObserver
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
 
 class SurfaceHudView(context: Context) : LinearLayout(context) {
-    private data class PendingInkHandoff(
-        val surfaceId: String,
-        val listener: ViewTreeObserver.OnPreDrawListener,
-    )
-
-    private data class ActiveNoticeMorph(
-        val surfaceId: String,
-        val placeholder: View,
-        val start: HudBounds,
-        val target: HudBounds,
-        val initialNoticeAlpha: Float,
-    )
-
     private val titleView = monoText(17f, BusTheme.text, bold = true)
     private val subtitleView = monoText(11f, BusTheme.muted)
     private val previousView = monoText(15f, BusTheme.dim)
@@ -66,9 +52,6 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
     private var pendingListLayoutListener: View.OnLayoutChangeListener? = null
     private var insetUnsubscribe: (() -> Unit)? = null
     private var stopObservingReaderScroll: (() -> Unit)? = null
-    private var pendingInkHandoff: PendingInkHandoff? = null
-    private var activeNoticeMorph: ActiveNoticeMorph? = null
-    private val noticeMorphProgress = HudMotionValue(1f, ::applyNoticeMorphProgress)
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -131,12 +114,6 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
 
     fun render(next: NexusSurface?) {
         removeCallbacks(ticker)
-        val keepsInkHandoff = next?.isInk == true && next.surfaceId ==
-            (activeNoticeMorph?.surfaceId ?: pendingInkHandoff?.surfaceId)
-        if (!keepsInkHandoff) {
-            cancelPendingInkHandoff()
-            cancelNoticeMorph()
-        }
         surface = next
         if (next == null) {
             clear()
@@ -145,9 +122,6 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         renderNow(next)
         if (shouldTick(next)) {
             postDelayed(ticker, tickDelay(next))
-        }
-        if (next.isInk && !keepsInkHandoff) {
-            maybeScheduleInkHandoff(next)
         }
         requestFocus()
     }
@@ -167,8 +141,6 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         insetUnsubscribe = null
         removeCallbacks(ticker)
         invalidatePendingListLayout()
-        cancelPendingInkHandoff()
-        cancelNoticeMorph()
         stopObservingReaderScroll?.invoke()
         stopObservingReaderScroll = null
         SurfaceController.detachInkRenderer(inkView)
@@ -214,124 +186,6 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
     private fun hideInk() {
         SurfaceController.detachInkRenderer(inkView)
         inkView.visibility = GONE
-    }
-
-    private fun maybeScheduleInkHandoff(surface: NexusSurface) {
-        val ownerPluginId = surface.ownerPluginId
-        if (!NoticeController.hasMorphCandidate(ownerPluginId)) {
-            setInkContentAlpha(1f)
-            return
-        }
-        setInkContentAlpha(0f)
-        val listener = object : ViewTreeObserver.OnPreDrawListener {
-            override fun onPreDraw(): Boolean {
-                cancelPendingInkHandoff()
-                if (this@SurfaceHudView.surface?.surfaceId != surface.surfaceId) {
-                    setInkContentAlpha(1f)
-                    return true
-                }
-                beginInkHandoff(surface.surfaceId, ownerPluginId)
-                return true
-            }
-        }
-        pendingInkHandoff = PendingInkHandoff(surface.surfaceId, listener)
-        viewTreeObserver.addOnPreDrawListener(listener)
-        invalidate()
-    }
-
-    private fun beginInkHandoff(surfaceId: String, ownerPluginId: String) {
-        val targetOnScreen = inkView.primaryContentBoundsOnScreen()
-        val snapshot = NoticeController.handoffSnapshot(ownerPluginId)
-        if (targetOnScreen == null || targetOnScreen.isEmpty || snapshot == null) {
-            setInkContentAlpha(1f)
-            return
-        }
-        val hostLocation = IntArray(2)
-        getLocationOnScreen(hostLocation)
-        val start = snapshot.bounds.relativeTo(hostLocation[0], hostLocation[1])
-        val target = targetOnScreen.relativeTo(hostLocation[0], hostLocation[1])
-        val placeholder = NoticeOverlayRenderer.NoticeBandView(context).apply {
-            render(
-                titleText = snapshot.title,
-                bodyText = snapshot.body,
-                footerText = snapshot.footer,
-                leadingGlyph = null,
-            )
-            alpha = 0f
-        }
-        overlay.add(placeholder)
-        layoutMorphPlaceholder(placeholder, start)
-        if (!NoticeController.closeForHandoff(snapshot)) {
-            overlay.remove(placeholder)
-            setInkContentAlpha(1f)
-            return
-        }
-        activeNoticeMorph = ActiveNoticeMorph(
-            surfaceId = surfaceId,
-            placeholder = placeholder,
-            start = start,
-            target = target,
-            initialNoticeAlpha = snapshot.alpha,
-        )
-        noticeMorphProgress.snapTo(0f)
-        noticeMorphProgress.animateTo(
-            target = 1f,
-            durationMs = HudMotion.STANDARD_MS,
-            interpolator = HudMotion.enter,
-        ) {
-            completeNoticeMorph(surfaceId)
-        }
-    }
-
-    private fun applyNoticeMorphProgress(progress: Float) {
-        val morph = activeNoticeMorph ?: return
-        val frame = noticeMorphFrame(
-            start = morph.start,
-            target = morph.target,
-            progress = progress,
-            initialNoticeAlpha = morph.initialNoticeAlpha,
-        )
-        layoutMorphPlaceholder(morph.placeholder, frame.bounds)
-        morph.placeholder.alpha = frame.noticeAlpha
-        setInkContentAlpha(frame.inkAlpha)
-    }
-
-    private fun layoutMorphPlaceholder(view: View, bounds: HudBounds) {
-        if (bounds.isEmpty) return
-        view.measure(
-            MeasureSpec.makeMeasureSpec(bounds.width, MeasureSpec.EXACTLY),
-            MeasureSpec.makeMeasureSpec(bounds.height, MeasureSpec.EXACTLY),
-        )
-        view.layout(bounds.left, bounds.top, bounds.right, bounds.bottom)
-    }
-
-    private fun completeNoticeMorph(surfaceId: String) {
-        val morph = activeNoticeMorph?.takeIf { it.surfaceId == surfaceId } ?: return
-        overlay.remove(morph.placeholder)
-        activeNoticeMorph = null
-        setInkContentAlpha(1f)
-    }
-
-    private fun cancelNoticeMorph() {
-        noticeMorphProgress.cancel()
-        activeNoticeMorph?.placeholder?.let(overlay::remove)
-        activeNoticeMorph = null
-        setInkContentAlpha(1f)
-    }
-
-    private fun cancelPendingInkHandoff() {
-        val pending = pendingInkHandoff ?: return
-        if (viewTreeObserver.isAlive) {
-            viewTreeObserver.removeOnPreDrawListener(pending.listener)
-        }
-        pendingInkHandoff = null
-    }
-
-    private fun setInkContentAlpha(alpha: Float) {
-        titleView.alpha = alpha
-        subtitleView.alpha = alpha
-        inkView.alpha = alpha
-        footerView.alpha = alpha
     }
 
     private fun renderTimed(surface: NexusSurface) {

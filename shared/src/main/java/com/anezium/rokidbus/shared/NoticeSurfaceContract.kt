@@ -16,9 +16,6 @@ enum class NoticeCloseReason(val wireValue: String) {
     /** The owner called hide. */
     OWNER("owner"),
 
-    /** The glasses handed the band to the same owner's foreground surface. */
-    HANDOFF("handoff"),
-
     /** Another plugin took the slot. */
     REPLACED("replaced"),
 
@@ -27,12 +24,8 @@ enum class NoticeCloseReason(val wireValue: String) {
     ;
 
     companion object {
-        fun fromWireValue(value: String): NoticeCloseReason? = when (value) {
-            // The published plugin close-reason enum intentionally stays unchanged. The wire
-            // keeps the choreography diagnostic, while SDK consumers retain owner-hide semantics.
-            HANDOFF.wireValue -> OWNER
-            else -> entries.firstOrNull { it.wireValue == value }
-        }
+        fun fromWireValue(value: String): NoticeCloseReason? =
+            entries.firstOrNull { it.wireValue == value }
     }
 }
 

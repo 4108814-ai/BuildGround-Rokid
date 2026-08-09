@@ -40,7 +40,6 @@ internal data class NexusNoticeSurface(
      * messaging plugin that is two replies sent.
      */
     val answered: Boolean = false,
-    val ownerPluginId: String = "",
 ) {
     /**
      * The actions still on offer. An answered band shows none: the question has
@@ -260,7 +259,6 @@ internal class NoticeStateMachine {
         content: NoticeSurfaceContent,
         nowMs: Long,
         imageBitmap: Bitmap? = null,
-        ownerPluginId: String = "",
     ): NoticeStateDecision {
         if (seq <= latestSeq) return NoticeStateDecision.DroppedStale
         latestSeq = seq
@@ -274,7 +272,6 @@ internal class NoticeStateMachine {
             ),
             hardExpiresAtMs = nowMs + NoticeSurfaceContract.MAX_LIFETIME_MS,
             imageBitmap = imageBitmap,
-            ownerPluginId = ownerPluginId,
         )
         active = notice
         return NoticeStateDecision.Shown(notice)
@@ -525,39 +522,6 @@ internal object NoticeController {
 
     fun activeNotice(): NexusNoticeSurface? = state.activeNotice()
 
-    fun hasMorphCandidate(ownerPluginId: String): Boolean =
-        noticeMatchesInkOwner(state.activeNotice()?.ownerPluginId, ownerPluginId)
-
-    /** A fresh, measured snapshot; callers must identity-check it again when closing. */
-    fun handoffSnapshot(ownerPluginId: String): NoticeBandSnapshot? {
-        if (Looper.myLooper() != Looper.getMainLooper()) return null
-        val notice = state.activeNotice() ?: return null
-        if (!noticeMatchesInkOwner(notice.ownerPluginId, ownerPluginId)) return null
-        return NoticeOverlayRenderer.handoffSnapshot(notice)
-    }
-
-    /**
-     * Removes the real notice immediately and closes its slot exactly once.
-     * A timeout or owner hide winning after capture makes this a harmless miss.
-     */
-    fun closeForHandoff(snapshot: NoticeBandSnapshot): Boolean {
-        if (Looper.myLooper() != Looper.getMainLooper()) return false
-        val current = state.activeNotice() ?: return false
-        if (
-            current.surfaceId != snapshot.surfaceId ||
-            current.seq != snapshot.seq ||
-            current.ownerPluginId != snapshot.ownerPluginId ||
-            !noticeMatchesInkOwner(current.ownerPluginId, snapshot.ownerPluginId)
-        ) {
-            return false
-        }
-        if (!NoticeOverlayRenderer.removeForHandoff(snapshot.seq)) return false
-        val decision = state.close(NoticeCloseReason.HANDOFF)
-        if (decision !is NoticeStateDecision.Closed) return false
-        applyDecision(decision)
-        return true
-    }
-
     fun onServiceConnected(context: Context, sleepDisplay: () -> Boolean) {
         runOnMain {
             serviceContext = context.applicationContext
@@ -768,7 +732,6 @@ internal object NoticeController {
             return
         }
         val seq = envelope.payload.optLong("seq", Long.MIN_VALUE)
-        val ownerPluginId = envelope.payload.optString("ownerPluginId")
         val image = validation.content.image
         if (image != null) {
             val bytes = envelope.binary ?: return
@@ -801,7 +764,6 @@ internal object NoticeController {
                                 seq = seq,
                                 content = validation.content,
                                 imageBitmap = decoded,
-                                ownerPluginId = ownerPluginId,
                             )
                             imageDecodeCoordinator.invalidate(surfaceId)
                                 ?.takeUnless { it === decoded }
@@ -815,7 +777,7 @@ internal object NoticeController {
         imageDecodeCoordinator.invalidate()?.let { pending ->
             if (pending !== state.activeNotice()?.imageBitmap) pending.recycleSafely()
         }
-        showValidated(context, surfaceId, seq, validation.content, ownerPluginId = ownerPluginId)
+        showValidated(context, surfaceId, seq, validation.content)
     }
 
     private fun showValidated(
@@ -824,7 +786,6 @@ internal object NoticeController {
         seq: Long,
         content: NoticeSurfaceContent,
         imageBitmap: Bitmap? = null,
-        ownerPluginId: String = "",
     ) {
         val previous = state.activeNotice()
         val decision = state.show(
@@ -833,7 +794,6 @@ internal object NoticeController {
             content,
             SystemClock.elapsedRealtime(),
             imageBitmap,
-            ownerPluginId,
         )
         // A different plugin taking the slot is a close for the one that had it,
         // and its owner is owed the reason.

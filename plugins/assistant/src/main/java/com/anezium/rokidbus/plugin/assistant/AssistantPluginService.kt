@@ -766,7 +766,7 @@ class AssistantPluginService : NexusPluginService() {
                 }
                 inkShownRequestId = session.requestId
                 uiController.onInkAnswerShown()
-                Log.i(TAG, "Ink answer shown; notice stream stopped for glasses handoff")
+                Log.i(TAG, "Ink answer shown; redundant notice stream dismissed")
                 return true
             }
         }
