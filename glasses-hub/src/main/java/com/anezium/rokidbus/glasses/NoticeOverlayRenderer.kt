@@ -222,7 +222,14 @@ object NoticeOverlayRenderer {
         WindowManager.LayoutParams.MATCH_PARENT,
         WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+            // The ROM sleeps the display five seconds after the last input
+            // (vendor-set screen_off_timeout), which is shorter than a notice's
+            // own life — a dictated reply died mid-flow under a dark screen.
+            // The window exists exactly as long as the notice, and the
+            // notice-close path puts the display back to sleep itself, so
+            // holding the screen here cannot outlive what warrants it.
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
         PixelFormat.TRANSLUCENT,
     ).apply { gravity = Gravity.TOP or Gravity.START }
 
