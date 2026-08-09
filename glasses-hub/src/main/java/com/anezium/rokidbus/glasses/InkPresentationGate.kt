@@ -27,9 +27,11 @@ internal class InkPresentationGate {
         seq: Long,
         widthPx: Int,
         heightPx: Int,
+        displayTransitioning: Boolean = false,
     ): Boolean {
         if (widthPx <= 0 || heightPx <= 0) return false
         if (pending != PendingShow(surfaceId, seq)) return false
+        if (displayTransitioning) return false
         pending = null
         return true
     }

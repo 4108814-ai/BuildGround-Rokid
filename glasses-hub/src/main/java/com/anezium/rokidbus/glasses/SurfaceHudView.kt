@@ -134,8 +134,8 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         SurfaceController.onInkFrameDrawn(
             surfaceId = drawn.surfaceId,
             seq = drawn.seq,
-            widthPx = width,
-            heightPx = height,
+            widthPx = inkView.width,
+            heightPx = inkView.height,
         )
     }
 

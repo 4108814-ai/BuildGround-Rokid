@@ -21,6 +21,7 @@ class InkLayoutSettlePolicyTest {
             policy.onPostLayout(width = 444, height = 592),
         )
         assertFalse(policy.canDraw(width = 444, height = 592))
+        assertTrue(policy.onGeometryApplied(width = 444, height = 592))
 
         assertEquals(
             InkLayoutSettleAction.NONE,
@@ -43,6 +44,7 @@ class InkLayoutSettlePolicyTest {
             policy.onPostLayout(width = 444, height = 568),
         )
         assertFalse(policy.canDraw(width = 444, height = 568))
+        assertTrue(policy.onGeometryApplied(width = 444, height = 568))
         assertEquals(
             InkLayoutSettleAction.NONE,
             policy.onPostLayout(width = 444, height = 568),
@@ -76,12 +78,34 @@ class InkLayoutSettlePolicyTest {
         )
     }
 
+    @Test
+    fun `repeated layouts cannot settle before geometry was applied outside layout`() {
+        val policy = InkLayoutSettlePolicy()
+        policy.onProjectionChanged()
+
+        repeat(3) {
+            assertEquals(
+                InkLayoutSettleAction.REAPPLY_GEOMETRY,
+                policy.onPostLayout(width = 444, height = 592),
+            )
+            assertFalse(policy.canDraw(width = 444, height = 592))
+        }
+
+        assertTrue(policy.onGeometryApplied(width = 444, height = 592))
+        assertEquals(
+            InkLayoutSettleAction.NONE,
+            policy.onPostLayout(width = 444, height = 592),
+        )
+        assertTrue(policy.canDraw(width = 444, height = 592))
+    }
+
     private fun settledPolicy(width: Int, height: Int) = InkLayoutSettlePolicy().apply {
         onProjectionChanged()
         assertEquals(
             InkLayoutSettleAction.REAPPLY_GEOMETRY,
             onPostLayout(width, height),
         )
+        assertTrue(onGeometryApplied(width, height))
         assertEquals(InkLayoutSettleAction.NONE, onPostLayout(width, height))
     }
 }

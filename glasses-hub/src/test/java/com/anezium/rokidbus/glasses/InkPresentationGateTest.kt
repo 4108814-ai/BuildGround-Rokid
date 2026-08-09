@@ -50,6 +50,31 @@ class InkPresentationGateTest {
         assertFalse(gate.releaseAfterDraw(SURFACE_ID, 13L, widthPx = 480, heightPx = 640))
     }
 
+    @Test
+    fun `metrics captured during a display power transition cannot release the show`() {
+        val gate = InkPresentationGate()
+        gate.arm(SURFACE_ID, seq = 14L)
+
+        assertFalse(
+            gate.releaseAfterDraw(
+                SURFACE_ID,
+                14L,
+                widthPx = 426,
+                heightPx = 592,
+                displayTransitioning = true,
+            ),
+        )
+        assertTrue(
+            gate.releaseAfterDraw(
+                SURFACE_ID,
+                14L,
+                widthPx = 444,
+                heightPx = 592,
+                displayTransitioning = false,
+            ),
+        )
+    }
+
     private companion object {
         const val SURFACE_ID = "assistant:assistant-ink"
     }

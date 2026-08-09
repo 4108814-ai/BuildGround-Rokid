@@ -1,5 +1,6 @@
 package com.anezium.rokidbus.glasses
 
+import android.view.WindowManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -41,54 +42,38 @@ class NoticeOverlayRendererTest {
         assertTrue(
             NoticeDisplayHoldPolicy.noticeHoldsDisplay(
                 surfaceId = "assistant:notice",
-                wakeDisplay = false,
+                engaged = true,
             ),
         )
         assertFalse(
             NoticeDisplayHoldPolicy.noticeHoldsDisplay(
                 surfaceId = "assistant:notice",
-                wakeDisplay = true,
+                engaged = false,
             ),
         )
         assertFalse(
             NoticeDisplayHoldPolicy.noticeHoldsDisplay(
                 surfaceId = "relay:notice",
-                wakeDisplay = false,
+                engaged = true,
             ),
         )
         assertFalse(
             NoticeDisplayHoldPolicy.noticeHoldsDisplay(
                 surfaceId = "assistant:activity",
-                wakeDisplay = false,
+                engaged = true,
             ),
         )
     }
 
     @Test
-    fun `display hold stays continuous from assistant notice through surface handoff`() {
+    fun `engaged notice sets the window flag and passive notice clears it`() {
         assertTrue(
-            NoticeDisplayHoldPolicy.displayHeld(
-                noticeHolding = true,
-                surfaceHolding = false,
-            ),
-        )
-        assertTrue(
-            NoticeDisplayHoldPolicy.displayHeld(
-                noticeHolding = true,
-                surfaceHolding = true,
-            ),
-        )
-        assertTrue(
-            NoticeDisplayHoldPolicy.displayHeld(
-                noticeHolding = false,
-                surfaceHolding = true,
-            ),
+            noticeWindowFlags(displayHoldActive = true) and
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0,
         )
         assertFalse(
-            NoticeDisplayHoldPolicy.displayHeld(
-                noticeHolding = false,
-                surfaceHolding = false,
-            ),
+            noticeWindowFlags(displayHoldActive = false) and
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0,
         )
     }
 }

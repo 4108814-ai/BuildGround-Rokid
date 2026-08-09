@@ -25,6 +25,12 @@ internal interface AssistantUiRenderer {
     ): NexusSdkResult
 }
 
+internal enum class AssistantNoticeMode {
+    NONE,
+    ENGAGED,
+    PASSIVE,
+}
+
 internal class AssistantUiController(
     private val scope: CoroutineScope,
     private val renderer: AssistantUiRenderer,
@@ -48,6 +54,7 @@ internal class AssistantUiController(
     private var noticeStateVersion = 0L
     private var surfaceShown = false
     private var noticeShown = false
+    private var noticeMode = AssistantNoticeMode.NONE
     private var answerCardStarted = false
 
     /**
@@ -58,12 +65,16 @@ internal class AssistantUiController(
     val isNoticeBandMode: Boolean
         get() = renderer.supportsNoticeSurface && !surfaceShown
 
+    internal val isEngagedNoticeEpisode: Boolean
+        get() = noticeShown && noticeMode == AssistantNoticeMode.ENGAGED
+
     fun onOpen() {
         cancelLauncherHint()
         stopKeepalive()
         startNewState(flushTranscript = false)
         surfaceShown = false
         noticeShown = false
+        noticeMode = AssistantNoticeMode.NONE
         answerCardStarted = false
         launcherHintJob = scope.launch {
             delay(launcherHintDelayMs)
@@ -83,6 +94,7 @@ internal class AssistantUiController(
         startNewState(flushTranscript = false)
         surfaceShown = false
         noticeShown = false
+        noticeMode = AssistantNoticeMode.NONE
         answerCardStarted = false
     }
 
@@ -146,7 +158,7 @@ internal class AssistantUiController(
         val stateVersion = startNewState()
         answerCardStarted = false
         if (useNoticeBand()) {
-            if (showOrUpdateNotice(body)) {
+            if (showOrUpdateNotice(body, AssistantNoticeMode.PASSIVE)) {
                 noticeHideJob = scope.launch {
                     delay(errorNoticeDurationMs)
                     noticeHideJob = null
@@ -235,6 +247,7 @@ internal class AssistantUiController(
         stopKeepalive()
         startNewState(flushTranscript = false)
         noticeShown = false
+        noticeMode = AssistantNoticeMode.NONE
         if (reason == NexusNoticeCloseReason.USER) {
             cancelPipeline()
             resetCapture()
@@ -245,25 +258,36 @@ internal class AssistantUiController(
 
     private fun showOrUpdateNotice(
         body: String,
+        mode: AssistantNoticeMode = AssistantNoticeMode.ENGAGED,
         ttlMs: Long? = null,
     ): Boolean {
         val safeBody = truncateNoticeHead(body)
+        val modeUpdate = mode.takeIf { !noticeShown || it != noticeMode }
         val result = if (noticeShown) {
-            renderer.updateNotice(NexusNoticeUpdate(body = safeBody, ttlMs = ttlMs))
+            renderer.updateNotice(
+                NexusNoticeUpdate(
+                    body = safeBody,
+                    interactive = modeUpdate?.let { it == AssistantNoticeMode.ENGAGED },
+                    ttlMs = ttlMs,
+                ),
+            )
         } else {
             renderer.showNotice(
                 NexusNotice(
                     title = NOTICE_TITLE,
                     body = safeBody,
+                    interactive = mode == AssistantNoticeMode.ENGAGED,
                     ttlMs = ttlMs,
                 ),
             )
         }
         if (result == NexusSdkResult.SENT) {
             noticeShown = true
+            noticeMode = mode
             return true
         }
         noticeShown = false
+        noticeMode = AssistantNoticeMode.NONE
         return false
     }
 
@@ -272,12 +296,22 @@ internal class AssistantUiController(
         ttlMs: Long? = null,
     ): Boolean {
         val lines = truncateAnswerLines(body)
+        val modeUpdate = AssistantNoticeMode.ENGAGED.takeIf {
+            !noticeShown || noticeMode != AssistantNoticeMode.ENGAGED
+        }
         val result = if (noticeShown) {
-            renderer.updateNotice(NexusNoticeUpdate(lines = lines, ttlMs = ttlMs))
+            renderer.updateNotice(
+                NexusNoticeUpdate(
+                    interactive = modeUpdate?.let { true },
+                    lines = lines,
+                    ttlMs = ttlMs,
+                ),
+            )
         } else {
             renderer.showNotice(
                 NexusNotice(
                     title = NOTICE_TITLE,
+                    interactive = true,
                     lines = lines,
                     ttlMs = ttlMs,
                 ),
@@ -285,16 +319,22 @@ internal class AssistantUiController(
         }
         if (result == NexusSdkResult.SENT) {
             noticeShown = true
+            noticeMode = AssistantNoticeMode.ENGAGED
             return true
         }
         noticeShown = false
+        noticeMode = AssistantNoticeMode.NONE
         return false
     }
 
     private fun hideNoticeIfShown() {
         stopKeepalive()
-        if (!noticeShown) return
+        if (!noticeShown) {
+            noticeMode = AssistantNoticeMode.NONE
+            return
+        }
         noticeShown = false
+        noticeMode = AssistantNoticeMode.NONE
         renderer.hideNotice()
     }
 

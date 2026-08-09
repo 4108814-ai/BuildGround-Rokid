@@ -142,6 +142,10 @@ internal class InkRendererLayer(
 
     fun handleKeyEvent(event: KeyEvent): Boolean = attachedView?.handleInkKeyEvent(event) == true
 
+    fun invalidateLayoutMetrics() {
+        attachedView?.invalidateLayoutMetrics()
+    }
+
     fun clear() {
         nextGeneration()
         store = null

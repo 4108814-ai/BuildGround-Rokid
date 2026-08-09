@@ -1,10 +1,14 @@
 package com.anezium.rokidbus.glasses
 
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.view.KeyEvent
 import com.anezium.rokidbus.shared.BusEnvelope
@@ -43,8 +47,24 @@ object SurfaceController {
     private var backFailsafeSurfaceId: String? = null
     private var backFailsafe: Runnable? = null
     private var inkFrameMeterRunning = false
+    private var displayStateReceiverRegistered = false
+    private var inkDisplayTransitioning = false
     @Volatile private var inkResyncListener: ((InkResyncRequest) -> Unit)? = null
     @Volatile private var active: NexusSurface? = null
+
+    private val displayStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            runOnMain {
+                when (intent.action) {
+                    Intent.ACTION_SCREEN_OFF -> inkDisplayTransitioning = true
+                    Intent.ACTION_SCREEN_ON -> {
+                        inkDisplayTransitioning = false
+                        inkRendererLayer.invalidateLayoutMetrics()
+                    }
+                }
+            }
+        }
+    }
 
     fun activeSurface(): NexusSurface? = active
 
@@ -328,7 +348,15 @@ object SurfaceController {
         ) {
             return
         }
-        if (inkPresentationGate.releaseAfterDraw(surfaceId, seq, widthPx, heightPx)) {
+        if (
+            inkPresentationGate.releaseAfterDraw(
+                surfaceId,
+                seq,
+                widthPx,
+                heightPx,
+                displayTransitioning = inkDisplayTransitioning,
+            )
+        ) {
             sendInkEvent(surfaceId, InkSurfaceContract.EVENT_READY)
         }
     }
@@ -346,6 +374,7 @@ object SurfaceController {
         val completesRingHandoff =
             launcherShow && launcherReturnCoordinator.onSurfaceShown(surface.surfaceId)
         runOnMain {
+            if (surface.isInk) ensureDisplayStateMonitoring(context)
             notifyReplacedInk(surface)
             if (!surface.isInk) clearInkRenderer()
             val keepMediaDecode = surface.isMedia && surface.mediaArtworkMetadata != null &&
@@ -544,6 +573,23 @@ object SurfaceController {
         val previous = active?.takeIf(NexusSurface::isInk) ?: return
         if (next.isInk && next.surfaceId == previous.surfaceId) return
         sendInkClosed(previous.surfaceId, InkSurfaceContract.CLOSE_REPLACED)
+    }
+
+    private fun ensureDisplayStateMonitoring(context: Context) {
+        if (displayStateReceiverRegistered) return
+        inkDisplayTransitioning =
+            context.getSystemService(PowerManager::class.java)?.isInteractive != true
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(displayStateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            context.registerReceiver(displayStateReceiver, filter)
+        }
+        displayStateReceiverRegistered = true
     }
 
     private fun clearInkRenderer() {

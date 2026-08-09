@@ -630,6 +630,50 @@ class AssistantUiControllerTest {
             controller.onClose()
         }
 
+    @Test
+    fun `display hold follows the complete engaged notice lifecycle`() =
+        runTest {
+            val renderer = FakeRenderer(supportsNotice = true)
+            val controller = controller(renderer)
+            controller.onOpen()
+            controller.cancelLauncherHint()
+
+            controller.showTransient("Listeningâ€¦")
+            assertTrue(controller.isEngagedNoticeEpisode)
+            assertEquals(listOf<Boolean?>(true), renderer.noticeEngagement)
+
+            advanceTimeBy(AssistantUiController.NOTICE_KEEPALIVE_INTERVAL_MS * 4)
+            runCurrent()
+            assertTrue(controller.isEngagedNoticeEpisode)
+            assertEquals(
+                listOf<Boolean?>(true, null, null, null, null),
+                renderer.noticeEngagement,
+            )
+
+            controller.showAnswer("Done.", legacyCardLines = listOf("Done."))
+            assertTrue(controller.isEngagedNoticeEpisode)
+            assertEquals(null, renderer.noticeEngagement.last())
+
+            controller.onNoticeClosed(NexusNoticeCloseReason.USER)
+            assertTrue(!controller.isEngagedNoticeEpisode)
+
+            controller.showTransient("Thinkingâ€¦")
+            assertTrue(controller.isEngagedNoticeEpisode)
+            controller.showError("Request failed.")
+            assertTrue(!controller.isEngagedNoticeEpisode)
+            assertEquals(false, renderer.noticeEngagement.last())
+
+            controller.showTransient("Listeningâ€¦")
+            assertTrue(controller.isEngagedNoticeEpisode)
+            controller.onInkAnswerShown()
+            assertTrue(!controller.isEngagedNoticeEpisode)
+
+            controller.showTransient("Listeningâ€¦")
+            assertTrue(controller.isEngagedNoticeEpisode)
+            controller.onClose()
+            assertTrue(!controller.isEngagedNoticeEpisode)
+        }
+
     private fun TestScope.controller(renderer: FakeRenderer): AssistantUiController =
         AssistantUiController(
             scope = this,
@@ -676,18 +720,21 @@ class AssistantUiControllerTest {
 
         /** Kept beside [calls] so the existing call assertions stay about bodies alone. */
         val updateTtls = mutableListOf<Long?>()
+        val noticeEngagement = mutableListOf<Boolean?>()
 
         override val supportsNoticeSurface: Boolean
             get() = supportsNotice
 
         override fun showNotice(notice: NexusNotice): NexusSdkResult {
             calls += RenderCall.ShowNotice(notice.title, notice.body, notice.lines)
+            noticeEngagement += notice.interactive
             return NexusSdkResult.SENT
         }
 
         override fun updateNotice(update: NexusNoticeUpdate): NexusSdkResult {
             calls += RenderCall.UpdateNotice(update.body, update.lines)
             updateTtls += update.ttlMs
+            noticeEngagement += update.interactive
             return NexusSdkResult.SENT
         }
 

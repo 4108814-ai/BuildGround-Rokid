@@ -18,31 +18,37 @@ internal class InkLayoutSettlePolicy {
     )
 
     private var projection = 0L
-    private var awaitingCleanLayout: Key? = null
+    private var geometryApplied: Key? = null
     private var settled: Key? = null
 
     fun onProjectionChanged() {
         projection += 1L
-        awaitingCleanLayout = null
+        geometryApplied = null
         settled = null
     }
 
     fun onPostLayout(width: Int, height: Int): InkLayoutSettleAction {
         if (width <= 0 || height <= 0) {
-            awaitingCleanLayout = null
+            geometryApplied = null
             settled = null
             return InkLayoutSettleAction.WAIT_FOR_BOUNDS
         }
         val key = Key(projection, width, height)
         if (settled == key) return InkLayoutSettleAction.NONE
-        if (awaitingCleanLayout == key) {
-            awaitingCleanLayout = null
+        if (geometryApplied == key) {
+            geometryApplied = null
             settled = key
             return InkLayoutSettleAction.NONE
         }
-        awaitingCleanLayout = key
         settled = null
         return InkLayoutSettleAction.REAPPLY_GEOMETRY
+    }
+
+    fun onGeometryApplied(width: Int, height: Int): Boolean {
+        if (width <= 0 || height <= 0) return false
+        geometryApplied = Key(projection, width, height)
+        settled = null
+        return true
     }
 
     fun canDraw(width: Int, height: Int): Boolean =

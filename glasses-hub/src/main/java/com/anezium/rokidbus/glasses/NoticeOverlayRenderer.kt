@@ -26,12 +26,14 @@ import com.anezium.rokidbus.shared.NoticeSurfaceContract
 internal object NoticeDisplayHoldPolicy {
     private const val ASSISTANT_NOTICE_ID = "assistant:${NoticeSurfaceContract.LOCAL_SURFACE_ID}"
 
-    fun noticeHoldsDisplay(surfaceId: String, wakeDisplay: Boolean): Boolean =
-        surfaceId == ASSISTANT_NOTICE_ID && !wakeDisplay
-
-    fun displayHeld(noticeHolding: Boolean, surfaceHolding: Boolean): Boolean =
-        noticeHolding || surfaceHolding
+    fun noticeHoldsDisplay(surfaceId: String, engaged: Boolean): Boolean =
+        surfaceId == ASSISTANT_NOTICE_ID && engaged
 }
+
+internal fun noticeWindowFlags(displayHoldActive: Boolean): Int =
+    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+        (if (displayHoldActive) WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON else 0)
 
 internal fun noticeBackdropAlpha(fadeAlpha: Float, backdrop: Boolean): Float =
     if (backdrop) fadeAlpha else 0f
@@ -67,10 +69,10 @@ internal fun noticeBandHeightCeiling(
  * Like the pin and like Relay's own overlay, the window is never focusable and
  * never touchable: it does not steal focus from what is underneath, and the
  * touchpad keeps working for everything the notice has not explicitly claimed.
- * Ordinary notices never keep the screen on. The assistant's conversational
- * band is the one foreground bridge to a pending Ink answer: it holds only
- * until that band starts dismissing, while the Ink surface takes over with its
- * existing foreground window flag. Wake requests remain separately owned by
+ * Ordinary notices never keep the screen on. The assistant marks only its
+ * listening, thinking, and answer-review episode as engaged; that band holds
+ * until the episode closes or its Ink surface takes over with the existing
+ * foreground window flag. Wake requests remain separately owned by
  * [NoticeController].
  */
 object NoticeOverlayRenderer {
@@ -134,7 +136,7 @@ object NoticeOverlayRenderer {
         setDisplayHold(
             NoticeDisplayHoldPolicy.noticeHoldsDisplay(
                 surfaceId = notice.surfaceId,
-                wakeDisplay = notice.content.wakeDisplay,
+                engaged = notice.content.interactive,
             ),
         )
         backdrop = notice.content.backdrop
@@ -240,20 +242,11 @@ object NoticeOverlayRenderer {
     }
 
     private fun params(context: Context): WindowManager.LayoutParams {
-        val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-            // The ROM sleeps the display five seconds after the last input
-            // (vendor-set screen_off_timeout), which is shorter than a notice's
-            // own life — a dictated reply died mid-flow under a dark screen.
-            // The window exists exactly as long as the notice, and the
-            // notice-close path puts the display back to sleep itself, so
-            // holding the screen here cannot outlive what warrants it.
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
         return WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            flags,
+            noticeWindowFlags(displayHoldActive),
             PixelFormat.TRANSLUCENT,
         ).apply { gravity = Gravity.TOP or Gravity.START }
     }
@@ -263,7 +256,9 @@ object NoticeOverlayRenderer {
         displayHoldActive = active
         val manager = windowManager ?: return
         val root = container ?: return
-        runCatching { manager.updateViewLayout(root, params(root.context)) }
+        val layout = (root.layoutParams as? WindowManager.LayoutParams) ?: params(root.context)
+        layout.flags = noticeWindowFlags(active)
+        runCatching { manager.updateViewLayout(root, layout) }
             .onFailure { logError("Notice display hold update failed", it) }
     }
 

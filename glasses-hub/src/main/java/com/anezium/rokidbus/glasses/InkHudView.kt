@@ -64,6 +64,8 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
     private var projectedRevision = -1
     private var containerWidth = 0
     private val layoutSettlePolicy = InkLayoutSettlePolicy()
+    private var layoutGeneration = 0L
+    private var pendingGeometryReapply: Runnable? = null
 
     init {
         setBackgroundColor(BusTheme.glassesBg)
@@ -83,8 +85,7 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
         projectedDocumentId = next.documentId
         projectedRevision = next.revision
         next.rootNodes().forEachIndexed { index, node -> addSubtree(node, null, index) }
-        layoutSettlePolicy.onProjectionChanged()
-        requestLayout()
+        invalidateLayoutMetrics()
     }
 
     fun applyPatch(next: InkNodeStore, changes: List<RenderChange>, debugActions: Boolean) {
@@ -114,6 +115,8 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
     }
 
     fun clearProjection() {
+        pendingGeometryReapply?.let(::removeCallbacks)
+        pendingGeometryReapply = null
         motion.cancelAll()
         registry.values.forEach {
             it.view.animate().cancel()
@@ -126,7 +129,17 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
         store = null
         projectedDocumentId = null
         projectedRevision = -1
+        containerWidth = 0
+        layoutGeneration += 1L
         layoutSettlePolicy.onProjectionChanged()
+    }
+
+    fun invalidateLayoutMetrics() {
+        pendingGeometryReapply?.let(::removeCallbacks)
+        pendingGeometryReapply = null
+        layoutGeneration += 1L
+        layoutSettlePolicy.onProjectionChanged()
+        requestLayout()
     }
 
     fun handleInkKeyEvent(event: KeyEvent): Boolean {
@@ -160,15 +173,35 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
             layoutSettlePolicy.onPostLayout(width, height) ==
             InkLayoutSettleAction.REAPPLY_GEOMETRY
         ) {
-            // Parent Flexboxes now have their stretched final bounds. Resolve
-            // every percentage/rpx value against those bounds, then give the
-            // tree one clean measure/layout before presentation is acknowledged.
-            containerWidth = width
+            scheduleGeometryReapply(width, height)
+        }
+    }
+
+    private fun scheduleGeometryReapply(settledWidth: Int, settledHeight: Int) {
+        if (pendingGeometryReapply != null) return
+        val generation = layoutGeneration
+        val reapply = Runnable {
+            pendingGeometryReapply = null
+            if (
+                generation != layoutGeneration ||
+                width != settledWidth ||
+                height != settledHeight
+            ) {
+                requestLayout()
+                return@Runnable
+            }
+            // LayoutParams changes made from onLayout are ignored by ViewRoot
+            // and corrupt Flexbox's same-frame second pass. Re-resolve only
+            // after that pass has returned, then require a fresh clean layout.
+            containerWidth = settledWidth
             registry.values.filterNot(Record::virtual).forEach { applyStyle(it) }
+            if (!layoutSettlePolicy.onGeometryApplied(settledWidth, settledHeight)) return@Runnable
             rootFlex.requestLayout()
             rootAbsolute.requestLayout()
             requestLayout()
         }
+        pendingGeometryReapply = reapply
+        post(reapply)
     }
 
     internal fun isLayoutSettledForDraw(): Boolean =
