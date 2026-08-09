@@ -13,13 +13,13 @@ import org.junit.Test
 class RenderInkPageToolTest {
     @Test
     fun `tool is declared only for an active granted supported session`() {
-        val capabilities = FakeRenderInkPageCapabilities()
+        val capabilities = FakeInkPageToolCapabilities()
         var session = AssistantToolSessionContext(
             active = true,
             grantedCapabilities = setOf(PluginCapability.INK_SURFACE.wireValue),
         )
         val registry = AssistantToolRegistry(
-            definitions = listOf(RenderInkPageTool(capabilities)),
+            definitions = listOf(RenderInkPageTool(InkPageToolRuntime(capabilities))),
             sessionContext = { session },
         )
 
@@ -42,8 +42,8 @@ class RenderInkPageToolTest {
 
     @Test
     fun `schema and validator enforce page title and data types`() = runTest {
-        val capabilities = FakeRenderInkPageCapabilities()
-        val tool = RenderInkPageTool(capabilities)
+        val capabilities = FakeInkPageToolCapabilities()
+        val tool = RenderInkPageTool(InkPageToolRuntime(capabilities))
         val schema = tool.parametersSchema.toJsonObject()
         val properties = schema.getJSONObject("properties")
 
@@ -88,8 +88,8 @@ class RenderInkPageToolTest {
 
     @Test
     fun `typed ink problems are returned to the model`() = runTest {
-        val capabilities = FakeRenderInkPageCapabilities().apply {
-            showResult = RenderInkPageShowResult.Rejected(
+        val capabilities = FakeInkPageToolCapabilities().apply {
+            showResult = InkPageShowResult.Rejected(
                 listOf(
                     NexusInkProblem(
                         code = "INK_UNKNOWN_COMPONENT",
@@ -127,7 +127,7 @@ class RenderInkPageToolTest {
 
     @Test
     fun `side effecting render executes once per phase`() = runTest {
-        val capabilities = FakeRenderInkPageCapabilities()
+        val capabilities = FakeInkPageToolCapabilities()
         val phase = registry(capabilities).newExecutionPhase(TOOLS_SUPPORTED)
 
         val first = phase.execute(
@@ -150,6 +150,7 @@ class RenderInkPageToolTest {
         assertTrue(RENDER_INK_PAGE_TOOL_DESCRIPTION.contains("No <script setup>"))
         assertTrue(RENDER_INK_PAGE_TOOL_DESCRIPTION.contains("Monochrome only"))
         assertTrue(RENDER_INK_PAGE_TOOL_DESCRIPTION.contains("<chart"))
+        assertTrue(RENDER_INK_PAGE_TOOL_DESCRIPTION.contains("Prefer render_template"))
     }
 
     @Test
@@ -176,9 +177,9 @@ class RenderInkPageToolTest {
         )
     }
 
-    private fun registry(capabilities: FakeRenderInkPageCapabilities): AssistantToolRegistry =
+    private fun registry(capabilities: FakeInkPageToolCapabilities): AssistantToolRegistry =
         AssistantToolRegistry(
-            definitions = listOf(RenderInkPageTool(capabilities)),
+            definitions = listOf(RenderInkPageTool(InkPageToolRuntime(capabilities))),
             sessionContext = {
                 AssistantToolSessionContext(
                     active = true,
@@ -187,34 +188,34 @@ class RenderInkPageToolTest {
             },
         )
 
-    private class FakeRenderInkPageCapabilities : RenderInkPageToolCapabilities {
+    private class FakeInkPageToolCapabilities : InkPageToolCapabilities {
         var supported = true
         var sessionActive = true
-        var showResult: RenderInkPageShowResult = RenderInkPageShowResult.Shown
+        var showResult: InkPageShowResult = InkPageShowResult.Shown
         var showCalls = 0
         var markShownCalls = 0
         var shownPage: String? = null
         var shownData: JSONObject? = null
 
-        override fun currentSession(): RenderInkPageToolSession =
-            RenderInkPageToolSession("request", 1L)
+        override fun currentSession(): InkPageToolSession =
+            InkPageToolSession("request", 1L)
 
-        override fun isSessionActive(session: RenderInkPageToolSession): Boolean = sessionActive
+        override fun isSessionActive(session: InkPageToolSession): Boolean = sessionActive
 
         override fun supportsInkSurface(): Boolean = supported
 
         override suspend fun showInkPage(
-            session: RenderInkPageToolSession,
+            session: InkPageToolSession,
             page: String,
             data: JSONObject?,
-        ): RenderInkPageShowResult {
+        ): InkPageShowResult {
             showCalls += 1
             shownPage = page
             shownData = data
             return showResult
         }
 
-        override fun markInkShown(session: RenderInkPageToolSession): Boolean {
+        override fun markInkShown(session: InkPageToolSession): Boolean {
             markShownCalls += 1
             return sessionActive
         }

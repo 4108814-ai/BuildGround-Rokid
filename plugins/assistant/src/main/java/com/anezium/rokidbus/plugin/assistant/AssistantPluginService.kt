@@ -60,11 +60,21 @@ class AssistantPluginService : NexusPluginService() {
     private val reminderStore by lazy { AssistantReminderStore(applicationContext) }
     private val reminderScheduler by lazy { androidReminderScheduler(applicationContext) }
     private val conversationThreading by lazy { AssistantConversationThreading(threadStore) }
+    private val inkPageToolCapabilities by lazy { createInkPageToolCapabilities() }
+    private val inkPageToolRuntime by lazy { InkPageToolRuntime(inkPageToolCapabilities) }
+    private val inkTemplateLoader by lazy {
+        InkTemplateLoader { template ->
+            assets.open("$INK_TEMPLATE_ASSET_DIR/${template.wireValue}.ink")
+                .bufferedReader()
+                .use { it.readText() }
+        }
+    }
     private val assistantToolRegistry by lazy {
         AssistantToolRegistry(
             definitions = listOf(
                 TakePhotoTool(createTakePhotoToolCapabilities()),
-                RenderInkPageTool(createRenderInkPageToolCapabilities()),
+                RenderTemplateTool(inkPageToolRuntime, inkTemplateLoader),
+                RenderInkPageTool(inkPageToolRuntime),
             ) +
                 assistantProductivityTools(
                     noteStore = noteStore,
@@ -239,7 +249,7 @@ class AssistantPluginService : NexusPluginService() {
         }
         pendingInkShow = null
         if (pending.continuation.isActive) {
-            pending.continuation.resume(RenderInkPageShowResult.Shown)
+            pending.continuation.resume(InkPageShowResult.Shown)
         }
     }
 
@@ -263,7 +273,7 @@ class AssistantPluginService : NexusPluginService() {
         val pending = pendingInkShow
         pendingInkShow = null
         if (pending?.continuation?.isActive == true) {
-            pending.continuation.resume(RenderInkPageShowResult.Rejected(problems))
+            pending.continuation.resume(InkPageShowResult.Rejected(problems))
         }
     }
 
@@ -729,27 +739,27 @@ class AssistantPluginService : NexusPluginService() {
             }
         }
 
-    private fun createRenderInkPageToolCapabilities(): RenderInkPageToolCapabilities =
-        object : RenderInkPageToolCapabilities {
-            override fun currentSession(): RenderInkPageToolSession? {
+    private fun createInkPageToolCapabilities(): InkPageToolCapabilities =
+        object : InkPageToolCapabilities {
+            override fun currentSession(): InkPageToolSession? {
                 val requestId = currentRequestId ?: return null
                 val generation = currentAssistantGeneration ?: return null
-                return RenderInkPageToolSession(requestId, generation)
+                return InkPageToolSession(requestId, generation)
             }
 
-            override fun isSessionActive(session: RenderInkPageToolSession): Boolean =
+            override fun isSessionActive(session: InkPageToolSession): Boolean =
                 isRenderInkSessionActive(session)
 
             override fun supportsInkSurface(): Boolean =
                 nexusClient?.supportsInkSurface == true
 
             override suspend fun showInkPage(
-                session: RenderInkPageToolSession,
+                session: InkPageToolSession,
                 page: String,
                 data: JSONObject?,
-            ): RenderInkPageShowResult = awaitInkPageShow(session, page, data)
+            ): InkPageShowResult = awaitInkPageShow(session, page, data)
 
-            override fun markInkShown(session: RenderInkPageToolSession): Boolean {
+            override fun markInkShown(session: InkPageToolSession): Boolean {
                 if (!isRenderInkSessionActive(session) || !inkSurfaceActive) {
                     clearInkSurface(hide = true)
                     return false
@@ -760,22 +770,22 @@ class AssistantPluginService : NexusPluginService() {
         }
 
     private suspend fun awaitInkPageShow(
-        session: RenderInkPageToolSession,
+        session: InkPageToolSession,
         page: String,
         data: JSONObject?,
-    ): RenderInkPageShowResult = suspendCancellableCoroutine { continuation ->
+    ): InkPageShowResult = suspendCancellableCoroutine { continuation ->
         if (!isRenderInkSessionActive(session)) {
-            continuation.resume(RenderInkPageShowResult.Failed(TOOL_ERROR_CANCELLED))
+            continuation.resume(InkPageShowResult.Failed(TOOL_ERROR_CANCELLED))
             return@suspendCancellableCoroutine
         }
         val sessionSurface = inkSurface
             ?: nexusInkSurfaceSession(INK_SURFACE_ID)?.also { inkSurface = it }
         if (sessionSurface == null) {
-            continuation.resume(RenderInkPageShowResult.Failed(TOOL_ERROR_INK_RENDER_FAILED))
+            continuation.resume(InkPageShowResult.Failed(TOOL_ERROR_INK_RENDER_FAILED))
             return@suspendCancellableCoroutine
         }
         if (pendingInkShow != null) {
-            continuation.resume(RenderInkPageShowResult.Failed(TOOL_ERROR_SURFACE_BUSY))
+            continuation.resume(InkPageShowResult.Failed(TOOL_ERROR_SURFACE_BUSY))
             return@suspendCancellableCoroutine
         }
 
@@ -798,13 +808,13 @@ class AssistantPluginService : NexusPluginService() {
             pendingInkShow = null
             if (continuation.isActive) {
                 continuation.resume(
-                    RenderInkPageShowResult.Failed(inkShowStartToolErrorCode(result)),
+                    InkPageShowResult.Failed(inkShowStartToolErrorCode(result)),
                 )
             }
         }
     }
 
-    private fun isRenderInkSessionActive(session: RenderInkPageToolSession): Boolean =
+    private fun isRenderInkSessionActive(session: InkPageToolSession): Boolean =
         currentRequestId == session.requestId &&
             currentAssistantGeneration == session.generation &&
             captureGeneration == session.generation &&
@@ -819,7 +829,7 @@ class AssistantPluginService : NexusPluginService() {
         val pending = pendingInkShow
         pendingInkShow = null
         if (pending?.continuation?.isActive == true) {
-            pending.continuation.resume(RenderInkPageShowResult.Failed(TOOL_ERROR_CANCELLED))
+            pending.continuation.resume(InkPageShowResult.Failed(TOOL_ERROR_CANCELLED))
         }
         if (shouldHide) inkSurface?.hide()
         if (hadInk || pending != null) uiController.onSurfaceHidden()
@@ -1045,6 +1055,7 @@ class AssistantPluginService : NexusPluginService() {
         private const val TAG = "NexusAssistant"
         private const val SURFACE_ID = "assistant"
         private const val INK_SURFACE_ID = "assistant-ink"
+        private const val INK_TEMPLATE_ASSET_DIR = "ink_templates"
         private const val AI_ASSIST_OPEN_PATH = "/system/plugin/ai-assist"
         private const val AI_ASSIST_OPEN_TYPE = "ai_assist"
         private const val FALLBACK_CAPTURE_DURATION_MS = 6_000L
@@ -1080,8 +1091,8 @@ class AssistantPluginService : NexusPluginService() {
 }
 
 private data class PendingInkShow(
-    val session: RenderInkPageToolSession,
-    val continuation: CancellableContinuation<RenderInkPageShowResult>,
+    val session: InkPageToolSession,
+    val continuation: CancellableContinuation<InkPageShowResult>,
 )
 
 internal fun inkShowStartToolErrorCode(result: NexusSdkResult): String = when (result) {
