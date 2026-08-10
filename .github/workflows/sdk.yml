@@ -18,8 +18,8 @@ jobs:
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
       - name: Test and lint public modules
-        run: ./gradlew :shared:testDebugUnitTest :bus-client:testDebugUnitTest :shared:lintDebug :bus-client:lintDebug -PskipCxrGlobal=true
+        run: ./gradlew :shared:testDebugUnitTest :bus-client:testDebugUnitTest :ink-engine:test :shared:lintDebug :bus-client:lintDebug -PskipCxrGlobal=true
       - name: Publish SDK to the runner Maven local repository
-        run: ./gradlew :shared:publishToMavenLocal :bus-client:publishToMavenLocal -PversionName=0.1.0-SNAPSHOT -PskipCxrGlobal=true
+        run: ./gradlew :shared:publishToMavenLocal :bus-client:publishToMavenLocal :ink-engine:publishToMavenLocal -PversionName=0.1.0-SNAPSHOT -PskipCxrGlobal=true
       - name: Compile sample from published coordinates
         run: ./gradlew :plugin-sample:assembleDebug -PusePublishedSdk=true -PversionName=0.1.0-SNAPSHOT -PskipCxrGlobal=true
