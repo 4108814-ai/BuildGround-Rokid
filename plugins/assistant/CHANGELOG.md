@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.4.0
+
 - **Your phone calendar is a real tool too.** Ask the assistant to add an
   appointment, read what is coming up, or delete one by its exact title and
   start time. Ambiguous matches and recurring series are refused instead of

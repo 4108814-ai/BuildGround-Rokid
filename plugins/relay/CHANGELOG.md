@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.2.0
+
 - **Inbox conversations now open as full-screen reader documents.** Messages
   wrap as prose and scroll in the native glasses renderer, while tapping still
   starts a reply and Back still returns to the Messages list.

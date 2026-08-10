@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.4.0
+
 - **Assistant can act on the phone calendar.** It can add and list events after
   the wearer grants Android calendar access, and deletion fails closed unless
   exactly one event matches the requested title and start time. Recurring
