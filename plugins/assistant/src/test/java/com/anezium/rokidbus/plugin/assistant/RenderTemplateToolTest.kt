@@ -37,6 +37,7 @@ class RenderTemplateToolTest {
         val properties = schema.getJSONObject("properties")
         val templateEnum = properties.getJSONObject("template").getJSONArray("enum")
 
+        assertEquals("Drawing the card…", tool.progressLabel)
         // Strict providers require every property; optionals are nullable and
         // free-form data travels as a JSON-encoded string.
         assertEquals("object", schema.getString("type"))

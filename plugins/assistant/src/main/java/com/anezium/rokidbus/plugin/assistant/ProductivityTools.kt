@@ -69,6 +69,7 @@ internal class TakeNoteTool(
         """{"type":"object","properties":{"text":{"type":"string","minLength":1},"title":{"type":["string","null"],"maxLength":80}},"required":["text","title"],"additionalProperties":false}""",
     )
     override val sideEffecting = true
+    override val progressLabel = "Saving the note…"
     override val executionFailureCode = "note_save_failed"
 
     override fun validate(argumentsJson: String): AssistantToolValidation {
@@ -114,6 +115,7 @@ internal class ListNotesTool(
     override val description = "List up to 10 most recent saved notes."
     override val parametersSchema = EMPTY_PARAMETERS_SCHEMA
     override val sideEffecting = false
+    override val progressLabel = "Reading your notes…"
 
     override fun validate(argumentsJson: String): AssistantToolValidation = emptyArguments(argumentsJson)
 
@@ -143,6 +145,7 @@ internal class SearchNotesTool(
         """{"type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":200}},"required":["query"],"additionalProperties":false}""",
     )
     override val sideEffecting = false
+    override val progressLabel = "Searching your notes…"
 
     override fun validate(argumentsJson: String): AssistantToolValidation {
         val arguments = strictArguments(argumentsJson, setOf("query"))
@@ -182,6 +185,7 @@ internal class DeleteNoteTool(
         """{"type":"object","properties":{"id":{"type":"string","pattern":"^n_[a-z0-9]{8}$"}},"required":["id"],"additionalProperties":false}""",
     )
     override val sideEffecting = true
+    override val progressLabel = "Deleting the note…"
     override val executionFailureCode = "note_delete_failed"
 
     override fun validate(argumentsJson: String): AssistantToolValidation {
@@ -218,6 +222,7 @@ internal class SetReminderTool(
         """{"type":"object","properties":{"time":{"type":"string"},"label":{"type":"string","minLength":1,"maxLength":200}},"required":["time","label"],"additionalProperties":false}""",
     )
     override val sideEffecting = true
+    override val progressLabel = "Setting the reminder…"
     override val executionFailureCode = "reminder_save_failed"
 
     override fun validate(argumentsJson: String): AssistantToolValidation {
@@ -283,6 +288,7 @@ internal class ListRemindersTool(
     override val description = "List up to 10 pending reminders and timers, soonest first."
     override val parametersSchema = EMPTY_PARAMETERS_SCHEMA
     override val sideEffecting = false
+    override val progressLabel = "Checking your reminders…"
 
     override fun validate(argumentsJson: String): AssistantToolValidation = emptyArguments(argumentsJson)
 
@@ -327,6 +333,7 @@ internal class CancelReminderTool(
         """{"type":"object","properties":{"id_or_label":{"type":"string","minLength":1,"maxLength":200}},"required":["id_or_label"],"additionalProperties":false}""",
     )
     override val sideEffecting = true
+    override val progressLabel = "Cancelling the reminder…"
     override val executionFailureCode = "reminder_cancel_failed"
 
     override fun validate(argumentsJson: String): AssistantToolValidation {
@@ -386,6 +393,7 @@ internal class SetTimerTool(
         """{"type":"object","properties":{"duration_seconds":{"type":"integer","minimum":5,"maximum":86400},"label":{"type":["string","null"],"maxLength":200}},"required":["duration_seconds","label"],"additionalProperties":false}""",
     )
     override val sideEffecting = true
+    override val progressLabel = "Starting the timer…"
     override val executionFailureCode = "timer_save_failed"
 
     override fun validate(argumentsJson: String): AssistantToolValidation {

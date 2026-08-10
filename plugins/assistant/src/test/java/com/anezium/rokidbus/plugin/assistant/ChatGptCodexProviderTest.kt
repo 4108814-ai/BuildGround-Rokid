@@ -179,6 +179,83 @@ class ChatGptCodexProviderTest {
     }
 
     @Test
+    fun webSearchProgressFollowsObservedItemAndCallEvents() = runTest {
+        val transport = FakeTransport(
+            StubResponse(
+                statusCode = 200,
+                sseData = listOf(
+                    """{"type":"response.output_item.added","item":{"id":"ws-added","type":"web_search_call","status":"in_progress"}}""",
+                    """{"type":"response.web_search_call.in_progress","item_id":"ws-added"}""",
+                    """{"type":"response.web_search_call.searching","item_id":"ws-added"}""",
+                    """{"type":"response.output_item.done","item":{"id":"ws-added","type":"web_search_call","status":"completed"}}""",
+                    """{"type":"response.web_search_call.in_progress","item_id":"ws-progress"}""",
+                    """{"type":"response.web_search_call.searching","item_id":"ws-progress"}""",
+                    """{"type":"response.web_search_call.completed","item_id":"ws-progress"}""",
+                    """{"type":"response.completed"}""",
+                ),
+            ),
+        )
+
+        val events = provider(transport)
+            .streamEvents(ChatRequest(userText = "Search for this"))
+            .toList()
+
+        assertEquals(
+            listOf(
+                "Searching the web…",
+                "Thinking…",
+                "Searching the web…",
+                "Thinking…",
+            ),
+            events.filterIsInstance<AiProviderEvent.Progress>().map { event -> event.message },
+        )
+        assertTrue(events.last() is AiProviderEvent.MessageDone)
+    }
+
+    @Test
+    fun webSearchProgressIsClearedWhenTheTurnEndsOrFails() = runTest {
+        val completedTransport = FakeTransport(
+            StubResponse(
+                statusCode = 200,
+                sseData = listOf(
+                    """{"type":"response.output_item.added","item":{"id":"ws-open","type":"web_search_call","status":"in_progress"}}""",
+                    """{"type":"response.completed"}""",
+                ),
+            ),
+        )
+
+        val completedEvents = provider(completedTransport)
+            .streamEvents(ChatRequest(userText = "Search"))
+            .toList()
+
+        assertEquals(
+            listOf("Searching the web…", "Thinking…"),
+            completedEvents.filterIsInstance<AiProviderEvent.Progress>().map { it.message },
+        )
+        assertTrue(completedEvents.last() is AiProviderEvent.MessageDone)
+
+        val failedTransport = FakeTransport(
+            StubResponse(
+                statusCode = 200,
+                sseData = listOf(
+                    """{"type":"response.web_search_call.searching","item_id":"ws-failed"}""",
+                    """{"type":"error","error":{"type":"invalid_request_error","code":"invalid_request","message":"search failed"}}""",
+                ),
+            ),
+        )
+
+        val failedEvents = provider(failedTransport)
+            .streamEvents(ChatRequest(userText = "Search"))
+            .toList()
+
+        assertEquals(
+            listOf("Searching the web…", "Thinking…"),
+            failedEvents.filterIsInstance<AiProviderEvent.Progress>().map { it.message },
+        )
+        assertTrue(failedEvents.last() is AiProviderEvent.Failed)
+    }
+
+    @Test
     fun emitsTextDeltaBeforeTerminalSseIsConsumed() = runTest {
         val deltaObserved = CompletableDeferred<Unit>()
         val terminalConsumed = AtomicBoolean(false)

@@ -30,6 +30,19 @@ class ProductivityToolsTest {
             setOf(TAKE_NOTE_TOOL_NAME, DELETE_NOTE_TOOL_NAME, SET_REMINDER_TOOL_NAME, CANCEL_REMINDER_TOOL_NAME, SET_TIMER_TOOL_NAME),
             available.filter(AssistantToolDefinition::sideEffecting).map(AssistantToolDefinition::name).toSet(),
         )
+        assertEquals(
+            mapOf(
+                TAKE_NOTE_TOOL_NAME to "Saving the note…",
+                LIST_NOTES_TOOL_NAME to "Reading your notes…",
+                SEARCH_NOTES_TOOL_NAME to "Searching your notes…",
+                DELETE_NOTE_TOOL_NAME to "Deleting the note…",
+                SET_REMINDER_TOOL_NAME to "Setting the reminder…",
+                LIST_REMINDERS_TOOL_NAME to "Checking your reminders…",
+                CANCEL_REMINDER_TOOL_NAME to "Cancelling the reminder…",
+                SET_TIMER_TOOL_NAME to "Starting the timer…",
+            ),
+            available.associate { tool -> tool.name to tool.progressLabel },
+        )
     }
 
     @Test

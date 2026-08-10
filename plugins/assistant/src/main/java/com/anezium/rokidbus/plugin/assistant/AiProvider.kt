@@ -33,6 +33,7 @@ data class ChatRequest(
 
 sealed interface AiProviderEvent {
     data class Started(val messageId: String) : AiProviderEvent
+    data class Progress(val messageId: String, val message: String) : AiProviderEvent
     data class TextReset(val messageId: String) : AiProviderEvent
     data class TextDelta(val messageId: String, val delta: String) : AiProviderEvent
     data class MessageDone(val message: ChatMessage) : AiProviderEvent

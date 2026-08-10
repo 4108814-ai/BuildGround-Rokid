@@ -9,6 +9,7 @@ internal class RenderInkPageTool(
     override val description: String = RENDER_INK_PAGE_TOOL_DESCRIPTION
     override val parametersSchema: AssistantToolJsonSchema = RENDER_INK_PAGE_PARAMETERS_SCHEMA
     override val sideEffecting: Boolean = true
+    override val progressLabel: String = "Drawing the card…"
     override val executionFailureCode: String = TOOL_ERROR_INK_RENDER_FAILED
 
     override fun isAvailable(context: AssistantToolAvailabilityContext): Boolean =

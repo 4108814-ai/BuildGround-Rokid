@@ -20,7 +20,10 @@ import java.util.concurrent.ConcurrentHashMap
 
 internal sealed interface ChatGptCodexSseEvent {
     data class TextDelta(val text: String) : ChatGptCodexSseEvent
+    data class OutputItemAdded(val item: JSONObject) : ChatGptCodexSseEvent
     data class OutputItemDone(val item: JSONObject) : ChatGptCodexSseEvent
+    data class WebSearchStarted(val itemId: String) : ChatGptCodexSseEvent
+    data class WebSearchCompleted(val itemId: String) : ChatGptCodexSseEvent
     data class StreamError(
         val message: String,
         val type: String,
@@ -49,10 +52,22 @@ internal object ChatGptCodexSseParser {
                 }
             }
             "response.completed" -> ChatGptCodexSseEvent.Completed
+            "response.output_item.added" ->
+                json.optJSONObject("item")
+                    ?.let { item -> ChatGptCodexSseEvent.OutputItemAdded(item) }
+                    ?: ChatGptCodexSseEvent.Ignored
             "response.output_item.done" ->
                 json.optJSONObject("item")
                     ?.let { item -> ChatGptCodexSseEvent.OutputItemDone(item) }
                     ?: ChatGptCodexSseEvent.Ignored
+            "response.web_search_call.in_progress",
+            "response.web_search_call.searching",
+            -> json.webSearchItemId()
+                ?.let { itemId -> ChatGptCodexSseEvent.WebSearchStarted(itemId) }
+                ?: ChatGptCodexSseEvent.Ignored
+            "response.web_search_call.completed" -> json.webSearchItemId()
+                ?.let { itemId -> ChatGptCodexSseEvent.WebSearchCompleted(itemId) }
+                ?: ChatGptCodexSseEvent.Ignored
             "response.failed", "error" -> streamError(json)
             else -> ChatGptCodexSseEvent.Ignored
         }
@@ -93,6 +108,9 @@ internal object ChatGptCodexSseParser {
         "service_unavailable_error",
         "server_is_overloaded",
     )
+
+    private fun JSONObject.webSearchItemId(): String? =
+        optString("item_id").takeIf(String::isNotBlank)
 }
 
 internal data class ChatGptCodexHttpRequest(
@@ -221,6 +239,7 @@ internal class ChatGptCodexApiClient(
         requestId: String = request.requestId,
         onTextDelta: suspend (String) -> Unit = {},
         onStreamRestart: suspend () -> Unit = {},
+        onWebSearchStateChanged: suspend (Boolean) -> Unit = {},
     ): ChatGptCodexStreamResult {
         var tokens = tokenProvider()
             ?: throw IllegalStateException("No ChatGPT sign-in is stored. Sign in again.")
@@ -233,6 +252,33 @@ internal class ChatGptCodexApiClient(
             val outputItems = mutableListOf<JSONObject>()
             var streamError: ChatGptCodexSseEvent.StreamError? = null
             var completed = false
+            val activeWebSearchItemIds = mutableSetOf<String>()
+            var webSearchReported = false
+
+            suspend fun reportWebSearch(searching: Boolean) {
+                if (webSearchReported == searching) return
+                webSearchReported = searching
+                onWebSearchStateChanged(searching)
+            }
+
+            suspend fun startWebSearch(itemId: String) {
+                if (activeWebSearchItemIds.add(itemId) && activeWebSearchItemIds.size == 1) {
+                    reportWebSearch(true)
+                }
+            }
+
+            suspend fun completeWebSearch(itemId: String) {
+                if (activeWebSearchItemIds.remove(itemId) && activeWebSearchItemIds.isEmpty()) {
+                    reportWebSearch(false)
+                }
+            }
+
+            suspend fun clearWebSearches() {
+                if (activeWebSearchItemIds.isEmpty()) return
+                activeWebSearchItemIds.clear()
+                reportWebSearch(false)
+            }
+
             val httpRequest = buildHttpRequest(
                 request = request,
                 modelId = supportedModel(modelId),
@@ -241,29 +287,51 @@ internal class ChatGptCodexApiClient(
                 toolDefinitions = toolDefinitions,
                 tokens = tokens,
             )
-            val response = withContext(Dispatchers.IO) {
-                transport.execute(requestId, httpRequest) { payload ->
-                    when (val event = ChatGptCodexSseParser.parseData(payload)) {
-                        is ChatGptCodexSseEvent.TextDelta -> {
-                            textDeltas += event.text
-                            onTextDelta(event.text)
-                            true
+            val response = try {
+                withContext(Dispatchers.IO) {
+                    transport.execute(requestId, httpRequest) { payload ->
+                        when (val event = ChatGptCodexSseParser.parseData(payload)) {
+                            is ChatGptCodexSseEvent.TextDelta -> {
+                                textDeltas += event.text
+                                onTextDelta(event.text)
+                                true
+                            }
+                            is ChatGptCodexSseEvent.OutputItemAdded -> {
+                                if (event.item.isWebSearchCall()) {
+                                    event.item.itemId()?.let { itemId -> startWebSearch(itemId) }
+                                }
+                                true
+                            }
+                            is ChatGptCodexSseEvent.OutputItemDone -> {
+                                if (event.item.isWebSearchCall()) {
+                                    event.item.itemId()?.let { itemId -> completeWebSearch(itemId) }
+                                }
+                                outputItems += event.item
+                                true
+                            }
+                            is ChatGptCodexSseEvent.WebSearchStarted -> {
+                                startWebSearch(event.itemId)
+                                true
+                            }
+                            is ChatGptCodexSseEvent.WebSearchCompleted -> {
+                                completeWebSearch(event.itemId)
+                                true
+                            }
+                            is ChatGptCodexSseEvent.StreamError -> {
+                                streamError = event
+                                false
+                            }
+                            ChatGptCodexSseEvent.Completed -> {
+                                clearWebSearches()
+                                completed = true
+                                false
+                            }
+                            ChatGptCodexSseEvent.Ignored -> true
                         }
-                        is ChatGptCodexSseEvent.OutputItemDone -> {
-                            outputItems += event.item
-                            true
-                        }
-                        is ChatGptCodexSseEvent.StreamError -> {
-                            streamError = event
-                            false
-                        }
-                        ChatGptCodexSseEvent.Completed -> {
-                            completed = true
-                            false
-                        }
-                        ChatGptCodexSseEvent.Ignored -> true
                     }
                 }
+            } finally {
+                clearWebSearches()
             }
 
             if (
@@ -456,6 +524,15 @@ internal class ChatGptCodexProvider(
                 send(AiProviderEvent.TextReset(messageId))
             }
 
+            suspend fun streamWebSearchState(searching: Boolean) {
+                send(
+                    AiProviderEvent.Progress(
+                        messageId = messageId,
+                        message = if (searching) SEARCHING_WEB_LABEL else THINKING_LABEL,
+                    ),
+                )
+            }
+
             val firstResponse = apiClient.executeResponses(
                 request = request,
                 modelId = modelId,
@@ -465,6 +542,7 @@ internal class ChatGptCodexProvider(
                 requestId = request.requestId,
                 onTextDelta = ::streamDelta,
                 onStreamRestart = ::resetStreamedText,
+                onWebSearchStateChanged = ::streamWebSearchState,
             )
             currentCoroutineContext().ensureActive()
 
@@ -489,6 +567,7 @@ internal class ChatGptCodexProvider(
                     requestId = request.requestId,
                     onTextDelta = ::streamDelta,
                     onStreamRestart = ::resetStreamedText,
+                    onWebSearchStateChanged = ::streamWebSearchState,
                 )
             }
 
@@ -648,6 +727,13 @@ private val CODEX_PROVIDER_FEATURES = AssistantProviderFeatures(
     supportsTools = true,
     supportsVision = true,
 )
+
+private const val SEARCHING_WEB_LABEL = "Searching the web…"
+private const val THINKING_LABEL = "Thinking…"
+
+private fun JSONObject.isWebSearchCall(): Boolean = optString("type") == "web_search_call"
+
+private fun JSONObject.itemId(): String? = optString("id").takeIf(String::isNotBlank)
 
 private inline fun JSONArray.forEachJsonValue(block: (Any) -> Unit) {
     for (index in 0 until length()) block(get(index))

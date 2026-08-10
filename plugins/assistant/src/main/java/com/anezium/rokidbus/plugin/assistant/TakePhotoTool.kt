@@ -2,7 +2,6 @@ package com.anezium.rokidbus.plugin.assistant
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.os.SystemClock
 import android.util.Base64
 import com.anezium.rokidbus.client.plugin.NexusSdkResult
 import com.anezium.rokidbus.client.plugin.NexusSnapshotError
@@ -54,12 +53,13 @@ internal interface TakePhotoToolCapabilities {
 
 internal class TakePhotoTool(
     private val capabilities: TakePhotoToolCapabilities,
+    private val elapsedClock: () -> Long = { android.os.SystemClock.elapsedRealtime() },
 ) : AssistantToolDefinition {
     override val name: String = TAKE_PHOTO_TOOL_NAME
     override val description: String = TAKE_PHOTO_TOOL_DESCRIPTION
     override val parametersSchema: AssistantToolJsonSchema = TAKE_PHOTO_PARAMETERS_SCHEMA
     override val sideEffecting: Boolean = true
-    override val progressLabel: String = "Photo\u2026"
+    override val progressLabel: String? = null
     override val executionFailureCode: String = TOOL_ERROR_CAPTURE_FAILED
 
     override fun isAvailable(context: AssistantToolAvailabilityContext): Boolean =
@@ -80,22 +80,14 @@ internal class TakePhotoTool(
         call: AssistantToolCall,
         arguments: JSONObject,
     ): AssistantToolResult {
-        val startedAt = SystemClock.elapsedRealtime()
+        val startedAt = elapsedClock()
         val session = capabilities.currentSession()
-        var progressShown = false
 
         fun error(
             code: String,
             captureMs: Long = 0L,
             processMs: Long = 0L,
         ): AssistantToolResult.Error {
-            if (
-                progressShown &&
-                session != null &&
-                capabilities.isSessionActive(session)
-            ) {
-                capabilities.showTransient("Thinking\u2026")
-            }
             capabilities.logOutcome(
                 TakePhotoToolOutcome(
                     requestId = session?.requestId,
@@ -106,7 +98,7 @@ internal class TakePhotoTool(
                     height = 0,
                     captureMs = captureMs,
                     processMs = processMs,
-                    totalMs = SystemClock.elapsedRealtime() - startedAt,
+                    totalMs = elapsedClock() - startedAt,
                 ),
             )
             return AssistantToolResult.Error(code)
@@ -122,56 +114,54 @@ internal class TakePhotoTool(
         if (capabilities.isCameraBusy()) return error(TOOL_ERROR_CAMERA_BUSY)
 
         currentCoroutineContext().ensureActive()
-        capabilities.showTransient(progressLabel)
-        progressShown = true
+        capabilities.showTransient(TAKE_PHOTO_PROGRESS_LABEL)
         currentCoroutineContext().ensureActive()
         if (!capabilities.isSessionActive(session)) {
             throw CancellationException("Assistant generation is stale.")
         }
 
-        val captureStartedAt = SystemClock.elapsedRealtime()
+        val captureStartedAt = elapsedClock()
         val capture = try {
             withTimeoutOrNull(SNAPSHOT_CAPTURE_TIMEOUT_MS) {
                 capabilities.captureSnapshotJpeg()
             } ?: return error(
                 code = TOOL_ERROR_CAPTURE_FAILED,
-                captureMs = SystemClock.elapsedRealtime() - captureStartedAt,
+                captureMs = elapsedClock() - captureStartedAt,
             )
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Throwable) {
             return error(
                 code = TOOL_ERROR_CAPTURE_FAILED,
-                captureMs = SystemClock.elapsedRealtime() - captureStartedAt,
+                captureMs = elapsedClock() - captureStartedAt,
             )
         }
         if (capture is TakePhotoCaptureResult.Failed) {
             return error(
                 code = capture.code,
-                captureMs = SystemClock.elapsedRealtime() - captureStartedAt,
+                captureMs = elapsedClock() - captureStartedAt,
             )
         }
         capture as TakePhotoCaptureResult.Captured
-        val captureMs = SystemClock.elapsedRealtime() - captureStartedAt
+        val captureMs = elapsedClock() - captureStartedAt
         capabilities.markPhotoCaptured(session)
 
         currentCoroutineContext().ensureActive()
-        val processStartedAt = SystemClock.elapsedRealtime()
+        val processStartedAt = elapsedClock()
         val image = withContext(Dispatchers.Default) {
             prepareToolImage(capture.jpeg)
         } ?: return error(
             code = TOOL_ERROR_CAPTURE_FAILED,
             captureMs = captureMs,
-            processMs = SystemClock.elapsedRealtime() - processStartedAt,
+            processMs = elapsedClock() - processStartedAt,
         )
-        val processMs = SystemClock.elapsedRealtime() - processStartedAt
+        val processMs = elapsedClock() - processStartedAt
         currentCoroutineContext().ensureActive()
         if (!capabilities.isSessionActive(session)) {
             throw CancellationException("Assistant generation is stale.")
         }
         capabilities.retainPhoto(session, image.jpeg)
 
-        capabilities.showTransient("Thinking\u2026")
         capabilities.logOutcome(
             TakePhotoToolOutcome(
                 requestId = session.requestId,
@@ -182,7 +172,7 @@ internal class TakePhotoTool(
                 height = image.height,
                 captureMs = captureMs,
                 processMs = processMs,
-                totalMs = SystemClock.elapsedRealtime() - startedAt,
+                totalMs = elapsedClock() - startedAt,
             ),
         )
         return AssistantToolResult.Image(
@@ -265,6 +255,7 @@ internal class TakePhotoTool(
     }
 
     private companion object {
+        const val TAKE_PHOTO_PROGRESS_LABEL = "Photo\u2026"
         const val SNAPSHOT_CAPTURE_TIMEOUT_MS = 8_000L
         const val MAX_TOOL_IMAGE_LONG_EDGE_PX = 1_024
         const val TOOL_IMAGE_JPEG_QUALITY = 80

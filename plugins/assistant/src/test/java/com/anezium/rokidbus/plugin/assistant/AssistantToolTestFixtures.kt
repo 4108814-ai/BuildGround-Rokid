@@ -35,6 +35,7 @@ internal fun testTakePhotoTool(
     description = TAKE_PHOTO_TOOL_DESCRIPTION,
     parametersSchema = TAKE_PHOTO_PARAMETERS_SCHEMA,
     sideEffecting = true,
+    progressLabel = null,
     executionFailureCode = TOOL_ERROR_CAPTURE_FAILED,
     available = { context -> context.provider.supportsVision && context.session.active },
     executor = { call, _ -> executor(call) },

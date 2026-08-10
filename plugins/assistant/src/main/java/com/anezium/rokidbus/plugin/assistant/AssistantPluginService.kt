@@ -82,6 +82,7 @@ class AssistantPluginService : NexusPluginService() {
                     reminderScheduler = reminderScheduler,
                 ),
             sessionContext = ::assistantToolSessionContext,
+            progressReporter = { label -> uiController.showTransient(label) },
         )
     }
     private val openAiCompatClients by lazy {
@@ -606,6 +607,7 @@ class AssistantPluginService : NexusPluginService() {
             providerRouter.providerFor(providerId).streamEvents(request).collect { event ->
                 when (event) {
                     is AiProviderEvent.Started -> Unit
+                    is AiProviderEvent.Progress -> uiController.showTransient(event.message)
                     is AiProviderEvent.TextReset -> {
                         answer.clear()
                         lastHudUpdateMs = 0L

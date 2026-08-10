@@ -45,7 +45,6 @@ internal interface AssistantToolDefinition {
     val parametersSchema: AssistantToolJsonSchema
     val sideEffecting: Boolean
     val progressLabel: String?
-        get() = null
     val executionFailureCode: String
         get() = "${name}_failed"
 
@@ -64,6 +63,7 @@ internal class AssistantToolRegistry(
     private val sessionContext: () -> AssistantToolSessionContext = {
         AssistantToolSessionContext(active = true)
     },
+    private val progressReporter: (String) -> Unit = {},
 ) {
     private val definitionsByName = definitions.associateBy(AssistantToolDefinition::name)
 
@@ -78,6 +78,11 @@ internal class AssistantToolRegistry(
             require(definition.description.isNotBlank()) {
                 "Assistant tool descriptions must not be blank."
             }
+            definition.progressLabel?.let { label ->
+                require(label.isNotBlank()) {
+                    "Assistant tool progress labels must not be blank."
+                }
+            }
             AssistantToolResult.Error(definition.executionFailureCode)
         }
     }
@@ -91,22 +96,30 @@ internal class AssistantToolRegistry(
     }
 
     fun newExecutionPhase(features: AssistantProviderFeatures): AssistantToolExecutionPhase =
-        AssistantToolExecutionPhase(availableDefinitions(features))
+        AssistantToolExecutionPhase(availableDefinitions(features), progressReporter)
 
-    private companion object {
-        val TOOL_NAME = Regex("[a-z][a-z0-9_]{0,63}")
+    companion object {
+        private val TOOL_NAME = Regex("[a-z][a-z0-9_]{0,63}")
+        const val THINKING_LABEL = "Thinking…"
     }
 }
 
 internal class AssistantToolExecutionPhase(
     val availableDefinitions: List<AssistantToolDefinition>,
+    private val progressReporter: (String) -> Unit,
 ) {
     private val definitionsByName = availableDefinitions.associateBy(AssistantToolDefinition::name)
     private val resultsByCallId = mutableMapOf<String, AssistantToolResult>()
     private val executedSideEffectingTools = mutableSetOf<String>()
     private var executedCalls = 0
 
-    suspend fun execute(call: AssistantToolCall): AssistantToolResult {
+    suspend fun execute(call: AssistantToolCall): AssistantToolResult = try {
+        executeCall(call)
+    } finally {
+        reportProgress(AssistantToolRegistry.THINKING_LABEL)
+    }
+
+    private suspend fun executeCall(call: AssistantToolCall): AssistantToolResult {
         resultsByCallId[call.callId]?.let { result -> return result }
 
         val definition = definitionsByName[call.name]
@@ -131,6 +144,7 @@ internal class AssistantToolExecutionPhase(
         executedCalls += 1
         if (definition.sideEffecting) executedSideEffectingTools += definition.name
         val result = try {
+            definition.progressLabel?.let(::reportProgress)
             definition.execute(call, validation.arguments)
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -146,6 +160,10 @@ internal class AssistantToolExecutionPhase(
     ): AssistantToolResult {
         resultsByCallId[call.callId] = result
         return result
+    }
+
+    private fun reportProgress(label: String) {
+        runCatching { progressReporter(label) }
     }
 
     private companion object {

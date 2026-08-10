@@ -1,11 +1,106 @@
 package com.anezium.rokidbus.plugin.assistant
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AssistantToolRegistryTest {
+    @Test
+    fun `each local tool label is shown during execution then restored`() = runTest {
+        val expectedLabels = linkedMapOf(
+            RENDER_TEMPLATE_TOOL_NAME to "Drawing the card…",
+            RENDER_INK_PAGE_TOOL_NAME to "Drawing the card…",
+            TAKE_NOTE_TOOL_NAME to "Saving the note…",
+            LIST_NOTES_TOOL_NAME to "Reading your notes…",
+            SEARCH_NOTES_TOOL_NAME to "Searching your notes…",
+            DELETE_NOTE_TOOL_NAME to "Deleting the note…",
+            SET_REMINDER_TOOL_NAME to "Setting the reminder…",
+            LIST_REMINDERS_TOOL_NAME to "Checking your reminders…",
+            CANCEL_REMINDER_TOOL_NAME to "Cancelling the reminder…",
+            SET_TIMER_TOOL_NAME to "Starting the timer…",
+        )
+
+        expectedLabels.forEach { (name, label) ->
+            val progress = mutableListOf<String>()
+            val tool = TestAssistantTool(
+                name = name,
+                progressLabel = label,
+                executor = { _, _ ->
+                    assertEquals(listOf(label), progress)
+                    AssistantToolResult.Json("{}")
+                },
+            )
+            val phase = AssistantToolRegistry(
+                definitions = listOf(tool),
+                progressReporter = progress::add,
+            ).newExecutionPhase(TOOLS_WITHOUT_VISION)
+
+            phase.execute(AssistantToolCall("call-$name", name, "{}"))
+
+            assertEquals(name, listOf(label, "Thinking…"), progress)
+        }
+    }
+
+    @Test
+    fun `validation and refusal paths restore thinking without showing a work label`() = runTest {
+        val progress = mutableListOf<String>()
+        val tool = TestAssistantTool(
+            name = "save_note",
+            sideEffecting = true,
+            progressLabel = "Saving the note…",
+        )
+        val phase = AssistantToolRegistry(
+            definitions = listOf(tool),
+            progressReporter = progress::add,
+        ).newExecutionPhase(TOOLS_WITHOUT_VISION)
+
+        phase.execute(AssistantToolCall("invalid", tool.name, "not-json"))
+        assertEquals(listOf("Thinking…"), progress)
+
+        progress.clear()
+        phase.execute(AssistantToolCall("first", tool.name, "{}"))
+        assertEquals(listOf("Saving the note…", "Thinking…"), progress)
+
+        progress.clear()
+        phase.execute(AssistantToolCall("refused", tool.name, "{}"))
+        assertEquals(listOf("Thinking…"), progress)
+
+        progress.clear()
+        phase.execute(AssistantToolCall("unknown", "unknown_tool", "{}"))
+        assertEquals(listOf("Thinking…"), progress)
+    }
+
+    @Test
+    fun `throw and cancellation paths restore thinking`() = runTest {
+        suspend fun executeThrowingTool(throwable: Throwable): Pair<Throwable?, List<String>> {
+            val progress = mutableListOf<String>()
+            val tool = TestAssistantTool(
+                name = "lookup_note",
+                progressLabel = "Reading your notes…",
+                executor = { _, _ -> throw throwable },
+            )
+            val phase = AssistantToolRegistry(
+                definitions = listOf(tool),
+                progressReporter = progress::add,
+            ).newExecutionPhase(TOOLS_WITHOUT_VISION)
+            val thrown = runCatching {
+                phase.execute(AssistantToolCall("call", tool.name, "{}"))
+            }.exceptionOrNull()
+            return thrown to progress
+        }
+
+        val (mappedFailure, failureProgress) = executeThrowingTool(IllegalStateException("boom"))
+        assertEquals(null, mappedFailure)
+        assertEquals(listOf("Reading your notes…", "Thinking…"), failureProgress)
+
+        val cancellation = CancellationException("cancelled")
+        val (thrownCancellation, cancellationProgress) = executeThrowingTool(cancellation)
+        assertTrue(thrownCancellation === cancellation)
+        assertEquals(listOf("Reading your notes…", "Thinking…"), cancellationProgress)
+    }
+
     @Test
     fun `multiple registered tools are available without provider changes`() {
         val registry = AssistantToolRegistry(
@@ -46,14 +141,19 @@ class AssistantToolRegistryTest {
     @Test
     fun `phase executes at most three calls`() = runTest {
         var executions = 0
+        val progress = mutableListOf<String>()
         val tool = TestAssistantTool(
             name = "lookup_note",
+            progressLabel = "Reading your notes…",
             executor = { call, _ ->
                 executions += 1
                 AssistantToolResult.Json("result:${call.callId}")
             },
         )
-        val phase = AssistantToolRegistry(listOf(tool)).newExecutionPhase(TOOLS_WITHOUT_VISION)
+        val phase = AssistantToolRegistry(
+            definitions = listOf(tool),
+            progressReporter = progress::add,
+        ).newExecutionPhase(TOOLS_WITHOUT_VISION)
 
         val results = (1..4).map { index ->
             phase.execute(AssistantToolCall("call-$index", tool.name, "{}"))
@@ -64,6 +164,9 @@ class AssistantToolRegistryTest {
             AssistantToolResult.Error(TOOL_ERROR_ALREADY_USED),
             results.last(),
         )
+        assertEquals("Thinking…", progress.last())
+        assertEquals(3, progress.count { it == "Reading your notes…" })
+        assertEquals(4, progress.count { it == "Thinking…" })
     }
 
     @Test
