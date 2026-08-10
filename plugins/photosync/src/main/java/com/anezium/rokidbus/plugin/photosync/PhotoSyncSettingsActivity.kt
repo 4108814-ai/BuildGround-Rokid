@@ -415,9 +415,7 @@ class PhotoSyncSettingsActivity : Activity() {
         addTypeRow(
             title = "AR photos",
             subtitle = "Photos taken with a heads-up overlay on screen.",
-            warning = "The overlay is drawn by the Hi Rokid app after its import. Synced here, " +
-                "they arrive as the plain photo without it — so there is little point unless you " +
-                "want the raw shot.",
+            warning = "The overlay comes from the Hi Rokid app — here you get only the plain photo.",
             enabled = { it.syncArPhotos },
             onChange = { runtime?.setSyncArPhotos(it) },
         )
@@ -425,8 +423,7 @@ class PhotoSyncSettingsActivity : Activity() {
         addTypeRow(
             title = "Videos",
             subtitle = "Clips from the glasses camera.",
-            warning = "Stabilization runs in the Hi Rokid app after its import. Synced here, clips " +
-                "arrive raw and shaky. Leave this off to let Hi Rokid smooth them instead.",
+            warning = "Stabilization comes from the Hi Rokid app — here clips arrive raw and shaky.",
             enabled = { it.syncNormalVideos },
             onChange = { runtime?.setSyncNormalVideos(it) },
         )
@@ -434,9 +431,8 @@ class PhotoSyncSettingsActivity : Activity() {
         addTypeRow(
             title = "AR videos",
             subtitle = "Clips recorded with a heads-up overlay.",
-            warning = "Both the overlay and the stabilization are added by the Hi Rokid app after " +
-                "its import. Synced here, they arrive raw — with neither. Leave off unless you " +
-                "want the unprocessed clip.",
+            warning = "Overlay and stabilization both come from the Hi Rokid app — here you get " +
+                "neither.",
             enabled = { it.syncArVideos },
             onChange = { runtime?.setSyncArVideos(it) },
         )
