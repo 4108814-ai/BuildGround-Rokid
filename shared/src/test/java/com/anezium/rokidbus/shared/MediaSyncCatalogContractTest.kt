@@ -10,16 +10,52 @@ import java.util.TimeZone
 
 class MediaSyncCatalogContractTest {
     @Test
-    fun `catalog round trip preserves order size and mtime`() {
+    fun `catalog round trip preserves order size mtime and capture type`() {
         val items = listOf(
-            MediaSyncItem("img-20260710-175956-a0-N1-2.jpg", 3_145_728L, 1_752_170_396_000L),
-            MediaSyncItem("vid-20260710-180402-a0-N1-2.mp4", 41_000_000L, 1_752_170_642_000L),
+            MediaSyncItem(
+                "img-20260710-175956-a0-N1-2.jpg",
+                3_145_728L,
+                1_752_170_396_000L,
+                MediaSyncCaptureType.PHOTO_AR,
+            ),
+            MediaSyncItem(
+                "vid-20260710-180402-a0-N1-2.mp4",
+                41_000_000L,
+                1_752_170_642_000L,
+                MediaSyncCaptureType.VIDEO_AR,
+            ),
         )
 
         val decoded = MediaSyncCatalogContract.decode(MediaSyncCatalogContract.encode(items, true))
 
         assertEquals(items, decoded?.items)
         assertTrue(decoded!!.truncated)
+    }
+
+    @Test
+    fun `a catalog without capture type falls back from the extension`() {
+        val payload = MediaSyncCatalogContract.encode(
+            listOf(mediaItem("vid-old-hub.mp4", 12L, 34L)),
+            false,
+        )
+        payload.getJSONArray("items").getJSONObject(0).remove("type")
+
+        val decoded = MediaSyncCatalogContract.decode(payload)
+
+        assertEquals(MediaSyncCaptureType.VIDEO, decoded?.items?.single()?.captureType)
+    }
+
+    @Test
+    fun `an unknown capture type falls back instead of rejecting the catalog`() {
+        val payload = MediaSyncCatalogContract.encode(
+            listOf(mediaItem("img-future.jpg", 12L, 34L)),
+            false,
+        )
+        payload.getJSONArray("items").getJSONObject(0).put("type", "photo_hologram")
+
+        val decoded = MediaSyncCatalogContract.decode(payload)
+
+        assertEquals(MediaSyncCaptureType.PHOTO, decoded?.items?.single()?.captureType)
     }
 
     @Test
@@ -37,12 +73,12 @@ class MediaSyncCatalogContractTest {
         assertNull(MediaSyncCatalogContract.decode(JSONObject().put("version", 2)))
         assertNull(MediaSyncCatalogContract.decode(JSONObject().put("version", 1)))
         val duplicated = MediaSyncCatalogContract.encode(
-            listOf(MediaSyncItem("a.jpg", 1L, 1L)),
+            listOf(mediaItem("a.jpg", 1L, 1L)),
             false,
         )
         duplicated.getJSONArray("items").put(JSONObject().put("name", "a.jpg").put("size", 1).put("mtime", 1))
         assertNull(MediaSyncCatalogContract.decode(duplicated))
-        val negative = MediaSyncCatalogContract.encode(listOf(MediaSyncItem("a.jpg", 1L, 1L)), false)
+        val negative = MediaSyncCatalogContract.encode(listOf(mediaItem("a.jpg", 1L, 1L)), false)
         negative.getJSONArray("items").getJSONObject(0).put("size", -1)
         assertNull(MediaSyncCatalogContract.decode(negative))
     }
@@ -96,4 +132,11 @@ class MediaSyncCatalogContractTest {
         assertNull(MediaSyncMediaFile.capturedAtMillis("img-20260710-995956-a0.jpg", utc))
         assertNull(MediaSyncMediaFile.capturedAtMillis("img-19990101-000000.jpg", utc))
     }
+
+    private fun mediaItem(name: String, sizeBytes: Long, modifiedMillis: Long) = MediaSyncItem(
+        name,
+        sizeBytes,
+        modifiedMillis,
+        MediaSyncCaptureType.defaultFor(name),
+    )
 }

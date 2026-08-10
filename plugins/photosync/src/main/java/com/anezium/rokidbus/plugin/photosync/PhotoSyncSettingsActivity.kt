@@ -21,6 +21,7 @@ import com.anezium.rokidbus.client.ui.BusTheme
 import com.anezium.rokidbus.client.ui.NexusUi
 import com.anezium.rokidbus.shared.MediaSyncBlocker
 import com.anezium.rokidbus.shared.MediaSyncMode
+import com.anezium.rokidbus.shared.MediaSyncSettings
 import com.anezium.rokidbus.shared.MediaSyncState
 import com.anezium.rokidbus.shared.MediaSyncStatus
 import java.text.SimpleDateFormat
@@ -59,6 +60,7 @@ class PhotoSyncSettingsActivity : Activity() {
     private var deleteSwitch: Switch? = null
     private var deleteNote: TextView? = null
     private val modeRows = LinkedHashMap<MediaSyncMode, ModeRow>()
+    private val typeRows = mutableListOf<TypeRow>()
 
     private var renderedKey: String? = null
 
@@ -85,6 +87,12 @@ class PhotoSyncSettingsActivity : Activity() {
         val mark: View,
         val title: TextView,
         val subtitle: TextView,
+    )
+
+    /** One capture-type toggle, mirrored from the hub and read back from a real gesture only. */
+    private class TypeRow(
+        val switch: Switch,
+        val enabled: (MediaSyncSettings) -> Boolean,
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -187,13 +195,16 @@ class PhotoSyncSettingsActivity : Activity() {
         val current = status
         renderedKey = structureKey(current)
         modeRows.clear()
+        typeRows.clear()
         content.removeAllViews()
 
         content.addView(
             NexusUi.cardBody(
                 this,
-                "Captures from the glasses land in your phone gallery, in the same Hi Rokid " +
-                    "album. They travel over the glasses connection — no Wi-Fi needed.",
+                "Copies the glasses' camera captures into your phone gallery, in the same Hi " +
+                    "Rokid album, over the glasses connection — no Wi-Fi needed. Photos arrive " +
+                    "full quality. The AR overlay and video stabilization are added by the Hi " +
+                    "Rokid app after its own import, so those are left off below by default.",
             ),
             NexusUi.block(),
         )
@@ -202,6 +213,11 @@ class PhotoSyncSettingsActivity : Activity() {
         content.addView(NexusUi.sectionRow(this, "Status"), NexusUi.block())
         content.addView(BusTheme.gap(this, 10))
         content.addView(statusCard(), NexusUi.block())
+
+        content.addView(BusTheme.gap(this, 24))
+        content.addView(NexusUi.sectionRow(this, "What to sync"), NexusUi.block())
+        content.addView(BusTheme.gap(this, 10))
+        content.addView(whatToSyncCard(), NexusUi.block())
 
         content.addView(BusTheme.gap(this, 24))
         content.addView(NexusUi.sectionRow(this, "When to sync"), NexusUi.block())
@@ -381,6 +397,96 @@ class PhotoSyncSettingsActivity : Activity() {
         return ModeRow(root, mark, titleView, subtitleView)
     }
 
+    /**
+     * The four capture types, each an independent switch. Photos are the only kind we deliver at
+     * full quality; the other three carry a red note because their Hi Rokid post-processing (the AR
+     * overlay, the video stabilization) happens in that app after its own import and cannot be
+     * reproduced here — synced through this plugin they arrive as the raw file, without it.
+     */
+    private fun whatToSyncCard(): LinearLayout = NexusUi.card(this).apply {
+        addTypeRow(
+            title = "Photos",
+            subtitle = "Full-quality stills, copied exactly as the glasses took them.",
+            warning = null,
+            enabled = { it.syncNormalPhotos },
+            onChange = { runtime?.setSyncNormalPhotos(it) },
+        )
+        addTypeDivider()
+        addTypeRow(
+            title = "AR photos",
+            subtitle = "Photos taken with a heads-up overlay on screen.",
+            warning = "The overlay is drawn by the Hi Rokid app after its import. Synced here, " +
+                "they arrive as the plain photo without it — so there is little point unless you " +
+                "want the raw shot.",
+            enabled = { it.syncArPhotos },
+            onChange = { runtime?.setSyncArPhotos(it) },
+        )
+        addTypeDivider()
+        addTypeRow(
+            title = "Videos",
+            subtitle = "Clips from the glasses camera.",
+            warning = "Stabilization runs in the Hi Rokid app after its import. Synced here, clips " +
+                "arrive raw and shaky. Leave this off to let Hi Rokid smooth them instead.",
+            enabled = { it.syncNormalVideos },
+            onChange = { runtime?.setSyncNormalVideos(it) },
+        )
+        addTypeDivider()
+        addTypeRow(
+            title = "AR videos",
+            subtitle = "Clips recorded with a heads-up overlay.",
+            warning = "Both the overlay and the stabilization are added by the Hi Rokid app after " +
+                "its import. Synced here, they arrive raw — with neither. Leave off unless you " +
+                "want the unprocessed clip.",
+            enabled = { it.syncArVideos },
+            onChange = { runtime?.setSyncArVideos(it) },
+        )
+    }
+
+    private fun LinearLayout.addTypeDivider() {
+        addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 12))
+        addView(NexusUi.divider(this@PhotoSyncSettingsActivity))
+        addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 12))
+    }
+
+    private fun LinearLayout.addTypeRow(
+        title: String,
+        subtitle: String,
+        warning: String?,
+        enabled: (MediaSyncSettings) -> Boolean,
+        onChange: (Boolean) -> Unit,
+    ) {
+        val switch = NexusUi.switch(this@PhotoSyncSettingsActivity).apply {
+            // Like the delete toggle: only a real gesture may travel back, never a hub echo.
+            setOnCheckedChangeListener { _, value ->
+                if (!mirroringHubState) onChange(value)
+            }
+        }
+        typeRows += TypeRow(switch, enabled)
+        addView(
+            LinearLayout(this@PhotoSyncSettingsActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(
+                    LinearLayout(this@PhotoSyncSettingsActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        addView(NexusUi.rowTitle(this@PhotoSyncSettingsActivity, title))
+                        addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 3))
+                        addView(wrappingSub(subtitle))
+                        if (warning != null) {
+                            addView(BusTheme.gap(this@PhotoSyncSettingsActivity, 5))
+                            addView(wrappingSub(warning).apply { setTextColor(NexusUi.DANGER) })
+                        }
+                    },
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        marginEnd = NexusUi.dp(this@PhotoSyncSettingsActivity, 12)
+                    },
+                )
+                addView(switch)
+            },
+            NexusUi.block(),
+        )
+    }
+
     private fun deleteCard(current: MediaSyncStatus?): LinearLayout = NexusUi.card(this).apply {
         addView(
             LinearLayout(this@PhotoSyncSettingsActivity).apply {
@@ -524,6 +630,14 @@ class PhotoSyncSettingsActivity : Activity() {
             alpha = if (current != null) 1f else DISABLED_ALPHA
             val target = current?.settings?.deleteAfterSync ?: false
             if (isChecked != target) isChecked = target
+        }
+
+        val settings = current?.settings
+        typeRows.forEach { row ->
+            row.switch.isEnabled = current != null
+            row.switch.alpha = if (current != null) 1f else DISABLED_ALPHA
+            val target = settings?.let(row.enabled) ?: false
+            if (row.switch.isChecked != target) row.switch.isChecked = target
         }
     }
 

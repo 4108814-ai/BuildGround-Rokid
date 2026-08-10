@@ -7,6 +7,7 @@ import com.anezium.rokidbus.shared.MediaSyncProgress
 import com.anezium.rokidbus.shared.MediaSyncResult
 import com.anezium.rokidbus.shared.MediaSyncResumePolicy
 import com.anezium.rokidbus.shared.MediaSyncRun
+import com.anezium.rokidbus.shared.MediaSyncSettings
 import com.anezium.rokidbus.shared.MediaSyncTransferContract
 import com.anezium.rokidbus.shared.MediaSyncWindowPolicy
 import org.json.JSONObject
@@ -25,7 +26,7 @@ internal class MediaSyncTransferReceiver(
     private val ledger: SyncLedger,
     private val gallery: MediaSyncGalleryWriter,
     private val staging: MediaSyncStagingStore,
-    private val deleteAfterSync: Boolean,
+    private val settings: MediaSyncSettings,
     private val clock: () -> Long,
     private val logger: (String) -> Unit,
     private val send: (String, JSONObject) -> Boolean,
@@ -84,7 +85,8 @@ internal class MediaSyncTransferReceiver(
             return
         }
         truncated = catalog.truncated
-        pending = ledger.pending(catalog.items)
+        val enabledItems = catalog.items.filter { settings.allows(it.captureType) }
+        pending = ledger.pending(enabledItems)
         totalBytes = pending.sumOf(MediaSyncItem::sizeBytes)
         logger("mediaSync pending=${pending.size} bytes=$totalBytes truncated=$truncated")
         if (pending.isEmpty()) {
@@ -244,7 +246,7 @@ internal class MediaSyncTransferReceiver(
         ledger.record(item, clock())
         filesSynced += 1
         acknowledge(item.name, ok = true)
-        if (deleteAfterSync) {
+        if (settings.deleteAfterSync) {
             awaitingDeleteResult = true
             // The glasses answer with a delete result; requestNext waits for it so the two files
             // never interleave their deletions.
@@ -320,7 +322,7 @@ internal class MediaSyncTransferReceiver(
     private fun acknowledge(name: String, ok: Boolean) {
         send(
             BusPaths.MEDIA_SYNC_XFER_FILE_ACK,
-            MediaSyncTransferContract.fileAck(sessionId, name, ok, ok && deleteAfterSync),
+            MediaSyncTransferContract.fileAck(sessionId, name, ok, ok && settings.deleteAfterSync),
         )
     }
 

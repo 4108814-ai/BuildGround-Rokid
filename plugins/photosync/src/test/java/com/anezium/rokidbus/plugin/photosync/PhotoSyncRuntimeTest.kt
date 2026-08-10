@@ -102,6 +102,27 @@ class PhotoSyncRuntimeTest {
     }
 
     @Test
+    fun `each capture filter setter sends its own partial settings request`() {
+        runtime.setSyncNormalPhotos(false)
+        runtime.setSyncArPhotos(true)
+        runtime.setSyncNormalVideos(true)
+        runtime.setSyncArVideos(true)
+
+        val expected = listOf(
+            "syncNormalPhotos" to false,
+            "syncArPhotos" to true,
+            "syncNormalVideos" to true,
+            "syncArVideos" to true,
+        )
+        assertEquals(List(4) { BusPaths.MEDIA_SYNC_SETTINGS }, host.sends.map { it.first })
+        expected.zip(host.sends.map { it.second }).forEach { (entry, payload) ->
+            val (key, value) = entry
+            assertEquals(2, payload.length())
+            assertEquals(value, payload.getBoolean(key))
+        }
+    }
+
+    @Test
     fun `losing the hub clears the mirrored status`() {
         runtime.onMessage(
             BusPaths.MEDIA_SYNC_STATUS,

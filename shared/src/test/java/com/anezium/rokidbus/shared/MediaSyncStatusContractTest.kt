@@ -13,7 +13,14 @@ class MediaSyncStatusContractTest {
         val status = MediaSyncStatus(
             state = MediaSyncState.TRANSFERRING,
             blocker = null,
-            settings = MediaSyncSettings(mode = MediaSyncMode.ALWAYS, deleteAfterSync = true),
+            settings = MediaSyncSettings(
+                mode = MediaSyncMode.ALWAYS,
+                deleteAfterSync = true,
+                syncNormalPhotos = false,
+                syncArPhotos = true,
+                syncNormalVideos = true,
+                syncArVideos = true,
+            ),
             progress = MediaSyncProgress(3, 12, 4_200_000L, 18_600_000L, "img-1.jpg"),
             history = listOf(
                 MediaSyncRun(1_752_170_396_000L, MediaSyncResult.COMPLETED, 12, 18_600_000L, 0, 12),
@@ -75,6 +82,32 @@ class MediaSyncStatusContractTest {
     }
 
     @Test
+    fun `each capture filter request only moves its own field`() {
+        val current = MediaSyncSettings(
+            mode = MediaSyncMode.ALWAYS,
+            deleteAfterSync = true,
+            syncNormalPhotos = false,
+            syncArPhotos = false,
+            syncNormalVideos = false,
+            syncArVideos = false,
+        )
+        val cases = listOf(
+            MediaSyncStatusContract.encodeSettingsRequest(syncNormalPhotos = true) to
+                current.copy(syncNormalPhotos = true),
+            MediaSyncStatusContract.encodeSettingsRequest(syncArPhotos = true) to
+                current.copy(syncArPhotos = true),
+            MediaSyncStatusContract.encodeSettingsRequest(syncNormalVideos = true) to
+                current.copy(syncNormalVideos = true),
+            MediaSyncStatusContract.encodeSettingsRequest(syncArVideos = true) to
+                current.copy(syncArVideos = true),
+        )
+
+        cases.forEach { (request, expected) ->
+            assertEquals(expected, MediaSyncStatusContract.applySettingsRequest(current, request))
+        }
+    }
+
+    @Test
     fun `an empty settings request is a refresh, not a reset`() {
         val current = MediaSyncSettings(mode = MediaSyncMode.MANUAL, deleteAfterSync = true)
 
@@ -88,11 +121,18 @@ class MediaSyncStatusContractTest {
 
     @Test
     fun `non boolean settings values are refused`() {
-        val bogus = JSONObject()
-            .put("version", MediaSyncStatusContract.VERSION)
-            .put("deleteAfterSync", "yes")
-
-        assertNull(MediaSyncStatusContract.applySettingsRequest(MediaSyncSettings(), bogus))
+        listOf(
+            "deleteAfterSync",
+            "syncNormalPhotos",
+            "syncArPhotos",
+            "syncNormalVideos",
+            "syncArVideos",
+        ).forEach { key ->
+            val bogus = JSONObject()
+                .put("version", MediaSyncStatusContract.VERSION)
+                .put(key, "yes")
+            assertNull(MediaSyncStatusContract.applySettingsRequest(MediaSyncSettings(), bogus))
+        }
         assertNull(
             MediaSyncStatusContract.applySettingsRequest(
                 MediaSyncSettings(),
@@ -102,11 +142,55 @@ class MediaSyncStatusContractTest {
     }
 
     @Test
-    fun `defaults are charge-anchored sync and delete off`() {
+    fun `settings defaults only enable normal photos`() {
         val defaults = MediaSyncSettings()
 
         assertEquals(MediaSyncMode.CHARGING, defaults.mode)
         assertFalse(defaults.deleteAfterSync)
+        assertTrue(defaults.syncNormalPhotos)
+        assertFalse(defaults.syncArPhotos)
+        assertFalse(defaults.syncNormalVideos)
+        assertFalse(defaults.syncArVideos)
+    }
+
+    @Test
+    fun `an old status without capture filters uses the new defaults`() {
+        val encoded = MediaSyncStatusContract.encode(
+            MediaSyncStatus(
+                settings = MediaSyncSettings(
+                    syncNormalPhotos = false,
+                    syncArPhotos = true,
+                    syncNormalVideos = true,
+                    syncArVideos = true,
+                ),
+            ),
+        )
+        listOf(
+            "syncNormalPhotos",
+            "syncArPhotos",
+            "syncNormalVideos",
+            "syncArVideos",
+        ).forEach(encoded::remove)
+
+        val decoded = MediaSyncStatusContract.decode(encoded)
+
+        assertEquals(MediaSyncSettings(), decoded?.settings)
+    }
+
+    @Test
+    fun `allows maps every capture type to its setting`() {
+        MediaSyncCaptureType.entries.forEach { enabledType ->
+            val settings = MediaSyncSettings(
+                syncNormalPhotos = enabledType == MediaSyncCaptureType.PHOTO,
+                syncArPhotos = enabledType == MediaSyncCaptureType.PHOTO_AR,
+                syncNormalVideos = enabledType == MediaSyncCaptureType.VIDEO,
+                syncArVideos = enabledType == MediaSyncCaptureType.VIDEO_AR,
+            )
+
+            MediaSyncCaptureType.entries.forEach { type ->
+                assertEquals(type == enabledType, settings.allows(type))
+            }
+        }
     }
 
     @Test

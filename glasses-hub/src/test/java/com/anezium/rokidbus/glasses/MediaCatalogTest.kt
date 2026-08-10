@@ -1,5 +1,6 @@
 package com.anezium.rokidbus.glasses
 
+import com.anezium.rokidbus.shared.MediaSyncCaptureType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -8,6 +9,72 @@ import org.junit.Test
 import java.nio.file.Files
 
 class MediaCatalogTest {
+    @Test
+    fun `matching companions classify photos and videos as AR by exact basename`() {
+        val parent = Files.createTempDirectory("media-catalog-ar-test").toFile()
+        try {
+            val photos = parent.resolve("photos").apply { mkdir() }
+            val videos = parent.resolve("videos").apply { mkdir() }
+            val screenshots = parent.resolve("screenshots").apply { mkdir() }
+            val screenRecorder = parent.resolve("screen-recorder").apply { mkdir() }
+            photos.resolve("img-normal-N1.jpg").writeBytes(byteArrayOf(1))
+            photos.resolve("img-ar-P1.jpg").writeBytes(byteArrayOf(2))
+            videos.resolve("vid-normal-N1.mp4").writeBytes(byteArrayOf(3))
+            videos.resolve("vid-ar-P1.mp4").writeBytes(byteArrayOf(4))
+            val screenshot = screenshots.resolve("img-ar-P1.png").apply {
+                writeBytes(byteArrayOf(5))
+            }
+            val mixRecord = screenRecorder.resolve("vid-ar-P1.webm").apply {
+                writeBytes(byteArrayOf(6))
+            }
+            screenRecorder.resolve("vid-normal-N1-extra.webm").writeBytes(byteArrayOf(7))
+            val catalog = MediaCatalog(
+                directories = listOf(photos, videos),
+                screenshotsDirectory = screenshots,
+                screenRecorderDirectory = screenRecorder,
+                gate = MediaSyncStabilityGate(minAgeMillis = 0L, minSampleGapMillis = 0L),
+                clock = { System.currentTimeMillis() + 1_000L },
+            )
+
+            assertTrue(catalog.scan().items.isEmpty())
+            val types = catalog.scan().items.associate { it.name to it.captureType }
+
+            assertEquals(MediaSyncCaptureType.PHOTO, types["img-normal-N1.jpg"])
+            assertEquals(MediaSyncCaptureType.PHOTO_AR, types["img-ar-P1.jpg"])
+            assertEquals(MediaSyncCaptureType.VIDEO, types["vid-normal-N1.mp4"])
+            assertEquals(MediaSyncCaptureType.VIDEO_AR, types["vid-ar-P1.mp4"])
+            assertNull(catalog.resolve(screenshot.name))
+            assertNull(catalog.resolve(mixRecord.name))
+        } finally {
+            parent.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `missing AR lookup directories leave every capture normal`() {
+        val parent = Files.createTempDirectory("media-catalog-missing-ar-test").toFile()
+        try {
+            val captures = parent.resolve("captures").apply { mkdir() }
+            captures.resolve("img-normal.jpg").writeBytes(byteArrayOf(1))
+            captures.resolve("vid-normal.mp4").writeBytes(byteArrayOf(2))
+            val catalog = MediaCatalog(
+                directories = listOf(captures),
+                screenshotsDirectory = parent.resolve("missing-screenshots"),
+                screenRecorderDirectory = parent.resolve("missing-screen-recorder"),
+                gate = MediaSyncStabilityGate(minAgeMillis = 0L, minSampleGapMillis = 0L),
+                clock = { System.currentTimeMillis() + 1_000L },
+            )
+
+            assertTrue(catalog.scan().items.isEmpty())
+            val types = catalog.scan().items.associate { it.name to it.captureType }
+
+            assertEquals(MediaSyncCaptureType.PHOTO, types["img-normal.jpg"])
+            assertEquals(MediaSyncCaptureType.VIDEO, types["vid-normal.mp4"])
+        } finally {
+            parent.deleteRecursively()
+        }
+    }
+
     @Test
     fun `a fresh capture keeps the catalog settling beside eligible old captures`() {
         val directory = Files.createTempDirectory("media-catalog-test").toFile()

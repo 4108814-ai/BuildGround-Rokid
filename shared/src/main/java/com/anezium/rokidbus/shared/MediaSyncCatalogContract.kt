@@ -6,11 +6,36 @@ import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
 
+enum class MediaSyncCaptureType(val wireValue: String) {
+    PHOTO("photo"),
+    PHOTO_AR("photo_ar"),
+    VIDEO("video"),
+    VIDEO_AR("video_ar");
+
+    val isVideo: Boolean get() = this == VIDEO || this == VIDEO_AR
+    val isAr: Boolean get() = this == PHOTO_AR || this == VIDEO_AR
+
+    companion object {
+        fun fromWireValue(value: String?): MediaSyncCaptureType? =
+            entries.firstOrNull { it.wireValue == value }
+
+        /** Fallback when a catalog carries no type (old glasses hub): derive from extension. */
+        fun defaultFor(name: String): MediaSyncCaptureType =
+            if (MediaSyncMediaFile.isVideo(name)) VIDEO else PHOTO
+
+        fun of(name: String, ar: Boolean): MediaSyncCaptureType = when {
+            MediaSyncMediaFile.isVideo(name) -> if (ar) VIDEO_AR else VIDEO
+            else -> if (ar) PHOTO_AR else PHOTO
+        }
+    }
+}
+
 /** One media file the glasses offer for transfer, identified by its capture filename. */
 data class MediaSyncItem(
     val name: String,
     val sizeBytes: Long,
     val modifiedMillis: Long,
+    val captureType: MediaSyncCaptureType,
 )
 
 /**
@@ -36,7 +61,8 @@ object MediaSyncCatalogContract {
                             JSONObject()
                                 .put("name", item.name)
                                 .put("size", item.sizeBytes)
-                                .put("mtime", item.modifiedMillis),
+                                .put("mtime", item.modifiedMillis)
+                                .put("type", item.captureType.wireValue),
                         )
                     }
                 },
@@ -57,7 +83,9 @@ object MediaSyncCatalogContract {
             val modified = entry.optLong("mtime", -1L)
             if (!isSafeName(name) || size !in 0..MAX_FILE_BYTES || modified < 0L) return null
             if (!seen.add(name)) return null
-            items += MediaSyncItem(name, size, modified)
+            val captureType = MediaSyncCaptureType.fromWireValue(entry.optString("type"))
+                ?: MediaSyncCaptureType.defaultFor(name)
+            items += MediaSyncItem(name, size, modified, captureType)
         }
         return MediaSyncCatalog(items, payload.optBoolean("truncated", false))
     }

@@ -72,7 +72,18 @@ enum class MediaSyncMode(val wireValue: String) {
 data class MediaSyncSettings(
     val mode: MediaSyncMode = MediaSyncMode.CHARGING,
     val deleteAfterSync: Boolean = false,
-)
+    val syncNormalPhotos: Boolean = true,
+    val syncArPhotos: Boolean = false,
+    val syncNormalVideos: Boolean = false,
+    val syncArVideos: Boolean = false,
+) {
+    fun allows(type: MediaSyncCaptureType): Boolean = when (type) {
+        MediaSyncCaptureType.PHOTO -> syncNormalPhotos
+        MediaSyncCaptureType.PHOTO_AR -> syncArPhotos
+        MediaSyncCaptureType.VIDEO -> syncNormalVideos
+        MediaSyncCaptureType.VIDEO_AR -> syncArVideos
+    }
+}
 
 data class MediaSyncProgress(
     val filesDone: Int = 0,
@@ -122,6 +133,10 @@ object MediaSyncStatusContract {
         .put("syncedTotal", status.syncedTotal)
         .put("syncMode", status.settings.mode.wireValue)
         .put("deleteAfterSync", status.settings.deleteAfterSync)
+        .put("syncNormalPhotos", status.settings.syncNormalPhotos)
+        .put("syncArPhotos", status.settings.syncArPhotos)
+        .put("syncNormalVideos", status.settings.syncNormalVideos)
+        .put("syncArVideos", status.settings.syncArVideos)
         .apply {
             status.blocker?.let { put("blocker", it.wireValue) }
             status.deletionSupported?.let { put("deletionSupported", it) }
@@ -187,6 +202,10 @@ object MediaSyncStatusContract {
                 mode = MediaSyncMode.fromWireValue(payload.optString("syncMode"))
                     ?: MediaSyncMode.CHARGING,
                 deleteAfterSync = payload.optBoolean("deleteAfterSync", false),
+                syncNormalPhotos = payload.optBoolean("syncNormalPhotos", true),
+                syncArPhotos = payload.optBoolean("syncArPhotos", false),
+                syncNormalVideos = payload.optBoolean("syncNormalVideos", false),
+                syncArVideos = payload.optBoolean("syncArVideos", false),
             ),
             progress = MediaSyncProgress(
                 filesDone = progressJson.optInt("filesDone"),
@@ -208,11 +227,19 @@ object MediaSyncStatusContract {
     fun encodeSettingsRequest(
         mode: MediaSyncMode? = null,
         deleteAfterSync: Boolean? = null,
+        syncNormalPhotos: Boolean? = null,
+        syncArPhotos: Boolean? = null,
+        syncNormalVideos: Boolean? = null,
+        syncArVideos: Boolean? = null,
     ): JSONObject = JSONObject()
         .put("version", VERSION)
         .apply {
             mode?.let { put("syncMode", it.wireValue) }
             deleteAfterSync?.let { put("deleteAfterSync", it) }
+            syncNormalPhotos?.let { put("syncNormalPhotos", it) }
+            syncArPhotos?.let { put("syncArPhotos", it) }
+            syncNormalVideos?.let { put("syncNormalVideos", it) }
+            syncArVideos?.let { put("syncArVideos", it) }
         }
 
     /** Applies a partial settings request; unknown or absent fields keep their current value. */
@@ -228,6 +255,33 @@ object MediaSyncStatusContract {
         } else {
             current.deleteAfterSync
         }
-        return MediaSyncSettings(mode, delete)
+        val syncNormalPhotos = if (payload.has("syncNormalPhotos")) {
+            payload.opt("syncNormalPhotos") as? Boolean ?: return null
+        } else {
+            current.syncNormalPhotos
+        }
+        val syncArPhotos = if (payload.has("syncArPhotos")) {
+            payload.opt("syncArPhotos") as? Boolean ?: return null
+        } else {
+            current.syncArPhotos
+        }
+        val syncNormalVideos = if (payload.has("syncNormalVideos")) {
+            payload.opt("syncNormalVideos") as? Boolean ?: return null
+        } else {
+            current.syncNormalVideos
+        }
+        val syncArVideos = if (payload.has("syncArVideos")) {
+            payload.opt("syncArVideos") as? Boolean ?: return null
+        } else {
+            current.syncArVideos
+        }
+        return MediaSyncSettings(
+            mode = mode,
+            deleteAfterSync = delete,
+            syncNormalPhotos = syncNormalPhotos,
+            syncArPhotos = syncArPhotos,
+            syncNormalVideos = syncNormalVideos,
+            syncArVideos = syncArVideos,
+        )
     }
 }

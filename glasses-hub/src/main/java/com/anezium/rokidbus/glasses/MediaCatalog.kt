@@ -1,6 +1,7 @@
 package com.anezium.rokidbus.glasses
 
 import com.anezium.rokidbus.shared.MediaSyncCatalogContract
+import com.anezium.rokidbus.shared.MediaSyncCaptureType
 import com.anezium.rokidbus.shared.MediaSyncItem
 import com.anezium.rokidbus.shared.MediaSyncMediaFile
 import java.io.File
@@ -14,6 +15,8 @@ import java.io.File
  */
 class MediaCatalog(
     private val directories: List<File> = DEFAULT_DIRECTORIES.map(::File),
+    private val screenshotsDirectory: File = File(DEFAULT_SCREENSHOTS_DIRECTORY),
+    private val screenRecorderDirectory: File = File(DEFAULT_SCREEN_RECORDER_DIRECTORY),
     private val gate: MediaSyncStabilityGate = MediaSyncStabilityGate(),
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
@@ -23,6 +26,8 @@ class MediaCatalog(
      * session is worth running immediately after this one.
      */
     fun scan(): CatalogScan {
+        val screenshotBasenames = companionBasenames(screenshotsDirectory)
+        val screenRecorderBasenames = companionBasenames(screenRecorderDirectory)
         val samplesByName = LinkedHashMap<String, MediaFileSample>()
         directories.forEach { directory ->
             val listed = runCatching { directory.listFiles() }.getOrNull().orEmpty()
@@ -41,7 +46,23 @@ class MediaCatalog(
         val eligible = gate.observe(samples, clock())
             .sortedWith(compareBy(MediaFileSample::modifiedMillis, MediaFileSample::name))
         val items = eligible.take(MediaSyncCatalogContract.MAX_ITEMS)
-            .map { MediaSyncItem(it.name, it.sizeBytes, it.modifiedMillis) }
+            .map { sample ->
+                val name = sample.name
+                val basename = name.substringBeforeLast('.')
+                val ar = if (MediaSyncMediaFile.isVideo(name)) {
+                    // Hi Rokid also fuzzy-matches video names; exact basename equality avoids
+                    // classifying an unrelated recording as this capture's companion.
+                    basename in screenRecorderBasenames
+                } else {
+                    basename in screenshotBasenames
+                }
+                MediaSyncItem(
+                    name = name,
+                    sizeBytes = sample.sizeBytes,
+                    modifiedMillis = sample.modifiedMillis,
+                    captureType = MediaSyncCaptureType.of(name, ar),
+                )
+            }
         return CatalogScan(
             items = items,
             truncated = eligible.size > items.size,
@@ -68,6 +89,14 @@ class MediaCatalog(
 
     fun forget(name: String) = gate.forget(name)
 
+    private fun companionBasenames(directory: File): Set<String> = runCatching {
+        directory.listFiles().orEmpty()
+            .asSequence()
+            .filter { it.isFile }
+            .map { it.name.substringBeforeLast('.') }
+            .toSet()
+    }.getOrDefault(emptySet())
+
     data class CatalogScan(
         val items: List<MediaSyncItem>,
         val truncated: Boolean,
@@ -84,6 +113,8 @@ class MediaCatalog(
     companion object {
         const val DEFAULT_DIRECTORY = "/sdcard/DCIM/Camera"
         const val DEFAULT_VIDEO_DIRECTORY = "/sdcard/Movies/Camera"
+        const val DEFAULT_SCREENSHOTS_DIRECTORY = "/sdcard/Screenshots"
+        const val DEFAULT_SCREEN_RECORDER_DIRECTORY = "/sdcard/ScreenRecorder"
         val DEFAULT_DIRECTORIES = listOf(DEFAULT_DIRECTORY, DEFAULT_VIDEO_DIRECTORY)
     }
 }

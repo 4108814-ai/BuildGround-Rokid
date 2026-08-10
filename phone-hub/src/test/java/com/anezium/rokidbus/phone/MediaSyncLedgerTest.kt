@@ -4,6 +4,7 @@ import com.anezium.rokidbus.phone.mediasync.SyncLedger
 import com.anezium.rokidbus.phone.mediasync.SyncLedgerCodec
 import com.anezium.rokidbus.phone.mediasync.SyncLedgerEntry
 import com.anezium.rokidbus.phone.mediasync.SyncLedgerStorage
+import com.anezium.rokidbus.shared.MediaSyncCaptureType
 import com.anezium.rokidbus.shared.MediaSyncItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -20,8 +21,8 @@ class MediaSyncLedgerTest {
         }
     }
 
-    private val first = MediaSyncItem("img-20260710-175956-a0-N1-2.jpg", 3_145_728L, 1_000L)
-    private val second = MediaSyncItem("vid-20260710-180402-a0-N1-2.mp4", 41_000_000L, 2_000L)
+    private val first = mediaItem("img-20260710-175956-a0-N1-2.jpg", 3_145_728L, 1_000L)
+    private val second = mediaItem("vid-20260710-180402-a0-N1-2.mp4", 41_000_000L, 2_000L)
 
     @Test
     fun `pending is the catalog minus what has already been recorded`() {
@@ -98,4 +99,11 @@ class MediaSyncLedgerTest {
         assertEquals(1, ledger.size())
         assertEquals(20L, ledger.snapshot().single().syncedAtMillis)
     }
+
+    private fun mediaItem(name: String, sizeBytes: Long, modifiedMillis: Long) = MediaSyncItem(
+        name,
+        sizeBytes,
+        modifiedMillis,
+        MediaSyncCaptureType.defaultFor(name),
+    )
 }

@@ -62,6 +62,26 @@ internal class PhotoSyncRuntime(private val host: PhotoSyncHost) {
         MediaSyncStatusContract.encodeSettingsRequest(deleteAfterSync = enabled),
     )
 
+    fun setSyncNormalPhotos(enabled: Boolean): Boolean = host.send(
+        BusPaths.MEDIA_SYNC_SETTINGS,
+        MediaSyncStatusContract.encodeSettingsRequest(syncNormalPhotos = enabled),
+    )
+
+    fun setSyncArPhotos(enabled: Boolean): Boolean = host.send(
+        BusPaths.MEDIA_SYNC_SETTINGS,
+        MediaSyncStatusContract.encodeSettingsRequest(syncArPhotos = enabled),
+    )
+
+    fun setSyncNormalVideos(enabled: Boolean): Boolean = host.send(
+        BusPaths.MEDIA_SYNC_SETTINGS,
+        MediaSyncStatusContract.encodeSettingsRequest(syncNormalVideos = enabled),
+    )
+
+    fun setSyncArVideos(enabled: Boolean): Boolean = host.send(
+        BusPaths.MEDIA_SYNC_SETTINGS,
+        MediaSyncStatusContract.encodeSettingsRequest(syncArVideos = enabled),
+    )
+
     fun syncNow(): Boolean =
         host.send(BusPaths.MEDIA_SYNC_NOW, JSONObject().put("version", MediaSyncStatusContract.VERSION))
 

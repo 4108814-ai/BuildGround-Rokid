@@ -100,15 +100,17 @@ internal class MediaSyncCoordinator(
      *
      * The settings screen refreshes through this path, so an unchanged request must stay free:
      * it neither rewrites preferences nor pushes config across the link photo sync is otherwise
-     * careful not to crowd. Only a real change travels to the glasses.
+     * careful not to crowd. Only a real glasses-side setting change travels to the glasses.
      */
     fun applySettings(payload: JSONObject): Boolean {
+        var glassesConfigChanged = false
         val changed = synchronized(lock) {
             val next = MediaSyncStatusContract.applySettingsRequest(settings, payload)
                 ?: return false
             if (next == settings) {
                 false
             } else {
+                glassesConfigChanged = next.mode != settings.mode
                 settings = next
                 store.saveSettings(next)
                 true
@@ -120,7 +122,7 @@ internal class MediaSyncCoordinator(
                 "mediaSync settings mode=${current.mode.wireValue} " +
                     "deleteAfterSync=${current.deleteAfterSync}",
             )
-            pushConfig()
+            if (glassesConfigChanged) pushConfig()
         }
         emitStatus()
         return true
@@ -169,13 +171,13 @@ internal class MediaSyncCoordinator(
      * bus traffic: no transport to negotiate, nothing that can fail before the first byte moves.
      */
     private fun beginSession(sessionId: String) {
-        val deleteAfterSync = synchronized(lock) {
+        val sessionSettings = synchronized(lock) {
             if (!consented || transferring) return
             transferring = true
             state = MediaSyncState.PREPARING
             blocker = null
             progress = MediaSyncProgress()
-            settings.deleteAfterSync
+            settings
         }
         emitStatus()
         val session = MediaSyncTransferReceiver(
@@ -183,7 +185,7 @@ internal class MediaSyncCoordinator(
             ledger = ledger,
             gallery = gallery,
             staging = staging,
-            deleteAfterSync = deleteAfterSync,
+            settings = sessionSettings,
             clock = clock,
             logger = logger,
             send = sendToGlasses,
@@ -192,7 +194,7 @@ internal class MediaSyncCoordinator(
             onFinished = ::onRunFinished,
         )
         synchronized(lock) { receiver = session }
-        logger("mediaSync session begin id=$sessionId deleteAfterSync=$deleteAfterSync")
+        logger("mediaSync session begin id=$sessionId deleteAfterSync=${sessionSettings.deleteAfterSync}")
         // Start on the receive thread too, so nothing in the session ever runs anywhere else.
         runCatching { transferExecutor.execute { session.start() } }
             .onFailure { logger("mediaSync session start rejected") }
@@ -287,12 +289,20 @@ internal class MediaSyncSettingsStore(context: Context) {
         mode = MediaSyncMode.fromWireValue(preferences.getString(KEY_SYNC_MODE, null))
             ?: MediaSyncMode.CHARGING,
         deleteAfterSync = preferences.getBoolean(KEY_DELETE_AFTER_SYNC, false),
+        syncNormalPhotos = preferences.getBoolean(KEY_SYNC_NORMAL_PHOTOS, true),
+        syncArPhotos = preferences.getBoolean(KEY_SYNC_AR_PHOTOS, false),
+        syncNormalVideos = preferences.getBoolean(KEY_SYNC_NORMAL_VIDEOS, false),
+        syncArVideos = preferences.getBoolean(KEY_SYNC_AR_VIDEOS, false),
     )
 
     fun saveSettings(settings: MediaSyncSettings) {
         preferences.edit()
             .putString(KEY_SYNC_MODE, settings.mode.wireValue)
             .putBoolean(KEY_DELETE_AFTER_SYNC, settings.deleteAfterSync)
+            .putBoolean(KEY_SYNC_NORMAL_PHOTOS, settings.syncNormalPhotos)
+            .putBoolean(KEY_SYNC_AR_PHOTOS, settings.syncArPhotos)
+            .putBoolean(KEY_SYNC_NORMAL_VIDEOS, settings.syncNormalVideos)
+            .putBoolean(KEY_SYNC_AR_VIDEOS, settings.syncArVideos)
             .apply()
     }
 
@@ -323,6 +333,10 @@ internal class MediaSyncSettingsStore(context: Context) {
         const val PREFERENCES_NAME = "nexus_media_sync"
         const val KEY_SYNC_MODE = "sync_mode"
         const val KEY_DELETE_AFTER_SYNC = "delete_after_sync"
+        const val KEY_SYNC_NORMAL_PHOTOS = "sync_normal_photos"
+        const val KEY_SYNC_AR_PHOTOS = "sync_ar_photos"
+        const val KEY_SYNC_NORMAL_VIDEOS = "sync_normal_videos"
+        const val KEY_SYNC_AR_VIDEOS = "sync_ar_videos"
         const val KEY_DELETION_SUPPORTED = "deletion_supported"
         const val KEY_HISTORY = "history_v1"
     }
