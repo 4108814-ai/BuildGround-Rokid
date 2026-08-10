@@ -4,13 +4,6 @@
 
 ## 1.4.1
 
-- **Wireless ADB can recover from Wi-Fi being off.** Enable & pair now turns
-  the glasses' Wi-Fi radio on and waits for a saved network before enabling
-  ADB. Disabling wireless debugging remains deliberately scoped to ADB and
-  leaves the normal Wi-Fi connection running.
-
-## 1.4.0
-
 - **Assistant can act on the phone calendar.** It can add and list events after
   the wearer grants Android calendar access, and deletion fails closed unless
   exactly one event matches the requested title and start time. Recurring
@@ -30,6 +23,17 @@
   protocol is versioned, replay-safe, and unavailable to plugins; sensitive
   fields secure the phone window and existing editor contents are never copied
   back to the phone. Native APK installation is not part of this release.
+- **Wireless ADB can be enabled and paired without driving Settings.** The
+  new Wireless ADB plugin asks for an explicit privileged capability, trusts
+  the current glasses Wi-Fi network through a fixed signed bridge command,
+  and creates a two-minute pairing code for a computer on the same LAN. The
+  code is never persisted or logged, its screen blocks capture, and expiry
+  stays tracked until the pairing service is confirmed closed or the transport
+  is disabled fail-closed.
+- **Wireless ADB can recover from Wi-Fi being off.** Enable & pair now turns
+  the glasses' Wi-Fi radio on and waits for a saved network before enabling
+  ADB. Disabling wireless debugging remains deliberately scoped to ADB and
+  leaves the normal Wi-Fi connection running.
 - **Assistant answers stay visible through their whole display episode.** A
   single episode owner now spans the listening band, handover, and answer
   surface. Notice windows keep their normal screen-on flag, while the
@@ -39,16 +43,6 @@
   full-screen reader documents, and a thread already on screen refreshes in
   place when its notification gains a message. Scroll position is preserved,
   while dictation, reply review, and sending remain uninterrupted.
-
-## 1.3.0
-
-- **Wireless ADB can be enabled and paired without driving Settings.** The
-  new Wireless ADB plugin asks for an explicit privileged capability, trusts
-  the current glasses Wi-Fi network through a fixed signed bridge command,
-  and creates a two-minute pairing code for a computer on the same LAN. The
-  code is never persisted or logged, its screen blocks capture, and expiry
-  stays tracked until the pairing service is confirmed closed or the transport
-  is disabled fail-closed.
 
 ## 1.2.11
 

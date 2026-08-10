@@ -12,8 +12,8 @@ network, start pairing, cancel pairing, or disable ADB.
 
 ## Requirements
 
-- Rokid Nexus phone and glasses hubs 1.3.0 or newer, installed through their normal
-  signed upgrade path. Automatic Wi-Fi restoration requires glasses hub 1.4.1 or newer.
+- Rokid Nexus phone and glasses hubs 1.4.1 or newer, installed through their normal
+  signed upgrade path.
 - A saved Wi-Fi network on the glasses, Nexus self-arm/developer access already
   complete, and a computer on the same LAN. If the Wi-Fi radio is off, Nexus turns
   it on and waits for that saved network; it does not choose or configure a network.

@@ -1,5 +1,16 @@
 # Changelog — Photos Sync
 
+## 1.1.0
+
+- **Choose which capture types sync.** Settings now lists photos, AR photos,
+  videos, and AR videos as separate switches, so a type you never want copied
+  stops crossing the Bluetooth link at all instead of being deleted after the
+  fact. Everything stays on by default.
+- The settings screen says plainly what a synced file will look like: AR
+  overlays and video stabilization are added by the Hi Rokid app after its own
+  import, so captures synced here arrive as the raw file — plain photos, and
+  clips without stabilization. One line per type, next to its switch.
+
 ## 1.0.2
 
 - The plugin's mark matches its Store icon again. Converting the glyph set to

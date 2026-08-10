@@ -44,6 +44,7 @@ jobs:
             exit 1
           fi
 
+          module_name=""
           case "$plugin_id" in
             feeds)
               module_dir="plugin-feeds"
@@ -95,6 +96,12 @@ jobs:
               changelog_path="plugins/tasker/CHANGELOG.md"
               release_name="Tasker"
               ;;
+            wirelessadb)
+              module_dir="plugins/wireless-adb"
+              module_name="plugin-wireless-adb"
+              changelog_path="plugins/wireless-adb/CHANGELOG.md"
+              release_name="Wireless ADB"
+              ;;
             *)
               echo "::error::Unknown Nexus plugin id '$plugin_id' in tag '$tag'."
               exit 1
@@ -104,7 +111,7 @@ jobs:
           {
             echo "PLUGIN_ID=$plugin_id"
             echo "PLUGIN_VERSION=$version"
-            echo "PLUGIN_MODULE=plugin-$plugin_id"
+            echo "PLUGIN_MODULE=${module_name:-plugin-$plugin_id}"
             echo "MODULE_DIR=$module_dir"
             echo "CHANGELOG_PATH=$changelog_path"
             echo "RELEASE_NAME=$release_name"
