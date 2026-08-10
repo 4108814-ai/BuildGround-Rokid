@@ -118,6 +118,44 @@ class RelayInboxModelTest {
         assertEquals(RelayInboxBackResult.CLOSE_SURFACE, selection.back())
     }
 
+    @Test
+    fun `live capture refreshes an opened thread only while it is being read`() {
+        val selection = RelayInboxSelection()
+        selection.reset(listOf("thread"))
+
+        assertEquals(
+            RelayInboxRefreshTarget.LIST,
+            selection.liveRefreshTarget(
+                changedItemId = "other",
+                canRefreshOpenedThread = false,
+            ),
+        )
+
+        selection.openSelected()
+
+        assertEquals(
+            RelayInboxRefreshTarget.THREAD,
+            selection.liveRefreshTarget(
+                changedItemId = "thread",
+                canRefreshOpenedThread = true,
+            ),
+        )
+        assertEquals(
+            RelayInboxRefreshTarget.NONE,
+            selection.liveRefreshTarget(
+                changedItemId = "thread",
+                canRefreshOpenedThread = false,
+            ),
+        )
+        assertEquals(
+            RelayInboxRefreshTarget.NONE,
+            selection.liveRefreshTarget(
+                changedItemId = "other",
+                canRefreshOpenedThread = true,
+            ),
+        )
+    }
+
     private fun snapshot(
         id: String,
         sender: String = "Sender",

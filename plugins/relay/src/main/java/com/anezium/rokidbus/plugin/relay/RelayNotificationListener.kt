@@ -33,7 +33,7 @@ class RelayNotificationListener : NotificationListenerService() {
         ReplyRepository.forget(sbn)
         // Answering on the phone empties the row here too, while the wearer is
         // looking straight at it.
-        NotificationControl.notifyCaptured()
+        NotificationControl.notifyCaptured(ReplyRepository.stableId(sbn.key))
     }
 
     /**
@@ -130,7 +130,7 @@ class RelayNotificationListener : NotificationListenerService() {
         RelayDiagnostics.recordAcceptedCapture(this)
         // The inbox, if it is open, is the only thing that will show this: the
         // band stands down while it holds the bus.
-        NotificationControl.notifyCaptured()
+        NotificationControl.notifyCaptured(capture.reply.id)
         val decision = when {
             !capture.contentChanged -> "unchanged"
             !mayShow -> "captured rebuild_only"

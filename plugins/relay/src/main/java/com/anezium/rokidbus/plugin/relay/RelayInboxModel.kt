@@ -194,6 +194,12 @@ internal enum class RelayInboxView {
     THREAD,
 }
 
+internal enum class RelayInboxRefreshTarget {
+    LIST,
+    THREAD,
+    NONE,
+}
+
 internal enum class RelayInboxBackResult {
     SHOW_LIST,
     CLOSE_SURFACE,
@@ -214,6 +220,15 @@ internal class RelayInboxSelection {
 
     val selectedId: String?
         get() = itemIds.getOrNull(selectedIndex)
+
+    fun liveRefreshTarget(
+        changedItemId: String,
+        canRefreshOpenedThread: Boolean,
+    ): RelayInboxRefreshTarget = when {
+        view == RelayInboxView.LIST -> RelayInboxRefreshTarget.LIST
+        canRefreshOpenedThread && openedThreadId == changedItemId -> RelayInboxRefreshTarget.THREAD
+        else -> RelayInboxRefreshTarget.NONE
+    }
 
     fun reset(ids: List<String>) {
         itemIds = ids.distinct()

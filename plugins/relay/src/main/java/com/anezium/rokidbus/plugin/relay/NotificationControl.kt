@@ -77,16 +77,16 @@ internal object NotificationControl {
     }
 
     /**
-     * A message arrived while the wearer is in the inbox, so the list redraws.
+     * A message arrived while the wearer is in the inbox, so its visible surface redraws.
      *
      * This matters more than it looks: the band stands down while the inbox
-     * holds the bus, so if the list did not refresh, a message arriving during
+     * holds the bus, so if the inbox did not refresh, a message arriving during
      * that time would be announced by nothing and appear nowhere — visible only
      * after closing and reopening. The capture is already in the repository by
-     * the time this runs; all the list has to do is look again.
+     * the time this runs; the visible inbox surface only has to look again.
      */
-    fun notifyCaptured() {
-        main.post { inbox?.onCaptureChanged() }
+    fun notifyCaptured(notificationId: String) {
+        main.post { inbox?.onCaptureChanged(notificationId) }
     }
 
     fun refreshFromSettings() {

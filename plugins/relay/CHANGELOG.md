@@ -5,6 +5,9 @@
 - **Inbox conversations now open as full-screen reader documents.** Messages
   wrap as prose and scroll in the native glasses renderer, while tapping still
   starts a reply and Back still returns to the Messages list.
+- **An open conversation now updates as new messages arrive.** Relay refreshes
+  a reader in place while preserving its scroll position, without interrupting
+  dictation, reply review, or sending.
 
 ## 1.1.4
 

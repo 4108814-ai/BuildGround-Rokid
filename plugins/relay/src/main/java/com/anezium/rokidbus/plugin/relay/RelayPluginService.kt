@@ -97,17 +97,13 @@ class RelayPluginService : NexusPluginService() {
         }
     }
 
-    /**
-     * A new message landed while the wearer is looking at the list.
-     *
-     * Only the list redraws. Someone reading a thread, dictating into one, or
-     * watching a send count down is in the middle of something, and pulling the
-     * screen out from under them to announce a different conversation would be
-     * worse than making them wait — the row will be there when they come back.
-     */
-    internal fun onCaptureChanged() {
-        if (selection.view != RelayInboxView.LIST) return
-        renderList(show = false)
+    /** A capture redraws the list or the thread being read without interrupting a reply in progress. */
+    internal fun onCaptureChanged(notificationId: String) {
+        when (selection.liveRefreshTarget(notificationId, threadMode == ThreadMode.READING)) {
+            RelayInboxRefreshTarget.LIST -> renderList(show = false)
+            RelayInboxRefreshTarget.THREAD -> renderThread(show = false)
+            RelayInboxRefreshTarget.NONE -> Unit
+        }
     }
 
     private fun move(delta: Int) {

@@ -26,6 +26,10 @@
   surface. Notice windows keep their normal screen-on flag, while the
   Assistant's scoped wake lock covers the band-to-card or band-to-Ink handover
   and is released when that episode ends.
+- **Relay conversations are readable and live.** Inbox threads open as native
+  full-screen reader documents, and a thread already on screen refreshes in
+  place when its notification gains a message. Scroll position is preserved,
+  while dictation, reply review, and sending remain uninterrupted.
 
 ## 1.3.0
 

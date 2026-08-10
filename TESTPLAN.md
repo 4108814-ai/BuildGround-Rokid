@@ -703,6 +703,22 @@ Typed debug injection after speech recognition is sufficient to isolate the
 provider/tool path, but it does not replace one physical assist-button and
 microphone pass on worn glasses. Remove all disposable events after validation.
 
+## Relay live reader validation
+
+1. Open Relay's Messages inbox on the glasses, open a conversation, and leave
+   the reader at its bottom.
+2. Add a message to that same Android messaging-style notification. Confirm the
+   open reader gains the message without Back/reopen and remains pinned to the
+   new bottom.
+3. Scroll away from the bottom, add another message, and confirm the reader
+   refreshes without losing the current reading offset.
+4. Start dictation or reach reply review, update the source notification, and
+   confirm Relay does not replace the reply UI. Return to reading and confirm
+   the updated thread is present.
+5. While reading one conversation, update a different conversation. Confirm the
+   open reader does not redraw; Back shows the updated conversation in the
+   inbox list.
+
 ## Wireless ADB v1 validation
 
 Software gate:
