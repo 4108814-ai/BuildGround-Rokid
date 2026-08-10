@@ -21,19 +21,10 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
-import com.anezium.rokidbus.shared.NoticeSurfaceContract
-
-internal object NoticeDisplayHoldPolicy {
-    private const val ASSISTANT_NOTICE_ID = "assistant:${NoticeSurfaceContract.LOCAL_SURFACE_ID}"
-
-    fun noticeHoldsDisplay(surfaceId: String, engaged: Boolean): Boolean =
-        surfaceId == ASSISTANT_NOTICE_ID && engaged
-}
-
-internal fun noticeWindowFlags(displayHoldActive: Boolean): Int =
+internal fun noticeWindowFlags(keepScreenOn: Boolean): Int =
     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
         WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-        (if (displayHoldActive) WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON else 0)
+        (if (keepScreenOn) WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON else 0)
 
 internal fun noticeBackdropAlpha(fadeAlpha: Float, backdrop: Boolean): Float =
     if (backdrop) fadeAlpha else 0f
@@ -89,9 +80,10 @@ internal data class NoticeInkMorphToken(
  * never touchable: it does not steal focus from what is underneath, and the
  * touchpad keeps working for everything the notice has not explicitly claimed.
  * Ordinary notices never keep the screen on. The assistant marks only its
- * listening, thinking, and answer-review episode as engaged; that band holds
- * until the episode closes or transfers the same bounded wake lease to its Ink
- * surface. Wake requests remain separately owned by [NoticeController].
+ * listening, thinking, and answer-review episode as engaged. The window keeps
+ * its existing flag, but the fixed [AssistantDisplayEpisode] owner holds the
+ * measured firmware wake lease independently of this drawable and its morph.
+ * Wake requests remain separately owned by [NoticeController].
  */
 object NoticeOverlayRenderer {
     private var service: AccessibilityService? = null
@@ -106,7 +98,7 @@ object NoticeOverlayRenderer {
     private var hudTopInsetDp = 0
     private var exitRunning = false
     private var renderedSeq: Long? = null
-    private var displayHoldActive = false
+    private var keepScreenOn = false
     private var inkMorph: NoticeInkMorphToken? = null
 
     private val slide = HudMotionValue(0f) { offset -> band?.translationY = offset }
@@ -209,7 +201,7 @@ object NoticeOverlayRenderer {
             fade.cancel()
             slide.snapTo(0f)
         }
-        setDisplayHold(
+        setKeepScreenOn(
             NoticeDisplayHoldPolicy.noticeHoldsDisplay(
                 surfaceId = notice.surfaceId,
                 engaged = notice.content.interactive,
@@ -257,11 +249,11 @@ object NoticeOverlayRenderer {
 
     private fun dismiss() {
         if (container == null) {
-            setDisplayHold(false)
+            setKeepScreenOn(false)
             return
         }
         if (noticeDismissMotion(inkMorph != null) == NoticeDismissMotion.INK_FADE_IN_PLACE) return
-        setDisplayHold(false)
+        setKeepScreenOn(false)
         exitRunning = true
         slide.animateTo(-bandHeightPx.toFloat(), HudMotion.EXIT_MS, HudMotion.exit)
         fade.animateTo(0f, HudMotion.EXIT_MS, HudMotion.exit) { teardown() }
@@ -330,14 +322,14 @@ object NoticeOverlayRenderer {
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            noticeWindowFlags(displayHoldActive),
+            noticeWindowFlags(keepScreenOn),
             PixelFormat.TRANSLUCENT,
         ).apply { gravity = Gravity.TOP or Gravity.START }
     }
 
-    private fun setDisplayHold(active: Boolean) {
-        if (displayHoldActive == active) return
-        displayHoldActive = active
+    private fun setKeepScreenOn(active: Boolean) {
+        if (keepScreenOn == active) return
+        keepScreenOn = active
         val manager = windowManager ?: return
         val root = container ?: return
         val layout = (root.layoutParams as? WindowManager.LayoutParams) ?: params(root.context)
@@ -349,7 +341,7 @@ object NoticeOverlayRenderer {
     private fun teardown() {
         val root = container
         if (root == null) {
-            displayHoldActive = false
+            keepScreenOn = false
             return
         }
         val seq = renderedSeq ?: -1L
@@ -361,7 +353,7 @@ object NoticeOverlayRenderer {
         inkMorph = null
         backdrop = false
         exitRunning = false
-        displayHoldActive = false
+        keepScreenOn = false
         slide.snapTo(0f)
         fade.snapTo(0f)
         renderedSeq = null

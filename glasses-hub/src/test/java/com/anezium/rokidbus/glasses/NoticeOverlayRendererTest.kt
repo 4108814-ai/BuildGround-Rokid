@@ -39,7 +39,7 @@ class NoticeOverlayRendererTest {
     }
 
     @Test
-    fun `only an assistant conversational notice holds the display`() {
+    fun `only an engaged assistant notice starts an episode`() {
         assertTrue(
             NoticeDisplayHoldPolicy.noticeHoldsDisplay(
                 surfaceId = "assistant:notice",
@@ -69,11 +69,11 @@ class NoticeOverlayRendererTest {
     @Test
     fun `engaged notice sets the window flag and passive notice clears it`() {
         assertTrue(
-            noticeWindowFlags(displayHoldActive = true) and
+            noticeWindowFlags(keepScreenOn = true) and
                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0,
         )
         assertFalse(
-            noticeWindowFlags(displayHoldActive = false) and
+            noticeWindowFlags(keepScreenOn = false) and
                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0,
         )
     }

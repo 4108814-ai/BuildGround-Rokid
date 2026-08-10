@@ -36,8 +36,7 @@ object SurfaceOverlayRenderer {
     fun show(context: Context, surface: NexusSurface): Boolean {
         val activeService = service ?: return false
         val manager = windowManager ?: activeService.getSystemService(WindowManager::class.java) ?: return false
-        val currentRoot = root ?: OverlayRoot(activeService).also { next ->
-            root = next
+        val currentRoot = root ?: OverlayRoot(activeService).let { next ->
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
@@ -46,12 +45,25 @@ object SurfaceOverlayRenderer {
                     WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
                 PixelFormat.TRANSLUCENT,
             )
-            manager.addView(next, params)
+            if (
+                runCatching { manager.addView(next, params) }
+                    .onFailure { logError("Surface overlay window could not be added", it) }
+                    .isFailure
+            ) {
+                return false
+            }
+            root = next
             HudOverlayStack.reassert()
+            next
         }
-        currentRoot.render(surface)
-        currentRoot.requestFocus()
-        return true
+        return runCatching {
+            currentRoot.render(surface)
+            currentRoot.requestFocus()
+            true
+        }.onFailure {
+            logError("Surface overlay render failed", it)
+            hide()
+        }.getOrDefault(false)
     }
 
     fun hide() {

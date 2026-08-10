@@ -8,6 +8,7 @@ internal enum class NoticeSleepRefusal(val logValue: String) {
     DISPLAY_NOT_INTERACTIVE("not_interactive"),
     LAUNCHER_SHOWN("launcher_shown"),
     SURFACE_ACTIVE("surface_active"),
+    ASSISTANT_EPISODE_ACTIVE("assistant_episode_active"),
     ACTIVITY_PRESENTING("activity_presenting"),
     CAMERA_OVERLAY_ACTIVE("camera_overlay_active"),
 }
@@ -29,6 +30,7 @@ internal object NoticeSleepPolicy {
         isInteractive: Boolean,
         launcherShown: Boolean,
         surfaceActive: Boolean,
+        assistantEpisodeActive: Boolean,
         activityPresenting: Boolean,
         cameraOverlayActive: Boolean,
     ): NoticeSleepDecision = when {
@@ -36,6 +38,8 @@ internal object NoticeSleepPolicy {
             NoticeSleepDecision.Skip(NoticeSleepRefusal.SURFACE_ACTIVE)
         closeReason != NoticeCloseReason.USER && closeReason != NoticeCloseReason.TIMEOUT ->
             NoticeSleepDecision.Skip(NoticeSleepRefusal.CLOSE_REASON)
+        assistantEpisodeActive ->
+            NoticeSleepDecision.Skip(NoticeSleepRefusal.ASSISTANT_EPISODE_ACTIVE)
         !episodeOwnsWake ->
             NoticeSleepDecision.Skip(NoticeSleepRefusal.NO_WAKE_OWNERSHIP)
         !isInteractive ->

@@ -49,6 +49,7 @@ object SurfaceController {
     private var inkFrameMeterRunning = false
     private var displayStateReceiverRegistered = false
     private var inkDisplayTransitioning = false
+    private var pendingInk: NexusSurface? = null
     @Volatile private var inkResyncListener: ((InkResyncRequest) -> Unit)? = null
     @Volatile private var active: NexusSurface? = null
 
@@ -309,9 +310,14 @@ object SurfaceController {
 
     fun onPhoneLinkLost() {
         runOnMain {
-            val surface = active?.takeIf(NexusSurface::isInk) ?: return@runOnMain
-            sendInkClosed(surface.surfaceId, InkSurfaceContract.CLOSE_LINK_LOST)
-            hideLocalOnMain(DisplayHoldReleaseReason.LINK_LOSS)
+            pendingInk = null
+            val surface = active?.takeIf(NexusSurface::isInk)
+            if (surface != null) {
+                sendInkClosed(surface.surfaceId, InkSurfaceContract.CLOSE_LINK_LOST)
+                hideLocalOnMain(DisplayHoldReleaseReason.LINK_LOSS)
+            } else {
+                clearInkRenderer()
+            }
         }
     }
 
@@ -360,8 +366,18 @@ object SurfaceController {
         ) {
             runCatching(onReleased)
                 .onFailure { logError("Ink first-frame commit failed", it) }
+            onInkAnswerShown(current)
             sendInkEvent(surfaceId, InkSurfaceContract.EVENT_READY)
         }
+    }
+
+    // A renewal never needs to build a lease, so no context is required here:
+    // an answer can only ever extend an episode that is already holding.
+    private fun onInkAnswerShown(surface: NexusSurface) {
+        AssistantDisplayEpisode.accept(
+            null,
+            assistantEpisodeAnswerShownSignal(surface.ownerPluginId, surface.seq),
+        )
     }
 
     internal fun isInkPresentationPending(surfaceId: String, seq: Long): Boolean =
@@ -378,6 +394,7 @@ object SurfaceController {
         ) {
             return false
         }
+        onInkAnswerShown(current)
         sendInkEvent(surfaceId, InkSurfaceContract.EVENT_READY)
         return true
     }
@@ -395,7 +412,11 @@ object SurfaceController {
         val completesRingHandoff =
             launcherShow && launcherReturnCoordinator.onSurfaceShown(surface.surfaceId)
         runOnMain {
-            if (surface.isInk) ensureDisplayStateMonitoring(context)
+            if (surface.isInk) {
+                ensureDisplayStateMonitoring(context)
+            } else {
+                pendingInk = null
+            }
             notifyReplacedInk(surface)
             if (!surface.isInk) clearInkRenderer()
             val keepMediaDecode = surface.isMedia && surface.mediaArtworkMetadata != null &&
@@ -407,6 +428,10 @@ object SurfaceController {
             DisplayWakePolicy.requestWake(context, DisplayWakeKind.SURFACE, requested = true)
             deactivateReplacedSurface(surface.surfaceId)
             prepareRingInputForSurface(surface.surfaceId)
+            AssistantDisplayEpisode.accept(
+                context,
+                assistantEpisodeSurfacePresentedSignal(surface.ownerPluginId),
+            )
             active = surface
             syncInkFrameMeter(surface)
             RingFocusBroadcastCoordinator.setSurfaceActive(
@@ -424,9 +449,16 @@ object SurfaceController {
         surface: NexusSurface,
         launcherShow: Boolean,
     ) {
+        pendingInk = surface
         inkRendererLayer.submit(
             surface = surface,
             onCommitted = {
+                if (
+                    pendingInk?.surfaceId == surface.surfaceId &&
+                    pendingInk?.seq == surface.seq
+                ) {
+                    pendingInk = null
+                }
                 if (launcherShow) {
                     inkPresentationGate.arm(surface.surfaceId, surface.seq)
                 }
@@ -459,6 +491,10 @@ object SurfaceController {
                 DisplayWakePolicy.requestWake(context, DisplayWakeKind.SURFACE, requested = true)
                 deactivateReplacedSurface(surface.surfaceId)
                 prepareRingInputForSurface(surface.surfaceId)
+                AssistantDisplayEpisode.accept(
+                    context,
+                    assistantEpisodeSurfacePresentedSignal(surface.ownerPluginId),
+                )
                 active = surface
                 RingFocusBroadcastCoordinator.setSurfaceActive(
                     context,
@@ -505,6 +541,10 @@ object SurfaceController {
                                 requested = true,
                             )
                             prepareRingInputForSurface(target.surfaceId)
+                            AssistantDisplayEpisode.accept(
+                                context,
+                                assistantEpisodeSurfacePresentedSignal(published.ownerPluginId),
+                            )
                             active = published
                             RingFocusBroadcastCoordinator.setSurfaceActive(
                                 context,
@@ -525,6 +565,7 @@ object SurfaceController {
         if (surface.isInk) {
             if (!SurfaceOverlayRenderer.show(context, surface)) {
                 log("Ink surface overlay unavailable")
+                onInkRendererError(surface, emptyList())
             }
             return
         }
@@ -553,13 +594,26 @@ object SurfaceController {
         if (surfaceId.isBlank()) return
         when (val decision = orderingCoordinator.onHide(surfaceId, seq)) {
             SurfaceOrderDecision.ApplyHide -> {
+                val endReason = if (backFailsafeSurfaceId == surfaceId) {
+                    DisplayHoldReleaseReason.WEARER_DISMISSED
+                } else {
+                    DisplayHoldReleaseReason.SESSION_CLOSED
+                }
+                val pending = pendingInk?.takeIf { it.surfaceId == surfaceId }
                 cancelBackFailsafeOnMain(surfaceId)
                 if (active?.surfaceId == surfaceId) {
                     if (active?.isInk == true) {
                         sendInkClosed(surfaceId, InkSurfaceContract.CLOSE_PLUGIN)
                     }
                     imageDecodeCoordinator.invalidate(surfaceId)?.recycleSafely()
-                    hideLocalOnMain(DisplayHoldReleaseReason.SURFACE_HIDDEN)
+                    hideLocalOnMain(endReason)
+                } else if (pending != null) {
+                    pendingInk = null
+                    clearInkRenderer()
+                    AssistantDisplayEpisode.accept(
+                        null,
+                        assistantEpisodeSurfaceEndedSignal(pending.ownerPluginId, endReason),
+                    )
                 }
             }
             is SurfaceOrderDecision.Drop -> logOrderDrop(surfaceId, seq, decision)
@@ -572,8 +626,14 @@ object SurfaceController {
     }
 
     private fun hideLocalOnMain(reason: DisplayHoldReleaseReason) {
-        releaseSurfaceDisplayHold(active, reason)
+        active?.let { ending ->
+            AssistantDisplayEpisode.accept(
+                null,
+                assistantEpisodeSurfaceEndedSignal(ending.ownerPluginId, reason),
+            )
+        }
         val activeSurfaceId = active?.surfaceId
+        if (pendingInk?.surfaceId == activeSurfaceId) pendingInk = null
         val returnToLauncher = activeSurfaceId?.let(launcherReturnCoordinator::consumeReturnOnHide) == true
         activeSurfaceId?.let { cancelBackFailsafeOnMain(it) }
         activeSurfaceId?.let(orderingCoordinator::deactivate)
@@ -608,7 +668,6 @@ object SurfaceController {
         ) {
             return
         }
-        releaseSurfaceDisplayHold(previous, DisplayHoldReleaseReason.SURFACE_REPLACED)
         sendInkClosed(previous.surfaceId, InkSurfaceContract.CLOSE_REPLACED)
     }
 
@@ -630,6 +689,7 @@ object SurfaceController {
     }
 
     private fun clearInkRenderer() {
+        pendingInk = null
         inkPresentationGate.cancel()
         inkRendererLayer.clear()
         if (inkFrameMeterRunning) {
@@ -678,13 +738,29 @@ object SurfaceController {
         )
     }
 
-    private fun onInkRendererError(surfaceId: String, problems: List<com.anezium.rokidbus.ink.InkProblem>) {
+    private fun onInkRendererError(
+        surface: NexusSurface,
+        problems: List<com.anezium.rokidbus.ink.InkProblem>,
+    ) {
         problems.forEach { problem ->
             log("Ink renderer error code=${problem.code} feature=${problem.feature.orEmpty()}")
         }
-        sendInkClosed(surfaceId, InkSurfaceContract.CLOSE_RENDERER_ERROR)
-        if (active?.surfaceId == surfaceId) {
-            hideLocalOnMain(DisplayHoldReleaseReason.SESSION_CLOSED)
+        if (
+            pendingInk?.surfaceId == surface.surfaceId &&
+            pendingInk?.seq == surface.seq
+        ) {
+            pendingInk = null
+        }
+        AssistantDisplayEpisode.accept(
+            null,
+            assistantEpisodeSurfaceEndedSignal(
+                surface.ownerPluginId,
+                DisplayHoldReleaseReason.RENDERER_ERROR,
+            ),
+        )
+        sendInkClosed(surface.surfaceId, InkSurfaceContract.CLOSE_RENDERER_ERROR)
+        if (active?.surfaceId == surface.surfaceId) {
+            hideLocalOnMain(DisplayHoldReleaseReason.RENDERER_ERROR)
         }
     }
 
@@ -809,7 +885,7 @@ object SurfaceController {
             armBackFailsafe(surface.surfaceId)
         } else {
             if (surface.isInk) sendInkClosed(surface.surfaceId, InkSurfaceContract.CLOSE_USER)
-            hideLocal(DisplayHoldReleaseReason.SESSION_CLOSED)
+            hideLocal(DisplayHoldReleaseReason.WEARER_DISMISSED)
         }
     }
 
@@ -830,7 +906,7 @@ object SurfaceController {
                     if (active?.isInk == true) {
                         sendInkClosed(surfaceId, InkSurfaceContract.CLOSE_USER)
                     }
-                    hideLocalOnMain(DisplayHoldReleaseReason.SESSION_CLOSED)
+                    hideLocalOnMain(DisplayHoldReleaseReason.WEARER_DISMISSED)
                 }
                 if (backFailsafeSurfaceId == surfaceId) {
                     backFailsafeSurfaceId = null
@@ -848,14 +924,6 @@ object SurfaceController {
         backFailsafe?.let { main.removeCallbacks(it) }
         backFailsafeSurfaceId = null
         backFailsafe = null
-    }
-
-    private fun releaseSurfaceDisplayHold(
-        surface: NexusSurface?,
-        reason: DisplayHoldReleaseReason,
-    ) {
-        val inkSurface = surface?.takeIf(NexusSurface::isInk) ?: return
-        DisplayWakePolicy.releaseDisplayHold(inkSurface.surfaceId, reason)
     }
 
     private fun runOnMain(action: () -> Unit) {

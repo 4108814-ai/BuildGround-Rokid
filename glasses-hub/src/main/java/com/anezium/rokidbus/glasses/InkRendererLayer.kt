@@ -24,7 +24,7 @@ internal class InkRendererLayer(
     private val main: Handler,
     private val onResyncNeeded: (InkResyncRequest) -> Unit,
     private val onAction: (String, Map<String, Any?>) -> Unit,
-    private val onRendererError: (String, List<InkProblem>) -> Unit,
+    private val onRendererError: (NexusSurface, List<InkProblem>) -> Unit,
 ) {
     private val decoder: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "RokidNexusInkDecode").apply { isDaemon = true }
@@ -44,7 +44,7 @@ internal class InkRendererLayer(
         if ((documentJson == null) == (patchJson == null)) {
             log("Ink payload rejected id=${surface.surfaceId}: expected exactly one document or patch")
             onRendererError(
-                surface.surfaceId,
+                surface,
                 listOf(
                     InkProblem(
                         InkProblemCodes.WIRE_INVALID,
@@ -101,7 +101,7 @@ internal class InkRendererLayer(
                             }
                             is InkPatchApplyResult.Invalid -> {
                                 logProblem("Ink patch rejected", result.problem)
-                                onRendererError(surface.surfaceId, listOf(result.problem))
+                                onRendererError(surface, listOf(result.problem))
                             }
                             is InkPatchApplyResult.ResyncNeeded -> onResyncNeeded(
                                 InkResyncRequest(
@@ -115,7 +115,7 @@ internal class InkRendererLayer(
                     }
                     is Decoded.Invalid -> {
                         decoded.problems.forEach { logProblem("Ink wire rejected", it) }
-                        onRendererError(surface.surfaceId, decoded.problems)
+                        onRendererError(surface, decoded.problems)
                     }
                 }
             }

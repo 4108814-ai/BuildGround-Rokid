@@ -72,6 +72,17 @@ class NoticeSleepPolicyTest {
     }
 
     @Test
+    fun `assistant episode blocks timeout sleep while waiting for its card`() {
+        assertSkipped(
+            NoticeSleepRefusal.ASSISTANT_EPISODE_ACTIVE,
+            decide(
+                NoticeCloseReason.TIMEOUT,
+                assistantEpisodeActive = true,
+            ),
+        )
+    }
+
+    @Test
     fun `owner hide ends a notice wake episode only when a surface takes over`() {
         assertFalse(
             NoticeSleepPolicy.episodeEnds(
@@ -115,6 +126,7 @@ class NoticeSleepPolicyTest {
         isInteractive: Boolean = true,
         launcherShown: Boolean = false,
         surfaceActive: Boolean = false,
+        assistantEpisodeActive: Boolean = false,
         activityPresenting: Boolean = false,
         cameraOverlayActive: Boolean = false,
     ): NoticeSleepDecision = NoticeSleepPolicy.decide(
@@ -123,6 +135,7 @@ class NoticeSleepPolicyTest {
         isInteractive = isInteractive,
         launcherShown = launcherShown,
         surfaceActive = surfaceActive,
+        assistantEpisodeActive = assistantEpisodeActive,
         activityPresenting = activityPresenting,
         cameraOverlayActive = cameraOverlayActive,
     )

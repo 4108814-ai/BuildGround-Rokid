@@ -360,6 +360,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         log("AccessibilityService destroyed")
+        AssistantDisplayEpisode.end(DisplayHoldReleaseReason.SERVICE_DESTROYED)
         displayStandbyWatchdog.stop()
         main.removeCallbacks(tapExpiry)
         wirelessDebuggingAutomator?.stop()

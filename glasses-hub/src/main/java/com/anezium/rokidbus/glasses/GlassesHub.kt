@@ -200,6 +200,7 @@ object GlassesHub {
         phoneConnected = connected || CxrBusBridge.isUp()
         if (!phoneConnected) {
             clearRemotePhoneCapabilities()
+            AssistantDisplayEpisode.end(DisplayHoldReleaseReason.LINK_LOSS)
             SurfaceController.onPhoneLinkLost()
             NoticeController.onPhoneLinkLost()
         }
@@ -216,6 +217,7 @@ object GlassesHub {
         phoneConnected = connected || SppServerManager.isConnected()
         if (!phoneConnected) {
             clearRemotePhoneCapabilities()
+            AssistantDisplayEpisode.end(DisplayHoldReleaseReason.LINK_LOSS)
             SurfaceController.onPhoneLinkLost()
             NoticeController.onPhoneLinkLost()
         }
