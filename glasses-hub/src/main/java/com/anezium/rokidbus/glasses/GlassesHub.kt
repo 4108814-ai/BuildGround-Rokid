@@ -27,10 +27,13 @@ import com.anezium.rokidbus.shared.GlassesRepairContract
 import com.anezium.rokidbus.shared.GlyphContract
 import com.anezium.rokidbus.shared.ImageSurfaceContract
 import com.anezium.rokidbus.shared.LinkStateBits
+import com.anezium.rokidbus.shared.NativeAppContract
 import com.anezium.rokidbus.shared.PhoneHubCapabilities
 import com.anezium.rokidbus.shared.PhoneHubCapabilitiesContract
 import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import com.anezium.rokidbus.shared.PinSurfaceContract
+import com.anezium.rokidbus.shared.RemoteInputContract
+import com.anezium.rokidbus.shared.RemoteNavigationContract
 import com.anezium.rokidbus.shared.SetupNoteContract
 import com.anezium.rokidbus.shared.SetupNoteMessage
 import com.anezium.rokidbus.shared.SetupPairingOfferContract
@@ -159,6 +162,10 @@ object GlassesHub {
     fun start(context: Context) {
         val applicationContext = context.applicationContext
         appContext = applicationContext
+        RemoteInputImeProvisioner.ensureConfigured(applicationContext)
+        RemoteInputHubBridge.initialize { path, payload ->
+            sendRemote(BusEnvelope(path = path, payload = payload)) == null
+        }
         if (wifiOwnership == null) {
             synchronized(this) {
                 if (wifiOwnership == null) {
@@ -195,6 +202,7 @@ object GlassesHub {
         if (connected) {
             TtsController.onPhoneLinkAvailable()
             announceRendererCapabilities()
+            RemoteInputHubBridge.onLinkAvailable()
         }
     }
 
@@ -206,11 +214,35 @@ object GlassesHub {
         if (connected) {
             TtsController.onPhoneLinkAvailable()
             announceRendererCapabilities()
+            RemoteInputHubBridge.onLinkAvailable()
         }
     }
 
     fun onRemoteEnvelope(envelope: BusEnvelope) {
         log("remote RX ${envelope.path} id=${envelope.id}")
+        if (envelope.path == RemoteInputContract.COMMAND_PATH ||
+            envelope.path == RemoteNavigationContract.REQUEST_PATH
+        ) {
+            val handled = envelope.binary == null &&
+                RemoteInputHubBridge.handle(envelope.path, envelope.payload)
+            if (!handled) sendRemote(errorEnvelope(envelope.id, "INVALID_CORE_REQUEST"))
+            return
+        }
+        if (envelope.path == NativeAppContract.REQUEST_PATH) {
+            val context = appContext
+            val handled = context != null && envelope.binary == null &&
+                NativeAppsController.handle(context, envelope.payload) { payload ->
+                    sendRemote(
+                        BusEnvelope(
+                            path = NativeAppContract.RESULT_PATH,
+                            id = envelope.id,
+                            payload = payload,
+                        ),
+                    ) == null
+                }
+            if (!handled) sendRemote(errorEnvelope(envelope.id, "INVALID_NATIVE_APP_REQUEST"))
+            return
+        }
         if (envelope.path == BusPaths.HUB_CAPABILITIES) {
             updateRemotePhoneCapabilities(envelope.payload)
             return

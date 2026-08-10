@@ -49,6 +49,7 @@ class MainActivity : Activity() {
     private lateinit var updateSection: LinearLayout
     private lateinit var setupProgressSection: LinearLayout
     private lateinit var setupSection: LinearLayout
+    private lateinit var coreControlsSection: LinearLayout
     private lateinit var pluginSection: LinearLayout
     private lateinit var toggleButton: Button
     private lateinit var gearIcon: ImageView
@@ -184,12 +185,14 @@ class MainActivity : Activity() {
         }
 
         pluginSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        coreControlsSection = buildCoreControlsSection()
         updateSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         setupProgressSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val content = NexusUi.contentColumn(this).apply {
             addView(updateSection, NexusUi.block())
             addView(setupProgressSection, NexusUi.block())
             addView(setupSection, NexusUi.block())
+            addView(coreControlsSection, NexusUi.block())
             addView(pluginSection, NexusUi.block())
         }
 
@@ -226,6 +229,37 @@ class MainActivity : Activity() {
         rebuildPluginSection()
         renderUpdateSection()
         setContentView(root)
+    }
+
+    private fun buildCoreControlsSection(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(
+            NexusUi.sectionRow(this@MainActivity, "Glasses controls", "Built in"),
+            NexusUi.block(),
+        )
+        addView(BusTheme.gap(this@MainActivity, 14))
+        addView(
+            NexusUi.navCard(
+                this@MainActivity,
+                "Keyboard & remote",
+                "Type live into the active glasses field and navigate from your phone.",
+            ) {
+                startActivity(Intent(this@MainActivity, RemoteInputActivity::class.java))
+            },
+            NexusUi.block(),
+        )
+        addView(BusTheme.gap(this@MainActivity, 9))
+        addView(
+            NexusUi.navCard(
+                this@MainActivity,
+                "Glasses apps",
+                "Browse and open Android apps installed on the glasses.",
+            ) {
+                startActivity(Intent(this@MainActivity, NativeAppsActivity::class.java))
+            },
+            NexusUi.block(),
+        )
+        addView(BusTheme.gap(this@MainActivity, 22))
     }
 
     private fun renderPhoneState() {

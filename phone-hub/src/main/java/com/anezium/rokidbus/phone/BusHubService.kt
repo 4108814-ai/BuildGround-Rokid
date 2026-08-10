@@ -46,6 +46,7 @@ import com.anezium.rokidbus.shared.ImageSurfaceMetadata
 import com.anezium.rokidbus.shared.ImageSurfaceValidationResult
 import com.anezium.rokidbus.shared.LinkStateBits
 import com.anezium.rokidbus.shared.MediaArtworkContract
+import com.anezium.rokidbus.shared.NativeAppContract
 import com.anezium.rokidbus.shared.PhoneHubCapabilities
 import com.anezium.rokidbus.shared.NoticeCloseReason
 import com.anezium.rokidbus.shared.NoticeSurfaceContract
@@ -53,6 +54,8 @@ import com.anezium.rokidbus.shared.NoticeSurfaceValidationResult
 import com.anezium.rokidbus.shared.PhoneHubCapabilitiesContract
 import com.anezium.rokidbus.shared.PinSurfaceContract
 import com.anezium.rokidbus.shared.PinSurfaceValidationResult
+import com.anezium.rokidbus.shared.RemoteInputContract
+import com.anezium.rokidbus.shared.RemoteNavigationContract
 import com.anezium.rokidbus.shared.SetupPairingFailureReason
 import com.anezium.rokidbus.shared.SetupPairingOfferContract
 import com.anezium.rokidbus.shared.TtsContract
@@ -270,6 +273,7 @@ class BusHubService : Service() {
     private lateinit var cameraCompanionController: CameraCompanionController
     private lateinit var pluginGuardianCoordinator: PluginGuardianCoordinator
     private lateinit var mediaSyncCoordinator: MediaSyncCoordinator
+    private lateinit var coreRemoteBridge: PhoneCoreRemoteBridge
     private lateinit var manualPairingEngine: GlassesManualPairingEngine
     private var manualPairingEngineSubscription: Closeable? = null
     private val phoneAssistedSetupOfferPolicy = PhoneAssistedSetupOfferPolicy()
@@ -636,6 +640,13 @@ class BusHubService : Service() {
         super.onCreate()
         NexusPhoneState.restore(applicationContext)
         activeInstance = this
+        coreRemoteBridge = PhoneCoreRemoteBridge(
+            context = applicationContext,
+            sendRemote = ::sendRemote,
+            isConnected = {
+                linkState() and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) != 0
+            },
+        ).also(PhoneCoreRemoteBridge::start)
         val phoneSpeakerRouteProbe = PhoneSpeakerRouteProbe(applicationContext) {
             prefs().getString(PREF_LAST_GLASSES_ADDRESS, null)
         }
@@ -978,6 +989,7 @@ class BusHubService : Service() {
         if (::pluginRegistry.isInitialized) pluginRegistry.close()
         if (::cameraCompanionController.isInitialized) cameraCompanionController.close()
         if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.close()
+        if (::coreRemoteBridge.isInitialized) coreRemoteBridge.close()
         synchronized(phoneAssistedPairingLock) { activePhoneAssistedPairing = null }
         manualPairingEngineSubscription?.close()
         manualPairingEngineSubscription = null
@@ -1281,6 +1293,20 @@ class BusHubService : Service() {
             // The glasses persist the boot-repair switch, but a reinstall or a toggle flipped
             // while the link was down leaves them stale; ride the same edge the consent does.
             executor.execute { pushGlassesRepairConfig() }
+            return
+        }
+        if (envelope.path == RemoteInputContract.SESSION_PATH ||
+            envelope.path == RemoteInputContract.STATUS_PATH ||
+            envelope.path == RemoteNavigationContract.RESULT_PATH ||
+            envelope.path == NativeAppContract.RESULT_PATH
+        ) {
+            val handled = ::coreRemoteBridge.isInitialized && coreRemoteBridge.handleRemote(envelope)
+            recordRemoteRoute(
+                envelope,
+                if (handled) PluginBusJournal.Verdict.OK else PluginBusJournal.Verdict.REJECTED,
+                if (handled) null else "INVALID_CORE_RESULT",
+            )
+            if (!handled) sendRemote(errorEnvelope(envelope.id, "INVALID_CORE_RESULT"))
             return
         }
         if (envelope.path == BusPaths.GLASSES_SETUP_NOTE) {
@@ -5057,6 +5083,9 @@ class BusHubService : Service() {
         val previousTransportState = lastTransportLinkState
         lastTransportLinkState = state
         val transportBits = LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP
+        if (::coreRemoteBridge.isInitialized) {
+            coreRemoteBridge.onLinkStateChanged(state and transportBits != 0)
+        }
         if (::pluginGuardianCoordinator.isInitialized) {
             pluginGuardianCoordinator.onLinkStateChanged(state and transportBits != 0)
         }

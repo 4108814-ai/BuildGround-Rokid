@@ -5,6 +5,8 @@
     <string name="accessibility_service_label" translatable="false">Rokid Nexus Glasses</string>
     <string name="accessibility_service_description">Runs Nexus controls and guides secure Wireless Debugging pairing during first-run setup.</string>
     <string name="accessibility_service_summary">Nexus controls and secure first-run setup</string>
+    <string name="remote_input_method_label" translatable="false">Rokid Nexus Remote Keyboard</string>
+    <string name="remote_input_method_description">Type on the glasses from your paired phone. Text is never saved by Nexus.</string>
 
     <!-- First-run onboarding, shown on the lens. Keep lines short: the optic fits ~29 columns. -->
     <string name="onb_footer">Tap: continue · Back: exit</string>

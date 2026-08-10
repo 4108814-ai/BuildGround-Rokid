@@ -38,6 +38,10 @@
         <intent>
             <action android:name="com.anezium.rokidbus.action.CLIENT" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
 
     <application
@@ -98,6 +102,21 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/rokidbus_accessibility_service" />
+        </service>
+
+        <!-- This IME intentionally draws no keyboard on the AR display. Once selected by the
+             wearer, it keeps Android's InputConnection available for the paired phone UI. -->
+        <service
+            android:name=".NexusRemoteInputMethodService"
+            android:exported="true"
+            android:label="@string/remote_input_method_label"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/nexus_remote_input_method" />
         </service>
 
         <service

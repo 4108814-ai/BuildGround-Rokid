@@ -72,6 +72,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
         wirelessDebuggingAutomator = SelfArmWirelessDebuggingAutomator(this, main)
         developerOptionsEnabler = SelfArmDeveloperOptionsEnabler(this, main)
         liveInstance = this
+        RemoteNavigationController.onServiceConnected(this)
         log("AccessibilityService connected; starting glasses hub")
         RingFocusBroadcastCoordinator.onServiceConnected(
             this,
@@ -371,6 +372,7 @@ class RokidBusAccessibilityService : AccessibilityService() {
         wirelessDebuggingAutomator = null
         developerOptionsEnabler = null
         if (liveInstance === this) liveInstance = null
+        RemoteNavigationController.onServiceDestroyed(this)
         LauncherOverlayRenderer.onServiceDestroyed(this)
         StatusBadgeOverlayRenderer.onServiceDestroyed(this)
         PinOverlayRenderer.onServiceDestroyed(this)

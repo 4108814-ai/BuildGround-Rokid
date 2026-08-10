@@ -185,4 +185,43 @@
     <string name="a11y_check_pass">Check passed: %1$s</string>
     <string name="a11y_check_fail">Check failed: %1$s</string>
     <string name="a11y_busy">Working, please wait.</string>
+
+    <!-- ===== System-wide glasses keyboard and remote ===== -->
+    <string name="remote_input_title">Glasses control</string>
+    <string name="remote_input_keyboard_section">Live keyboard</string>
+    <string name="remote_input_remote_section">Remote</string>
+    <string name="remote_input_hint">Type here</string>
+    <string name="remote_input_live_help">Every edit appears on the glasses immediately. There is no Send button.</string>
+    <string name="remote_input_enter">Enter</string>
+    <string name="remote_input_close">Close</string>
+    <string name="remote_input_previous">Previous</string>
+    <string name="remote_input_next">Next</string>
+    <string name="remote_input_select">Select</string>
+    <string name="remote_input_back">Back</string>
+    <string name="remote_input_remote_help">Move through any native glasses app without touching the lens.</string>
+    <string name="remote_input_status_connecting">Checking the glasses link</string>
+    <string name="remote_input_status_connecting_body">Nexus is asking the glasses for the active field.</string>
+    <string name="remote_input_status_disconnected">Glasses disconnected</string>
+    <string name="remote_input_status_disconnected_body">Reconnect the glasses to use the keyboard and remote.</string>
+    <string name="remote_input_status_waiting">Ready for a text field</string>
+    <string name="remote_input_status_waiting_body">Select a field on the glasses. The phone keyboard will open here.</string>
+    <string name="remote_input_status_ready">Text field active</string>
+    <string name="remote_input_status_ready_body">Typing is live. Nexus does not read or display the existing field contents.</string>
+    <string name="remote_input_private_mode">PRIVATE INPUT · CAPTURES, AUTOFILL AND SAVING OFF</string>
+    <string name="remote_input_no_remote_content">REMOTE CONTENT IS NEVER MIRRORED</string>
+
+    <!-- ===== Native glasses apps skeleton ===== -->
+    <string name="native_apps_title">Glasses apps</string>
+    <string name="native_apps_intro">Open ordinary Android apps that live on the glasses. Installation support will connect here without turning them into Nexus plugins.</string>
+    <string name="native_apps_section">On your glasses</string>
+    <string name="native_apps_loading">Checking your glasses</string>
+    <string name="native_apps_loading_body">Nexus is waiting for the glasses app catalogue.</string>
+    <string name="native_apps_empty">No native apps yet</string>
+    <string name="native_apps_empty_body">Compatible native apps will appear here when discovery is connected.</string>
+    <string name="native_apps_error">Apps unavailable</string>
+    <string name="native_apps_refresh">Refresh</string>
+    <string name="native_apps_retry">Try again</string>
+    <string name="native_apps_open">Open</string>
+    <string name="native_apps_install">Install</string>
+    <string name="native_apps_back">Go back</string>
 </resources>
