@@ -70,6 +70,10 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
     init {
         clipChildren = false
         clipToPadding = false
+        // The card is the page's opaque canvas: Rokid's own AIUI host never lets
+        // the screen behind show through, so pages don't author a background and
+        // the accessibility-overlay window beneath must not bleed into the page.
+        setBackgroundColor(BusTheme.glassesBg)
         addView(rootFlex, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(rootAbsolute, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }

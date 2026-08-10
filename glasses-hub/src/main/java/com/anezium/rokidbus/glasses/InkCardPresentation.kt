@@ -31,10 +31,10 @@ internal fun surfaceHudMode(kind: String): SurfaceHudMode =
     if (kind == NexusSurface.KIND_INK) SurfaceHudMode.INK_CARD else SurfaceHudMode.FULL_BLEED
 
 /**
- * What the surface host paints around the surface itself. An Ink page draws its
- * own border, background and padding, so the host contributes nothing and the
- * panel around the card stays transparent; every other kind keeps the
- * full-bleed panel.
+ * What the surface host paints around the surface itself. An Ink card is its
+ * own opaque canvas ([InkHudView] backs itself with the theme black), so the
+ * host contributes nothing and the panel around the card stays transparent;
+ * every other kind keeps the full-bleed panel.
  *
  * This is a value rather than a pair of methods because `SurfaceHudView` cannot
  * be instantiated under Robolectric (`ReaderSurfaceView` calls an API the
