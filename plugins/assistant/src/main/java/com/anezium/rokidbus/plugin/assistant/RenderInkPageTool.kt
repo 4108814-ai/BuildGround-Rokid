@@ -72,7 +72,7 @@ internal val RENDER_INK_PAGE_TOOL_DESCRIPTION = """
     Render a rich Nexus Ink page on the glasses as optional presentation alongside the required normal text answer. Use it for numbers, comparisons, trends, metric layouts, or multi-value/animated status; do not use it for plain prose.
     Prefer render_template when one of its fixed layouts fits; use this tool for freeform pages.
 
-    Nexus Ink v1 supports view, text, asset-only image, scroll-view, progress, chart (line/area/pie/radar/bar), lottie-view, and nx-canvas; wx:if/elif/else, wx:for, interpolation, and bounded expressions. Set display:flex explicitly on every layout container. No <script setup>, JavaScript, URLs, filters, keyframes, or media queries. Page <=32 KiB, data <=16 KiB, total <=64 KiB, <=256 nodes, <=4 chart series x 256 points, <=512 canvas commands, and each Lottie JSON <=32 KiB. Monochrome only: do not author color styling; identify every chart series/point by label.
+    Nexus Ink v1 supports view, text, asset-only image, scroll-view, progress, chart (line/area/pie/radar/bar), lottie-view, and nx-canvas; wx:if/elif/else, wx:for, interpolation, and bounded expressions. Set display:flex explicitly on every layout container. No <script setup>, JavaScript, URLs, filters, keyframes, or media queries. Page <=32 KiB, data <=16 KiB, total <=64 KiB, <=256 nodes, <=4 chart series x 256 points, <=512 canvas commands, and each Lottie JSON <=32 KiB. Monochrome only: do not author color styling; identify every chart series/point by label. Do not paint a page background or outer frame: the host renders every page as a framed opaque card.
 
     Compact example page:
     <script type="application/json" def>{"data":{"title":"Trend","points":[{"label":"Now","value":1}]}}</script>

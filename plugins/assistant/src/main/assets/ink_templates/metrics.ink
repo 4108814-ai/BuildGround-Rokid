@@ -32,7 +32,6 @@
   box-sizing: border-box;
   padding: 18rpx;
   color: var(--color-text-primary);
-  background-color: var(--color-background);
 }
 .title {
   color: var(--color-primary);
