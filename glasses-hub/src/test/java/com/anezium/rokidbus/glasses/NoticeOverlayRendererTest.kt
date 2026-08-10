@@ -67,15 +67,12 @@ class NoticeOverlayRendererTest {
     }
 
     @Test
-    fun `engaged notice sets the window flag and passive notice clears it`() {
-        assertTrue(
-            noticeWindowFlags(keepScreenOn = true) and
-                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0,
-        )
-        assertFalse(
-            noticeWindowFlags(keepScreenOn = false) and
-                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0,
-        )
+    fun `a notice window keeps the screen on for as long as it is up`() {
+        val flags = noticeWindowFlags()
+
+        assertTrue(flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0)
+        assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+        assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE != 0)
     }
 
     @Test

@@ -21,10 +21,19 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
-internal fun noticeWindowFlags(keepScreenOn: Boolean): Int =
+/**
+ * The ROM sleeps the display five seconds after the last input (vendor-set
+ * `screen_off_timeout`), which is shorter than a notice's own life -- a dictated
+ * reply once died mid-flow under a dark screen. The window exists exactly as
+ * long as the notice does, so holding the screen here cannot outlive what
+ * warrants it. On this firmware the flag alone does not actually stop the
+ * panel; the assistant's episode wake lock is what does. Both are kept: the
+ * flag costs nothing and other firmware honours it.
+ */
+internal fun noticeWindowFlags(): Int =
     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
         WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-        (if (keepScreenOn) WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON else 0)
+        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
 
 internal fun noticeBackdropAlpha(fadeAlpha: Float, backdrop: Boolean): Float =
     if (backdrop) fadeAlpha else 0f
@@ -98,7 +107,6 @@ object NoticeOverlayRenderer {
     private var hudTopInsetDp = 0
     private var exitRunning = false
     private var renderedSeq: Long? = null
-    private var keepScreenOn = false
     private var inkMorph: NoticeInkMorphToken? = null
 
     private val slide = HudMotionValue(0f) { offset -> band?.translationY = offset }
@@ -201,12 +209,6 @@ object NoticeOverlayRenderer {
             fade.cancel()
             slide.snapTo(0f)
         }
-        setKeepScreenOn(
-            NoticeDisplayHoldPolicy.noticeHoldsDisplay(
-                surfaceId = notice.surfaceId,
-                engaged = notice.content.interactive,
-            ),
-        )
         backdrop = notice.content.backdrop
         scrim?.alpha = noticeBackdropAlpha(fade.current, backdrop)
         val activeService = service ?: return
@@ -248,12 +250,8 @@ object NoticeOverlayRenderer {
     }
 
     private fun dismiss() {
-        if (container == null) {
-            setKeepScreenOn(false)
-            return
-        }
+        if (container == null) return
         if (noticeDismissMotion(inkMorph != null) == NoticeDismissMotion.INK_FADE_IN_PLACE) return
-        setKeepScreenOn(false)
         exitRunning = true
         slide.animateTo(-bandHeightPx.toFloat(), HudMotion.EXIT_MS, HudMotion.exit)
         fade.animateTo(0f, HudMotion.EXIT_MS, HudMotion.exit) { teardown() }
@@ -322,26 +320,14 @@ object NoticeOverlayRenderer {
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            noticeWindowFlags(keepScreenOn),
+            noticeWindowFlags(),
             PixelFormat.TRANSLUCENT,
         ).apply { gravity = Gravity.TOP or Gravity.START }
-    }
-
-    private fun setKeepScreenOn(active: Boolean) {
-        if (keepScreenOn == active) return
-        keepScreenOn = active
-        val manager = windowManager ?: return
-        val root = container ?: return
-        val layout = (root.layoutParams as? WindowManager.LayoutParams) ?: params(root.context)
-        layout.flags = noticeWindowFlags(active)
-        runCatching { manager.updateViewLayout(root, layout) }
-            .onFailure { logError("Notice display hold update failed", it) }
     }
 
     private fun teardown() {
         val root = container
         if (root == null) {
-            keepScreenOn = false
             return
         }
         val seq = renderedSeq ?: -1L
@@ -353,7 +339,6 @@ object NoticeOverlayRenderer {
         inkMorph = null
         backdrop = false
         exitRunning = false
-        keepScreenOn = false
         slide.snapTo(0f)
         fade.snapTo(0f)
         renderedSeq = null
