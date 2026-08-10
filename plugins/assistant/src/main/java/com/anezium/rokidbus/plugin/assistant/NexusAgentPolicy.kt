@@ -25,9 +25,10 @@ internal object NexusAgentPolicy {
     ): String {
         val base = customPrompt.trim().ifBlank { DEFAULT_SYSTEM_PROMPT }
         val productivityToolsAvailable = availableToolNames.any(PRODUCTIVITY_TOOL_NAMES::contains)
+        val calendarToolsAvailable = availableToolNames.any(CALENDAR_TOOL_NAMES::contains)
         return buildString {
             append(base)
-            if (productivityToolsAvailable && currentDateTime != null) {
+            if ((productivityToolsAvailable || calendarToolsAvailable) && currentDateTime != null) {
                 append("\nNow: ")
                 append(currentDateTime.format(CURRENT_TIME_FORMAT))
             }
@@ -58,6 +59,19 @@ internal object NexusAgentPolicy {
                 )
                 append("- Confirm the scheduled time from the tool result in the final answer.\n")
                 append("- Never claim a reminder, timer, or note was saved unless its tool result says so.\n")
+            }
+            if (calendarToolsAvailable) {
+                append(
+                    "- Never claim a calendar event was created or deleted unless its tool result says so.\n",
+                )
+            }
+            if (DELETE_CALENDAR_EVENT_TOOL_NAME in availableToolNames) {
+                append(
+                    "- When the user explicitly asks to delete a calendar event and its exact title and " +
+                        "start are known, call delete_calendar_event directly. If either detail is ambiguous, " +
+                        "call list_calendar_events and ask which event; do not delete in that turn. Delete a " +
+                        "recurring series only when the user explicitly requests the whole series.\n",
+                )
             }
             append("- Give actionable, concise error or retry guidance when something is unavailable.")
             if (noticeBand) {

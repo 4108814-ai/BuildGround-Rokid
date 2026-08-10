@@ -6,7 +6,7 @@ Hold the assist button, ask out loud: the words transcribe live on the HUD, then
 the answer streams into the band, is spoken aloud, or hands over in place to a
 native Ink page. The model can take one photo through the glasses camera when
 the question needs eyes, and it can set reminders and timers, take notes, and
-read them back.
+add, list, or delete events in the phone calendar.
 
 Answers come from the provider the wearer picks in Settings: a ChatGPT plan
 (OAuth, no key to paste), or an API key for OpenAI, OpenRouter, MiniMax,
@@ -17,8 +17,8 @@ Each provider keeps its own encrypted key, model, and endpoint.
 
 Tools go through `AssistantToolRegistry`: every provider declares the tools it
 can run, one client-managed tool phase per request, then the final reply. The
-text tools (notes, reminders, timers) are offered to every provider; only
-`take_photo` additionally requires a model that can see, and photos are
+text tools (notes, reminders, timers, calendar) are offered to every provider;
+only `take_photo` additionally requires a model that can see, and photos are
 stripped gracefully for models that cannot. `render_ink_page` and
 `render_template` can turn suitable results into the same strict compiled Ink
 surface exposed by the public Nexus SDK; the template tool offers seven bounded

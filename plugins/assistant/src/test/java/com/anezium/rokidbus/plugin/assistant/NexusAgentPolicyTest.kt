@@ -105,6 +105,24 @@ class NexusAgentPolicyTest {
         assertFalse(prompt.contains("note was saved"))
     }
 
+    @Test
+    fun `calendar delete policy uses exact details and protects ambiguous recurrence`() {
+        val prompt = NexusAgentPolicy.buildSystemPrompt(
+            currentDateTime = ZonedDateTime.parse("2026-08-07T11:32:00+02:00[Europe/Paris]"),
+            availableToolNames = listOf(
+                LIST_CALENDAR_EVENTS_TOOL_NAME,
+                DELETE_CALENDAR_EVENT_TOOL_NAME,
+            ),
+        )
+
+        assertTrue(prompt.contains("Now: Friday 2026-08-07 11:32 (+02:00 Europe/Paris)"))
+        assertTrue(prompt.contains("call delete_calendar_event directly"))
+        assertTrue(prompt.contains("exact title and start"))
+        assertTrue(prompt.contains("call list_calendar_events and ask which event"))
+        assertTrue(prompt.contains("explicitly requests the whole series"))
+        assertTrue(prompt.contains("Never claim a calendar event was created or deleted"))
+    }
+
     private companion object {
         const val INCIDENT_WEATHER_TRANSCRIPT =
             "ouais c'est quoi la météo de paris aujourd'hui"

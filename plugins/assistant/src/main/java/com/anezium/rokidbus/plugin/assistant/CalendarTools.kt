@@ -16,11 +16,13 @@ import java.util.Locale
 
 internal const val CREATE_CALENDAR_EVENT_TOOL_NAME = "create_calendar_event"
 internal const val LIST_CALENDAR_EVENTS_TOOL_NAME = "list_calendar_events"
+internal const val DELETE_CALENDAR_EVENT_TOOL_NAME = "delete_calendar_event"
 internal const val TOOL_ERROR_CALENDAR_PERMISSION_REQUIRED = "calendar_permission_required"
 
 internal val CALENDAR_TOOL_NAMES = setOf(
     CREATE_CALENDAR_EVENT_TOOL_NAME,
     LIST_CALENDAR_EVENTS_TOOL_NAME,
+    DELETE_CALENDAR_EVENT_TOOL_NAME,
 )
 
 internal data class AssistantCalendarInfo(
@@ -44,11 +46,21 @@ internal data class AssistantCalendarEventWrite(
 )
 
 internal data class AssistantCalendarInstance(
+    val eventId: Long,
     val startMillis: Long,
     val title: String,
     val location: String?,
     val allDay: Boolean,
+    val recurring: Boolean,
 )
+
+internal enum class AssistantCalendarDeleteResult {
+    DELETED,
+    NOT_FOUND,
+    TITLE_MISMATCH,
+    RECURRING_SERIES_CONFIRMATION_REQUIRED,
+    FAILED,
+}
 
 internal interface AssistantCalendarGateway {
     fun canReadCalendar(): Boolean
@@ -58,6 +70,12 @@ internal interface AssistantCalendarGateway {
     fun calendars(): List<AssistantCalendarInfo>
 
     fun createEvent(event: AssistantCalendarEventWrite): Boolean
+
+    fun deleteEvent(
+        eventId: Long,
+        expectedTitle: String,
+        deleteRecurringSeries: Boolean,
+    ): AssistantCalendarDeleteResult
 
     fun instances(
         startMillis: Long,
@@ -73,6 +91,7 @@ internal fun assistantCalendarTools(
 ): List<AssistantToolDefinition> = listOf(
     CreateCalendarEventTool(gateway, zoneId),
     ListCalendarEventsTool(gateway, epochClock, zoneId),
+    DeleteCalendarEventTool(gateway, zoneId),
 )
 
 internal class CreateCalendarEventTool(
@@ -210,6 +229,146 @@ internal class ListCalendarEventsTool(
                 }
                 .toString(),
         )
+    }
+}
+
+internal class DeleteCalendarEventTool(
+    private val gateway: AssistantCalendarGateway,
+    private val zoneId: () -> ZoneId = { ZoneId.systemDefault() },
+) : TextAssistantTool() {
+    override val name = DELETE_CALENDAR_EVENT_TOOL_NAME
+    override val description =
+        "Delete exactly one event from the phone's real calendar. Use this tool directly " +
+            "when the user explicitly asks to delete or cancel a calendar event and its exact " +
+            "title and start are known. The tool refuses zero or multiple matches. If those " +
+            "details are ambiguous, list events and ask the user which one instead. For a " +
+            "recurring event, deletion removes the whole series and delete_recurring_series " +
+            "must be true only when the user explicitly asked to delete the series."
+    override val parametersSchema = AssistantToolJsonSchema(
+        """{"type":"object","properties":{"title":{"type":"string","minLength":1,"description":"Exact event title"},"start":{"type":"string","description":"ISO-8601 local or offset date-time; use a date for an all-day event"},"all_day":{"type":"boolean"},"delete_recurring_series":{"type":"boolean","description":"True only after an explicit request to delete the whole recurring series"}},"required":["title","start","all_day","delete_recurring_series"],"additionalProperties":false}""",
+    )
+    override val sideEffecting = true
+    override val progressLabel = "Deleting calendar event"
+    override val executionFailureCode = "calendar_event_delete_failed"
+
+    override fun validate(argumentsJson: String): AssistantToolValidation {
+        val arguments = strictCalendarArguments(
+            argumentsJson,
+            setOf("title", "start", "all_day", "delete_recurring_series"),
+        ) ?: return AssistantToolValidation.Invalid()
+        val title = arguments.optionalString("title")
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?: return AssistantToolValidation.Invalid(
+                AssistantToolResult.Error("calendar_event_title_required"),
+            )
+        val startText = arguments.optionalString("start")
+            ?: return AssistantToolValidation.Invalid(
+                AssistantToolResult.Error("invalid_calendar_start"),
+            )
+        val allDay = arguments.opt("all_day") as? Boolean
+            ?: return AssistantToolValidation.Invalid()
+        val deleteRecurringSeries = arguments.opt("delete_recurring_series") as? Boolean
+            ?: return AssistantToolValidation.Invalid()
+        val startMillis = runCatching {
+            if (allDay) {
+                parseLocalDate(startText)
+                    ?.atStartOfDay(ZoneOffset.UTC)
+                    ?.toInstant()
+                    ?.toEpochMilli()
+            } else {
+                parseTimedDateTime(startText, zoneId())?.instant?.toEpochMilli()
+            }
+        }.getOrNull() ?: return AssistantToolValidation.Invalid(
+            AssistantToolResult.Error("invalid_calendar_start"),
+        )
+        return AssistantToolValidation.Valid(
+            JSONObject()
+                .put("title", title)
+                .put("start_millis", startMillis)
+                .put("all_day", allDay)
+                .put("delete_recurring_series", deleteRecurringSeries),
+        )
+    }
+
+    override suspend fun execute(
+        call: AssistantToolCall,
+        arguments: JSONObject,
+    ): AssistantToolResult = withContext(Dispatchers.IO) {
+        if (!gateway.canReadCalendar() || !gateway.canWriteCalendar()) {
+            return@withContext calendarPermissionError()
+        }
+        val title = arguments.getString("title")
+        val startMillis = arguments.getLong("start_millis")
+        val allDay = arguments.getBoolean("all_day")
+        val searchStart = if (allDay) startMillis else startMillis - DELETE_TIME_TOLERANCE_MS
+        val searchEnd = if (allDay) {
+            Instant.ofEpochMilli(startMillis).plusSeconds(SECONDS_PER_DAY).toEpochMilli()
+        } else {
+            startMillis + DELETE_TIME_TOLERANCE_MS
+        }
+        val matches = gateway.instances(
+            startMillis = searchStart,
+            endMillis = searchEnd,
+            limit = MAX_CALENDAR_INSTANCES + 1,
+        ).filter { instance ->
+            instance.allDay == allDay &&
+                instance.title.ifBlank { "Untitled event" }.equals(title, ignoreCase = true) &&
+                if (allDay) {
+                    instance.startMillis == startMillis
+                } else {
+                    instance.startMillis / MILLIS_PER_MINUTE == startMillis / MILLIS_PER_MINUTE
+                }
+        }
+        if (matches.isEmpty()) {
+            return@withContext AssistantToolResult.Error("calendar_event_not_found")
+        }
+        if (matches.size > 1) {
+            return@withContext AssistantToolResult.Error(
+                code = "calendar_event_ambiguous",
+                detailsJson = JSONObject()
+                    .put(
+                        "message",
+                        "More than one event has that title and start time. Ask the user " +
+                            "which event to delete.",
+                    )
+                    .toString(),
+            )
+        }
+        val target = matches.single()
+        val expectedTitle = target.title.ifBlank { "Untitled event" }
+        when (
+            gateway.deleteEvent(
+                eventId = target.eventId,
+                expectedTitle = expectedTitle,
+                deleteRecurringSeries = arguments.getBoolean("delete_recurring_series"),
+            )
+        ) {
+            AssistantCalendarDeleteResult.DELETED -> AssistantToolResult.Json(
+                JSONObject()
+                    .put("deleted", true)
+                    .put("event_id", target.eventId)
+                    .put("title", expectedTitle)
+                    .toString(),
+            )
+            AssistantCalendarDeleteResult.NOT_FOUND ->
+                AssistantToolResult.Error("calendar_event_not_found")
+            AssistantCalendarDeleteResult.TITLE_MISMATCH ->
+                AssistantToolResult.Error("calendar_event_changed")
+            AssistantCalendarDeleteResult.RECURRING_SERIES_CONFIRMATION_REQUIRED ->
+                AssistantToolResult.Error(
+                    code = "calendar_recurring_series_confirmation_required",
+                    detailsJson = JSONObject()
+                        .put(
+                            "message",
+                            "This is a recurring event. Ask the user whether to delete the " +
+                                "whole series, then retry only if they explicitly confirm.",
+                        )
+                        .toString(),
+                )
+            AssistantCalendarDeleteResult.FAILED ->
+                AssistantToolResult.Error(executionFailureCode)
+        }
     }
 }
 
@@ -419,6 +578,7 @@ private fun AssistantCalendarEventWrite.humanReadableStart(zoneId: ZoneId): Stri
 
 private fun AssistantCalendarInstance.toResultJson(zoneId: ZoneId): JSONObject =
     JSONObject()
+        .put("event_id", eventId)
         .put(
             "start",
             if (allDay) {
@@ -436,6 +596,7 @@ private fun AssistantCalendarInstance.toResultJson(zoneId: ZoneId): JSONObject =
         .put("title", title.ifBlank { "Untitled event" })
         .apply { location?.takeIf(String::isNotBlank)?.let { put("location", it) } }
         .put("all_day", allDay)
+        .put("recurring", recurring)
 
 private fun calendarPermissionError(): AssistantToolResult.Error =
     AssistantToolResult.Error(
@@ -453,6 +614,9 @@ private const val DEFAULT_CALENDAR_DURATION_MINUTES = 60L
 private const val DEFAULT_CALENDAR_DAYS = 7
 private const val MAX_CALENDAR_DAYS = 31
 private const val MAX_CALENDAR_INSTANCES = 50
+private const val MILLIS_PER_MINUTE = 60_000L
+private const val DELETE_TIME_TOLERANCE_MS = MILLIS_PER_MINUTE
+private const val SECONDS_PER_DAY = 86_400L
 private const val NORMALIZED_TITLE = "normalized_title"
 private const val NORMALIZED_START_MILLIS = "normalized_start_millis"
 private const val NORMALIZED_END_MILLIS = "normalized_end_millis"

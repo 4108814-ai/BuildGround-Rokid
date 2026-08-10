@@ -22,6 +22,9 @@
   tells you and the reminder waits on the HUD for your return.
 - It can also list what is pending, cancel a reminder by name, and search your
   notes back — all out loud, mid-conversation.
+- **Your phone calendar is a real tool too.** Ask it to add an appointment,
+  read what is coming up, or delete one by its exact title and start time.
+  Ambiguous matches and recurring series are refused instead of guessed.
 - **Notes & reminders**, a new section in settings, is where all of it lands:
   read a note in full, delete one, cancel a reminder before it rings. Nothing
   leaves the phone.

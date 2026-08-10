@@ -93,6 +93,47 @@ internal class AndroidCalendarGateway(
         return results.firstOrNull()?.uri?.let(ContentUris::parseId) != null
     }
 
+    override fun deleteEvent(
+        eventId: Long,
+        expectedTitle: String,
+        deleteRecurringSeries: Boolean,
+    ): AssistantCalendarDeleteResult {
+        val eventUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId)
+        val event = resolver.query(
+            eventUri,
+            arrayOf(
+                CalendarContract.Events.TITLE,
+                CalendarContract.Events.RRULE,
+                CalendarContract.Events.RDATE,
+            ),
+            null,
+            null,
+            null,
+        )?.use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            val storedTitle = cursor.getString(
+                cursor.getColumnIndexOrThrow(CalendarContract.Events.TITLE),
+            ).orEmpty().ifBlank { "Untitled event" }
+            val recurring = listOf(
+                CalendarContract.Events.RRULE,
+                CalendarContract.Events.RDATE,
+            ).any { column ->
+                !cursor.getString(cursor.getColumnIndexOrThrow(column)).isNullOrBlank()
+            }
+            storedTitle to recurring
+        } ?: return AssistantCalendarDeleteResult.NOT_FOUND
+
+        if (event.first != expectedTitle) return AssistantCalendarDeleteResult.TITLE_MISMATCH
+        if (event.second && !deleteRecurringSeries) {
+            return AssistantCalendarDeleteResult.RECURRING_SERIES_CONFIRMATION_REQUIRED
+        }
+        return if (resolver.delete(eventUri, null, null) == 1) {
+            AssistantCalendarDeleteResult.DELETED
+        } else {
+            AssistantCalendarDeleteResult.FAILED
+        }
+    }
+
     override fun instances(
         startMillis: Long,
         endMillis: Long,
@@ -103,10 +144,13 @@ internal class AndroidCalendarGateway(
             ContentUris.appendId(this, endMillis)
         }.build()
         val projection = arrayOf(
+            CalendarContract.Instances.EVENT_ID,
             CalendarContract.Instances.BEGIN,
             CalendarContract.Instances.TITLE,
             CalendarContract.Instances.EVENT_LOCATION,
             CalendarContract.Instances.ALL_DAY,
+            CalendarContract.Instances.RRULE,
+            CalendarContract.Instances.RDATE,
         )
         return resolver.query(
             uri,
@@ -115,20 +159,29 @@ internal class AndroidCalendarGateway(
             null,
             CalendarContract.Instances.BEGIN + " ASC",
         )?.use { cursor ->
+            val eventIdColumn = cursor.getColumnIndexOrThrow(CalendarContract.Instances.EVENT_ID)
             val startColumn = cursor.getColumnIndexOrThrow(CalendarContract.Instances.BEGIN)
             val titleColumn = cursor.getColumnIndexOrThrow(CalendarContract.Instances.TITLE)
             val locationColumn = cursor.getColumnIndexOrThrow(
                 CalendarContract.Instances.EVENT_LOCATION,
             )
             val allDayColumn = cursor.getColumnIndexOrThrow(CalendarContract.Instances.ALL_DAY)
+            val recurrenceColumns = listOf(
+                CalendarContract.Instances.RRULE,
+                CalendarContract.Instances.RDATE,
+            ).map(cursor::getColumnIndexOrThrow)
             buildList {
                 while (size < limit && cursor.moveToNext()) {
                     add(
                         AssistantCalendarInstance(
+                            eventId = cursor.getLong(eventIdColumn),
                             startMillis = cursor.getLong(startColumn),
                             title = cursor.getString(titleColumn).orEmpty(),
                             location = cursor.getString(locationColumn),
                             allDay = cursor.getInt(allDayColumn) == 1,
+                            recurring = recurrenceColumns.any { column ->
+                                !cursor.getString(column).isNullOrBlank()
+                            },
                         ),
                     )
                 }

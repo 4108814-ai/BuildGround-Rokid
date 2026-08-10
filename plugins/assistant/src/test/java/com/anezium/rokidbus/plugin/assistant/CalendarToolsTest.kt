@@ -285,6 +285,218 @@ class CalendarToolsTest {
     }
 
     @Test
+    fun `delete calendar event requires an exact title and parseable start`() = runTest {
+        val gateway = FakeCalendarGateway()
+        val tool = deleteTool(gateway)
+
+        assertEquals(
+            AssistantToolResult.Error("calendar_event_title_required"),
+            execute(
+                tool,
+                """{"title":"  ","start":"2026-08-10T09:30:00","all_day":false,"delete_recurring_series":false}""",
+            ),
+        )
+        assertEquals(
+            AssistantToolResult.Error("invalid_calendar_start"),
+            execute(
+                tool,
+                """{"title":"Planning","start":"tomorrow","all_day":false,"delete_recurring_series":false}""",
+            ),
+        )
+        assertEquals(
+            AssistantToolResult.Error(TOOL_ERROR_INVALID_CALL),
+            execute(
+                tool,
+                """{"title":"Planning","start":"2026-08-10T09:30:00","all_day":false,"delete_recurring_series":false,"all":true}""",
+            ),
+        )
+        assertTrue(gateway.deleteRequests.isEmpty())
+    }
+
+    @Test
+    fun `successful delete passes the listed identity and reports it`() = runTest {
+        val startMillis = epochAtParis(2026, 8, 10, 9, 30)
+        val gateway = FakeCalendarGateway(
+            instanceResults = listOf(
+                calendarInstance(eventId = 42L, startMillis = startMillis, title = "Planning"),
+            ),
+            deleteResult = AssistantCalendarDeleteResult.DELETED,
+        )
+
+        val result = execute(
+            deleteTool(gateway),
+            """{"title":"Planning","start":"2026-08-10T09:30:00","all_day":false,"delete_recurring_series":false}""",
+        ) as AssistantToolResult.Json
+
+        assertEquals(
+            InstanceRequest(startMillis - 60_000L, startMillis + 60_000L, 51),
+            gateway.instanceRequests.single(),
+        )
+        assertEquals(
+            DeleteRequest(42L, "Planning", deleteRecurringSeries = false),
+            gateway.deleteRequests.single(),
+        )
+        val json = JSONObject(result.text)
+        assertTrue(json.getBoolean("deleted"))
+        assertEquals(42L, json.getLong("event_id"))
+        assertEquals("Planning", json.getString("title"))
+    }
+
+    @Test
+    fun `all-day delete searches the exact UTC calendar day`() = runTest {
+        val startMillis = LocalDate.of(2026, 8, 11)
+            .atStartOfDay(ZoneOffset.UTC)
+            .toInstant()
+            .toEpochMilli()
+        val gateway = FakeCalendarGateway(
+            instanceResults = listOf(
+                calendarInstance(
+                    eventId = 44L,
+                    startMillis = startMillis,
+                    title = "Holiday",
+                    allDay = true,
+                ),
+            ),
+        )
+
+        execute(
+            deleteTool(gateway),
+            """{"title":"Holiday","start":"2026-08-11","all_day":true,"delete_recurring_series":false}""",
+        )
+
+        assertEquals(
+            InstanceRequest(startMillis, startMillis + 86_400_000L, 51),
+            gateway.instanceRequests.single(),
+        )
+        assertEquals(
+            DeleteRequest(44L, "Holiday", deleteRecurringSeries = false),
+            gateway.deleteRequests.single(),
+        )
+    }
+
+    @Test
+    fun `explicit recurring series delete passes the destructive scope`() = runTest {
+        val gateway = FakeCalendarGateway(
+            instanceResults = listOf(
+                calendarInstance(
+                    eventId = 45L,
+                    startMillis = epochAtParis(2026, 8, 10, 9, 30),
+                    title = "Weekly planning",
+                    recurring = true,
+                ),
+            ),
+        )
+
+        execute(
+            deleteTool(gateway),
+            """{"title":"Weekly planning","start":"2026-08-10T09:30:00","all_day":false,"delete_recurring_series":true}""",
+        )
+
+        assertEquals(
+            DeleteRequest(45L, "Weekly planning", deleteRecurringSeries = true),
+            gateway.deleteRequests.single(),
+        )
+    }
+
+    @Test
+    fun `delete calendar event maps safe gateway refusals`() = runTest {
+        val instance = calendarInstance(
+            eventId = 42L,
+            startMillis = epochAtParis(2026, 8, 10, 9, 30),
+            title = "Planning",
+        )
+        val cases = listOf(
+            AssistantCalendarDeleteResult.NOT_FOUND to "calendar_event_not_found",
+            AssistantCalendarDeleteResult.TITLE_MISMATCH to "calendar_event_changed",
+            AssistantCalendarDeleteResult.FAILED to "calendar_event_delete_failed",
+        )
+
+        cases.forEach { (gatewayResult, expectedCode) ->
+            val result = execute(
+                deleteTool(
+                    FakeCalendarGateway(
+                        instanceResults = listOf(instance),
+                        deleteResult = gatewayResult,
+                    ),
+                ),
+                """{"title":"Planning","start":"2026-08-10T09:30:00","all_day":false,"delete_recurring_series":false}""",
+            )
+
+            assertEquals(AssistantToolResult.Error(expectedCode), result)
+        }
+    }
+
+    @Test
+    fun `delete calendar event refuses missing and ambiguous matches`() = runTest {
+        val missing = execute(
+            deleteTool(FakeCalendarGateway()),
+            """{"title":"Planning","start":"2026-08-10T09:30:00","all_day":false,"delete_recurring_series":false}""",
+        )
+        val duplicateGateway = FakeCalendarGateway(
+            instanceResults = listOf(
+                calendarInstance(
+                    eventId = 42L,
+                    startMillis = epochAtParis(2026, 8, 10, 9, 30),
+                    title = "Planning",
+                ),
+                calendarInstance(
+                    eventId = 43L,
+                    startMillis = epochAtParis(2026, 8, 10, 9, 30),
+                    title = "planning",
+                ),
+            ),
+        )
+        val ambiguous = execute(
+            deleteTool(duplicateGateway),
+            """{"title":"Planning","start":"2026-08-10T09:30:00","all_day":false,"delete_recurring_series":false}""",
+        ) as AssistantToolResult.Error
+
+        assertEquals(AssistantToolResult.Error("calendar_event_not_found"), missing)
+        assertEquals("calendar_event_ambiguous", ambiguous.code)
+        assertTrue(JSONObject(ambiguous.detailsJson!!).getString("message").contains("More than one"))
+        assertTrue(duplicateGateway.deleteRequests.isEmpty())
+    }
+
+    @Test
+    fun `recurring delete requires explicit whole series confirmation`() = runTest {
+        val result = execute(
+            deleteTool(
+                FakeCalendarGateway(
+                    instanceResults = listOf(
+                        calendarInstance(
+                            eventId = 42L,
+                            startMillis = epochAtParis(2026, 8, 10, 9, 30),
+                            title = "Weekly planning",
+                            recurring = true,
+                        ),
+                    ),
+                    deleteResult =
+                        AssistantCalendarDeleteResult.RECURRING_SERIES_CONFIRMATION_REQUIRED,
+                ),
+            ),
+            """{"title":"Weekly planning","start":"2026-08-10T09:30:00","all_day":false,"delete_recurring_series":false}""",
+        ) as AssistantToolResult.Error
+
+        assertEquals("calendar_recurring_series_confirmation_required", result.code)
+        assertTrue(JSONObject(result.detailsJson!!).getString("message").contains("whole series"))
+    }
+
+    @Test
+    fun `delete calendar event reports missing read or write permission`() = runTest {
+        val missingRead = execute(
+            deleteTool(FakeCalendarGateway(readAllowed = false)),
+            """{"title":"Planning","start":"2026-08-10T09:30:00","all_day":false,"delete_recurring_series":false}""",
+        ) as AssistantToolResult.Error
+        val missingWrite = execute(
+            deleteTool(FakeCalendarGateway(writeAllowed = false)),
+            """{"title":"Planning","start":"2026-08-10T09:30:00","all_day":false,"delete_recurring_series":false}""",
+        ) as AssistantToolResult.Error
+
+        assertCalendarPermissionGuidance(missingRead)
+        assertCalendarPermissionGuidance(missingWrite)
+    }
+
+    @Test
     fun `list calendar events defaults to seven days and caps at thirty one`() = runTest {
         val gateway = FakeCalendarGateway()
         val tool = listTool(gateway)
@@ -333,22 +545,28 @@ class CalendarToolsTest {
         val gateway = FakeCalendarGateway(
             instanceResults = listOf(
                 AssistantCalendarInstance(
+                    eventId = 101L,
                     startMillis = Instant.parse("2026-08-11T00:00:00Z").toEpochMilli(),
                     title = "Holiday",
                     location = null,
                     allDay = true,
+                    recurring = false,
                 ),
                 AssistantCalendarInstance(
+                    eventId = 102L,
                     startMillis = epochAtParis(2026, 8, 10, 9, 30),
                     title = "",
                     location = "Room 4",
                     allDay = false,
+                    recurring = true,
                 ),
                 AssistantCalendarInstance(
+                    eventId = 103L,
                     startMillis = epochAtParis(2026, 8, 10, 11, 0),
                     title = "Remote",
                     location = "   ",
                     allDay = false,
+                    recurring = false,
                 ),
             ),
         )
@@ -364,12 +582,16 @@ class CalendarToolsTest {
         assertEquals(PARIS_ZONE.id, json.getString("time_zone"))
         assertFalse(json.has("truncated"))
         assertEquals("2026-08-11", allDay.getString("start"))
+        assertEquals(101L, allDay.getLong("event_id"))
         assertEquals("Holiday", allDay.getString("title"))
         assertTrue(allDay.getBoolean("all_day"))
+        assertFalse(allDay.getBoolean("recurring"))
         assertFalse(allDay.has("location"))
+        assertEquals(102L, timed.getLong("event_id"))
         assertEquals("Untitled event", timed.getString("title"))
         assertEquals("Room 4", timed.getString("location"))
         assertFalse(timed.getBoolean("all_day"))
+        assertTrue(timed.getBoolean("recurring"))
         assertEquals("2026-08-10T09:30:00", timed.getString("start"))
         assertFalse(blankLocation.has("location"))
     }
@@ -379,10 +601,12 @@ class CalendarToolsTest {
         val gateway = FakeCalendarGateway(
             instanceResults = (1..51).map { index ->
                 AssistantCalendarInstance(
+                    eventId = index.toLong(),
                     startMillis = NOW_EPOCH_MS + index * 60_000L,
                     title = "Event $index",
                     location = null,
                     allDay = false,
+                    recurring = false,
                 )
             },
         )
@@ -415,6 +639,9 @@ class CalendarToolsTest {
             zoneId = { PARIS_ZONE },
         )
 
+    private fun deleteTool(gateway: AssistantCalendarGateway): DeleteCalendarEventTool =
+        DeleteCalendarEventTool(gateway) { PARIS_ZONE }
+
     private fun rangeEnd(days: Long): Long = Instant.ofEpochMilli(NOW_EPOCH_MS)
         .atZone(PARIS_ZONE)
         .plusDays(days)
@@ -435,15 +662,24 @@ class CalendarToolsTest {
         val limit: Int,
     )
 
+    private data class DeleteRequest(
+        val eventId: Long,
+        val expectedTitle: String,
+        val deleteRecurringSeries: Boolean,
+    )
+
     private class FakeCalendarGateway(
         private val readAllowed: Boolean = true,
         private val writeAllowed: Boolean = true,
         private val calendarResults: List<AssistantCalendarInfo> = listOf(calendar()),
         private val createSucceeds: Boolean = true,
         private val instanceResults: List<AssistantCalendarInstance> = emptyList(),
+        private val deleteResult: AssistantCalendarDeleteResult =
+            AssistantCalendarDeleteResult.DELETED,
     ) : AssistantCalendarGateway {
         val createdEvents = mutableListOf<AssistantCalendarEventWrite>()
         val instanceRequests = mutableListOf<InstanceRequest>()
+        val deleteRequests = mutableListOf<DeleteRequest>()
 
         override fun canReadCalendar(): Boolean = readAllowed
 
@@ -454,6 +690,15 @@ class CalendarToolsTest {
         override fun createEvent(event: AssistantCalendarEventWrite): Boolean {
             createdEvents += event
             return createSucceeds
+        }
+
+        override fun deleteEvent(
+            eventId: Long,
+            expectedTitle: String,
+            deleteRecurringSeries: Boolean,
+        ): AssistantCalendarDeleteResult {
+            deleteRequests += DeleteRequest(eventId, expectedTitle, deleteRecurringSeries)
+            return deleteResult
         }
 
         override fun instances(
@@ -470,6 +715,21 @@ class CalendarToolsTest {
         val NO_VISION = AssistantProviderFeatures(supportsTools = true, supportsVision = false)
         val PARIS_ZONE: ZoneId = ZoneId.of("Europe/Paris")
         val NOW_EPOCH_MS: Long = Instant.parse("2026-08-10T10:00:00Z").toEpochMilli()
+
+        fun calendarInstance(
+            eventId: Long,
+            startMillis: Long,
+            title: String,
+            allDay: Boolean = false,
+            recurring: Boolean = false,
+        ) = AssistantCalendarInstance(
+            eventId = eventId,
+            startMillis = startMillis,
+            title = title,
+            location = null,
+            allDay = allDay,
+            recurring = recurring,
+        )
 
         fun calendar(
             id: Long = 1L,
