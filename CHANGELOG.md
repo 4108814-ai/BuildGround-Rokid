@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+- **Ink pages are a public HUD surface.** Plugins with the separate
+  `ink_surface` grant can submit a strict, inert subset of Rokid's `.ink`
+  format through the typed SDK, patch its data without resending the page, and
+  receive ready, action, close, and typed validation-error callbacks. The phone
+  compiles the page into bounded revisioned documents; the glasses render it
+  with native Views, charts, inline Lottie, progress, and declarative canvas —
+  no WebView, JavaScript, URL loading, or page-side network access. Assistant
+  uses the same path for generated pages and template-driven results.
+- **The phone can control native glasses apps.** The new Glasses apps screen
+  lists and opens launchable APKs already installed on the glasses. Keyboard &
+  remote adds previous/next/select/back navigation plus an ephemeral phone
+  keyboard for the editor currently focused on the glasses. The hub-to-hub
+  protocol is versioned, replay-safe, and unavailable to plugins; sensitive
+  fields secure the phone window and existing editor contents are never copied
+  back to the phone. Native APK installation is not part of this release.
+- **Assistant answers stay visible through their whole display episode.** A
+  single episode owner now spans the listening band, handover, and answer
+  surface. Notice windows keep their normal screen-on flag, while the
+  Assistant's scoped wake lock covers the band-to-card or band-to-Ink handover
+  and is released when that episode ends.
+
 ## 1.3.0
 
 - **Wireless ADB can be enabled and paired without driving Settings.** The

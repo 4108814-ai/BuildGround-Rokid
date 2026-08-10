@@ -662,3 +662,74 @@ device. If a test seems to need Wi-Fi, something is wrong.
 - **Consent after a glasses hub restart**: force-stop only the glasses hub. When
   it comes back it must request config and resume working without touching the
   phone hub (this is what previously needed a phone-side force-stop).
+
+## Ink Surface v1 validation
+
+Software gate:
+
+```powershell
+.\gradlew.bat :shared:test :ink-engine:test :bus-client:testDebugUnitTest :plugin-sample:testDebugUnitTest :plugin-sample:assembleDebug -PskipCxrGlobal=true
+.\gradlew.bat :phone-hub:testDebugUnitTest :phone-hub:assembleDebug :glasses-hub:testDebugUnitTest :glasses-hub:assembleDebug
+```
+
+On both devices:
+
+- Install current hubs and Sample, request/approve `ink_surface`, open Sample,
+  and confirm its Ink page appears before the card fallback. Revoke only
+  `ink_surface`: the page must be rejected while ordinary `surfaces` still
+  works. Adding the grant back requires explicit re-approval.
+- Activate **Tap to update** repeatedly. Confirm one action callback per tap,
+  the metric/row/chart patch in place without a full surface flash, monotonically
+  increasing revisions, and no stale patch repaint after hide/reopen.
+- Force a lost patch or inject a debug `resync` and confirm the phone resends one
+  complete current document, no more than once per second. A document-id or
+  revision mismatch must request resync rather than mutate the wrong page.
+- Open another plugin while Ink is visible, then return. Confirm the old owner
+  receives `REPLACED`, cannot repaint after replacement, and a competing
+  show/update receives `SURFACE_BUSY` without retry churn.
+- Drop SPP while Ink is visible. Confirm `LINK_LOST`, local compiler-session
+  cleanup, and a card fallback on the next open until `supportsInkSurface`
+  becomes true again.
+- Exercise chart animation, inline Lottie, progress, canvas, DPAD focus/scroll,
+  tap dataset, and BACK on the 480×640 HUD. Record frame time, CPU, PSS, and
+  display/battery behavior for M5; do not mark hardware conformance complete
+  from JVM screenshots alone.
+- Submit pages over every source/data/node/depth/chart/canvas/Lottie limit, plus
+  `<script setup>`, a URL as a Lottie source, unsupported selectors/styles,
+  malformed expressions, and unknown wire fields. Confirm typed `INK_*`
+  problems, no crash, no network request, and no partial page left visible.
+  An `image` URL is a separate negative case: it may label the v1 placeholder
+  but must never be fetched or decoded.
+
+## Native apps, remote input, and navigation validation
+
+Software gate:
+
+```powershell
+.\gradlew.bat :shared:test :phone-hub:testDebugUnitTest :phone-hub:assembleDebug :glasses-hub:testDebugUnitTest :glasses-hub:assembleDebug
+```
+
+On both devices:
+
+- Open **Glasses apps** on the phone. Confirm the list contains launchable
+  native packages only, excludes the Nexus glasses hub, is label-sorted, and
+  opens the selected installed app. An unknown/non-launchable package must fail
+  visibly. Confirm there is no install action or APK transfer.
+- Open **Keyboard & remote** and exercise previous, next, select, and back in a
+  native app. Each unique request must perform at most once; replay the same
+  request id and confirm the cached result returns without a second action.
+  Stop the glasses AccessibilityService and confirm `service_unavailable`
+  rather than a silent success.
+- Focus an ordinary text field on the glasses. Confirm a new random session
+  opens on the phone, commit/composition/delete/editor-action deltas apply in
+  sequence, duplicate sequence values are not applied twice, and an out-of-order
+  command reports the expected sequence. Change focus, close the phone screen,
+  and drop transport; each must end/clear the old session.
+- Focus a password or other sensitive editor. Confirm the phone window sets
+  `FLAG_SECURE`, the UI identifies the sensitive session, screenshots are
+  blocked, and neither existing field text nor surrounding/selected/extracted
+  text appears in bus inspection, preferences, saved state, or logs. Only the
+  newly typed transient delta may cross to the glasses.
+- From a test plugin, attempt every `/core/native-apps/*`,
+  `/core/remote-input/*`, and `/core/navigation/*` path and receive prefix.
+  Confirm the hub rejects them before routing regardless of the plugin's grants.

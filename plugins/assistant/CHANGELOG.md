@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Answers can become native interactive pages.** The assistant can author a
+  strict Ink page or choose one of seven bounded templates for results that
+  benefit from layout, charts, progress, or an action. The same phone compiler,
+  native glasses renderer, typed limits, and `ink_surface` grant used by public
+  plugins apply; plain text/card output remains the fallback.
+- **The answer no longer goes dark during handover.** Listening, processing,
+  and the final card or Ink page now share one display episode. Its scoped wake
+  lock survives the band-to-surface morph and is released when that episode
+  actually ends.
+
 ## 1.3.0
 
 - **Ask it to remember, and it will.** Say "remind me in twenty minutes to

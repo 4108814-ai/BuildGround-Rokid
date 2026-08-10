@@ -87,7 +87,7 @@ Copy `plugins/sample` as the canonical template. The hard rules:
 | Plugin id | 3–64 chars, `[a-z][a-z0-9._-]{2,63}` (lowercase start), unique on the device |
 | Display name | ≤ 80 chars |
 | API version | exactly **3** |
-| Capabilities | subset of `surfaces`, `http_proxy`, `microphone`, `stt`, `tts`, `camera`, `mediasync`, `assistant`, `wireless_debugging` (`stt` grants hub-produced text without raw PCM; microphone needs no Android `RECORD_AUDIO` because PCM arrives over the hub; `tts` speaks text out of the glasses; `mediasync` moves the wearer's captures to the phone gallery; `wireless_debugging` can expose ADB on the current LAN and mint temporary pairing codes) |
+| Capabilities | subset of `surfaces`, `ink_surface`, `http_proxy`, `microphone`, `stt`, `tts`, `camera`, `mediasync`, `assistant`, `wireless_debugging` (`ink_surface` is the separate grant for compiled interactive Ink pages; `stt` grants hub-produced text without raw PCM; microphone needs no Android `RECORD_AUDIO` because PCM arrives over the hub; `tts` speaks text out of the glasses; `mediasync` moves the wearer's captures to the phone gallery; `wireless_debugging` can expose ADB on the current LAN and mint temporary pairing codes) |
 | Receive prefixes | non-empty, normalized, within your authorized namespace `/plugin/<id>/…` |
 | Signer | exactly one current signing certificate |
 | UID | not shared with another discovered plugin |
@@ -101,7 +101,8 @@ with the concrete reason visible when Developer details is enabled.
 install → discovery → user approval (Plugin access) → glasses launcher open
   → hub binds service → registration (5 s timeout)
   → PLUGIN_OPEN (ack within 4 s or the hub cold-rebinds once, then gives up)
-  → /surface/show → input events → /surface/hide (self-close) or PLUGIN_CLOSE
+  → /surface/show or /ink/show → input/action events
+  → /surface/hide or /ink/hide (self-close) or PLUGIN_CLOSE
   → unbind, FGS dropped, back to dormant
 ```
 
@@ -114,7 +115,7 @@ Facts you must build around:
 - **Open is re-entrant.** A fresh `PLUGIN_OPEN` re-invokes `onNexusOpen` even if the
   SDK thought you were open: reset your state and re-show. The SDK dedupes the most
   recent 128 lifecycle ids, and callbacks are serialized on the main thread.
-- **Hiding your last visible surface is a close.** The hub treats it as self-close,
+- **Hiding your last visible surface, including Ink, is a close.** The hub treats it as self-close,
   delivers `PLUGIN_CLOSE`, and unbinds you. That is the correct way to exit on BACK
   from your root view.
 - **One plugin owns the HUD at a time.** While another plugin is foreground, your
@@ -132,7 +133,8 @@ Paths a plugin can **send to** (gated by capability):
 
 | Path | Capability | Purpose |
 |---|---|---|
-| `/surface/show`, `/surface/update`, `/surface/hide` | `surfaces` | HUD surface lifecycle (typed models: card, timed lines, media, image) |
+| `/surface/show`, `/surface/update`, `/surface/hide` | `surfaces` | HUD surface lifecycle (typed models: card, reader, timed lines, media, image) |
+| `/ink/show`, `/ink/update`, `/ink/hide` | `ink_surface` | Compiled interactive Ink lifecycle. Use `nexusInkSurfaceSession(id)`; `/ink/event` is the owner-only direct callback path for ready/action/closed/error and needs no receive prefix. |
 | `/http/request` → `/http/request/reply` | `http_proxy` | Phone-side HTTP proxy (strict policy, §9) |
 | `/audio/lease/acquire`, `/audio/lease/release` (+ `/reply` suffixes), `/audio/frames`, `/audio/lease/revoked` | `microphone` | Glasses mic lease + 16 kHz mono PCM frames. Use the SDK's `nexusAudioSession(callbacks)` rather than these paths directly. |
 | `/stt/session/start`, `/stt/session/stop` (+ replies), `/stt/state`, `/stt/partial`, `/stt/final`, `/stt/session/ended` | `stt` | Hub speech-to-text, targeted to the verified session binder. Use `nexusSpeechSession(callbacks)`; never log transcripts. |
@@ -146,8 +148,10 @@ Paths a plugin **receives** (reserved, hub-generated — you never send these):
 `/system/plugin/registration`, `/system/plugin/open`, `/system/plugin/close`,
 `/system/plugin/input`, `/glasses/device-info`, plus deliveries into your
 `/plugin/<id>/…` namespace.
-Reserved sender roots you can never use: `/launcher`, `/surface/input`, `/system`,
-`/security`, `/error`. Rejections and undeliverable traffic come back on `/error`.
+Reserved sender roots you can never use: `/launcher`, `/surface/input`, `/ink/event`,
+`/core`, `/system`, `/security`, `/error`. Rejections and undeliverable traffic
+come back on `/error`. `/core/native-apps/*`, `/core/remote-input/*`, and
+`/core/navigation/*` are trusted phone-hub/glasses-hub controls, never plugin APIs.
 
 Every approved, live registration receives glasses hardware signals without an
 additional capability grant. `onNexusLinkState` includes
@@ -165,6 +169,9 @@ binary frame is dropped, not retried.
 |---|---|
 | Surface JSON payload | 64 KiB (SDK preflight — fails locally) |
 | Local surface id | `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` |
+| Ink source/data | page ≤ 32 KiB UTF-8; merged data or update patch ≤ 16 KiB UTF-8; local id uses the surface-id rule |
+| Ink render document | ≤ 64 KiB, 256 nodes, depth 32; patch ≤ 64 KiB / 1,024 changes |
+| Ink rich components | chart ≤ 4 series and 256 points per series; canvas ≤ 512 commands at ≤ 30 fps; inline Lottie JSON ≤ 32 KiB |
 | Card | ≤ 64 rows; title ≤ 120; line/subtitle/footer ≤ 240; **contentKey ≤ 128** (hash long keys!); badge ≤ 24; ≤ 8 trail entries of ≤ 24 |
 | Timed lines | ≤ 2 000 entries, non-negative times |
 | Image surface | JPEG/PNG ≤ 64 KiB compressed, edges ≤ 512 px, ≤ 512² total px, ≥ 150 ms between updates |
@@ -221,11 +228,63 @@ central ~60% of the canvas); the Store downloads and shows it via the feed's
 (and update `iconAsset` accordingly): phones cache store icons by URL for seven
 days, so replacing the bytes at the same URL leaves stale icons on devices.
 
-The HUD renders **structured rows**, not free text: build `NexusCard` /
-`NexusTimedLines` / `NexusMedia` / image surfaces and let the glasses lay them out.
+The ordinary surface API renders **structured rows**, not free text: build
+`NexusCard` / `NexusReader` / `NexusTimedLines` / `NexusMedia` / image surfaces
+and let the glasses lay them out. For an authored layout, use a separately
+granted `NexusInkSurfaceSession`: the phone compiles a strict `.ink` subset into
+an inert document and the glasses project it to native Views. Ink v1 executes no
+JavaScript, fetches no URLs, and exposes only bounded data binding plus action
+ids; use the typed SDK instead of hand-building `/ink/*` payloads. An Ink
+`image` is currently a placeholder reference because the public session has no
+asset transfer; use the ordinary image surface for real pixels.
+
 Never pre-format monospace strings. Input arrives as DPAD-style events
 (`/system/plugin/input`): forward/back swipes, tap (ENTER), BACK. BACK at your root
 = hide your surface (self-close, §5).
+
+### Ink pages
+
+Declare `ink_surface`, create one session per local surface id, and gate rich UI
+on the live renderer bit. `supportsInkSurface` reports Ink v1 plus SPP, while
+`show` separately checks the plugin grant. Keep a card fallback for either kind
+of failure.
+
+```kotlin
+private var ink: NexusInkSurfaceSession? = null
+
+override fun onNexusOpen() {
+    ink = nexusInkSurfaceSession("main")
+    val shown = nexusClient?.supportsInkSurface == true &&
+        ink?.show(
+            page = INK_PAGE,
+            data = JSONObject().put("value", "72"),
+            handlesBack = false,
+        ) == NexusSdkResult.SENT
+    if (!shown) {
+        nexusSurfaceSession("main")?.showCard(NexusCard("Status", listOf("72")))
+    }
+}
+
+override fun onNexusInkAction(surfaceId: String, actionId: String, dataset: JSONObject) {
+    if (surfaceId == "main" && actionId == "refresh") {
+        ink?.update(JSONObject().put("value", "73"))
+    }
+}
+
+override fun onNexusInkError(surfaceId: String, problems: List<NexusInkProblem>) {
+    // Surface the typed problems in developer diagnostics; do not retry-loop.
+}
+```
+
+An SFC contains one JSON `<script def>` with an optional `data` object, one `<page>`, and
+an optional `<style>`. `<script setup>` is rejected. V1 supports interpolation,
+bounded expressions, `wx:if`/`wx:elif`/`wx:else`, `wx:for`, class-based styles,
+`view`, `text`, `scroll-view`, `chart`, `progress`, inline-JSON `lottie-view`,
+and declarative `nx-canvas`. A `bindtap="refresh"` or `catchtap="refresh"`
+emits that action id; `data-*` attributes become its callback dataset. Updates
+are set-data-style patches, so nested keys such as `metrics[0].value` are valid.
+The complete example is `plugins/sample` and the full API is in
+`docs/PLUGIN_SDK.md`.
 
 ## 9. HTTP proxy policy
 
@@ -243,7 +302,7 @@ host to the allowlist is a hub change — open an issue.
   the **Bus inspector** unlocks below the toggle.
 - **Bus inspector** (Settings → Advanced → Bus inspector) — a live journal of the
   last 500 bus events, filterable per plugin: registrations (including every
-  rejection code), opens/closes, surface show/update/hide, input, transport choice,
+  rejection code), opens/closes, surface and Ink show/update/hide/event, input, transport choice,
   binary drops — rejections show in amber with their reason (`SURFACE_BUSY`,
   `PENDING_USER_APPROVAL`, capability denied, payload too large, …). The journal
   records only while developer mode is on.

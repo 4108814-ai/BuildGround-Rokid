@@ -1,6 +1,7 @@
 # Plan 020 — Ink Surface: a native port of the AIUI page format
 
-**Status:** approved direction, spec for implementation
+**Status:** implemented on `main`; M1–M4 complete, M5 hardware conformance and
+measurement remain
 **Supersedes:** the first draft of this plan (rich-surface tiers over Rokid's live AIUI runtime). The runtime path was proven on device and then deliberately set aside — it depends on private firmware surfaces and composes with nothing. Everything learned about it is preserved in [docs/AIUI_RUNTIME.md](../docs/AIUI_RUNTIME.md); this plan does not use it.
 
 ## 1. What this is
@@ -15,7 +16,8 @@ Why port the format instead of inventing a schema or driving their runtime:
 - **No firmware dependency.** The page renders in our overlay with our lifecycle, input, BACK semantics, and single-owner arbitration. Rokid updates can't break it.
 - **Legally clean.** Reimplementing a published Apache-2.0 spec without touching their (closed, native) runtime is standard compatible-implementation work.
 
-The first consumer is the Assistant plugin (an LLM tool that renders `.ink` pages); the public plugin SDK follows.
+The first consumer is the Assistant plugin (LLM-authored and template-driven
+`.ink` pages). The public plugin SDK and Sample reference are implemented too.
 
 ## 2. Compatibility doctrine
 
@@ -47,7 +49,15 @@ A page is a `.ink` single-file component. V1 accepts three of its four blocks:
 - Expression subset: literals, data paths, `!`, comparisons, `&&`/`||`, arithmetic, ternary. **No function calls, no assignment, no member access beyond data paths.** The evaluator is a bounded interpreter (depth/step limits), not `eval`.
 - Event attributes `bindtap` / `catchtap` (and the input events of supported components): the handler name becomes an **action id** delivered to the plugin (`onInkAction(id, dataset)`), with `data-*` attributes as the dataset — matching AIUI authoring shape without executing anything.
 
-**Components:** `view`, `text`, `image` (assets only, see §6), `scroll-view`, and list rendering via `wx:for`; `chart` per the official contract — `line`, `area`, `pie`, `radar` (multi-series, axes, smoothing, `animate`), plus `bar` flagged sample-derived; `lottie-view` (inline or asset JSON, autoplay/loop/speed/progress, size-capped, green-tinted); `progress`; **`nx-canvas`** — our declarative extension: a JSON array of draw commands mirroring `CanvasRenderingContext2D` names 1:1 (`moveTo`, `lineTo`, `arc`, `rect`, `fillText`, `setTransform`, gradients…), so the v2 JS canvas reuses the same backend verbatim.
+**Components:** `view`, `text`, `image` (placeholder reference in the delivered
+v1), `scroll-view`, and list rendering via `wx:for`; `chart` per the official
+contract — `line`, `area`, `pie`, `radar` (multi-series, axes, smoothing,
+`animate`), plus `bar` flagged sample-derived; `lottie-view` (inline JSON,
+autoplay/loop/speed/progress, size-capped, green-tinted); `progress`;
+**`nx-canvas`** — our declarative extension: a JSON array of draw commands
+mirroring `CanvasRenderingContext2D` names 1:1 (`moveTo`, `lineTo`, `arc`,
+`rect`, `fillText`, `setTransform`, gradients…), so a future scripted canvas
+can reuse the same backend.
 
 **Styles (WXSS subset):** class selectors (single-class, no combinators v1); flexbox layout (direction, wrap, justify, align, grow/shrink/basis, gap); box model (size, margin, padding, border width/radius); text (size, weight, line-height, align, overflow/ellipsis); `opacity`; `transform` (translate/scale/rotate); `transition` (property allowlist, duration, easing); `rpx` and `%` units; CSS custom properties for the design tokens. **Excluded v1:** keyframe animations (per official docs), filters/blur (banned on these optics by both design systems), positioned layout beyond `relative`/`absolute` basics, media queries.
 
@@ -78,15 +88,26 @@ data (init + patches) ──► binding engine (expr interpreter, dirty tracking
 
 `ink` is a **foreground surface tier** sharing the existing single-owner arbitration (`SURFACE_BUSY` semantics, BACK handling, dpad focus/scroll routing, display-wake on show). It is a sibling of the card surface, *not* a notice: notice bands remain short messages/questions (plan 011); a notice may announce a result and open an ink page on confirm.
 
-Wire shape (existing surface channel, existing 64 KiB envelope):
-- `/ink/show` — normalized page document + initial data + asset manifest.
-- `/ink/update` — data patch (small; coalesced ≤ 4/s).
-- `/ink/hide`, plus owner-only events back: `ready`, `action(id, dataset)`, `closed(reason)`, `error(code)`.
-- Budgets v1: ≤ 32 KiB page document, ≤ 16 KiB data, ≤ 64 KiB total with assets, ≤ 256 nodes, ≤ 4 chart series × 256 points, ≤ 512 canvas commands, ≤ 32 KiB per Lottie JSON. Tightened or raised after M5 measurement.
+Implemented wire shape:
+- Plugins send authored source and initial data on `/ink/show`, set-data patches
+  on `/ink/update`, and idempotent teardown on `/ink/hide`.
+- The phone owns the compiler session and forwards validated documents/patches
+  through the existing `/surface/show`, `/surface/update`, and `/surface/hide`
+  channel with `kind:"ink"`.
+- `/ink/event` is an owner-only direct callback path for `ready`,
+  `action(id,dataset)`, `closed(reason)`, and typed `error` problems. Glasses
+  `resync` requests stay internal and trigger a rate-limited full document.
+- Budgets v1: ≤ 32 KiB authored page, ≤ 16 KiB merged data/update patch,
+  ≤ 64 KiB compiled document or render patch, ≤ 256 nodes/depth 32,
+  ≤ 1,024 patch changes, ≤ 4 chart series × 256 points, ≤ 512 canvas commands
+  at ≤ 30 fps, ≤ 32 KiB inline Lottie JSON.
 
 ## 6. Assets and security
 
-- **Inert by construction (v1):** no script block, no URLs anywhere (`image`/`lottie` reference only names in the call's asset manifest — bytes shipped over the channel, size-capped, image-decoded phone-side into safe bitmaps), no external fetch of any kind from the page.
+- **Inert by construction (v1):** no executable script, no URL loading, and no
+  external fetch of any kind from the page. Lottie accepts inline JSON only.
+  The public session has no asset map; `image` therefore renders a placeholder
+  reference and real pixels use the ordinary image surface.
 - The expression interpreter is bounded (no recursion into user code — there is none) and fuzzed in M5.
 - Plugins need the new signer-bound **`ink_surface`** grant (distinct from `surfaces`, visible re-approval on request-set change).
 - Everything a page can *do* is: render, animate, and emit action ids. Capability creep (JS, network) arrives only with v2's sandboxed runtime, gated by the same grant system.
@@ -94,14 +115,17 @@ Wire shape (existing surface channel, existing 64 KiB envelope):
 ## 7. SDK and Assistant integration
 
 ```kotlin
-val ink = client.inkSurfaceSession()
-ink.show(page = inkText, data = json, assets = mapOf("logo" to bytes))
+val ink = client.inkSurfaceSession("main")
+ink.show(page = inkText, data = json, handlesBack = false)
 ink.update(data = patch)
-ink.close()
-// callbacks: onInkReady(), onInkAction(id, dataset), onInkClosed(reason), onInkError(code)
+ink.hide()
+// callbacks include surfaceId:
+// onInkReady, onInkAction, onInkClosed, onInkError
 ```
 
-Feature detection follows the existing pattern (capability bit + link state → `CAPABILITY_NOT_AVAILABLE` fallback to cards). The API is designed public from day one but stays Assistant-only until M4.
+Feature detection follows the existing pattern (capability bit + link state →
+`CAPABILITY_NOT_AVAILABLE` fallback to cards). M4 is complete: the API is public
+and Sample exercises it in addition to Assistant.
 
 **Assistant tool `render_ink_page`:** arguments = `{ page, data?, title? }`. Tool availability requires active session + grant + capability bit. Prompting reuses the official `aiui-dev` reference plus our delta doc ("what Nexus Ink v1 supports/rejects"); the fallback is today's text card, always produced. Side-effecting tool rules (once per phase, validated, memoized) apply unchanged. The model authors real `.ink` — the format it already knows from Rokid's own docs.
 
@@ -109,10 +133,10 @@ Feature detection follows the existing pattern (capability bit + link state → 
 
 | # | Milestone | Contents | Size |
 |---|---|---|---|
-| M1 | **Core engine** | SFC splitter, WXML/WXSS parsers + hub-side validator, binding engine with expression interpreter, flexbox composition, `view`/`text`/`image`/`scroll-view`, `wx:if`/`wx:for`, transitions, actions/dataset routing, `ink` tier plumbing (show/update/hide, arbitration, input), dev harness (render a local .ink from the phone). | **L** |
-| M2 | **Rich components** | `chart` (line/area/pie/radar/bar), `lottie-view`, `nx-canvas`, `progress`; value-change animations; asset manifest pipeline. | **M** |
-| M3 | **Assistant tool** | `render_ink_page` in the tool registry, prompting pack (aiui-dev + delta doc), card fallback, UX policy (when to render). First user-visible release. | **S–M** |
-| M4 | **Public SDK** | `ink_surface` grant, typed session API, docs + sample plugin, support-matrix doc. | **M** |
+| M1 | **Core engine — complete** | SFC splitter, WXML/WXSS parsers + hub-side validator, binding engine with expression interpreter, flexbox composition, `view`/`text`/`image`/`scroll-view`, `wx:if`/`wx:for`, transitions, actions/dataset routing, `ink` tier plumbing (show/update/hide, arbitration, input), dev harness. | **L** |
+| M2 | **Rich components — complete** | `chart` (line/area/pie/radar/bar), inline `lottie-view`, `nx-canvas`, `progress`, and value-change animations. The proposed asset-manifest API did not ship; image remains a placeholder. | **M** |
+| M3 | **Assistant tool — complete** | `render_ink_page` plus seven templates, prompting delta, card fallback, and display-episode handover. | **S–M** |
+| M4 | **Public SDK — complete** | `ink_surface` grant, typed session API, docs, Sample plugin, and support matrix. | **M** |
 | M5 | **Conformance & hardening** | Official-sample conformance runs (golden screenshots on device), fps/battery budgets measured, expression/parser fuzzing, limits finalized, drift policy vs upstream AIUI releases. | **M** |
 | v2 | **Script runtime** (separate plan when scheduled) | Sandboxed QuickJS: `setData`, timers, page lifecycle, `wx.request` through hub grants, JS-driven canvas on the `nx-canvas` backend. | **L** |
 

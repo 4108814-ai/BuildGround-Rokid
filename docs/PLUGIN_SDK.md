@@ -54,8 +54,10 @@ does not approve it.
 ```
 
 Plugin IDs use `[a-z][a-z0-9._-]{2,63}`. Requested capabilities are `surfaces`,
-`http_proxy`, `microphone`, `stt`, `tts`, `camera`, `mediasync`, `assistant`, and
-`wireless_debugging`. Camera paths
+`ink_surface`, `http_proxy`, `microphone`, `stt`, `tts`, `camera`, `mediasync`,
+`assistant`, and `wireless_debugging`. `ink_surface` is distinct from `surfaces`:
+it grants the phone-side compiler and native glasses renderer for interactive
+Ink pages, and adding it to an existing descriptor requires re-approval. Camera paths
 are protected by the approved signer-bound grant. `microphone` is grantable from
 the phone UI for any plugin that requests it (see §3.1); the plugin needs no
 Android `RECORD_AUDIO` permission — glasses-microphone PCM reaches the plugin
@@ -118,7 +120,7 @@ declared receive prefixes: `onNexusMessage` (JSON envelopes) and
 `onNexusBinaryMessage` (binary frames with their metadata). Hub state rides the
 additive capabilities contracts in `shared`: the phone announces `features`
 plus the camera consumer display name (`PhoneHubCapabilitiesContract`), the
-glasses announce renderer features, image/pin/notice/activity surface versions,
+glasses announce renderer features, image/pin/notice/activity/Ink surface versions,
 image limits, their app version, and onboarding completion
 (`GlassesHubCapabilitiesContract`); unknown fields stay ignorable in both
 directions.
@@ -853,6 +855,142 @@ for the tier you passed. The hub rejects malformed raw traffic with
 (`PIN_RATE_LIMITED`). The glasses overlay is text-only and has no input. The
 sample plugin cycles small pin, medium pin, hidden from its existing tap action
 for on-device validation.
+
+### Ink surfaces
+
+Ink is the authored-layout sibling of a card. The plugin submits a small `.ink`
+single-file component; the phone compiles it on a dedicated thread into a
+bounded, revisioned document, and the glasses render that document with native
+Views. A later `update` carries only set-data-style changes and becomes a
+revision-checked render patch. Ink shares the one foreground surface slot with
+ordinary `/surface/*` content, so `SURFACE_BUSY`, replacement, BACK, link loss,
+and self-close follow the same ownership rules.
+
+Request the separate `ink_surface` capability. Do not add `/ink/event` to
+`RECEIVE_PREFIXES`: it is an owner-scoped direct callback path delivered to the
+registered binder. Check `supportsInkSurface` immediately before `show` or
+`update`; it reports Ink v1 from the glasses plus the live SPP data link. The
+session separately checks that this plugin is approved for `ink_surface`.
+`hide` remains available during teardown even after the renderer bit disappears.
+
+```kotlin
+class StatusPluginService : NexusPluginService() {
+    private var ink: NexusInkSurfaceSession? = null
+    private var card: NexusSurfaceSession? = null
+    private var usingInk = false
+
+    override fun onNexusOpen() {
+        ink = nexusInkSurfaceSession("status")
+        card = nexusSurfaceSession("status")
+        usingInk = nexusClient?.supportsInkSurface == true &&
+            ink?.show(
+                page = STATUS_PAGE,
+                data = JSONObject()
+                    .put("title", "Link")
+                    .put("value", "72"),
+                handlesBack = false,
+            ) == NexusSdkResult.SENT
+        if (!usingInk) showCardFallback()
+    }
+
+    override fun onNexusInkReady(surfaceId: String) = Unit
+
+    override fun onNexusInkAction(
+        surfaceId: String,
+        actionId: String,
+        dataset: JSONObject,
+    ) {
+        if (surfaceId == "status" && actionId == "refresh") {
+            ink?.update(JSONObject().put("value", "73"))
+        }
+    }
+
+    override fun onNexusInkClosed(surfaceId: String, reason: NexusInkCloseReason) {
+        if (surfaceId == "status") usingInk = false
+    }
+
+    override fun onNexusInkError(surfaceId: String, problems: List<NexusInkProblem>) {
+        if (surfaceId == "status") {
+            usingInk = false
+            showCardFallback()
+        }
+    }
+
+    override fun onNexusClose() {
+        if (usingInk) ink?.hide() else card?.hide()
+        ink = null
+        card = null
+        usingInk = false
+    }
+
+    override fun onNexusInput(event: NexusInputEvent) = Unit
+
+    private fun showCardFallback() {
+        card?.showCard(NexusCard("Link", listOf("72")))
+    }
+
+    private companion object {
+        val STATUS_PAGE = """
+            <script type="application/json" def>{"data":{}}</script>
+            <page>
+              <view class="page">
+                <text class="title">{{ title }}</text>
+                <text>{{ value }}</text>
+                <view class="action" bindtap="refresh" data-source="status">
+                  <text>Refresh</text>
+                </view>
+              </view>
+            </page>
+            <style>
+              .page { display: flex; flex-direction: column; gap: 16rpx; padding: 24rpx; }
+              .title { font-size: 40rpx; font-weight: 700; }
+              .action { border-width: 1rpx; padding: 12rpx; }
+            </style>
+        """.trimIndent()
+    }
+}
+```
+
+The accepted single-file blocks are one JSON `<script def>` with an optional
+`data` object, one `<page>`, and an optional `<style>`. `<script setup>` and all
+other executable scripts are rejected. The v1 template subset includes
+interpolation, bounded expressions, `wx:if`/`wx:elif`/`wx:else`, `wx:for` and
+its item/index/key attributes, plus `bindtap`/`catchtap`. The tap handler name is
+the `actionId`; `data-*` attributes become the callback dataset. Update keys use
+set-data paths such as `metrics[0].value` or `rows[2].label`.
+
+Supported components are `view`, `text`, `scroll-view`, `chart` (line, area,
+pie, radar, and the sample-derived bar extension), `progress`, inline-JSON
+`lottie-view`, and declarative `nx-canvas`. `image` is accepted but currently
+renders a placeholder reference: the public session has no asset-transfer
+argument, so use `NexusSurfaceSession.showImage` for real pixels. Styles are a
+strict class-selector/WXSS subset with flexbox, box and text properties,
+opacity, transforms, transitions, `rpx`, percentages, and design-token custom
+properties. Unsupported tags, attributes, selectors, styles, scripts, sources,
+or expressions produce typed `NexusInkProblem` callbacks; they are never
+silently interpreted as arbitrary HTML/CSS.
+
+Ink v1 is inert by construction: no JavaScript, WebView, URL loading, page-side
+network, or arbitrary code execution. Lottie content must be inline JSON. The
+hard public budgets are:
+
+| Area | Limit |
+|---|---|
+| Authored page | 32 KiB UTF-8 |
+| Initial merged data / update patch | 16 KiB UTF-8 |
+| Compiled document / render patch | 64 KiB each |
+| Render tree | 256 nodes, depth 32 |
+| Patch | 1,024 changes |
+| Chart | 4 series, 256 points per series |
+| Canvas | 512 commands, 30 fps maximum |
+| Inline Lottie JSON | 32 KiB |
+
+`show`, `update`, and `hide` return the normal `NexusSdkResult` values. Invalid
+local size input returns `INVALID_PAYLOAD` and immediately calls
+`onNexusInkError`; compiler/renderer problems arrive the same way. Close reasons
+are `USER`, `PLUGIN`, `REPLACED`, `LINK_LOST`, and `RENDERER_ERROR`. The canonical
+working page and data-patch flow are in
+[`plugins/sample`](../plugins/sample/src/main/java/com/anezium/rokidbus/plugin/sample/HelloPluginService.kt).
 
 ### 3.1 Microphone (audio lease)
 

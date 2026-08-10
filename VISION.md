@@ -1,6 +1,6 @@
 # Rokid Nexus — Product Vision
 
-Status: 2026-07-18 — sections 1–4 are the founding vision (consolidated
+Status: 2026-08-10 — sections 1–4 are the founding vision (consolidated
 2026-07-07 from the QUESTIONS.md working session) and still govern every design
 decision. Sections 5–6 track where the platform stands and what remains. Wire
 and protocol details live in BUSSPEC.md.
@@ -19,8 +19,8 @@ Seamlessness comes from three properties, all validated on hardware:
 - **Wake-on-message** — a plugin does not need to be running to receive traffic; the
   hub binds it awake.
 - **A single hub-owned CXR-L session** — no more apps fighting over the link.
-- **Declarative surfaces** — plugins push content descriptions; the glasses hub renders
-  them locally. Zero glasses-side deployment.
+- **Declarative surfaces** — plugins push structured content or inert compiled
+  Ink pages; the glasses hub renders them locally. Zero glasses-side plugin deployment.
 
 Because plugins are plain phone APKs against a published `:bus-client` library, Nexus
 is not an app — it is a **platform** third-party developers can target, with RokidBrew
@@ -34,7 +34,7 @@ Everything the user sees on the HUD belongs to one of four layers:
 |---|---|---|
 | **Ambient** | Silent surface updates (lyrics advancing, glanceables refreshing) | Plugin, continuously |
 | **Toast** | Brief, non-blocking notice; latest wins, hub rate-limited | Plugin, throttled by hub |
-| **Surface** | Full interactive surface (card, timed-lines, future kinds) | Plugin via launcher or user action |
+| **Surface** | Full interactive surface (card, reader, timed-lines, media, image, compiled Ink) | Plugin via launcher or user action |
 | **Native apps** | Real glasses APKs (Scouter, NewPipe…) — outside Nexus, but launchable from the menu | User |
 
 Interruption rules:
@@ -52,9 +52,10 @@ Interruption rules:
 
 - **Triple-tap** on the touchpad opens the Nexus menu from anywhere. It is the only
   gesture Nexus claims; single/double taps and swipes pass through to the OS untouched.
-- The menu is **the single entry point**: plugins first (user-ordered, favorites
-  pinned, plain text rows — icons can come later, text is king on a monochrome HUD),
-  and in phase 2 an "Apps" section that lists and launches native glasses apps.
+- The glasses menu is **the single plugin entry point**: plugins first
+  (user-ordered, favorites pinned, plain text rows — icons can come later, text
+  is king on a monochrome HUD). The phone already lists and launches installed
+  native glasses apps; a glasses-side Apps section remains phase 2.
 - The Rokid launcher and its widgets stay in place; Nexus lives above them, not instead
   of them.
 - When the phone is unreachable, Nexus stays silent until asked: triple-tap shows
@@ -69,20 +70,20 @@ Public release makes this non-negotiable:
   in the phone hub. The "custom signature permission" idea from BUSSPEC is dropped —
   it would kill third-party plugins. The model is Android's notification-listener
   pattern: request, then explicit user grant.
-- **Granular consent, four capabilities** approved separately per plugin:
-  1. *Surfaces* — may draw on the glasses.
-  2. *Microphone* — may hold the audio lease.
-  3. *HTTP proxy* — may send traffic out through the user's data plan.
-  4. *Camera* — may consume a glasses camera session (added with the camera
-     platform; signer-bound like the rest).
+- **Granular consent** approved separately per plugin. The current vocabulary is
+  `surfaces`, `ink_surface`, `microphone`, `stt`, `tts`, `http_proxy`, `camera`,
+  `mediasync`, `assistant`, and `wireless_debugging`. A richer layout does not
+  ride the ordinary surface grant: compiled Ink pages require their own visible
+  `ink_surface` approval. Every grant is signer-bound and revocable.
 - Protocol hygiene: an unknown surface `kind` (old glasses hub, newer plugin) is
   ignored and answered with a "update required" toast — graceful degradation is a spec
   rule, not a courtesy.
 
-## 5. Where the platform stands (2026-07-18)
+## 5. Where the platform stands (2026-08-10)
 
-Every gate the original roadmap defined has been cleared; all of it is validated
-on real hardware.
+Every gate through the current shipped release has been cleared and validated on
+real hardware. Ink and the trusted phone controls described below are implemented
+for the next release; their remaining device gates are explicit in TESTPLAN.md.
 
 - **The public beta gate is passed.** A stranger sets up Nexus with nothing but
   their phone: seven onboarding steps on the phone, glasses app installed over
@@ -96,13 +97,25 @@ on real hardware.
   and install from the in-app Store with SHA-256 and signer pinning. Installed
   plugins surface update badges; the apps themselves self-update (phone from
   GitHub releases, glasses over CXR).
-- **Six plugins ship**: Transit (the original leverage bet — it led, as
-  planned), Lyrics, Media Deck, Feeds, Lens, and the copyable Sample. All are
-  external headless APKs; the hubs contain no built-ins.
+- **Eleven plugins ship**: Assistant, Relay, Lens, Feeds, Transit, Lyrics,
+  Media Deck, Photos Sync, Wireless ADB, Tasker, and the copyable Sample. All
+  are external headless APKs; the hubs contain no built-ins.
 - **Surfaces grew past text.** The image surface (v1) puts real photos on the
   HUD over the SPP binary path — Feeds renders tweet and Bluesky photos
   full-screen. The optics are green-mono; photos land as green luminance, and
   that is fine in practice.
+- **Ink makes authored rich pages declarative too.** A strict subset of Rokid's
+  published `.ink` format is compiled on the phone into bounded revisioned
+  documents and rendered with native Views on the glasses. It brings data
+  binding, lists, charts, progress, inline Lottie, declarative canvas, and tap
+  actions without a WebView, JavaScript, URL loading, or page-side network.
+  Assistant is the first consumer and the same typed session is public in the
+  plugin SDK under a separate `ink_surface` grant.
+- **The phone can drive software already on the glasses.** It can list and open
+  launchable native APKs, move accessibility focus with previous/next/select/back,
+  and provide an ephemeral keyboard to the focused glasses editor. Those
+  versioned `/core/*` paths are hub-only. Password state is signalled without
+  mirroring field contents, and native APK installation is deliberately absent.
 - **Lens shipped as the flagship — with a better architecture than §8 of the
   original vision imagined.** Instead of ~1 fps JPEG over SPP, the platform
   grew a generic `camera` capability: the glasses stream live H.264 over a
@@ -132,13 +145,13 @@ Ordered by the problem it solves, not by ambition:
 1. **Display arbitration** — the toast layer and a real `actionable` class
    (§2's vocabulary is in the protocol; v1 still renders `actionable` as
    `toast`). This is the first problem two chatty plugins will create.
-2. **Native-apps section in the menu** — phase 2 of §3: list and launch real
-   glasses APKs from the Nexus menu.
-3. **Rokid-Scribe** — first real audio-lease consumer (glasses mic → phone
-   STT). The lease protocol is specified and hardware-validated; microphone
-   approval stays disabled in the phone UI until a consumer exists.
-4. **Rokid-Relay migration** — notification listener + direct reply, per
-   BUSSPEC.
+2. **Native-apps section in the glasses menu** — phase 2 of §3. The trusted
+   phone screen already lists and launches installed apps; this remaining step
+   puts the same catalogue under the triple-tap launcher.
+3. **Continuous speech** — short STT takes and real consumers ship; held leases,
+   long-running partials, and a caption presentation still do not.
+4. **Relay breadth** — notification listener + direct reply ship for supported
+   messengers; ordinary-app selection and broader extraction remain.
 5. **`nav` surface kind** — real navigation HUD (GMaps degrades to a text card
    until then).
 6. **Maven Central** — once the AIDL surface is stable; JitPack carries the

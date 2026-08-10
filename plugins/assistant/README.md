@@ -2,10 +2,11 @@
 
 Phone-side Rokid Nexus voice assistant plugin.
 
-Hold the assist button, ask out loud: the words transcribe live on the HUD, the
-answer streams into the same band and is spoken aloud. The model can take one
-photo through the glasses camera when the question needs eyes, and it can set
-reminders and timers, take notes, and read them back.
+Hold the assist button, ask out loud: the words transcribe live on the HUD, then
+the answer streams into the band, is spoken aloud, or hands over in place to a
+native Ink page. The model can take one photo through the glasses camera when
+the question needs eyes, and it can set reminders and timers, take notes, and
+read them back.
 
 Answers come from the provider the wearer picks in Settings: a ChatGPT plan
 (OAuth, no key to paste), or an API key for OpenAI, OpenRouter, MiniMax,
@@ -18,8 +19,16 @@ Tools go through `AssistantToolRegistry`: every provider declares the tools it
 can run, one client-managed tool phase per request, then the final reply. The
 text tools (notes, reminders, timers) are offered to every provider; only
 `take_photo` additionally requires a model that can see, and photos are
-stripped gracefully for models that cannot. A server that rejects tools
-outright is retried once without them.
+stripped gracefully for models that cannot. `render_ink_page` and
+`render_template` can turn suitable results into the same strict compiled Ink
+surface exposed by the public Nexus SDK; the template tool offers seven bounded
+layouts. A server that rejects tools outright is retried once without them.
+
+Ink requires the separate `ink_surface` grant and a live compatible renderer.
+When either is unavailable, Assistant keeps the text answer and ordinary card
+path. The listening notice and final surface belong to one display episode, so
+the scoped wake lock spans the band-to-card/Ink handover and ends with the
+answer rather than leaving a dark panel midway through it.
 
 Reminders and timers persist in app-private JSON stores and fire through
 `AlarmManager` even when the plugin is closed: a short-lived foreground service
@@ -35,5 +44,5 @@ instructions. Notes and reminders live in their own settings screen.
 Build and test:
 
 ```powershell
-.\gradlew.bat :plugin-assistant:assembleDebug :plugin-assistant:testDebugUnitTest
+.\gradlew.bat :plugin-assistant:assembleDebug :plugin-assistant:testDebugUnitTest -PskipCxrGlobal=true
 ```

@@ -1,6 +1,6 @@
 # Rokid Nexus — Roadmap
 
-Status: 2026-08-03. This file is the public roadmap and the source the
+Status: 2026-08-10. This file is the public roadmap and the source the
 [project site](https://rokid-nexus.anezium.me) renders. The founding product
 argument lives in [VISION.md](VISION.md); what actually shipped in each release
 lives in [CHANGELOG.md](CHANGELOG.md).
@@ -16,7 +16,8 @@ shipped until it has run on real hardware.
 
 Any APK may bind to the hub; installing one grants it nothing. A plugin is
 identified by **package + plugin id + signing certificate**, and each capability
-— `surfaces`, `microphone`, `stt`, `tts`, `camera`, `http_proxy`, `mediasync` —
+— `surfaces`, `microphone`, `stt`, `tts`, `camera`, `http_proxy`, `mediasync`,
+`assistant`, `wireless_debugging` —
 is a separate user grant, checked at the hub on every message rather than once
 at install time.
 
@@ -64,7 +65,7 @@ plugins from the Store.
 | **Pin** | One global slot, text only — a plate, a gate, a door code — surviving across surfaces and native screens |
 | **Activity** | An ongoing process, idling as a chip and morphing in place into a panel when something significant happens |
 | **Notice** | A discrete event wanting an answer: up to sixteen structured lines paged on the glasses, up to three glyph answers, exactly one answer taken |
-| **Surface** | The engaged case: cards, timed lines, media decks, list rows, real images |
+| **Surface** | The engaged case: cards, readers, timed lines, media decks, list rows, real images |
 
 Plus the shared glyph set, plugin marks travelling to the glasses as bare
 geometry, and the phone's own battery in the ROM status row.
@@ -111,10 +112,33 @@ A notice worth it can pulse the display awake: at most one wake every five
 seconds *across every plugin*, always a short pulse, never held on. No other
 tier may do it at all, including activities.
 
-### Nine plugins, none of them built in
+### Eleven plugins, none of them built in
 
 Relay · Assistant · Lens · Feeds · Transit · Lyrics · Media Deck · Photos Sync
-· Sample
+· Wireless ADB · Tasker · Sample
+
+---
+
+## Ready for the next release
+
+### Ink Surface
+
+The public SDK now has a typed, separately granted `ink_surface` session. A
+plugin submits a strict subset of Rokid's `.ink` format; the phone compiles it
+into bounded revisioned documents and the glasses project them to native Views.
+Data patches, tap actions, charts, progress, inline Lottie, and declarative
+canvas are implemented without WebView, JavaScript, URL loading, or page-side
+network. Assistant is the first production consumer and Sample is the copyable
+SDK reference.
+
+### Phone control for native glasses apps
+
+The phone can list and open launchable APKs already installed on the glasses,
+move focus with previous/next/select/back, and supply an ephemeral keyboard to
+the focused glasses editor. The three versioned `/core/*` protocol families are
+hub-only and replay-safe; no plugin grant reaches them. Sensitive editors secure
+the phone window, and existing field contents never cross back to the phone.
+Installing native APKs is not part of this slice.
 
 ---
 
@@ -148,11 +172,10 @@ one — which is why it is the only other thing being written.
 
 Committed, not started, in this order.
 
-1. **Native apps in the Nexus menu.** Phase two of the menu: list and launch
-   real glasses APKs from the same triple-tap that lists plugins. Nexus does not
-   port them and does not wrap them; it stops the wearer having to leave to
-   reach them. The work is a launch path that does not fight the ROM launcher,
-   and a back that lands where you started.
+1. **Native apps in the glasses menu.** The phone-side catalogue and launch
+   path now exist. Phase two puts that catalogue behind the same triple-tap that
+   lists plugins, with a back path that lands where the wearer started. Nexus
+   still does not port, wrap, or install those apps.
 2. **A `nav` surface kind.** Turn-by-turn deserves a real surface — maneuver
    glyph, distance, street, ETA, drawn by the platform — instead of a navigation
    app degrading into a text card, which is what happens today.

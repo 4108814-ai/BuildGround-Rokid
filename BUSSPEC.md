@@ -35,6 +35,7 @@ Round A/API v1 and API v2 details are retained only in the historical appendix.
 | Module | Type | Package | Contents |
 |---|---|---|---|
 | `:shared` | kotlin lib | `com.anezium.rokidbus.shared` | envelope + frame codec |
+| `:ink-engine` | kotlin lib | `com.anezium.rokidbus.ink` | bounded `.ink` compiler, binding engine, render document/patch codec, and wire validation |
 | `:bus-client` | android lib | `com.anezium.rokidbus.client` | AIDL files + `BusClient` wrapper + `BusClientService` base |
 | `:phone-hub` | app | `com.anezium.rokidbus.phone` | FGS hub: CXR-L owner, SPP client, AIDL server, HTTP proxy, auth UI |
 | `:glasses-hub` | app | `com.anezium.rokidbus.glasses` | a11y anchor, CXR-S owner, SPP server, AIDL server, supervisor |
@@ -78,8 +79,9 @@ certificate, route prefixes, or surface ownership.
 Descriptor metadata keys are `com.anezium.rokidbus.plugin.ID`,
 `.DISPLAY_NAME`, `.API_VERSION`, `.CAPABILITIES`, `.RECEIVE_PREFIXES`,
 `.SETTINGS_ACTIVITY`, and `.LAUNCHABLE`. Plugin IDs match
-`[a-z][a-z0-9._-]{2,63}`. Capability values are `surfaces`, `microphone`, `stt`,
-`tts`, `http_proxy`, `camera`, and `mediasync`; unknown values invalidate the
+`[a-z][a-z0-9._-]{2,63}`. Capability values are `surfaces`, `ink_surface`,
+`microphone`, `stt`, `tts`, `http_proxy`, `camera`, `mediasync`, `assistant`,
+and `wireless_debugging`; unknown values invalidate the
 descriptor. Grants are keyed by package, plugin ID, and signing digest and are
 never implied by installation.
 
@@ -268,6 +270,73 @@ truncate all reader fields to these caps rather than rejecting or crashing the
 active HUD. Reader surfaces carry no card lines, timed lines, media, artwork, or
 image. `contentKey`, replacement, sequencing, and stale-message handling are the
 same as for `card`.
+
+## Ink surface protocol v1
+
+Ink is a foreground surface that shares the ordinary surface owner's single
+slot but has a distinct signer-bound `ink_surface` plugin grant. `surfaces`
+does not authorize Ink, and `ink_surface` does not authorize cards, notices,
+pins, activities, or images. A plugin uses local ids matching
+`[A-Za-z0-9][A-Za-z0-9._-]{0,63}`; the phone injects the authenticated plugin id
+and rewrites the wire id to `<pluginId>:<localSurfaceId>`.
+
+The plugin-facing JSON paths are:
+
+- `/ink/show`: `{surfaceId,page,data?,handlesBack}`. `page` is UTF-8 `.ink`
+  source, `data` is an optional JSON object, and `handlesBack` defaults false.
+- `/ink/update`: `{surfaceId,data}`. `data` is a set-data-style patch whose keys
+  may be paths such as `metrics[0].value`.
+- `/ink/hide`: `{surfaceId}`. Hiding a missing/already-closing session is
+  idempotent.
+- `/ink/event`: phone-to-owner direct events. This path is owner-scoped and
+  direct-reply routed; it is not declared in plugin receive prefixes.
+
+External plugins SHOULD use `NexusInkSurfaceSession`, not construct these
+payloads. The phone compiles every show on one dedicated Ink thread. It sends
+the glasses an ordinary `/surface/show` with `kind:"ink"` and
+`ink.document` containing the validated `INK_DOC_V1` wire JSON. Updates apply
+to the phone-owned `InkSession` and become `/surface/update` with
+`ink.patch`; a glasses `resync` event causes a full document update, rate
+limited to one per second. Hide becomes `/surface/hide`. This separation keeps
+authored source and mutable compiler state off the glasses.
+
+Ink shares `ForegroundSurfacePathPolicy` with `/surface/show` and
+`/surface/update`. A show/update from a non-owner while another plugin owns the
+foreground returns a typed `SURFACE_BUSY` problem. A successful show replaces
+any other Ink session; the previous owner receives `closed` with reason
+`replaced`. Link loss clears compiler sessions and closes them with `link_lost`.
+
+`/ink/event` payloads carry the plugin-local `surfaceId`, authenticated
+`pluginId`, and one type:
+
+| Type | Additional fields | Meaning |
+|---|---|---|
+| `ready` | — | Initial document or a full resync is attached on the glasses |
+| `action` | `actionId`, `dataset` | The wearer activated a `bindtap`/`catchtap` node; `data-*` values form the dataset |
+| `closed` | `reason` | Session ended; reason is `user`, `plugin`, `replaced`, `link_lost`, or `renderer_error` |
+| `error` | `problems[]` | Compiler, policy, transport, or renderer rejection; each problem has `code`, `message`, `severity`, and optional location/feature |
+
+`resync` is glasses-to-phone only and never forwarded to the plugin. Action,
+ready, closed, and error events are delivered only to the verified live owner.
+Binary `/ink/*` commands and events are rejected.
+
+An Ink SFC contains one JSON `<script def>` block, one `<page>`, and an optional
+`<style>`. `<script setup>` and all executable scripts are rejected. V1 accepts
+bounded interpolation/expressions, conditionals, `wx:for`, class selectors,
+flex/box/text styles, transforms/transitions, `rpx`/percent units, tap actions,
+and the native components `view`, `text`, `scroll-view`, `chart`, `progress`,
+inline-JSON `lottie-view`, and declarative `nx-canvas`. `image` currently
+projects a placeholder reference; the public session has no asset-transfer
+field. There is no WebView, URL load, page-side network, or arbitrary code
+execution.
+
+The rejecting budgets are 32 KiB authored page, 16 KiB merged data or update
+patch, 64 KiB compiled document, 64 KiB render patch, 256 nodes, render depth
+32, 1,024 patch changes, four chart series with 256 points per series, 512
+canvas commands at most 30 fps, and 32 KiB inline Lottie JSON. The revisioned
+wire decoder additionally rejects unknown fields, document-id mismatches,
+non-monotonic revisions, malformed datasets, and out-of-matrix components,
+attributes, selectors, styles, or expressions with typed `INK_*` problems.
 
 ## Pin protocol v1
 
@@ -1325,7 +1394,8 @@ unknown fields are ignorable in both directions, so fields only ever get added.
 
 - Glasses → phone (`GlassesHubCapabilitiesContract`): `version`, renderer
   `features` bits, `imageSurfaceVersion`, `pinSurfaceVersion`,
-  `noticeSurfaceVersion`, `activitySurfaceVersion`, `maxImageBytes`, the glasses app
+  `noticeSurfaceVersion`, `activitySurfaceVersion`, `inkSurfaceVersion`,
+  `ttsVersion`, `maxImageBytes`, the glasses app
   `versionName` (drives the phone-side glasses update checker), and
   `setupComplete` (self-arm onboarding state; the phone preserves the last
   known value across link loss — only a live announcement can lower it).
@@ -1391,11 +1461,15 @@ Hub feature bits share one value space regardless of direction. Bit `2` is
 `IMAGE_SURFACE`, bit `4` is `CAMERA_CONSUMER_READY`, bit `8` is
 `CAMERA_FROZEN_SPP`, bit `16` is `CAMERA_LOHS_REVERSE_REQUIRED` (sent only in
 phone-to-glasses camera announcements), bit `32` is `PIN_SURFACE`, bit `64` is
-`NOTICE_SURFACE`, and bit `128` is `ACTIVITY_SURFACE`. The phone does not
+`NOTICE_SURFACE`, bit `128` is `ACTIVITY_SURFACE`, bit `256` is
+`PHONE_ASSISTED_SETUP`, bit `512` is `TTS`, and bit `1024` is `INK_SURFACE`.
+The phone does not
 include renderer bits in camera announcements. The glasses hub announces its
 renderer after either remote link connects by sending
 `/system/hub/capabilities` with
-`{"version":1,"features":226,"imageSurfaceVersion":1,"pinSurfaceVersion":1,"noticeSurfaceVersion":3,"activitySurfaceVersion":1,"maxImageBytes":65536,"versionName":"1.0.0","setupComplete":true}`.
+`{"version":1,"features":1762,"imageSurfaceVersion":1,"pinSurfaceVersion":1,"noticeSurfaceVersion":3,"activitySurfaceVersion":1,"inkSurfaceVersion":1,"ttsVersion":1,"maxImageBytes":65536,"versionName":"1.0.0","setupComplete":true}`
+when every current renderer feature, including runtime TTS, is available. The
+`features` value is the bitwise sum; TTS may be absent at runtime.
 `versionName` is the optional glasses app `BuildConfig.VERSION_NAME`; older glasses
 omit it and newer phones treat the missing field as an unknown installed version.
 `setupComplete` reports whether the on-device self-arm onboarding state is `COMPLETE`;
@@ -1412,10 +1486,12 @@ notices remain live moments and are never held for a down link. A later
 announcement overwrites the remembered feature value. Capability changes are surfaced by
 another link-state callback so clients refresh `capabilities()`; callers must not
 cache a one-time Binder result. Old glasses hubs do not announce the bit, so the
-plugin API version remains 3 and typed image, pin, notice, and activity calls
-fail locally with `CAPABILITY_NOT_AVAILABLE`. Image surfaces, pins, notices,
-and activities remain covered by the existing `surfaces` user grant; it is not
-a plugin descriptor capability.
+plugin API version remains 3 and typed image, pin, notice, activity, and Ink
+calls fail locally with `CAPABILITY_NOT_AVAILABLE`. Image surfaces, pins,
+notices, and activities remain covered by the existing `surfaces` user grant;
+their feature bits are not plugin descriptor capabilities. Ink requires both
+the `INK_SURFACE` bit with `inkSurfaceVersion == 1` and the separate
+`ink_surface` plugin grant.
 
 Request/response is NOT in AIDL: the `BusClient` wrapper implements it — a request is
 `send(path, id, payload)` + a pending map keyed by `id`; any reply is delivered by the
@@ -1457,6 +1533,27 @@ val supportsActivitySurface: Boolean
 `onActivityClosed(reason: String)`. `NexusPluginService` exposes them as
 `onNexusActivityAction(id: String)` and
 `onNexusActivityClosed(reason: String)`.
+
+The typed Ink wrapper is session-scoped because the phone retains compiled
+state between data patches:
+
+```kotlin
+fun NexusPluginClient.inkSurfaceSession(localSurfaceId: String): NexusInkSurfaceSession
+
+class NexusInkSurfaceSession {
+    fun show(page: String, data: JSONObject? = null, handlesBack: Boolean = false): NexusSdkResult
+    fun update(data: JSONObject): NexusSdkResult
+    fun hide(): NexusSdkResult
+}
+
+val NexusPluginClient.supportsInkSurface: Boolean
+```
+
+`NexusPluginCallbacks` receives `onInkReady`, `onInkAction`, `onInkClosed`, and
+`onInkError`; `NexusPluginService` exposes the corresponding
+`onNexusInk*` overrides and `nexusInkSurfaceSession(localSurfaceId)` factory.
+Local size failures and remote compiler/renderer failures use the same typed
+`NexusInkProblem` callback path.
 
 The hub service is discovered by **intent action** `com.anezium.rokidbus.action.HUB`
 (each hub app exports a `BusHubService` with that action; the lib resolves it via
@@ -1511,6 +1608,67 @@ Hub manifests use `<queries><intent><action android:name="com.anezium.rokidbus.a
 - `/hub/probe` is an internal diagnostic envelope sent by the glasses CXR bridge
   after connection and consumed by the phone hub.
 - `ProbeBroadcastReceiver` remains a debug entry point for component-targeted broadcasts.
+
+## Trusted core phone controls v1
+
+Native-app discovery, remote text input, and system navigation are hub-owned
+features. Every path begins `/core/`, is reserved by `PathRules`, and is
+consumed before plugin routing. No plugin capability authorizes sending or
+subscribing to these paths, and no external registration can impersonate either
+hub. All payloads are versioned JSON; binary bodies are invalid.
+
+### Native apps
+
+- Phone → glasses `/core/native-apps/request`: a `list_request`, or a
+  `launch_request` naming one package.
+- Glasses → phone `/core/native-apps/result`: matching `list_result` or
+  `launch_result`. The response preserves the bus-envelope id; the phone accepts
+  state changes only for a still-pending contract `requestId`.
+
+The glasses enumerate `ACTION_MAIN` + `CATEGORY_LAUNCHER` activities, exclude
+the glasses hub itself, deduplicate by package, sort by label/package, and cap
+the result at 64 entries. Labels are trimmed/control-stripped and limited to 96
+characters; packages are validated before launch. If a full result does not fit
+the current transport, the glasses send the largest valid prefix that does.
+This protocol lists and opens apps that are already installed. It has no APK
+download, transfer, install, uninstall, or privilege-elevation operation.
+
+### Remote input
+
+- Glasses → phone `/core/remote-input/session`: `session_open` and
+  `session_closed` from the Nexus IME.
+- Phone → glasses `/core/remote-input/command`: `commit_text`,
+  `set_composing_text`, `finish_composing_text`, `delete_surrounding_text`,
+  `perform_editor_action`, or `close`.
+- Glasses → phone `/core/remote-input/status`: readiness, cumulative applied
+  sequence, rejection with expected sequence, or closure.
+
+Only the editor-owned active session accepts commands. Session ids are random,
+commands carry a monotonically increasing safe-integer sequence, duplicates are
+acknowledged without applying twice, and out-of-order commands are rejected with
+the next expected sequence. A text-bearing delta is at most 256 UTF-16 code
+units and 512 UTF-8 bytes; messages are at most the 3 KiB CXR-control budget.
+
+The protocol deliberately carries editing deltas, never an editor snapshot.
+The glasses send input type, IME options, target package, and a derived
+`sensitive` flag, but never the field's current text, selection, surrounding
+text, password, or extracted document. The phone keeps typed/composing text
+ephemeral, redacts text-bearing model strings, sets `FLAG_SECURE` for sensitive
+sessions, and clears state on close or transport loss. Implementations must not
+persist or log command JSON.
+
+### Remote navigation
+
+- Phone → glasses `/core/navigation/request`: one of `previous`, `next`,
+  `select`, or `back`, with a unique request id.
+- Glasses → phone `/core/navigation/result`: the same id/action with success or
+  `service_unavailable`, `action_unavailable`, `invalid_request`, or `internal`.
+
+The glasses AccessibilityService moves accessibility/input focus through the
+current readable window, clicks the focused node or a clickable ancestor, and
+uses Android's global BACK action. It does not inject shell or ADB commands.
+Results are kept in a bounded replay cache, so a transport retry with the same
+request id returns the prior result instead of performing the action twice.
 
 ## Audio lease v1
 

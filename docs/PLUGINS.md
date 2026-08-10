@@ -7,9 +7,10 @@ discovers it, the user approves its capabilities once, and from then on it
 lives entirely inside Nexus — launched from the glasses launcher, configured
 from the phone hub, removable from its own settings screen or the Store.
 
-Assistant, Relay, Feeds, Transit, Lyrics, Media Deck, Lens, Photos Sync, and Wireless ADB all ship
-this way as external headless APKs, and so do the plugins written outside this
-repository. The phone hub registry has no built-in plugins.
+Assistant, Relay, Feeds, Transit, Lyrics, Media Deck, Lens, Photos Sync,
+Wireless ADB, and Tasker all ship this way as external headless APKs, and so do
+the plugins written outside this repository. The phone hub registry has no
+built-in plugins.
 
 The wire/SDK contract (artifact coordinates, service base class, payload
 limits, approval flow) is specified in [PLUGIN_SDK.md](PLUGIN_SDK.md); this
@@ -153,6 +154,14 @@ launcher), `onNexusClose`, `onNexusInput` (touchpad), `onNexusMessage`
 HUD cards go through `nexusSurfaceSession(id).showCard/updateCard` with the
 limits from `SurfaceModels.kt` — in particular **contentKey ≤ 128 chars: hash
 it, never concatenate content into it**.
+
+Rich authored pages go through `nexusInkSurfaceSession(id).show/update/hide`
+and require the separate `ink_surface` descriptor grant. Ink is a strict,
+inert AIUI-compatible subset compiled by the phone and rendered as native Views
+on the glasses; it shares foreground ownership with cards. Check the live
+`nexusClient?.supportsInkSurface` flag and keep a structured-card fallback.
+`plugins/sample` is the canonical page/action/data-patch example, and the exact
+support matrix and budgets live in [PLUGIN_SDK.md](PLUGIN_SDK.md#ink-surfaces).
 
 If the plugin needs an additional foreground-service type, there are two
 shipped shapes. For a type the session service itself can carry (location

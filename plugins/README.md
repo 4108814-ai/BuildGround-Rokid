@@ -16,7 +16,7 @@ releases. The Gradle project names keep the historical `:plugin-<id>` form
 
 | Plugin | Id | What it does |
 |---|---|---|
-| [Assistant](assistant/) | `assistant` | Voice questions answered on the band and aloud, with a look through the glasses camera when asked |
+| [Assistant](assistant/) | `assistant` | Voice questions answered on the band, aloud, or as generated native Ink pages, with a look through the glasses camera when asked |
 | [Relay](relay/) | `relay` | Phone notifications on the HUD, answered by voice, with an inbox for the rest |
 | [Feeds](../plugin-feeds/) | `feeds` | Bluesky and X timelines on the HUD |
 | [Lens](lens/) | `lens` | Live and frozen camera OCR with phone-side translation |
@@ -24,6 +24,8 @@ releases. The Gradle project names keep the historical `:plugin-<id>` form
 | [Lyrics](lyrics/) | `lyrics` | Live synced lyrics for whatever is playing |
 | [Media Deck](media/) | `media` | Universal now-playing surface with transport controls |
 | [Photos Sync](photosync/) | `photosync` | Copies glasses captures into the phone gallery on their own |
+| [Wireless ADB](wireless-adb/) | `wirelessadb` | Enables and pairs the glasses' real ADB-over-Wi-Fi transport under an explicit high-risk grant |
+| [Tasker](tasker/) | `tasker` | Lists named Tasker tasks on the HUD and runs the selected automation on the phone |
 | [Sample](sample/) | `hello` | Minimal copyable reference plugin |
 
 Feeds lives at the repository root as `plugin-feeds/`; everything else about

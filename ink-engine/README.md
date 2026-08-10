@@ -1,4 +1,17 @@
-# Ink engine wire harness
+# Ink engine
+
+`ink-engine` is the pure Kotlin compiler and revisioned wire model behind Nexus
+Ink Surface v1. It accepts a strict, inert subset of the AIUI `.ink` single-file
+format, merges host data, evaluates bounded bindings, and emits validated
+`INK_DOC_V1` documents plus incremental patches. The phone hub owns mutable
+compile sessions; the glasses hub consumes only validated documents and patches.
+
+The public plugin API, supported components, security rules, and hard budgets
+are documented in [the SDK reference](../docs/PLUGIN_SDK.md#ink-surfaces). This
+module deliberately contains no WebView, JavaScript runtime, URL fetcher, or
+Android SDK dependency.
+
+## Wire harness
 
 The JVM tests include an opt-in file harness that compiles a local `.ink` page into the
 same revisioned JSON consumed by the glasses renderer. It uses the test runtime so

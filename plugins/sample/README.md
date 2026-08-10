@@ -4,9 +4,17 @@ The canonical copyable starting point for a Rokid Nexus plugin. Its manifest is
 headless: the exported settings activity has no launcher intent filter, while one
 exported `NexusPluginService` advertises the plugin action and descriptor metadata.
 
-The service demonstrates a bundled JPEG image surface, a card fallback, directional
-input, tap state, and back-to-close behavior. The settings activity uses the shared
-`NexusUi`/`BusTheme` kit and provides the system uninstall action.
+The service first demonstrates the public `NexusInkSurfaceSession`: an authored
+page with bound metrics, a native chart, a tap action, and set-data-style
+patches. It falls back to the ordinary surface API and also demonstrates a
+bundled JPEG image, cards, directional input, tap state, and back-to-close
+behavior. The settings activity uses the shared `NexusUi`/`BusTheme` kit and
+provides the system uninstall action.
+
+The manifest requests `ink_surface` separately from `surfaces`. After install,
+approve both grants to exercise Ink; old glasses or a down SPP data link take
+the fallback path. The implementation is in
+[`HelloPluginService.kt`](src/main/java/com/anezium/rokidbus/plugin/sample/HelloPluginService.kt).
 
 ## Dictation
 

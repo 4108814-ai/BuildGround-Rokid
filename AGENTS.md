@@ -4,6 +4,13 @@ Android/Kotlin. Phone hub, glasses hub, a shared bus client, and the plugins und
 `plugins/`. Start with `README.md` for what the product is; `plugins/AGENTS.md` covers
 plugin work specifically.
 
+Ink Surface crosses `:ink-engine`, `:shared`, `:bus-client`, `:phone-hub`, and
+`:glasses-hub`. Treat `docs/PLUGIN_SDK.md` as the public typed API and `BUSSPEC.md`
+as the wire authority; do not copy the older implementation sketch in
+`plans/020-ink-surface.md` over the delivered contracts. The
+`/core/native-apps/*`, `/core/remote-input/*`, and `/core/navigation/*` routes are
+trusted hub-to-hub controls and must never be exposed as plugin capabilities.
+
 ## Building
 
 This is the verified way to build and test a module:
@@ -14,6 +21,10 @@ This is the verified way to build and test a module:
 
 Swap the module for whichever one you touched (`:phone-hub`, `:glasses-hub`,
 `:bus-client`, `:plugin-relay`, …).
+
+The Ink compiler is a pure Kotlin module and can be checked directly with
+`./gradlew :ink-engine:test`; changes to its public session path normally also
+require `:shared:test`, `:bus-client:testDebugUnitTest`, and both hub test suites.
 
 **`-PskipCxrGlobal=true` is only for modules that do not link against the vendor CXR
 library.** It is right for the plugins. The hubs do link against it, so building
