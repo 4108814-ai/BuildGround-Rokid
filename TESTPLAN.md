@@ -728,10 +728,11 @@ Software gate:
 .\gradlew.bat :phone-hub:testDebugUnitTest :phone-hub:assembleDebug :glasses-hub:testDebugUnitTest :glasses-hub:assembleDebug
 ```
 
-Use normally signed, upgrade-compatible phone and glasses hubs at version 1.3.0 or
-newer. Do not uninstall, downgrade, or replace a release-signed hub merely to make a
-debug build install. On validated Rokid Android 12L/API 32 glasses connected to the
-same LAN as the test computer:
+Use normally signed, upgrade-compatible phone and glasses hubs at version 1.4.1 or
+newer for the complete plan below. Hubs 1.3.x cover the original pairing contract
+but do not restore a disabled Wi-Fi radio. Do not uninstall, downgrade, or replace a
+release-signed hub merely to make a debug build install. On validated Rokid Android
+12L/API 32 glasses connected to the same LAN as the test computer:
 
 1. Install Wireless ADB, approve only `wireless_debugging`, and open its settings.
    Confirm an unapproved or revoked plugin receives a capability rejection and no
@@ -754,8 +755,11 @@ same LAN as the test computer:
    immediately after that status request rather than fail as busy. A real state
    change must still redraw once.
 6. Tap **Disable wireless debugging** and confirm the existing `adb connect`
-   endpoint closes and status reports disabled. Disconnect Wi-Fi and repeat enable;
-   expect a user-readable failure with no partial pairing state.
+   endpoint closes and status reports disabled while the normal Wi-Fi connection
+   remains up. Turn the Wi-Fi radio off, repeat **Enable & pair computer**, and
+   confirm Nexus restores Wi-Fi, reconnects to a saved network, and produces a
+   working pairing window. Repeat with no saved network available; expect
+   `WIFI_REQUIRED` with no partial pairing state.
 7. Verify unsupported API-level fixtures fail before any Binder transaction, every
    command-bridge argument remains fixed-input, malformed hosts/ports/codes are
    rejected, and stale or wrong-id replies cannot replace the active request.

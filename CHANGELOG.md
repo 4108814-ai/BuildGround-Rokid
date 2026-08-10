@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.4.1
+
+- **Wireless ADB can recover from Wi-Fi being off.** Enable & pair now turns
+  the glasses' Wi-Fi radio on and waits for a saved network before enabling
+  ADB. Disabling wireless debugging remains deliberately scoped to ADB and
+  leaves the normal Wi-Fi connection running.
+
 ## 1.4.0
 
 - **Assistant can act on the phone calendar.** It can add and list events after

@@ -59,6 +59,17 @@ internal object SelfArmWirelessAdbController {
                 ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
         }.getOrDefault(false)
 
+    @Throws(InterruptedException::class)
+    fun waitForWifiNetworkReady(context: Context, timeoutMs: Long): Boolean {
+        if (timeoutMs <= 0L) return false
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        do {
+            if (isWifiNetworkReady(context)) return true
+            Thread.sleep(WIFI_NETWORK_POLL_MS)
+        } while (SystemClock.elapsedRealtime() < deadline)
+        return isWifiNetworkReady(context)
+    }
+
     fun areDeveloperOptionsUsable(context: Context): Boolean =
         isDeveloperOptionsEnabled(context) && !resolvesToDisabledDeveloperOptions(context)
 
@@ -140,4 +151,6 @@ internal object SelfArmWirelessAdbController {
             val name = resolved?.activityInfo?.name.orEmpty()
             name.lowercase(Locale.US).contains("developmentsettingsdisabled")
         }.getOrDefault(false)
+
+    private const val WIFI_NETWORK_POLL_MS = 150L
 }

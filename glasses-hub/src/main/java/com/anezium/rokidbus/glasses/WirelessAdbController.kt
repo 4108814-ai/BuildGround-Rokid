@@ -16,6 +16,28 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
+internal enum class WirelessAdbWifiPreparationResult {
+    READY,
+    ENABLE_FAILED,
+    NETWORK_UNAVAILABLE,
+}
+
+internal fun prepareWifiForWirelessAdb(
+    isNetworkReady: () -> Boolean,
+    isWifiEnabled: () -> Boolean,
+    enableWifi: () -> Boolean,
+    awaitNetworkReady: () -> Boolean,
+): WirelessAdbWifiPreparationResult {
+    if (isNetworkReady()) return WirelessAdbWifiPreparationResult.READY
+    if (isWifiEnabled()) return WirelessAdbWifiPreparationResult.NETWORK_UNAVAILABLE
+    if (!enableWifi()) return WirelessAdbWifiPreparationResult.ENABLE_FAILED
+    return if (awaitNetworkReady()) {
+        WirelessAdbWifiPreparationResult.READY
+    } else {
+        WirelessAdbWifiPreparationResult.NETWORK_UNAVAILABLE
+    }
+}
+
 internal object WirelessAdbController {
     private data class PairingSession(
         val serviceName: String,
@@ -60,7 +82,7 @@ internal object WirelessAdbController {
         }
 
     private fun enable(context: Context, action: WirelessAdbAction): WirelessAdbReply {
-        preconditionFailure(context, action)?.let { return it }
+        enablePreconditionFailure(context, action)?.let { return it }
         val enabled = SelfArmCommandBridgeClient.setWirelessAdbEnabled(context, true)
         return if (enabled) {
             status(context, action, success = true)
@@ -76,7 +98,7 @@ internal object WirelessAdbController {
 
     private fun startPairing(context: Context): WirelessAdbReply {
         val action = WirelessAdbAction.START_PAIRING
-        preconditionFailure(context, action)?.let { return it }
+        enablePreconditionFailure(context, action)?.let { return it }
         if (!SelfArmCommandBridgeClient.setWirelessAdbEnabled(context, true)) {
             return failure(
                 context,
@@ -239,7 +261,10 @@ internal object WirelessAdbController {
             .apply()
     }
 
-    private fun preconditionFailure(context: Context, action: WirelessAdbAction): WirelessAdbReply? {
+    private fun enablePreconditionFailure(
+        context: Context,
+        action: WirelessAdbAction,
+    ): WirelessAdbReply? {
         if (!WirelessAdbShell.supportsApiLevel(Build.VERSION.SDK_INT)) {
             return failure(
                 context,
@@ -256,15 +281,33 @@ internal object WirelessAdbController {
                 "Developer options are not enabled on the glasses.",
             )
         }
-        if (!SelfArmWirelessAdbController.isWifiNetworkReady(context)) {
-            return failure(
+        return when (
+            prepareWifiForWirelessAdb(
+                isNetworkReady = { SelfArmWirelessAdbController.isWifiNetworkReady(context) },
+                isWifiEnabled = { SelfArmWirelessAdbController.isWifiEnabled(context) },
+                enableWifi = { SelfArmCommandBridgeClient.setWifiEnabled(context, true) },
+                awaitNetworkReady = {
+                    SelfArmWirelessAdbController.waitForWifiNetworkReady(
+                        context,
+                        WIFI_NETWORK_TIMEOUT_MS,
+                    )
+                },
+            )
+        ) {
+            WirelessAdbWifiPreparationResult.READY -> null
+            WirelessAdbWifiPreparationResult.ENABLE_FAILED -> failure(
+                context,
+                action,
+                "WIFI_ENABLE_FAILED",
+                "Nexus could not enable Wi-Fi on the glasses. Repair the glasses helper and try again.",
+            )
+            WirelessAdbWifiPreparationResult.NETWORK_UNAVAILABLE -> failure(
                 context,
                 action,
                 "WIFI_REQUIRED",
-                "Connect the glasses to Wi-Fi before enabling wireless debugging.",
+                "Wi-Fi is on, but the glasses did not connect to a saved network.",
             )
         }
-        return null
     }
 
     private fun status(
@@ -406,6 +449,7 @@ internal object WirelessAdbController {
     private const val PAIRING_SERVICE_TYPE = "_adb-tls-pairing._tcp."
     private const val DISCOVERY_START_TIMEOUT_MS = 2_000L
     private const val PAIRING_DISCOVERY_TIMEOUT_MS = 12_000L
+    private const val WIFI_NETWORK_TIMEOUT_MS = 12_000L
     private const val PAIRING_LIFETIME_MS = 2L * 60L * 1_000L
     private const val PAIRING_STOP_RETRY_MS = 5_000L
     private const val PAIRING_PREFERENCES = "wireless_adb_pairing"

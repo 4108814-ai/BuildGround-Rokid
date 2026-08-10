@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1
+
+- **Enable & pair now restores Wi-Fi when needed.** If the glasses' Wi-Fi radio
+  is off, Nexus turns it on and waits for a saved network before enabling ADB.
+- **Disable remains scoped to ADB.** It closes wireless debugging without
+  disconnecting the glasses from their normal Wi-Fi network.
+
 ## 1.0.0
 
 - Enable wireless debugging on the glasses without cable or Settings automation.

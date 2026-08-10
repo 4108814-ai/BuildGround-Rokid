@@ -13,18 +13,21 @@ network, start pairing, cancel pairing, or disable ADB.
 ## Requirements
 
 - Rokid Nexus phone and glasses hubs 1.3.0 or newer, installed through their normal
-  signed upgrade path.
-- Glasses on Wi-Fi, with Nexus self-arm/developer access already complete, and a
-  computer on the same LAN.
+  signed upgrade path. Automatic Wi-Fi restoration requires glasses hub 1.4.1 or newer.
+- A saved Wi-Fi network on the glasses, Nexus self-arm/developer access already
+  complete, and a computer on the same LAN. If the Wi-Fi radio is off, Nexus turns
+  it on and waits for that saved network; it does not choose or configure a network.
 - The validated Rokid Android 12L/API 32 firmware. Other API levels fail closed.
 
 ## Use
 
 1. Install the plugin and approve **Wireless debugging** in Nexus plugin access.
-2. Open the plugin settings and tap **Enable & pair computer**.
+2. Open the plugin settings and tap **Enable & pair computer**. Nexus restores
+   Wi-Fi first when the radio is off.
 3. Run the displayed `adb pair` command, then the displayed `adb connect`
    command, from a computer on the same LAN.
-4. Use **Disable wireless debugging** when LAN access is no longer needed.
+4. Use **Disable wireless debugging** when LAN access is no longer needed. This
+   disables ADB only and leaves the glasses' normal Wi-Fi connection alone.
 
 Nexus never logs or persists the six-digit pairing code, and the code expires after
 two minutes. **Copy command** explicitly places the command, including that code, on

@@ -1291,6 +1291,10 @@ LAN, create a two-minute pairing code, cancel that pairing window, query status,
 or disable the transport. It never grants arbitrary shell access to the plugin
 and it does not drive Settings or Accessibility. The contract requires phone and
 glasses hubs 1.3.0 or newer; older hubs do not recognize the capability or route.
+On glasses hub 1.4.1 or newer, `ENABLE` and `START_PAIRING` restore the Wi-Fi
+radio when it is off and wait for an already-saved network before enabling ADB.
+They do not choose or configure a network. `DISABLE` turns off wireless ADB only
+and deliberately leaves normal Wi-Fi connected.
 
 Send `WirelessAdbContract.request(action)` to
 `BusPaths.WIRELESS_ADB_REQUEST`. The hub answers on

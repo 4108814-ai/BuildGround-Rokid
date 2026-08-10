@@ -156,6 +156,10 @@ Paths a plugin can **send to** (gated by capability):
 Wireless ADB requires both phone and glasses hubs 1.3.0 or newer and the
 validated Rokid Android 12L/API 32 firmware. Do not fall back to arbitrary shell
 commands or Settings automation on an unsupported hub or firmware.
+Glasses hub 1.4.1 or newer restores the Wi-Fi radio for `enable` and
+`start_pairing` when it is off, then waits for a saved network. It never selects
+or configures a network, and `disable` must remain scoped to ADB rather than
+turning normal Wi-Fi off.
 
 Paths a plugin **receives** (reserved, hub-generated — you never send these):
 `/system/plugin/registration`, `/system/plugin/open`, `/system/plugin/close`,

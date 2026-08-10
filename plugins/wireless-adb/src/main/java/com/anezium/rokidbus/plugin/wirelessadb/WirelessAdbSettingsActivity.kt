@@ -133,7 +133,8 @@ class WirelessAdbSettingsActivity : Activity() {
             NexusUi.cardBody(
                 this,
                 "No cable and no Settings automation. Nexus enables Android's real wireless " +
-                    "debugging service, then creates a temporary pairing code for this Wi-Fi network.",
+                    "debugging service, restoring Wi-Fi first when needed, then creates a " +
+                    "temporary pairing code for this network.",
             ),
             NexusUi.block(),
         )
@@ -216,7 +217,8 @@ class WirelessAdbSettingsActivity : Activity() {
             NexusUi.cardBody(
                 this,
                 "Only approve computers you control. Wireless debugging stays reachable from the " +
-                    "current LAN until you disable it here; the pairing code itself lasts two minutes.",
+                    "current LAN until you disable it here; disabling ADB leaves normal Wi-Fi " +
+                    "connected. The pairing code itself lasts two minutes.",
             ),
             NexusUi.block(),
         )

@@ -1416,6 +1416,10 @@ Request payload:
 `action` is exactly one of `status`, `enable`, `start_pairing`,
 `cancel_pairing`, or `disable`. Unknown versions and actions fail closed. Plugins
 must use `WirelessAdbContract.request(action)` rather than hand-building payloads.
+On glasses hub 1.4.1 or newer, `enable` and `start_pairing` turn the Wi-Fi radio
+on when necessary and wait for a saved network before enabling ADB. They never
+choose or configure a network. `disable` remains scoped to wireless ADB and does
+not turn Wi-Fi off.
 
 Every reply contains `version`, the hub-stamped `pluginId`, `action`, `success`,
 `wifiConnected`, `enabled`, and `pairingActive`. It may also contain `host`,
@@ -1430,7 +1434,7 @@ adb connect <host>:<connectPort>
 
 Stable v1 failure codes are `INVALID_REQUEST`, `HUB_NOT_READY`,
 `WIRELESS_ADB_BUSY`, `UNSUPPORTED_ANDROID_VERSION`,
-`DEVELOPER_OPTIONS_DISABLED`, `WIFI_REQUIRED`,
+`DEVELOPER_OPTIONS_DISABLED`, `WIFI_ENABLE_FAILED`, `WIFI_REQUIRED`,
 `PRIVILEGED_BRIDGE_UNAVAILABLE`, `NO_IPV4_ADDRESS`,
 `PAIRING_CANCEL_FAILED`, `PAIRING_SERVICE_NOT_FOUND`,
 `PAIRING_CLEANUP_FAILED`, `WIRELESS_DEBUGGING_STOPPED`, `DISABLE_FAILED`, and
