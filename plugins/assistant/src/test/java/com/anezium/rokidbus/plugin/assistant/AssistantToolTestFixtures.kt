@@ -10,6 +10,7 @@ internal class TestAssistantTool(
     ),
     override val sideEffecting: Boolean = false,
     override val progressLabel: String? = null,
+    override val retiresProgressOnSuccess: Boolean = false,
     override val executionFailureCode: String = "${name}_failed",
     private val available: (AssistantToolAvailabilityContext) -> Boolean = { true },
     private val validator: (String) -> AssistantToolValidation = ::emptyObjectValidation,

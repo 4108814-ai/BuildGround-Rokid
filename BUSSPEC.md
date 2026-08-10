@@ -41,7 +41,7 @@ Round A/API v1 and API v2 details are retained only in the historical appendix.
 | `:glasses-hub` | app | `com.anezium.rokidbus.glasses` | a11y anchor, CXR-S owner, SPP server, AIDL server, supervisor |
 | `:phone-client-probe` | app | `com.anezium.rokidbus.phoneprobe` | sample client using `:bus-client` |
 | `:glasses-client-probe` | app | `com.anezium.rokidbus.clientprobe` | sample client using `:bus-client` |
-| `:plugin-assistant`, `:plugin-relay`, `:plugin-tasker`, `:plugin-feeds`, `:plugin-lens`, `:plugin-transit`, `:plugin-lyrics`, `:plugin-media`, `:plugin-photosync`, `:plugin-sample` | apps | `com.anezium.rokidbus.plugin.*` | external headless plugin APKs built on `:bus-client` (sources under `plugins/` and `plugin-feeds/`) |
+| `:plugin-assistant`, `:plugin-relay`, `:plugin-tasker`, `:plugin-feeds`, `:plugin-lens`, `:plugin-transit`, `:plugin-lyrics`, `:plugin-media`, `:plugin-photosync`, `:plugin-wireless-adb`, `:plugin-sample` | apps | `com.anezium.rokidbus.plugin.*` | external headless plugin APKs built on `:bus-client` (sources under `plugins/` and `plugin-feeds/`) |
 
 ## Wire envelope and binary frames
 
@@ -1393,6 +1393,64 @@ feature must also never remove a group it did not create — the camera link's
 parked group (kept ~40 s so warm reopens cost 1.4 s instead of 5-7 s) is
 indistinguishable from a stranger's.
 
+
+## Wireless ADB control v1
+
+Wireless ADB exposes Android's real ADB-over-Wi-Fi transport to one authenticated
+phone plugin without giving that plugin a shell or letting it drive Settings. The
+route is available on phone and glasses hubs 1.3.0 or newer. The
+plugin must be approved and hold the high-risk `wireless_debugging` grant before it
+can send `/debug/adb/request`. The phone hub derives the principal from Binder,
+discards caller-supplied identity and unknown fields, rebuilds the canonical request
+with its verified `pluginId`, and forwards it to the glasses. The reply returns on
+`/debug/adb/reply` with the same
+envelope id and is delivered only to that owner; it is a direct reply and requires
+no receive prefix.
+
+Request payload:
+
+```json
+{ "version": 1, "action": "start_pairing" }
+```
+
+`action` is exactly one of `status`, `enable`, `start_pairing`,
+`cancel_pairing`, or `disable`. Unknown versions and actions fail closed. Plugins
+must use `WirelessAdbContract.request(action)` rather than hand-building payloads.
+
+Every reply contains `version`, the hub-stamped `pluginId`, `action`, `success`,
+`wifiConnected`, `enabled`, and `pairingActive`. It may also contain `host`,
+`connectPort`, `pairingPort`, `pairingCode`, `expiresAtMillis`, `errorCode`, and
+`message`. A successful `start_pairing` reply supplies a validated IPv4 address,
+ports in `1..65535`, a six-digit code, and an expiry so the client can form:
+
+```text
+adb pair <host>:<pairingPort> <pairingCode>
+adb connect <host>:<connectPort>
+```
+
+Stable v1 failure codes are `INVALID_REQUEST`, `HUB_NOT_READY`,
+`WIRELESS_ADB_BUSY`, `UNSUPPORTED_ANDROID_VERSION`,
+`DEVELOPER_OPTIONS_DISABLED`, `WIFI_REQUIRED`,
+`PRIVILEGED_BRIDGE_UNAVAILABLE`, `NO_IPV4_ADDRESS`,
+`PAIRING_CANCEL_FAILED`, `PAIRING_SERVICE_NOT_FOUND`,
+`PAIRING_CLEANUP_FAILED`, `WIRELESS_DEBUGGING_STOPPED`, `DISABLE_FAILED`, and
+`INTERNAL_ERROR`; a phone-to-glasses transport failure may instead preserve the
+existing bus error code. `message` is display text, while `errorCode` is the
+machine-readable branch.
+
+The glasses trust only the current Wi-Fi network through a fixed privileged bridge
+operation. No payload field is interpolated into a shell command. The hidden Binder
+transactions are limited to the validated Rokid Android 12L/API 32 firmware; other
+API levels return an unsupported-version failure. Nexus never logs or persists the
+pairing code; only an explicit user copy action may place the generated command on
+the Android clipboard. The two-minute deadline is persisted without the code so a
+hub restart can still stop the temporary pairing service on time. `cancel_pairing`
+clears that window, while `disable` also turns off the wireless debugging transport.
+The hub clears its active state only after it observes a successful stop or a closed
+transport. At expiry, a failed pairing-stop command triggers a fail-closed transport
+disable; if both operations fail, the hub retains the session and retries instead of
+reporting it inactive. Logs must redact the pairing code, BSSID, device identity,
+and full reply payload.
 
 ## Hub capabilities announcements
 

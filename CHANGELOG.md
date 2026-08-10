@@ -32,7 +32,10 @@
 - **Wireless ADB can be enabled and paired without driving Settings.** The
   new Wireless ADB plugin asks for an explicit privileged capability, trusts
   the current glasses Wi-Fi network through a fixed signed bridge command,
-  and creates a two-minute pairing code for a computer on the same LAN.
+  and creates a two-minute pairing code for a computer on the same LAN. The
+  code is never persisted or logged, its screen blocks capture, and expiry
+  stays tracked until the pairing service is confirmed closed or the transport
+  is disabled fail-closed.
 
 ## 1.2.11
 

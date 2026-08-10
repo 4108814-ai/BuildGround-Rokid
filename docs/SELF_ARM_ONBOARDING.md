@@ -152,6 +152,11 @@ or unopenable FIFO falls back to the sleep-based poll. The line is
 is a 32-byte value generated once, kept app-private and baked into the deployed script. Arguments
 that could contain `:` travel base64-encoded. The bridge re-validates everything itself and refuses
 on any surprise: unknown command, malformed nonce, replayed nonce, bad token, wrong shape.
+The current allow-list is `wifi_enable`, `wifi_disable`, `wifi_connect`,
+`delete_capture`, `adb_wifi_enable`, and `adb_wifi_disable`. The Wireless ADB
+plugin uses the last two only to toggle the transport; pairing start/stop uses
+the hub's already authenticated local KADB identity with separately validated,
+fixed `service call adb` shapes.
 
 **Adding a command — the whole path.** Every step matters; skipping one is how a command ships in the
 APK and never reaches the glasses.
@@ -175,8 +180,10 @@ APK and never reaches the glasses.
 **Never read the bridge's response file from the app.** A file created by the bridge's uid can stay
 invisible to the app's uid for seconds behind the FUSE negative-dentry cache, which made every
 request look like it had failed. Watch the effect instead: `WifiManager.isWifiEnabled` for the Wi-Fi
-commands, a directory listing for the delete command. A listing also beats a `stat`, which can answer
-from a cached entry.
+commands, the global wireless-debugging state plus its live TLS port for the ADB commands, and a
+directory listing for the delete command. A listing also beats a `stat`, which can answer from a
+cached entry. The API-32 bridge derives the current BSSID itself, validates it, and never returns or
+logs it; no plugin-controlled value reaches that Binder transaction.
 
 **How the script reaches the glasses.** Normally the self-arm session rewrites it on every hub start.
 That session needs working ADB, so the bridge also checks the installed APK on a five-minute elapsed

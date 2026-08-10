@@ -23,11 +23,7 @@ internal object RemoteInputHubBridge {
     private var observing = false
     private var lastState = RemoteInputSessionState()
     private var closeReason = RemoteInputCloseReason.FOCUS_LOST
-    private val navigationResults = object : LinkedHashMap<String, WireNavigationResult>(32, 0.75f, true) {
-        override fun removeEldestEntry(
-            eldest: MutableMap.MutableEntry<String, WireNavigationResult>?,
-        ): Boolean = size > MAX_NAVIGATION_RESULTS
-    }
+    private val navigationReplay = RemoteNavigationReplayCache(MAX_NAVIGATION_RESULTS)
 
     fun initialize(send: (String, JSONObject) -> Boolean) {
         sender = send
@@ -94,11 +90,16 @@ internal object RemoteInputHubBridge {
 
     private fun handleNavigation(payload: JSONObject): Boolean {
         val request = RemoteNavigationContract.parseRequest(payload) ?: return false
-        synchronized(navigationResults) {
-            navigationResults[request.requestId]
-        }?.let { cached ->
-            send(RemoteNavigationContract.RESULT_PATH, RemoteNavigationContract.result(cached))
-            return true
+        when (val replay = navigationReplay.reserve(request.requestId)) {
+            RemoteNavigationReplay.New -> Unit
+            RemoteNavigationReplay.InFlight -> return true
+            is RemoteNavigationReplay.Completed -> {
+                send(
+                    RemoteNavigationContract.RESULT_PATH,
+                    RemoteNavigationContract.result(replay.result),
+                )
+                return true
+            }
         }
         RemoteNavigationController.perform(request.action.toLocalAction()) { localResult ->
             val result = WireNavigationResult(
@@ -113,7 +114,7 @@ internal object RemoteInputHubBridge {
                     -> RemoteNavigationErrorCode.ACTION_UNAVAILABLE
                 },
             )
-            synchronized(navigationResults) { navigationResults[request.requestId] = result }
+            navigationReplay.complete(result)
             send(RemoteNavigationContract.RESULT_PATH, RemoteNavigationContract.result(result))
         }
         return true
@@ -241,4 +242,37 @@ internal object RemoteInputHubBridge {
     }
 
     private const val MAX_NAVIGATION_RESULTS = 64
+}
+
+internal sealed interface RemoteNavigationReplay {
+    data object New : RemoteNavigationReplay
+    data object InFlight : RemoteNavigationReplay
+    data class Completed(val result: WireNavigationResult) : RemoteNavigationReplay
+}
+
+internal class RemoteNavigationReplayCache(
+    private val maximumEntries: Int,
+) {
+    private val results = object : LinkedHashMap<String, WireNavigationResult?>(32, 0.75f, true) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<String, WireNavigationResult?>?,
+        ): Boolean = size > maximumEntries
+    }
+
+    init {
+        require(maximumEntries > 0)
+    }
+
+    @Synchronized
+    fun reserve(requestId: String): RemoteNavigationReplay {
+        results[requestId]?.let { return RemoteNavigationReplay.Completed(it) }
+        if (results.containsKey(requestId)) return RemoteNavigationReplay.InFlight
+        results[requestId] = null
+        return RemoteNavigationReplay.New
+    }
+
+    @Synchronized
+    fun complete(result: WireNavigationResult) {
+        results[result.requestId] = result
+    }
 }

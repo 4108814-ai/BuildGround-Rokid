@@ -13,8 +13,10 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PersistableBundle
 import android.view.Gravity
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -50,6 +52,7 @@ class WirelessAdbSettingsActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         window.statusBarColor = NexusUi.BG
         window.navigationBarColor = NexusUi.BG
         content = NexusUi.contentColumn(this)
@@ -293,9 +296,12 @@ class WirelessAdbSettingsActivity : Activity() {
     }
 
     private fun copyCommand(command: String) {
-        getSystemService(ClipboardManager::class.java)?.setPrimaryClip(
-            ClipData.newPlainText("ADB command", command),
-        )
+        val clip = ClipData.newPlainText("ADB command", command).apply {
+            description.extras = PersistableBundle().apply {
+                putBoolean(CLIPBOARD_IS_SENSITIVE, true)
+            }
+        }
+        getSystemService(ClipboardManager::class.java)?.setPrimaryClip(clip)
         Toast.makeText(this, "Command copied", Toast.LENGTH_SHORT).show()
     }
 
@@ -326,5 +332,6 @@ class WirelessAdbSettingsActivity : Activity() {
     private companion object {
         const val HEARTBEAT_MS = 5_000L
         const val DISABLED_ALPHA = 0.45f
+        const val CLIPBOARD_IS_SENSITIVE = "android.content.extra.IS_SENSITIVE"
     }
 }

@@ -150,8 +150,12 @@ Paths a plugin can **send to** (gated by capability):
 | `/tts/speak`, `/tts/stop` | `tts` | Speech out of the glasses. Use `nexusTtsSession(callbacks)`. `/tts/started` and `/tts/done` are **receive-only** — declare exactly those two in RECEIVE_PREFIXES, not `/tts`. Text is capped at 1024 characters, five commands per second, one utterance at a time on the glasses. Voice and speed belong to the wearer's Rokid assistant settings; nothing may change them. |
 | `/camera/freeze/result`, `/camera/overlay`, `/camera/link/offer` | `camera` | Camera platform sends (signer/grant-bound). `/camera/link/offer` is bidirectional so an approved camera plugin can advertise a reverse transport role. `/camera/session/state` and `/camera/freeze/image/chunk` remain **receive-only** (declare them in RECEIVE_PREFIXES); sending them is rejected |
 | `/mediasync/settings`, `/mediasync/now` | `mediasync` | Photo sync control: partial settings updates (`autoSyncOnCharge`, `deleteAfterSync`; an empty request is a refresh) and a manual "sync now". `/mediasync/status` is **receive-only** (declare it in RECEIVE_PREFIXES); every other `/mediasync/…` path is hub-to-hub and rejected if you send it |
-| `/debug/adb/request` → `/debug/adb/reply` | `wireless_debugging` | High-risk wireless ADB control. Actions are `status`, `enable`, `start_pairing`, `cancel_pairing`, and `disable`. Replies are owner-scoped direct replies and need no receive prefix. The phone hub stamps the authenticated plugin id; plugins must not add or trust one themselves. Pairing codes expire after two minutes. |
+| `/debug/adb/request` → `/debug/adb/reply` | `wireless_debugging` | High-risk wireless ADB control. Actions are `status`, `enable`, `start_pairing`, `cancel_pairing`, and `disable`. Replies are owner-scoped direct replies and need no receive prefix. The phone hub stamps the authenticated plugin id; plugins must not add or trust one themselves. Pairing codes expire after two minutes and must not be persisted or logged; code-bearing windows use `FLAG_SECURE`, and only an explicit user action may copy a sensitive-marked command to the Android clipboard. |
 | `/plugin/<yourId>/…` | — | Your private namespace (must match your declared receive prefixes) |
+
+Wireless ADB requires both phone and glasses hubs 1.3.0 or newer and the
+validated Rokid Android 12L/API 32 firmware. Do not fall back to arbitrary shell
+commands or Settings automation on an unsupported hub or firmware.
 
 Paths a plugin **receives** (reserved, hub-generated — you never send these):
 `/system/plugin/registration`, `/system/plugin/open`, `/system/plugin/close`,

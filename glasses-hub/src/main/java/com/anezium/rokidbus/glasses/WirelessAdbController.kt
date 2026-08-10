@@ -25,29 +25,39 @@ internal object WirelessAdbController {
     private data class PairingEndpoint(val port: Int)
 
     private val random = SecureRandom()
-    private val pairingLock = Any()
+    private val pairingOperationLock = Any()
     private val expiryExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "NexusAdbPairingExpiry").apply { isDaemon = true }
     }
+    @Volatile
     private var activePairing: PairingSession? = null
 
-    fun restorePairingExpiry(context: Context) {
+    fun isPairingActive(): Boolean = activePairing != null
+
+    fun restorePairingExpiry(context: Context) = synchronized(pairingOperationLock) {
         val preferences = context.getSharedPreferences(PAIRING_PREFERENCES, Context.MODE_PRIVATE)
         val serviceName = preferences.getString(KEY_SERVICE_NAME, null).orEmpty()
         val expiresAtMillis = preferences.getLong(KEY_EXPIRES_AT, 0L)
-        if (serviceName.isBlank() || expiresAtMillis <= 0L) return
+        if (serviceName.isBlank() || expiresAtMillis <= 0L) {
+            activePairing = null
+            clearStoredPairing(context)
+            return@synchronized
+        }
         val session = PairingSession(serviceName, expiresAtMillis)
-        synchronized(pairingLock) { activePairing = session }
+        activePairing = session
         scheduleExpiry(context.applicationContext, session)
     }
 
-    fun handle(context: Context, action: WirelessAdbAction): WirelessAdbReply = when (action) {
-        WirelessAdbAction.STATUS -> status(context, action, success = true)
-        WirelessAdbAction.ENABLE -> enable(context, action)
-        WirelessAdbAction.START_PAIRING -> startPairing(context)
-        WirelessAdbAction.CANCEL_PAIRING -> cancelPairing(context, action)
-        WirelessAdbAction.DISABLE -> disable(context)
-    }
+    fun handle(context: Context, action: WirelessAdbAction): WirelessAdbReply =
+        synchronized(pairingOperationLock) {
+            when (action) {
+                WirelessAdbAction.STATUS -> status(context, action, success = true)
+                WirelessAdbAction.ENABLE -> enable(context, action)
+                WirelessAdbAction.START_PAIRING -> startPairing(context)
+                WirelessAdbAction.CANCEL_PAIRING -> cancelPairing(context, action)
+                WirelessAdbAction.DISABLE -> disable(context)
+            }
+        }
 
     private fun enable(context: Context, action: WirelessAdbAction): WirelessAdbReply {
         preconditionFailure(context, action)?.let { return it }
@@ -81,24 +91,40 @@ internal object WirelessAdbController {
             "NO_IPV4_ADDRESS",
             "The glasses do not have a usable IPv4 address on this Wi-Fi network.",
         )
-        cancelPairingInternal(context)
-        val serviceName = "Nexus_${randomHex(8)}"
-        val pairingCode = (random.nextInt(900_000) + 100_000).toString()
-        val endpoint = discoverPairingEndpoint(context, serviceName) {
-            WirelessAdbShell.startPairing(context, serviceName, pairingCode).success
-        }
-        if (endpoint == null) {
-            WirelessAdbShell.stopPairing(context)
+        if (!cancelPairingInternal(context)) {
             return failure(
                 context,
                 action,
-                "PAIRING_SERVICE_NOT_FOUND",
-                "The pairing service did not become visible on the local network.",
+                "PAIRING_CANCEL_FAILED",
+                "The previous pairing window could not be closed.",
+            )
+        }
+        val serviceName = "Nexus_${randomHex(8)}"
+        val pairingCode = (random.nextInt(900_000) + 100_000).toString()
+        val session = PairingSession(
+            serviceName = serviceName,
+            expiresAtMillis = System.currentTimeMillis() + PAIRING_LIFETIME_MS,
+        )
+        val endpoint = discoverPairingEndpoint(context, serviceName) {
+            activatePairing(context, session) &&
+                WirelessAdbShell.startPairing(context, serviceName, pairingCode).success
+        }
+        if (endpoint == null) {
+            val stopped = cancelPairingInternal(context)
+            return failure(
+                context,
+                action,
+                if (stopped) "PAIRING_SERVICE_NOT_FOUND" else "PAIRING_CLEANUP_FAILED",
+                if (stopped) {
+                    "The pairing service did not become visible on the local network."
+                } else {
+                    "Pairing failed and the temporary service could not be closed. Try cancelling it again."
+                },
             )
         }
         val connectPort = SelfArmWirelessAdbController.readWirelessPort()
         if (connectPort <= 0) {
-            WirelessAdbShell.stopPairing(context)
+            cancelPairingInternal(context)
             return failure(
                 context,
                 action,
@@ -106,15 +132,6 @@ internal object WirelessAdbController {
                 "Wireless debugging stopped before pairing was ready.",
             )
         }
-        val expiresAtMillis = System.currentTimeMillis() + PAIRING_LIFETIME_MS
-        val session = PairingSession(serviceName, expiresAtMillis)
-        synchronized(pairingLock) { activePairing = session }
-        context.getSharedPreferences(PAIRING_PREFERENCES, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_SERVICE_NAME, serviceName)
-            .putLong(KEY_EXPIRES_AT, expiresAtMillis)
-            .apply()
-        scheduleExpiry(context.applicationContext, session)
         return WirelessAdbReply(
             action = action,
             success = true,
@@ -125,26 +142,51 @@ internal object WirelessAdbController {
             connectPort = connectPort,
             pairingPort = endpoint.port,
             pairingCode = pairingCode,
-            expiresAtMillis = expiresAtMillis,
+            expiresAtMillis = session.expiresAtMillis,
         )
     }
 
+    private fun activatePairing(context: Context, session: PairingSession): Boolean {
+        val stored = context.getSharedPreferences(PAIRING_PREFERENCES, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_SERVICE_NAME, session.serviceName)
+            .putLong(KEY_EXPIRES_AT, session.expiresAtMillis)
+            .commit()
+        if (!stored) {
+            Log.w(TAG, "temporary ADB pairing metadata could not be stored")
+            return false
+        }
+        activePairing = session
+        scheduleExpiry(context.applicationContext, session)
+        return true
+    }
+
     private fun scheduleExpiry(context: Context, session: PairingSession) {
-        val delayMillis = (session.expiresAtMillis - System.currentTimeMillis()).coerceAtLeast(0L)
+        val delayMillis = (session.expiresAtMillis - System.currentTimeMillis())
+            .coerceIn(0L, PAIRING_LIFETIME_MS)
+        schedulePairingStop(context, session, delayMillis)
+    }
+
+    private fun schedulePairingStop(
+        context: Context,
+        session: PairingSession,
+        delayMillis: Long,
+    ) {
         expiryExecutor.schedule(
             {
-                val shouldStop = synchronized(pairingLock) {
-                    if (activePairing?.serviceName == session.serviceName) {
-                        activePairing = null
-                        true
-                    } else {
-                        false
+                synchronized(pairingOperationLock) {
+                    val isCurrent = activePairing?.serviceName == session.serviceName
+                    if (isCurrent) {
+                        if (cancelPairingInternal(context)) {
+                            Log.i(TAG, "temporary ADB pairing window closed at expiry")
+                        } else if (SelfArmCommandBridgeClient.setWirelessAdbEnabled(context, false)) {
+                            clearPairingState(context)
+                            Log.w(TAG, "temporary ADB pairing stop failed; disabled wireless debugging")
+                        } else {
+                            Log.w(TAG, "temporary ADB pairing stop failed; retrying")
+                            schedulePairingStop(context, session, PAIRING_STOP_RETRY_MS)
+                        }
                     }
-                }
-                if (shouldStop) {
-                    clearStoredPairing(context)
-                    WirelessAdbShell.stopPairing(context)
-                    Log.i(TAG, "temporary ADB pairing window expired")
                 }
             },
             delayMillis,
@@ -154,7 +196,7 @@ internal object WirelessAdbController {
 
     private fun cancelPairing(context: Context, action: WirelessAdbAction): WirelessAdbReply {
         val stopped = cancelPairingInternal(context)
-        return if (stopped || SelfArmWirelessAdbController.readWirelessPort() <= 0) {
+        return if (stopped) {
             status(context, action, success = true)
         } else {
             failure(context, action, "PAIRING_CANCEL_FAILED", "The temporary pairing window could not be closed.")
@@ -165,6 +207,7 @@ internal object WirelessAdbController {
         cancelPairingInternal(context)
         val disabled = SelfArmCommandBridgeClient.setWirelessAdbEnabled(context, false)
         return if (disabled) {
+            clearPairingState(context)
             status(context, WirelessAdbAction.DISABLE, success = true)
         } else {
             failure(
@@ -177,9 +220,15 @@ internal object WirelessAdbController {
     }
 
     private fun cancelPairingInternal(context: Context): Boolean {
-        synchronized(pairingLock) { activePairing = null }
+        val stopped = WirelessAdbShell.stopPairing(context).success ||
+            SelfArmWirelessAdbController.readWirelessPort() <= 0
+        if (stopped) clearPairingState(context)
+        return stopped
+    }
+
+    private fun clearPairingState(context: Context) {
+        activePairing = null
         clearStoredPairing(context)
-        return WirelessAdbShell.stopPairing(context).success
     }
 
     private fun clearStoredPairing(context: Context) {
@@ -225,9 +274,7 @@ internal object WirelessAdbController {
     ): WirelessAdbReply {
         val wifiConnected = SelfArmWirelessAdbController.isWifiNetworkReady(context)
         val connectPort = SelfArmWirelessAdbController.readWirelessPort().takeIf { it > 0 }
-        val pairingActive = synchronized(pairingLock) {
-            activePairing?.expiresAtMillis?.let { it > System.currentTimeMillis() } == true
-        }
+        val pairingActive = activePairing != null
         return WirelessAdbReply(
             action = action,
             success = success,
@@ -360,6 +407,7 @@ internal object WirelessAdbController {
     private const val DISCOVERY_START_TIMEOUT_MS = 2_000L
     private const val PAIRING_DISCOVERY_TIMEOUT_MS = 12_000L
     private const val PAIRING_LIFETIME_MS = 2L * 60L * 1_000L
+    private const val PAIRING_STOP_RETRY_MS = 5_000L
     private const val PAIRING_PREFERENCES = "wireless_adb_pairing"
     private const val KEY_SERVICE_NAME = "service_name"
     private const val KEY_EXPIRES_AT = "expires_at"

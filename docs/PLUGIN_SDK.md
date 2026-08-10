@@ -1289,17 +1289,27 @@ that speaks, not a per-plugin one.
 the glasses hub to enable Android's real ADB-over-Wi-Fi transport on the current
 LAN, create a two-minute pairing code, cancel that pairing window, query status,
 or disable the transport. It never grants arbitrary shell access to the plugin
-and it does not drive Settings or Accessibility.
+and it does not drive Settings or Accessibility. The contract requires phone and
+glasses hubs 1.3.0 or newer; older hubs do not recognize the capability or route.
 
 Send `WirelessAdbContract.request(action)` to
 `BusPaths.WIRELESS_ADB_REQUEST`. The hub answers on
 `BusPaths.WIRELESS_ADB_REPLY` with the same envelope id. This is an owner-scoped
 direct reply, so it must not be declared in `RECEIVE_PREFIXES`. The phone hub
-stamps `pluginId` from the authenticated registration before forwarding the
-request; a plugin-provided identity is ignored. A successful `START_PAIRING`
+rebuilds the canonical request and stamps `pluginId` from the authenticated
+registration before forwarding it; plugin-provided identity and unknown fields
+are ignored. A successful `START_PAIRING`
 reply contains the IPv4 host, pairing port, six-digit code, connect port, and
 expiry needed to form `adb pair` and `adb connect` commands. Treat the code as
-an in-memory secret: do not persist or log it.
+a short-lived secret: do not persist or log it. If the UI offers a copy action,
+make that user-initiated and explain that it places the command on the Android
+clipboard until the clipboard is cleared; the pairing code still expires after
+two minutes. Mark the clip sensitive and protect every code-bearing window with
+`FLAG_SECURE`. A hub must not clear its active session until the pairing service
+is confirmed stopped or the transport is disabled; failed expiry cleanup remains
+tracked and is retried. Branch on `errorCode`, not the display-oriented `message`;
+the stable code list is specified in
+[BUSSPEC.md](../BUSSPEC.md#wireless-adb-control-v1).
 
 ## 4. Approve and debug
 

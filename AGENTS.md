@@ -15,8 +15,20 @@ Assistant's phone-calendar tools are local Android integrations. They use the
 Calendar Provider and the plugin's own `READ_CALENDAR`/`WRITE_CALENDAR` runtime
 permissions; they add no Nexus capability, receive prefix, SDK surface, or bus
 route. Keep destructive calendar operations fail-closed: delete only one exact
-title-and-start match, reject ambiguity, and require an explicit whole-series
-request before deleting a recurring event.
+title-and-start match, revalidate that identity at the final provider delete
+boundary, reject ambiguity, and require an explicit whole-series request before
+deleting a recurring event.
+
+Wireless ADB crosses `:plugin-wireless-adb`, `:shared`, `:phone-hub`, and
+`:glasses-hub`. Its `/debug/adb/request` path requires the high-risk
+`wireless_debugging` grant; replies are owner-scoped and the phone hub, never the
+plugin, stamps the authenticated plugin id. Keep the privileged bridge fixed-input,
+limited to the validated Rokid Android 12L/API 32 transaction contract, and
+fail-closed on every other API. Pairing codes are two-minute secrets: Nexus must
+never persist or log them, Wi-Fi identifiers, or device identity. Only an explicit
+user copy action may place the generated command on the Android clipboard, and any
+screen displaying it must use `FLAG_SECURE`. Changes normally require the shared,
+plugin, and both hub test/build suites.
 
 ## Building
 

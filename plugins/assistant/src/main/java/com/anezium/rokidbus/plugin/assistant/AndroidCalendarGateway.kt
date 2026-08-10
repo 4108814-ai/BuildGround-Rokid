@@ -96,6 +96,8 @@ internal class AndroidCalendarGateway(
     override fun deleteEvent(
         eventId: Long,
         expectedTitle: String,
+        expectedStartMillis: Long,
+        expectedAllDay: Boolean,
         deleteRecurringSeries: Boolean,
     ): AssistantCalendarDeleteResult {
         val eventUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId)
@@ -103,35 +105,103 @@ internal class AndroidCalendarGateway(
             eventUri,
             arrayOf(
                 CalendarContract.Events.TITLE,
+                CalendarContract.Events.DTSTART,
+                CalendarContract.Events.ALL_DAY,
                 CalendarContract.Events.RRULE,
                 CalendarContract.Events.RDATE,
+                CalendarContract.Events.EXRULE,
+                CalendarContract.Events.EXDATE,
             ),
             null,
             null,
             null,
         )?.use { cursor ->
             if (!cursor.moveToFirst()) return@use null
-            val storedTitle = cursor.getString(
-                cursor.getColumnIndexOrThrow(CalendarContract.Events.TITLE),
-            ).orEmpty().ifBlank { "Untitled event" }
-            val recurring = listOf(
-                CalendarContract.Events.RRULE,
-                CalendarContract.Events.RDATE,
-            ).any { column ->
-                !cursor.getString(cursor.getColumnIndexOrThrow(column)).isNullOrBlank()
-            }
-            storedTitle to recurring
+            CalendarEventSnapshot(
+                rawTitle = cursor.getString(
+                    cursor.getColumnIndexOrThrow(CalendarContract.Events.TITLE),
+                ),
+                startMillis = cursor.getLong(
+                    cursor.getColumnIndexOrThrow(CalendarContract.Events.DTSTART),
+                ),
+                allDay = cursor.getInt(
+                    cursor.getColumnIndexOrThrow(CalendarContract.Events.ALL_DAY),
+                ) == 1,
+                recurrenceRule = cursor.getString(
+                    cursor.getColumnIndexOrThrow(CalendarContract.Events.RRULE),
+                ),
+                recurrenceDates = cursor.getString(
+                    cursor.getColumnIndexOrThrow(CalendarContract.Events.RDATE),
+                ),
+                exceptionRule = cursor.getString(
+                    cursor.getColumnIndexOrThrow(CalendarContract.Events.EXRULE),
+                ),
+                exceptionDates = cursor.getString(
+                    cursor.getColumnIndexOrThrow(CalendarContract.Events.EXDATE),
+                ),
+            )
         } ?: return AssistantCalendarDeleteResult.NOT_FOUND
 
-        if (event.first != expectedTitle) return AssistantCalendarDeleteResult.TITLE_MISMATCH
-        if (event.second && !deleteRecurringSeries) {
+        if (event.displayTitle != expectedTitle || event.allDay != expectedAllDay) {
+            return AssistantCalendarDeleteResult.IDENTITY_MISMATCH
+        }
+        if (!event.recurring && event.startMillis != expectedStartMillis) {
+            return AssistantCalendarDeleteResult.IDENTITY_MISMATCH
+        }
+        if (!hasExactInstance(eventId, expectedTitle, expectedStartMillis, expectedAllDay)) {
+            return AssistantCalendarDeleteResult.IDENTITY_MISMATCH
+        }
+        if (event.recurring && !deleteRecurringSeries) {
             return AssistantCalendarDeleteResult.RECURRING_SERIES_CONFIRMATION_REQUIRED
         }
-        return if (resolver.delete(eventUri, null, null) == 1) {
-            AssistantCalendarDeleteResult.DELETED
-        } else {
-            AssistantCalendarDeleteResult.FAILED
+        val guard = event.deleteGuard()
+        return when (resolver.delete(eventUri, guard.selection, guard.arguments)) {
+            1 -> AssistantCalendarDeleteResult.DELETED
+            0 -> AssistantCalendarDeleteResult.IDENTITY_MISMATCH
+            else -> AssistantCalendarDeleteResult.FAILED
         }
+    }
+
+    private fun hasExactInstance(
+        eventId: Long,
+        expectedTitle: String,
+        expectedStartMillis: Long,
+        expectedAllDay: Boolean,
+    ): Boolean {
+        val endMillis = runCatching { Math.addExact(expectedStartMillis, 1L) }
+            .getOrNull()
+            ?: return false
+        val uri = CalendarContract.Instances.CONTENT_URI.buildUpon().apply {
+            ContentUris.appendId(this, expectedStartMillis)
+            ContentUris.appendId(this, endMillis)
+        }.build()
+        return resolver.query(
+            uri,
+            arrayOf(
+                CalendarContract.Instances.EVENT_ID,
+                CalendarContract.Instances.BEGIN,
+                CalendarContract.Instances.TITLE,
+                CalendarContract.Instances.ALL_DAY,
+            ),
+            CalendarContract.Instances.EVENT_ID + "=?",
+            arrayOf(eventId.toString()),
+            null,
+        )?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(CalendarContract.Instances.EVENT_ID)
+            val startColumn = cursor.getColumnIndexOrThrow(CalendarContract.Instances.BEGIN)
+            val titleColumn = cursor.getColumnIndexOrThrow(CalendarContract.Instances.TITLE)
+            val allDayColumn = cursor.getColumnIndexOrThrow(CalendarContract.Instances.ALL_DAY)
+            var matched = false
+            while (!matched && cursor.moveToNext()) {
+                matched = cursor.getLong(idColumn) == eventId &&
+                    cursor.getLong(startColumn) == expectedStartMillis &&
+                    cursor.getString(titleColumn)
+                        .orEmpty()
+                        .ifBlank { "Untitled event" } == expectedTitle &&
+                    (cursor.getInt(allDayColumn) == 1) == expectedAllDay
+            }
+            matched
+        } == true
     }
 
     override fun instances(
@@ -187,5 +257,52 @@ internal class AndroidCalendarGateway(
                 }
             }
         }.orEmpty()
+    }
+
+    private data class CalendarEventSnapshot(
+        val rawTitle: String?,
+        val startMillis: Long,
+        val allDay: Boolean,
+        val recurrenceRule: String?,
+        val recurrenceDates: String?,
+        val exceptionRule: String?,
+        val exceptionDates: String?,
+    ) {
+        val displayTitle: String = rawTitle.orEmpty().ifBlank { "Untitled event" }
+        val recurring: Boolean = !recurrenceRule.isNullOrBlank() || !recurrenceDates.isNullOrBlank()
+
+        fun deleteGuard(): CalendarDeleteGuard {
+            val clauses = mutableListOf<String>()
+            val arguments = mutableListOf<String>()
+            clauses.addExactOrNull(CalendarContract.Events.TITLE, rawTitle, arguments)
+            clauses += CalendarContract.Events.DTSTART + "=?"
+            arguments += startMillis.toString()
+            clauses += CalendarContract.Events.ALL_DAY + "=?"
+            arguments += if (allDay) "1" else "0"
+            clauses.addExactOrNull(CalendarContract.Events.RRULE, recurrenceRule, arguments)
+            clauses.addExactOrNull(CalendarContract.Events.RDATE, recurrenceDates, arguments)
+            clauses.addExactOrNull(CalendarContract.Events.EXRULE, exceptionRule, arguments)
+            clauses.addExactOrNull(CalendarContract.Events.EXDATE, exceptionDates, arguments)
+            return CalendarDeleteGuard(clauses.joinToString(" AND "), arguments.toTypedArray())
+        }
+    }
+
+    private data class CalendarDeleteGuard(
+        val selection: String,
+        val arguments: Array<String>,
+    )
+
+}
+
+private fun MutableList<String>.addExactOrNull(
+    column: String,
+    value: String?,
+    arguments: MutableList<String>,
+) {
+    if (value == null) {
+        this += "$column IS NULL"
+    } else {
+        this += "$column=?"
+        arguments += value
     }
 }

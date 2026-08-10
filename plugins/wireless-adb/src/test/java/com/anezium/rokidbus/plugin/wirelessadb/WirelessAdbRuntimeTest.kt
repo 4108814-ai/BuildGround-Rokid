@@ -69,7 +69,7 @@ class WirelessAdbRuntimeTest {
         runtime.onConnected()
 
         assertEquals(WirelessAdbAction.STATUS, runtime.snapshot().busyAction)
-        val timedOut = runtime.snapshot(nowMillis = System.currentTimeMillis() + 50_000L)
+        val timedOut = runtime.snapshot(nowMillis = System.currentTimeMillis() + 80_000L)
         assertNull(timedOut.busyAction)
         assertEquals("The glasses did not answer in time.", timedOut.error)
         assertTrue(runtime.refresh())
@@ -176,6 +176,28 @@ class WirelessAdbRuntimeTest {
 
         assertEquals(1, observed.size)
         assertTrue(observed.single().enabled)
+    }
+
+    @Test
+    fun `reply action must match the pending request`() {
+        val host = RecordingHost()
+        val runtime = WirelessAdbRuntime(host)
+        runtime.onConnected()
+        val status = host.requests.removeFirst()
+
+        runtime.onMessage(
+            BusPaths.WIRELESS_ADB_REPLY,
+            status.id,
+            reply(WirelessAdbAction.DISABLE, enabled = false),
+        )
+
+        assertEquals(WirelessAdbAction.STATUS, runtime.snapshot().busyAction)
+        runtime.onMessage(
+            BusPaths.WIRELESS_ADB_REPLY,
+            status.id,
+            reply(WirelessAdbAction.STATUS, enabled = false),
+        )
+        assertNull(runtime.snapshot().busyAction)
     }
 
     private fun reply(action: WirelessAdbAction, enabled: Boolean): JSONObject =

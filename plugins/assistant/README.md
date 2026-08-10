@@ -28,7 +28,9 @@ Ink requires the separate `ink_surface` grant and a live compatible renderer.
 When either is unavailable, Assistant keeps the text answer and ordinary card
 path. The listening notice and final surface belong to one display episode, so
 the scoped wake lock spans the band-to-card/Ink handover and ends with the
-answer rather than leaving a dark panel midway through it.
+answer rather than leaving a dark panel midway through it. A successful Ink
+handover retires the tool progress notice; only a failed render restores the
+progress band while Assistant prepares the text fallback.
 These are Nexus surfaces rendered with native glasses Views, not windows from
 Rokid's private AIUI runtime.
 
@@ -38,7 +40,8 @@ permissions; it is not a Nexus descriptor capability, SDK surface, receive
 prefix, or bus route. The settings screen owns that consent. Calendar failures
 are reported to the model instead of being hidden, and deletion proceeds only
 when one event exactly matches both title and start time. Multiple matches are
-left untouched, and a recurring series is deleted only after an explicit
+left untouched. The provider identity is checked again immediately before the
+guarded delete, and a recurring series is deleted only after an explicit
 whole-series request.
 
 Reminders and timers persist in app-private JSON stores and fire through

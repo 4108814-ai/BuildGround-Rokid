@@ -15,6 +15,7 @@ import java.util.Locale
 /** Minimal glasses-side catalog/launcher behind the phone's native-apps skeleton. */
 internal object NativeAppsController {
     private const val MAX_CXR_PAYLOAD_BYTES = 2_200
+    internal const val LAUNCHER_QUERY_FLAGS = 0
 
     fun handle(
         context: Context,
@@ -112,7 +113,7 @@ internal object NativeAppsController {
     private fun launcherActivities(packageManager: PackageManager) =
         packageManager.queryIntentActivities(
             Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),
-            PackageManager.MATCH_DEFAULT_ONLY,
+            LAUNCHER_QUERY_FLAGS,
         )
 
     internal fun sanitizeLabel(value: String?, packageName: String): String {

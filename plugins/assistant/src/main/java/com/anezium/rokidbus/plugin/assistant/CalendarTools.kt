@@ -57,7 +57,7 @@ internal data class AssistantCalendarInstance(
 internal enum class AssistantCalendarDeleteResult {
     DELETED,
     NOT_FOUND,
-    TITLE_MISMATCH,
+    IDENTITY_MISMATCH,
     RECURRING_SERIES_CONFIRMATION_REQUIRED,
     FAILED,
 }
@@ -74,6 +74,8 @@ internal interface AssistantCalendarGateway {
     fun deleteEvent(
         eventId: Long,
         expectedTitle: String,
+        expectedStartMillis: Long,
+        expectedAllDay: Boolean,
         deleteRecurringSeries: Boolean,
     ): AssistantCalendarDeleteResult
 
@@ -341,6 +343,8 @@ internal class DeleteCalendarEventTool(
             gateway.deleteEvent(
                 eventId = target.eventId,
                 expectedTitle = expectedTitle,
+                expectedStartMillis = target.startMillis,
+                expectedAllDay = target.allDay,
                 deleteRecurringSeries = arguments.getBoolean("delete_recurring_series"),
             )
         ) {
@@ -353,7 +357,7 @@ internal class DeleteCalendarEventTool(
             )
             AssistantCalendarDeleteResult.NOT_FOUND ->
                 AssistantToolResult.Error("calendar_event_not_found")
-            AssistantCalendarDeleteResult.TITLE_MISMATCH ->
+            AssistantCalendarDeleteResult.IDENTITY_MISMATCH ->
                 AssistantToolResult.Error("calendar_event_changed")
             AssistantCalendarDeleteResult.RECURRING_SERIES_CONFIRMATION_REQUIRED ->
                 AssistantToolResult.Error(

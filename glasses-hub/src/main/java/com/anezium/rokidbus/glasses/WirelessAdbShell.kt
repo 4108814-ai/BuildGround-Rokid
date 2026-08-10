@@ -77,7 +77,11 @@ internal object WirelessAdbShell {
                     runCatching { kadb.close() }
                 }
             } catch (exception: Exception) {
-                val reason = shortMessage(exception)
+                val reason = if (redactOutput) {
+                    exception::class.java.simpleName.ifBlank { "Exception" }
+                } else {
+                    shortMessage(exception)
+                }
                 failures += "exception=$reason"
                 Log.i(TAG, "KADB $operation candidate failed: $reason")
                 continue

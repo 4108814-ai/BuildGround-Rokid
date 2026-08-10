@@ -16,8 +16,8 @@ shipped until it has run on real hardware.
 
 Any APK may bind to the hub; installing one grants it nothing. A plugin is
 identified by **package + plugin id + signing certificate**, and each capability
-— `surfaces`, `microphone`, `stt`, `tts`, `camera`, `http_proxy`, `mediasync`,
-`assistant`, `wireless_debugging` —
+— `surfaces`, `ink_surface`, `microphone`, `stt`, `tts`, `camera`, `http_proxy`,
+`mediasync`, `assistant`, `wireless_debugging` —
 is a separate user grant, checked at the hub on every message rather than once
 at install time.
 

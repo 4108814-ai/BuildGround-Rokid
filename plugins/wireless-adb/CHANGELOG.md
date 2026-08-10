@@ -6,3 +6,6 @@
 - Create a two-minute ADB pairing code and copyable `adb pair` / `adb connect` commands.
 - Cancel an active pairing window or disable the wireless debugging transport.
 - Keep periodic status checks from redrawing or disabling the settings controls.
+- Require signed Nexus phone and glasses hubs 1.3.0 or newer and validated Rokid
+  Android 12L/API 32 firmware.
+- Mark copied commands as sensitive and prevent screenshots while a pairing code is visible.

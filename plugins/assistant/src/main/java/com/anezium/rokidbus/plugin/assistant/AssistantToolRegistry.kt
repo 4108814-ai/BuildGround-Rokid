@@ -45,6 +45,8 @@ internal interface AssistantToolDefinition {
     val parametersSchema: AssistantToolJsonSchema
     val sideEffecting: Boolean
     val progressLabel: String?
+    val retiresProgressOnSuccess: Boolean
+        get() = false
     val executionFailureCode: String
         get() = "${name}_failed"
 
@@ -113,10 +115,16 @@ internal class AssistantToolExecutionPhase(
     private val executedSideEffectingTools = mutableSetOf<String>()
     private var executedCalls = 0
 
-    suspend fun execute(call: AssistantToolCall): AssistantToolResult = try {
-        executeCall(call)
-    } finally {
-        reportProgress(AssistantToolRegistry.THINKING_LABEL)
+    suspend fun execute(call: AssistantToolCall): AssistantToolResult {
+        var restoreProgress = true
+        try {
+            val result = executeCall(call)
+            restoreProgress = result is AssistantToolResult.Error ||
+                definitionsByName[call.name]?.retiresProgressOnSuccess != true
+            return result
+        } finally {
+            if (restoreProgress) reportProgress(AssistantToolRegistry.THINKING_LABEL)
+        }
     }
 
     private suspend fun executeCall(call: AssistantToolCall): AssistantToolResult {

@@ -21,11 +21,14 @@ class WirelessAdbContractTest {
     @Test
     fun `phone hub stamps the authenticated plugin identity`() {
         val stamped = WirelessAdbContract.stampedRequest(
-            WirelessAdbContract.request(WirelessAdbAction.STATUS).put("pluginId", "spoofed"),
+            WirelessAdbContract.request(WirelessAdbAction.STATUS)
+                .put("pluginId", "spoofed")
+                .put("unexpected", "discard me"),
             "wirelessadb",
         )
 
         assertEquals("wirelessadb", WirelessAdbContract.pluginId(requireNotNull(stamped)))
+        assertEquals(setOf("version", "action", "pluginId"), stamped.keys().asSequence().toSet())
         assertNull(
             WirelessAdbContract.stampedRequest(
                 WirelessAdbContract.request(WirelessAdbAction.STATUS),
@@ -67,5 +70,14 @@ class WirelessAdbContractTest {
             remove("pairingPort")
         }
         assertNull(WirelessAdbContract.parseReply(incomplete))
+        val missingExpiry = WirelessAdbContract.reply("wirelessadb", reply).apply {
+            remove("expiresAtMillis")
+        }
+        assertNull(WirelessAdbContract.parseReply(missingExpiry))
+        assertNull(
+            WirelessAdbContract.parseReply(
+                WirelessAdbContract.reply("wirelessadb", reply.copy(pairingActive = false)),
+            ),
+        )
     }
 }

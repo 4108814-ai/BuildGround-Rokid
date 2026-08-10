@@ -46,8 +46,9 @@ object WirelessAdbContract {
     }
 
     fun stampedRequest(payload: JSONObject, pluginId: String): JSONObject? {
-        if (requestAction(payload) == null || !PluginDescriptor.isValidId(pluginId)) return null
-        return JSONObject(payload.toString()).put("pluginId", pluginId)
+        val action = requestAction(payload) ?: return null
+        if (!PluginDescriptor.isValidId(pluginId)) return null
+        return request(action).put("pluginId", pluginId)
     }
 
     fun pluginId(payload: JSONObject): String? =
@@ -90,10 +91,11 @@ object WirelessAdbContract {
         } else {
             null
         }
-        if (success && action == WirelessAdbAction.START_PAIRING &&
-            (host == null || pairingPort == null || pairingCode == null || connectPort == null)
-        ) {
-            return null
+        if (success && action == WirelessAdbAction.START_PAIRING) {
+            if (!wifiConnected || !enabled || !pairingActive ||
+                host == null || pairingPort == null || pairingCode == null ||
+                connectPort == null || expiresAtMillis == null
+            ) return null
         }
         return WirelessAdbReply(
             action = action,

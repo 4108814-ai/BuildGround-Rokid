@@ -333,7 +333,7 @@ class CalendarToolsTest {
             gateway.instanceRequests.single(),
         )
         assertEquals(
-            DeleteRequest(42L, "Planning", deleteRecurringSeries = false),
+            DeleteRequest(42L, "Planning", startMillis, expectedAllDay = false, deleteRecurringSeries = false),
             gateway.deleteRequests.single(),
         )
         val json = JSONObject(result.text)
@@ -369,18 +369,19 @@ class CalendarToolsTest {
             gateway.instanceRequests.single(),
         )
         assertEquals(
-            DeleteRequest(44L, "Holiday", deleteRecurringSeries = false),
+            DeleteRequest(44L, "Holiday", startMillis, expectedAllDay = true, deleteRecurringSeries = false),
             gateway.deleteRequests.single(),
         )
     }
 
     @Test
     fun `explicit recurring series delete passes the destructive scope`() = runTest {
+        val startMillis = epochAtParis(2026, 8, 10, 9, 30)
         val gateway = FakeCalendarGateway(
             instanceResults = listOf(
                 calendarInstance(
                     eventId = 45L,
-                    startMillis = epochAtParis(2026, 8, 10, 9, 30),
+                    startMillis = startMillis,
                     title = "Weekly planning",
                     recurring = true,
                 ),
@@ -393,7 +394,13 @@ class CalendarToolsTest {
         )
 
         assertEquals(
-            DeleteRequest(45L, "Weekly planning", deleteRecurringSeries = true),
+            DeleteRequest(
+                45L,
+                "Weekly planning",
+                startMillis,
+                expectedAllDay = false,
+                deleteRecurringSeries = true,
+            ),
             gateway.deleteRequests.single(),
         )
     }
@@ -407,7 +414,7 @@ class CalendarToolsTest {
         )
         val cases = listOf(
             AssistantCalendarDeleteResult.NOT_FOUND to "calendar_event_not_found",
-            AssistantCalendarDeleteResult.TITLE_MISMATCH to "calendar_event_changed",
+            AssistantCalendarDeleteResult.IDENTITY_MISMATCH to "calendar_event_changed",
             AssistantCalendarDeleteResult.FAILED to "calendar_event_delete_failed",
         )
 
@@ -665,6 +672,8 @@ class CalendarToolsTest {
     private data class DeleteRequest(
         val eventId: Long,
         val expectedTitle: String,
+        val expectedStartMillis: Long,
+        val expectedAllDay: Boolean,
         val deleteRecurringSeries: Boolean,
     )
 
@@ -695,9 +704,17 @@ class CalendarToolsTest {
         override fun deleteEvent(
             eventId: Long,
             expectedTitle: String,
+            expectedStartMillis: Long,
+            expectedAllDay: Boolean,
             deleteRecurringSeries: Boolean,
         ): AssistantCalendarDeleteResult {
-            deleteRequests += DeleteRequest(eventId, expectedTitle, deleteRecurringSeries)
+            deleteRequests += DeleteRequest(
+                eventId,
+                expectedTitle,
+                expectedStartMillis,
+                expectedAllDay,
+                deleteRecurringSeries,
+            )
             return deleteResult
         }
 

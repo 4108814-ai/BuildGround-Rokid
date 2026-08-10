@@ -8,10 +8,8 @@ import org.junit.Test
 
 class AssistantToolRegistryTest {
     @Test
-    fun `each local tool label is shown during execution then restored`() = runTest {
+    fun `each nonvisual local tool label is shown during execution then restored`() = runTest {
         val expectedLabels = linkedMapOf(
-            RENDER_TEMPLATE_TOOL_NAME to "Drawing the card…",
-            RENDER_INK_PAGE_TOOL_NAME to "Drawing the card…",
             TAKE_NOTE_TOOL_NAME to "Saving the note…",
             LIST_NOTES_TOOL_NAME to "Reading your notes…",
             SEARCH_NOTES_TOOL_NAME to "Searching your notes…",
@@ -70,6 +68,30 @@ class AssistantToolRegistryTest {
         progress.clear()
         phase.execute(AssistantToolCall("unknown", "unknown_tool", "{}"))
         assertEquals(listOf("Thinking…"), progress)
+    }
+
+    @Test
+    fun `successful visual handoff retires progress while failures restore thinking`() = runTest {
+        val progress = mutableListOf<String>()
+        var result: AssistantToolResult = AssistantToolResult.Json("{}")
+        val tool = TestAssistantTool(
+            name = "render_card",
+            progressLabel = "Drawing the card…",
+            retiresProgressOnSuccess = true,
+            executor = { _, _ -> result },
+        )
+        val phase = AssistantToolRegistry(
+            definitions = listOf(tool),
+            progressReporter = progress::add,
+        ).newExecutionPhase(TOOLS_WITHOUT_VISION)
+
+        phase.execute(AssistantToolCall("shown", tool.name, "{}"))
+        assertEquals(listOf("Drawing the card…"), progress)
+
+        progress.clear()
+        result = AssistantToolResult.Error("render_card_failed")
+        phase.execute(AssistantToolCall("failed", tool.name, "{}"))
+        assertEquals(listOf("Drawing the card…", "Thinking…"), progress)
     }
 
     @Test

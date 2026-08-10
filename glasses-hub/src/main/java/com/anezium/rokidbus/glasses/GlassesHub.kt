@@ -49,11 +49,13 @@ import org.json.JSONObject
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 object GlassesHub {
     private const val LOCAL_BINARY_MAX_BYTES = 512 * 1024
+    private const val WIRELESS_ADB_REQUEST_SLOTS = 2
     internal const val LOHS_REVERSE_JOIN_TIMEOUT_MS = 15_000L
 
     data class LauncherEntry(
@@ -107,6 +109,7 @@ object GlassesHub {
     private val wirelessAdbExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "RokidNexusWirelessAdb").apply { isDaemon = true }
     }
+    private val wirelessAdbSlots = Semaphore(WIRELESS_ADB_REQUEST_SLOTS, true)
     private val setupCapabilitiesLock = Any()
     private var wifiDisableFuture: ScheduledFuture<*>? = null
     private var setupCapabilitiesFuture: ScheduledFuture<*>? = null
@@ -399,26 +402,48 @@ object GlassesHub {
             )
             return
         }
-        wirelessAdbExecutor.execute {
-            val result = runCatching {
-                WirelessAdbController.handle(context.applicationContext, action)
-            }.getOrElse { failure ->
-                log("wireless ADB action=${action.wireValue} failed type=${failure.javaClass.simpleName}")
+        if (!wirelessAdbSlots.tryAcquire()) {
+            sendWirelessAdbReply(
+                envelope.id,
+                pluginId,
                 WirelessAdbReply(
                     action = action,
                     success = false,
                     wifiConnected = SelfArmWirelessAdbController.isWifiNetworkReady(context),
-                    enabled = SelfArmWirelessAdbController.readWirelessPort() > 0,
-                    pairingActive = false,
-                    errorCode = "INTERNAL_ERROR",
-                    message = "Wireless debugging failed unexpectedly.",
-                )
-            }
-            sendWirelessAdbReply(envelope.id, pluginId, result)
-            log(
-                "wireless ADB action=${action.wireValue} success=${result.success} " +
-                    "code=${result.errorCode ?: "none"}",
+                    enabled = SelfArmWirelessAdbController.readWirelessPort() > 0 &&
+                        SelfArmWirelessAdbController.isEnabled(context),
+                    pairingActive = WirelessAdbController.isPairingActive(),
+                    errorCode = "WIRELESS_ADB_BUSY",
+                    message = "Another wireless debugging request is still running.",
+                ),
             )
+            return
+        }
+        wirelessAdbExecutor.execute {
+            try {
+                val result = runCatching {
+                    WirelessAdbController.handle(context.applicationContext, action)
+                }.getOrElse { failure ->
+                    log("wireless ADB action=${action.wireValue} failed type=${failure.javaClass.simpleName}")
+                    WirelessAdbReply(
+                        action = action,
+                        success = false,
+                        wifiConnected = SelfArmWirelessAdbController.isWifiNetworkReady(context),
+                        enabled = SelfArmWirelessAdbController.readWirelessPort() > 0 &&
+                            SelfArmWirelessAdbController.isEnabled(context),
+                        pairingActive = WirelessAdbController.isPairingActive(),
+                        errorCode = "INTERNAL_ERROR",
+                        message = "Wireless debugging failed unexpectedly.",
+                    )
+                }
+                sendWirelessAdbReply(envelope.id, pluginId, result)
+                log(
+                    "wireless ADB action=${action.wireValue} success=${result.success} " +
+                        "code=${result.errorCode ?: "none"}",
+                )
+            } finally {
+                wirelessAdbSlots.release()
+            }
         }
     }
 

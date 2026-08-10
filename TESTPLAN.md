@@ -690,6 +690,9 @@ Fail-closed cases:
 - A missing title/start match reports that nothing was deleted.
 - Two events with the same title and start time are reported as ambiguous and
   neither event is removed.
+- If the matched event's title, start, or all-day identity changes before the
+  provider delete, the guarded delete reports that the event changed and leaves
+  it untouched.
 - A recurring event is refused unless the request explicitly says to delete
   the whole series. If testing that scope, use a disposable series and verify
   every occurrence is removed.
@@ -699,6 +702,51 @@ Fail-closed cases:
 Typed debug injection after speech recognition is sufficient to isolate the
 provider/tool path, but it does not replace one physical assist-button and
 microphone pass on worn glasses. Remove all disposable events after validation.
+
+## Wireless ADB v1 validation
+
+Software gate:
+
+```powershell
+.\gradlew.bat :shared:test :plugin-wireless-adb:testDebugUnitTest :plugin-wireless-adb:assembleDebug -PskipCxrGlobal=true
+.\gradlew.bat :phone-hub:testDebugUnitTest :phone-hub:assembleDebug :glasses-hub:testDebugUnitTest :glasses-hub:assembleDebug
+```
+
+Use normally signed, upgrade-compatible phone and glasses hubs at version 1.3.0 or
+newer. Do not uninstall, downgrade, or replace a release-signed hub merely to make a
+debug build install. On validated Rokid Android 12L/API 32 glasses connected to the
+same LAN as the test computer:
+
+1. Install Wireless ADB, approve only `wireless_debugging`, and open its settings.
+   Confirm an unapproved or revoked plugin receives a capability rejection and no
+   pairing service starts.
+2. Tap **Enable & pair computer**. Run the displayed `adb pair` and `adb connect`
+   commands before the two-minute deadline, then confirm `adb devices` shows the
+   glasses without a cable.
+3. Start a second pairing window, cancel it, and confirm its pairing command no
+   longer succeeds. Start another window, let it expire, and confirm the same while
+   ordinary wireless debugging remains enabled.
+4. Restart the glasses hub during an active window. Confirm the code is not restored
+   or displayed again, but the persisted deadline still stops the pairing service.
+   Inject a pairing-stop failure: status must remain active, the expiry path must
+   attempt a fail-closed transport disable, and a double failure must retain the
+   session and retry rather than claim it closed.
+5. Leave the settings screen idle for at least four five-second status cycles.
+   **Glasses** and **Controls** must not flash, controls must remain enabled, and the
+   transient `Checking glasses…` state must not appear for background refreshes.
+   Tap a control while a status request is still in flight: the user action must run
+   immediately after that status request rather than fail as busy. A real state
+   change must still redraw once.
+6. Tap **Disable wireless debugging** and confirm the existing `adb connect`
+   endpoint closes and status reports disabled. Disconnect Wi-Fi and repeat enable;
+   expect a user-readable failure with no partial pairing state.
+7. Verify unsupported API-level fixtures fail before any Binder transaction, every
+   command-bridge argument remains fixed-input, malformed hosts/ports/codes are
+   rejected, and stale or wrong-id replies cannot replace the active request.
+8. Inspect phone and glasses logs after every path. They may contain action, result,
+   and redacted state, but never the six-digit code, BSSID, device identity, full
+   request/reply JSON, or an executable pairing command. Confirm Android blocks
+   screenshots and screen recording while the settings screen displays the code.
 
 ## Ink Surface v1 validation
 
@@ -715,6 +763,10 @@ On both devices:
   and confirm its Ink page appears before the card fallback. Revoke only
   `ink_surface`: the page must be rejected while ordinary `surfaces` still
   works. Adding the grant back requires explicit re-approval.
+- Ask Assistant for a result that uses `render_template` or `render_ink_page`.
+  Once the Ink page reports ready, confirm the drawing/listening notice retires
+  and no stale `Thinking…` band or notice keepalive reappears over the page when
+  the tool returns. A rejected render must restore progress for the text fallback.
 - Activate **Tap to update** repeatedly. Confirm one action callback per tap,
   the metric/row/chart patch in place without a full surface flash, monotonically
   increasing revisions, and no stale patch repaint after hide/reopen.

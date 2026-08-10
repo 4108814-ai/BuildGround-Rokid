@@ -31,17 +31,23 @@ internal data class WirelessAdbUiState(
 )
 
 internal class WirelessAdbRuntime(private val host: WirelessAdbHost) {
+    private data class PendingRequest(
+        val id: String,
+        val action: WirelessAdbAction,
+        val deadlineMillis: Long,
+        val visible: Boolean,
+    )
+
     private val listeners = CopyOnWriteArrayList<(WirelessAdbUiState) -> Unit>()
     @Volatile
     private var state = WirelessAdbUiState()
-    private var pendingRequestId: String? = null
-    private var pendingDeadlineMillis = 0L
+    private var pendingRequest: PendingRequest? = null
 
     @Synchronized
     fun snapshot(nowMillis: Long = System.currentTimeMillis()): WirelessAdbUiState {
-        if (pendingRequestId != null && pendingDeadlineMillis in 1..nowMillis) {
-            pendingRequestId = null
-            pendingDeadlineMillis = 0L
+        val pending = pendingRequest
+        if (pending != null && pending.deadlineMillis <= nowMillis) {
+            pendingRequest = null
             state = state.copy(busyAction = null, error = "The glasses did not answer in time.")
         }
         val commands = state.commands
@@ -66,8 +72,7 @@ internal class WirelessAdbRuntime(private val host: WirelessAdbHost) {
 
     @Synchronized
     fun onDisconnected() {
-        pendingRequestId = null
-        pendingDeadlineMillis = 0L
+        pendingRequest = null
         state = WirelessAdbUiState(error = "Waiting for Rokid Nexus.")
         notifyChanged()
     }
@@ -90,9 +95,9 @@ internal class WirelessAdbRuntime(private val host: WirelessAdbHost) {
     fun onMessage(path: String, id: String, payload: JSONObject) {
         if (path != BusPaths.WIRELESS_ADB_REPLY) return
         val reply = WirelessAdbContract.parseReply(payload) ?: return
-        if (id != pendingRequestId) return
-        pendingRequestId = null
-        pendingDeadlineMillis = 0L
+        val pending = pendingRequest ?: return
+        if (id != pending.id || reply.action != pending.action) return
+        pendingRequest = null
         val updated = stateFromReply(reply)
         if (updated != state) {
             state = updated
@@ -103,22 +108,25 @@ internal class WirelessAdbRuntime(private val host: WirelessAdbHost) {
     @Synchronized
     private fun request(action: WirelessAdbAction, showBusy: Boolean = true): Boolean {
         if (!state.connected) return false
-        if (pendingRequestId != null) {
-            if (!showBusy || state.busyAction != null) return false
-            pendingRequestId = null
-            pendingDeadlineMillis = 0L
+        val current = pendingRequest
+        if (current != null) {
+            if (!showBusy || current.visible) return false
+            pendingRequest = null
         }
         val id = UUID.randomUUID().toString()
-        pendingRequestId = id
-        pendingDeadlineMillis = System.currentTimeMillis() + REQUEST_TIMEOUT_MS
+        pendingRequest = PendingRequest(
+            id = id,
+            action = action,
+            deadlineMillis = System.currentTimeMillis() + REQUEST_TIMEOUT_MS,
+            visible = showBusy,
+        )
         if (showBusy) {
             state = state.copy(busyAction = action, error = null)
             notifyChanged()
         }
         val sent = host.send(BusPaths.WIRELESS_ADB_REQUEST, id, WirelessAdbContract.request(action))
-        if (!sent) {
-            pendingRequestId = null
-            pendingDeadlineMillis = 0L
+        if (!sent && pendingRequest?.id == id) {
+            pendingRequest = null
             state = state.copy(busyAction = null, error = "The request could not reach Rokid Nexus.")
             notifyChanged()
         }
@@ -168,9 +176,10 @@ internal class WirelessAdbRuntime(private val host: WirelessAdbHost) {
     }
 
     private companion object {
-        // The glasses chain behind START_PAIRING can legitimately take ~41 s at worst
-        // (privileged bridge enable, then NSD discovery around the pairing service).
-        // Giving up earlier would discard the only reply that carries the pairing code.
-        const val REQUEST_TIMEOUT_MS = 45_000L
+        // START_PAIRING can spend 12 s enabling the bridge, two 20 s local KADB
+        // operations closing and starting the pairing server, then 14 s on NSD.
+        // Keep the reply that carries the only copy of the pairing code alive past
+        // that bounded worst case.
+        const val REQUEST_TIMEOUT_MS = 75_000L
     }
 }

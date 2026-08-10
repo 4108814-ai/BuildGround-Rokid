@@ -60,6 +60,13 @@ class PluginRoutePolicyTest {
             PluginRouteDecision.Denied("CAPABILITY_REQUIRED_WIRELESS_DEBUGGING"),
             PluginRoutePolicy.authorize(plugin(), "/debug/adb/request"),
         )
+        assertEquals(
+            PluginRouteDecision.Denied("PLUGIN_NAMESPACE_DENIED"),
+            PluginRoutePolicy.authorize(
+                plugin(PluginCapability.WIRELESS_DEBUGGING),
+                "/debug/adb/reply",
+            ),
+        )
     }
 
     @Test

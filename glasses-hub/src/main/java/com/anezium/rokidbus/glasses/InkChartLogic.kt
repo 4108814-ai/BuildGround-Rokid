@@ -182,17 +182,18 @@ internal object InkChartLogic {
                 } else {
                     emptyList()
                 },
-                axisLabels = if (hasAxisLabels && first != null) {
-                    strided(first.points.filter { it.label.isNotBlank() }).map { point ->
-                        InkChartTextMark(
-                            x = map(point.x, model.minimumX, model.maximumX, left, right),
-                            y = height * 0.97f,
-                            text = point.label,
-                        )
+                axisLabels = first
+                    ?.takeIf { hasAxisLabels }
+                    ?.let { series ->
+                        strided(series.points.filter { it.label.isNotBlank() }).map { point ->
+                            InkChartTextMark(
+                                x = map(point.x, model.minimumX, model.maximumX, left, right),
+                                y = height * 0.97f,
+                                text = point.label,
+                            )
+                        }
                     }
-                } else {
-                    emptyList()
-                },
+                    .orEmpty(),
             )
         }
     }

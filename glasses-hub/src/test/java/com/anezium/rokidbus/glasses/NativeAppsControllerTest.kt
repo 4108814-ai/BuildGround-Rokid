@@ -1,5 +1,6 @@
 package com.anezium.rokidbus.glasses
 
+import android.content.pm.PackageManager
 import com.anezium.rokidbus.shared.NativeAppContract
 import com.anezium.rokidbus.shared.NativeAppEntry
 import org.junit.Assert.assertEquals
@@ -12,6 +13,14 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [32])
 class NativeAppsControllerTest {
+    @Test
+    fun `launcher discovery does not require the unrelated default category`() {
+        assertEquals(
+            0,
+            NativeAppsController.LAUNCHER_QUERY_FLAGS and PackageManager.MATCH_DEFAULT_ONLY,
+        )
+    }
+
     @Test
     fun `sanitizes labels before exposing them to the phone`() {
         assertEquals(
