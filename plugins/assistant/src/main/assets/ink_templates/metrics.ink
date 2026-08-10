@@ -33,10 +33,6 @@
   padding: 18rpx;
   color: var(--color-text-primary);
   background-color: var(--color-background);
-  border-width: 2rpx;
-  border-style: solid;
-  border-color: var(--border-color-default);
-  border-radius: var(--radius-md, 18rpx);
 }
 .title {
   color: var(--color-primary);

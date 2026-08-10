@@ -70,10 +70,17 @@ internal class InkHudView(context: Context) : FrameLayout(context) {
     init {
         clipChildren = false
         clipToPadding = false
-        // The card is the page's opaque canvas: Rokid's own AIUI host never lets
-        // the screen behind show through, so pages don't author a background and
-        // the accessibility-overlay window beneath must not bleed into the page.
-        setBackgroundColor(BusTheme.glassesBg)
+        // The card is the page's framed, opaque canvas: Rokid's own AIUI host
+        // never lets the screen behind show through, so pages don't author a
+        // background or an outer frame. Same recipe as the notice band the card
+        // morphs from — on the additive optics the black fill reads as
+        // transparent and only the hairline and the content light up.
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(BusTheme.glassesBg)
+            setStroke(BusTheme.dp(context, 1), BusTheme.hairline)
+            cornerRadius = BusTheme.dp(context, 7).toFloat()
+        }
         addView(rootFlex, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(rootAbsolute, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
