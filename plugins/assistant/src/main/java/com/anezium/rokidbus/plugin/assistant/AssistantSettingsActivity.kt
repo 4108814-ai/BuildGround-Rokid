@@ -1,8 +1,10 @@
 package com.anezium.rokidbus.plugin.assistant
 
+import android.Manifest
 import android.app.Activity
 import android.app.Dialog
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -45,6 +47,7 @@ class AssistantSettingsActivity : Activity() {
     private lateinit var personaStatus: TextView
     private lateinit var conversationsSlot: LinearLayout
     private lateinit var productivitySlot: LinearLayout
+    private lateinit var calendarAccessSlot: LinearLayout
     private lateinit var syncSection: LinearLayout
     private lateinit var syncFooter: LinearLayout
     private lateinit var memorySyncStatus: TextView
@@ -152,6 +155,7 @@ class AssistantSettingsActivity : Activity() {
         renderPersona()
         renderMemory()
         renderProductivityCard()
+        renderCalendarAccess()
     }
 
     private fun buildUi() {
@@ -253,6 +257,16 @@ class AssistantSettingsActivity : Activity() {
             }
             addView(productivitySlot, NexusUi.block())
             addView(BusTheme.gap(this@AssistantSettingsActivity, 28))
+            addView(
+                NexusUi.sectionRow(this@AssistantSettingsActivity, "Calendar"),
+                NexusUi.block(),
+            )
+            addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
+            calendarAccessSlot = LinearLayout(this@AssistantSettingsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            addView(calendarAccessSlot, NexusUi.block())
+            addView(BusTheme.gap(this@AssistantSettingsActivity, 28))
             addView(NexusUi.sectionRow(this@AssistantSettingsActivity, "Plugin"), NexusUi.block())
             addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
             addView(uninstallCard(), NexusUi.block())
@@ -280,6 +294,7 @@ class AssistantSettingsActivity : Activity() {
         renderPersona()
         renderMemory()
         renderProductivityCard()
+        renderCalendarAccess()
     }
 
     // ------------------------------------------------------------------ providers
@@ -1473,6 +1488,88 @@ class AssistantSettingsActivity : Activity() {
         return listOfNotNull(notePart, reminderPart).joinToString(" · ")
     }
 
+    // ------------------------------------------------------------------ calendar
+
+    private fun renderCalendarAccess() {
+        val granted = CALENDAR_PERMISSIONS.all { permission ->
+            checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+        }
+        calendarAccessSlot.removeAllViews()
+        calendarAccessSlot.addView(
+            NexusUi.card(this).apply {
+                addView(
+                    LinearLayout(this@AssistantSettingsActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(
+                            LinearLayout(this@AssistantSettingsActivity).apply {
+                                orientation = LinearLayout.VERTICAL
+                                addView(
+                                    NexusUi.rowTitle(
+                                        this@AssistantSettingsActivity,
+                                        "Phone calendar",
+                                    ),
+                                    NexusUi.block(),
+                                )
+                                addView(
+                                    NexusUi.rowSub(
+                                        this@AssistantSettingsActivity,
+                                        if (granted) {
+                                            "Appointments and agenda are available to the assistant"
+                                        } else {
+                                            "Allow the assistant to add and read calendar events"
+                                        },
+                                    ),
+                                    NexusUi.block(),
+                                )
+                            },
+                            LinearLayout.LayoutParams(
+                                0,
+                                ViewGroup.LayoutParams.WRAP_CONTENT,
+                                1f,
+                            ).apply {
+                                marginEnd = NexusUi.dp(this@AssistantSettingsActivity, 12)
+                            },
+                        )
+                        if (granted) {
+                            addView(
+                                NexusUi.metaLabel(
+                                    this@AssistantSettingsActivity,
+                                    "Granted",
+                                    NexusUi.GREEN,
+                                ),
+                            )
+                        } else {
+                            addView(
+                                NexusUi.textButton(
+                                    this@AssistantSettingsActivity,
+                                    "Grant access",
+                                ).apply {
+                                    setOnClickListener { requestCalendarAccess() }
+                                },
+                            )
+                        }
+                    },
+                    NexusUi.block(),
+                )
+            },
+            NexusUi.block(),
+        )
+    }
+
+    private fun requestCalendarAccess() {
+        requestPermissions(CALENDAR_PERMISSIONS, REQUEST_CALENDAR_ACCESS)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_CALENDAR_ACCESS) renderCalendarAccess()
+    }
+
     // ------------------------------------------------------------------ memory
 
     private fun syncCard(): LinearLayout =
@@ -1741,5 +1838,13 @@ class AssistantSettingsActivity : Activity() {
 
     private fun toast(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    private companion object {
+        const val REQUEST_CALENDAR_ACCESS = 1201
+        val CALENDAR_PERMISSIONS = arrayOf(
+            Manifest.permission.READ_CALENDAR,
+            Manifest.permission.WRITE_CALENDAR,
+        )
     }
 }

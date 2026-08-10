@@ -59,6 +59,7 @@ class AssistantPluginService : NexusPluginService() {
     private val noteStore by lazy { AssistantNoteStore(applicationContext) }
     private val reminderStore by lazy { AssistantReminderStore(applicationContext) }
     private val reminderScheduler by lazy { androidReminderScheduler(applicationContext) }
+    private val calendarGateway by lazy { AndroidCalendarGateway(applicationContext) }
     private val conversationThreading by lazy { AssistantConversationThreading(threadStore) }
     private val inkPageToolCapabilities by lazy { createInkPageToolCapabilities() }
     private val inkPageToolRuntime by lazy { InkPageToolRuntime(inkPageToolCapabilities) }
@@ -80,7 +81,7 @@ class AssistantPluginService : NexusPluginService() {
                     noteStore = noteStore,
                     reminderStore = reminderStore,
                     reminderScheduler = reminderScheduler,
-                ),
+                ) + assistantCalendarTools(calendarGateway),
             sessionContext = ::assistantToolSessionContext,
             progressReporter = { label -> uiController.showTransient(label) },
         )
