@@ -67,6 +67,14 @@ hub-produced transcript text and does not require the plugin to request raw
 (§3.3); it is likewise independent of `microphone`, since the plugin supplies
 text and never touches audio.
 
+Descriptor capabilities authorize Nexus hub resources and routes. They do not
+replace Android permissions for a phone-local platform API. A headless plugin
+may use such an API under permissions declared in its own manifest and granted
+through its own settings UI; Assistant's direct Calendar Provider access under
+`READ_CALENDAR` and `WRITE_CALENDAR` is one example. That access adds no Nexus
+capability, receive prefix, typed SDK surface, or wire route. The plugin owns
+the consent, denial, and provider-error UX.
+
 ## 3. Implement the service
 
 ```kotlin

@@ -663,6 +663,43 @@ device. If a test seems to need Wi-Fi, something is wrong.
   it comes back it must request config and resume working without touching the
   phone hub (this is what previously needed a phone-side force-stop).
 
+## Assistant phone calendar validation
+
+Software gate:
+
+```powershell
+.\gradlew.bat :plugin-assistant:testDebugUnitTest :plugin-assistant:assembleDebug -PskipCxrGlobal=true
+```
+
+On the phone and glasses:
+
+1. Open Assistant settings, grant **Phone calendar**, and confirm Android shows
+   Calendar access as granted.
+2. With the glasses worn, ask Assistant to create a uniquely titled event at a
+   precise future local time. Confirm the success response appears through the
+   normal Assistant notice/card/Ink path, then verify the title and time in the
+   phone's calendar app.
+3. Ask what is on the calendar for the matching window. Confirm the event is
+   returned once at the same local time; a timezone offset must not be applied
+   twice.
+4. Ask to delete that exact title at that exact start time. Confirm the event is
+   absent both from a second list request and from the phone calendar app.
+
+Fail-closed cases:
+
+- A missing title/start match reports that nothing was deleted.
+- Two events with the same title and start time are reported as ambiguous and
+  neither event is removed.
+- A recurring event is refused unless the request explicitly says to delete
+  the whole series. If testing that scope, use a disposable series and verify
+  every occurrence is removed.
+- Revoking either Android calendar permission makes the tool report the missing
+  grant and leaves calendar data unchanged.
+
+Typed debug injection after speech recognition is sufficient to isolate the
+provider/tool path, but it does not replace one physical assist-button and
+microphone pass on worn glasses. Remove all disposable events after validation.
+
 ## Ink Surface v1 validation
 
 Software gate:

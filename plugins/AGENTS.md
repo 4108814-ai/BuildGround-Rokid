@@ -39,6 +39,15 @@ sanctioned exceptions:
    reason; "the user would probably want it" does not qualify — only an item the
    user explicitly created with a delivery time does.
 
+A phone plugin may also call an Android platform API directly under permissions
+declared in its own manifest. Those runtime permissions are separate from Nexus
+descriptor capabilities: they do not authorize a bus path, receive prefix, SDK
+surface, or glasses resource. Request them in the plugin's settings at the point
+of use, explain why they are needed, and surface denial or provider failure
+honestly. Assistant's Calendar Provider integration is the precedent. For a
+destructive platform action, fail closed on missing or ambiguous identity rather
+than guessing; recurring calendar series require explicit whole-series intent.
+
 ## 2. Project setup
 
 ```kotlin

@@ -85,6 +85,13 @@ and `wireless_debugging`; unknown values invalidate the
 descriptor. Grants are keyed by package, plugin ID, and signing digest and are
 never implied by installation.
 
+Phone-local Android platform access is outside this bus contract. For example,
+Assistant talks directly to the phone's Calendar Provider under its own Android
+runtime permissions; those calls never cross a hub and add no path, feature bit,
+receive prefix, or descriptor capability. A future calendar exchange involving
+the glasses or either hub would require a separately specified and authorized
+wire contract; the current provider integration must not be represented as one.
+
 Legacy `register(clientId, prefixes, callback)` remains ABI-compatible for
 same-UID hub internals and explicit debug-probe compatibility. Release hubs
 reject unknown external legacy callers. Phone approval does not authorize an

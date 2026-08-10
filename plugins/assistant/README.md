@@ -29,6 +29,17 @@ When either is unavailable, Assistant keeps the text answer and ordinary card
 path. The listening notice and final surface belong to one display episode, so
 the scoped wake lock spans the band-to-card/Ink handover and ends with the
 answer rather than leaving a dark panel midway through it.
+These are Nexus surfaces rendered with native glasses Views, not windows from
+Rokid's private AIUI runtime.
+
+Calendar access is local to the phone plugin. It uses Android's Calendar
+Provider under the standard `READ_CALENDAR` and `WRITE_CALENDAR` runtime
+permissions; it is not a Nexus descriptor capability, SDK surface, receive
+prefix, or bus route. The settings screen owns that consent. Calendar failures
+are reported to the model instead of being hidden, and deletion proceeds only
+when one event exactly matches both title and start time. Multiple matches are
+left untouched, and a recurring series is deleted only after an explicit
+whole-series request.
 
 Reminders and timers persist in app-private JSON stores and fire through
 `AlarmManager` even when the plugin is closed: a short-lived foreground service
@@ -44,5 +55,5 @@ instructions. Notes and reminders live in their own settings screen.
 Build and test:
 
 ```powershell
-.\gradlew.bat :plugin-assistant:assembleDebug :plugin-assistant:testDebugUnitTest -PskipCxrGlobal=true
+.\gradlew.bat :plugin-assistant:testDebugUnitTest :plugin-assistant:assembleDebug -PskipCxrGlobal=true
 ```

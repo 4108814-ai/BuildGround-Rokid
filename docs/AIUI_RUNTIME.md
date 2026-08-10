@@ -2,7 +2,7 @@
 
 Reference notes on Rokid's live AIUI runtime as it behaves on Rokid Glasses, gathered while evaluating it as a rendering target for Nexus (June–August 2026, firmware `SKQ1.240613.001` / Android 12, `assistserver` 0.3.5, Ink runtime `0.15.0-rc-20260716065001`).
 
-**Nexus does not use this runtime.** The evaluation concluded that driving it from a third-party app depends on private, undocumented firmware surfaces and composes poorly with other display owners. Nexus instead reimplements the published AIUI *page format* natively — see [plans/020-ink-surface.md](../plans/020-ink-surface.md). These findings are preserved because they were hard-won, they document real firmware behavior, and they may help other projects (or a future fallback).
+**Nexus does not use this runtime.** The evaluation concluded that driving it from a third-party app depends on private, undocumented firmware surfaces and composes poorly with other display owners. Nexus instead implements a bounded subset of the published AIUI *page format* with a phone compiler and native glasses Views; the delivered contracts are [PLUGIN_SDK.md § Ink surfaces](PLUGIN_SDK.md#ink-surfaces) and [BUSSPEC.md § Ink Surface protocol v1](../BUSSPEC.md#ink-surface-protocol-v1). These findings are preserved because they were hard-won, they document real firmware behavior, and they may help other projects (or a future fallback).
 
 ## Architecture
 

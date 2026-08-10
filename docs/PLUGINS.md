@@ -217,6 +217,15 @@ that rings user-created reminders may declare `POST_NOTIFICATIONS`,
 deliveries. Otherwise plugins must not post notifications beyond the
 open-scoped dedicated-foreground-service exception described above.
 
+Android runtime permissions used by the plugin itself are a separate consent
+layer from Nexus Plugin access. Declare only the platform permissions the
+feature needs, request them contextually from the settings screen, and keep the
+feature disabled with an actionable explanation when consent is missing. Do
+not add a Nexus capability or bus route for phone-local provider access:
+Assistant's `READ_CALENDAR`/`WRITE_CALENDAR` Calendar Provider integration is
+the precedent. Destructive actions must fail closed when the target is absent
+or ambiguous.
+
 ## 4. Settings screen — the design kit
 
 The screen is a plain code-built `Activity` using **only** `NexusUi` +

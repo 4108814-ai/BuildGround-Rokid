@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Assistant can act on the phone calendar.** It can add and list events after
+  the wearer grants Android calendar access, and deletion fails closed unless
+  exactly one event matches the requested title and start time. Recurring
+  series require an explicit whole-series request.
 - **Ink pages are a public HUD surface.** Plugins with the separate
   `ink_surface` grant can submit a strict, inert subset of Rokid's `.ink`
   format through the typed SDK, patch its data without resending the page, and

@@ -11,6 +11,13 @@ as the wire authority; do not copy the older implementation sketch in
 `/core/native-apps/*`, `/core/remote-input/*`, and `/core/navigation/*` routes are
 trusted hub-to-hub controls and must never be exposed as plugin capabilities.
 
+Assistant's phone-calendar tools are local Android integrations. They use the
+Calendar Provider and the plugin's own `READ_CALENDAR`/`WRITE_CALENDAR` runtime
+permissions; they add no Nexus capability, receive prefix, SDK surface, or bus
+route. Keep destructive calendar operations fail-closed: delete only one exact
+title-and-start match, reject ambiguity, and require an explicit whole-series
+request before deleting a recurring event.
+
 ## Building
 
 This is the verified way to build and test a module:
