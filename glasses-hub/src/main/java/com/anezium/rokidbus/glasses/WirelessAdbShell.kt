@@ -1,6 +1,7 @@
 package com.anezium.rokidbus.glasses
 
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import com.flyfishxu.kadb.Kadb
 
@@ -18,6 +19,44 @@ internal object WirelessAdbShell {
 
     fun setWifiEnabled(context: Context, enabled: Boolean): Result {
         val command = if (enabled) WIFI_ENABLE_COMMAND else WIFI_DISABLE_COMMAND
+        return executeFixed(context, command, "Wi-Fi", redactOutput = false)
+    }
+
+    fun startPairing(context: Context, serviceName: String, pairingCode: String): Result {
+        if (!supportsApiLevel(Build.VERSION.SDK_INT)) {
+            return Result(success = false, error = "unsupported Android API")
+        }
+        if (!PAIRING_SERVICE_PATTERN.matches(serviceName) ||
+            !PAIRING_CODE_PATTERN.matches(pairingCode)
+        ) {
+            return Result(success = false, error = "invalid pairing arguments")
+        }
+        return executeFixed(
+            context = context,
+            command = "service call adb $ADB_PAIRING_START_TRANSACTION s16 $serviceName s16 $pairingCode",
+            operation = "ADB pairing start",
+            redactOutput = true,
+        )
+    }
+
+    fun stopPairing(context: Context): Result {
+        if (!supportsApiLevel(Build.VERSION.SDK_INT)) {
+            return Result(success = false, error = "unsupported Android API")
+        }
+        return executeFixed(
+            context = context,
+            command = "service call adb $ADB_PAIRING_STOP_TRANSACTION",
+            operation = "ADB pairing stop",
+            redactOutput = true,
+        )
+    }
+
+    private fun executeFixed(
+        context: Context,
+        command: String,
+        operation: String,
+        redactOutput: Boolean,
+    ): Result {
         val failures = mutableListOf<String>()
         for (candidate in candidateTargets(SelfArmWirelessAdbController.readWirelessPort())) {
             val result = try {
@@ -27,27 +66,31 @@ internal object WirelessAdbShell {
                     val shell = kadb.shell(command)
                     Result(
                         success = shell.exitCode == 0,
-                        output = shell.output,
-                        error = shell.errorOutput,
+                        output = if (redactOutput) "" else shell.output,
+                        error = if (redactOutput) {
+                            if (shell.exitCode == 0) "" else "shell exit was non-zero"
+                        } else {
+                            shell.errorOutput
+                        },
                     )
                 } finally {
                     runCatching { kadb.close() }
                 }
             } catch (exception: Exception) {
                 val reason = shortMessage(exception)
-                failures += "${candidate.host}:${candidate.port} exception=$reason"
-                Log.i(TAG, "KADB Wi-Fi candidate ${candidate.host}:${candidate.port} failed: $reason")
+                failures += "exception=$reason"
+                Log.i(TAG, "KADB $operation candidate failed: $reason")
                 continue
             }
 
             if (result.success) {
-                Log.i(TAG, "KADB Wi-Fi command succeeded on ${candidate.host}:${candidate.port}")
+                Log.i(TAG, "KADB $operation command succeeded")
                 return result
             }
 
             val reason = result.error.trim().ifBlank { "shell exit was non-zero" }.take(MAX_LOG_REASON_LENGTH)
-            failures += "${candidate.host}:${candidate.port} $reason"
-            Log.i(TAG, "KADB Wi-Fi candidate ${candidate.host}:${candidate.port} failed: $reason")
+            failures += reason
+            Log.i(TAG, "KADB $operation candidate failed: $reason")
         }
         return Result(
             success = false,
@@ -57,6 +100,8 @@ internal object WirelessAdbShell {
 
     internal fun candidateTargets(wirelessPort: Int): List<CandidateTarget> =
         listOfNotNull(wirelessPort.takeIf { it > 0 }?.let { CandidateTarget(LOCALHOST, it) })
+
+    internal fun supportsApiLevel(apiLevel: Int): Boolean = apiLevel == SUPPORTED_API_LEVEL
 
     private fun shortMessage(exception: Exception): String =
         exception.message.orEmpty()
@@ -71,4 +116,9 @@ internal object WirelessAdbShell {
     private const val SHELL_TIMEOUT_MS = 15_000
     private const val WIFI_ENABLE_COMMAND = "svc wifi enable"
     private const val WIFI_DISABLE_COMMAND = "svc wifi disable"
+    private const val ADB_PAIRING_START_TRANSACTION = 9
+    private const val ADB_PAIRING_STOP_TRANSACTION = 11
+    private const val SUPPORTED_API_LEVEL = 32
+    private val PAIRING_SERVICE_PATTERN = Regex("[A-Za-z0-9_-]{8,48}")
+    private val PAIRING_CODE_PATTERN = Regex("[0-9]{6}")
 }

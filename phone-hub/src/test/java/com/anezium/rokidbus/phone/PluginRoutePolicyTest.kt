@@ -27,6 +27,13 @@ class PluginRoutePolicyTest {
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.TTS), "/tts/speak"))
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.TTS), "/tts/stop"))
         assertEquals(PluginRouteDecision.Allowed, PluginRoutePolicy.authorize(plugin(PluginCapability.HTTP_PROXY), "/http/request"))
+        assertEquals(
+            PluginRouteDecision.Allowed,
+            PluginRoutePolicy.authorize(
+                plugin(PluginCapability.WIRELESS_DEBUGGING),
+                "/debug/adb/request",
+            ),
+        )
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/surface/update") is PluginRouteDecision.Denied)
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/pin/show") is PluginRouteDecision.Denied)
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/audio/lease/release") is PluginRouteDecision.Denied)
@@ -41,6 +48,10 @@ class PluginRoutePolicyTest {
             PluginRoutePolicy.authorize(plugin(), "/tts/stop"),
         )
         assertTrue(PluginRoutePolicy.authorize(plugin(), "/http/request") is PluginRouteDecision.Denied)
+        assertEquals(
+            PluginRouteDecision.Denied("CAPABILITY_REQUIRED_WIRELESS_DEBUGGING"),
+            PluginRoutePolicy.authorize(plugin(), "/debug/adb/request"),
+        )
     }
 
     @Test

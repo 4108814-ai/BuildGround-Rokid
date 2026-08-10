@@ -9,6 +9,7 @@ enum class PluginCapability(val wireValue: String) {
     CAMERA("camera"),
     MEDIA_SYNC("mediasync"),
     ASSISTANT("assistant"),
+    WIRELESS_DEBUGGING("wireless_debugging"),
     ;
 
     companion object {

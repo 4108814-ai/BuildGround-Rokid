@@ -58,6 +58,9 @@ import com.anezium.rokidbus.shared.SetupPairingOfferContract
 import com.anezium.rokidbus.shared.TtsContract
 import com.anezium.rokidbus.shared.TtsDoneEvent
 import com.anezium.rokidbus.shared.TtsValidationResult
+import com.anezium.rokidbus.shared.WirelessAdbAction
+import com.anezium.rokidbus.shared.WirelessAdbContract
+import com.anezium.rokidbus.shared.WirelessAdbReply
 import com.anezium.rokidbus.shared.plugin.PathRules
 import com.anezium.rokidbus.shared.plugin.PluginCapability
 import com.anezium.rokidbus.shared.plugin.PluginCapability.Companion.serialize
@@ -2105,6 +2108,10 @@ class BusHubService : Service() {
             BusPaths.MEDIA_SYNC_NOW -> executor.execute {
                 if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.requestSyncNow()
             }
+            BusPaths.WIRELESS_ADB_REQUEST -> {
+                if (replyRemote || principal == null) return false
+                handleWirelessAdbRequest(envelope, principal, replyBinder)
+            }
             SttWireProtocol.SESSION_START_PATH -> speechBusExecutor.execute {
                 handleSpeechSessionStart(envelope, replyRemote, replyBinder, principal)
             }
@@ -2114,6 +2121,66 @@ class BusHubService : Service() {
             else -> return false
         }
         return true
+    }
+
+    private fun handleWirelessAdbRequest(
+        envelope: BusEnvelope,
+        principal: PhonePluginPrincipal,
+        replyBinder: IBinder?,
+    ) {
+        val action = WirelessAdbContract.requestAction(envelope.payload)
+        val stamped = action?.let {
+            WirelessAdbContract.stampedRequest(envelope.payload, principal.descriptor.id)
+        }
+        if (envelope.binary != null || action == null || stamped == null) {
+            deliverWirelessAdbFailure(
+                principal = principal,
+                replyBinder = replyBinder,
+                requestId = envelope.id,
+                action = action ?: WirelessAdbAction.STATUS,
+                code = "INVALID_REQUEST",
+                message = "The wireless debugging request was invalid.",
+            )
+            return
+        }
+        val error = sendRemote(envelope.copy(payload = stamped)) ?: return
+        deliverWirelessAdbFailure(
+            principal = principal,
+            replyBinder = replyBinder,
+            requestId = envelope.id,
+            action = action,
+            code = error,
+            message = "The glasses are not connected.",
+        )
+    }
+
+    private fun deliverWirelessAdbFailure(
+        principal: PhonePluginPrincipal,
+        replyBinder: IBinder?,
+        requestId: String,
+        action: WirelessAdbAction,
+        code: String,
+        message: String,
+    ) {
+        deliverLocal(
+            BusEnvelope(
+                path = BusPaths.WIRELESS_ADB_REPLY,
+                id = requestId,
+                payload = WirelessAdbContract.reply(
+                    principal.descriptor.id,
+                    WirelessAdbReply(
+                        action = action,
+                        success = false,
+                        wifiConnected = false,
+                        enabled = false,
+                        pairingActive = false,
+                        errorCode = code,
+                        message = message,
+                    ),
+                ),
+            ),
+            targetBinder = replyBinder,
+        )
     }
 
     private fun requestCameraSnapshot(

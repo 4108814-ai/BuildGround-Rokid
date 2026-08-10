@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Wireless ADB's mark: a shell prompt that broadcasts. The chevron doubles as
+  the transmitter - the two arcs are the same stroke rippling outward, because
+  the whole point is a prompt that reaches the glasses over the air. The solid
+  bar underneath is the prompt's cursor, the one filled shape: live, waiting
+  for your computer. No terminal frame - at launcher size the box only steals
+  room from the signal.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- The prompt chevron, which is also the wave source. -->
+    <path
+        android:pathData="M5.1,4.9 L10.7,10.5 L5.1,16.1"
+        android:strokeColor="#FF4DFF8C"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- The signal, concentric with the chevron's apex. -->
+    <path
+        android:pathData="M13.5,7.4 A4.4,4.4 0 0 1 13.5,13.6 M15.9,4.7 A8.2,8.2 0 0 1 15.9,16.3"
+        android:strokeColor="#FF4DFF8C"
+        android:strokeWidth="2.1"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- The live cursor, solid. -->
+    <path
+        android:pathData="M7.35,18.7 h4.6 a1.05,1.05 0 0 1 0,2.1 h-4.6 a1.05,1.05 0 0 1 0,-2.1 Z"
+        android:fillColor="#FF4DFF8C" />
+</vector>

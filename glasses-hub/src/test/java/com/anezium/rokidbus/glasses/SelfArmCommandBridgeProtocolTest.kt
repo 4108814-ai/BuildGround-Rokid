@@ -110,6 +110,28 @@ class SelfArmCommandBridgeProtocolTest {
     }
 
     @Test
+    fun authenticatedWirelessAdbCommandsCarryNoArguments() {
+        listOf(
+            SelfArmCommandBridgeProtocol.ADB_WIFI_ENABLE,
+            SelfArmCommandBridgeProtocol.ADB_WIFI_DISABLE,
+        ).forEach { command ->
+            val request = SelfArmCommandBridgeProtocol.request(SECRET, command, NONCE)
+            assertEquals(
+                SelfArmCommandBridgeProtocol.Verification.Accepted(command, NONCE),
+                SelfArmCommandBridgeProtocol.verify(request, SECRET, emptySet()),
+            )
+            assertEquals(
+                SelfArmCommandBridgeProtocol.Verification.Rejected("format"),
+                SelfArmCommandBridgeProtocol.verify(
+                    "$command:$NONCE:unexpected:${"0".repeat(64)}\n",
+                    SECRET,
+                    emptySet(),
+                ),
+            )
+        }
+    }
+
+    @Test
     fun rejectsMalformedOversizedAndInjectionInputs() {
         val invalidRequests = listOf(
             "wifi_enable;svc wifi disable:$NONCE:${"0".repeat(64)}\n",

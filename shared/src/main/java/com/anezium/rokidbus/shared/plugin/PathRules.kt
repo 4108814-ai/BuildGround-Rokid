@@ -3,7 +3,14 @@ package com.anezium.rokidbus.shared.plugin
 import com.anezium.rokidbus.shared.BusPaths
 
 object PathRules {
-    private val reservedRoots = setOf("/launcher", "/surface/input", "/system", "/security", "/error")
+    private val reservedRoots = setOf(
+        "/core",
+        "/launcher",
+        "/surface/input",
+        "/system",
+        "/security",
+        "/error",
+    )
     private val hubOnlyPaths = setOf(BusPaths.TTS_CANCEL)
     private val lifecyclePrefixes = setOf("/system/plugin")
     private val httpReplyPrefixes = setOf("/http/request/reply")
@@ -70,6 +77,7 @@ object PathRules {
         BusPaths.ACTIVITY_ACTION, BusPaths.ACTIVITY_CLOSED,
         BusPaths.TTS_STARTED, BusPaths.TTS_DONE,
         BusPaths.CAMERA_SNAPSHOT_RESULT, BusPaths.CAMERA_SNAPSHOT_ERROR,
+        BusPaths.WIRELESS_ADB_REPLY,
         -> true
         else -> false
     }
@@ -79,6 +87,7 @@ object PathRules {
         BusPaths.ACTIVITY_ACTION, BusPaths.ACTIVITY_CLOSED,
         BusPaths.TTS_STARTED, BusPaths.TTS_DONE,
         BusPaths.CAMERA_SNAPSHOT_RESULT, BusPaths.CAMERA_SNAPSHOT_ERROR,
+        BusPaths.WIRELESS_ADB_REPLY,
         -> true
         else -> matchesPrefix(path, "/system/plugin")
     }
@@ -101,6 +110,7 @@ object PathRules {
         BusPaths.MEDIA_SYNC_SETTINGS,
         BusPaths.MEDIA_SYNC_NOW,
         -> PluginCapability.MEDIA_SYNC
+        BusPaths.WIRELESS_ADB_REQUEST -> PluginCapability.WIRELESS_DEBUGGING
         else -> null
     }
 

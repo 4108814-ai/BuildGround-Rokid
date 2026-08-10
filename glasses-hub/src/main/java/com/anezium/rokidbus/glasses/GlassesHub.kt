@@ -36,6 +36,9 @@ import com.anezium.rokidbus.shared.SetupNoteMessage
 import com.anezium.rokidbus.shared.SetupPairingOfferContract
 import com.anezium.rokidbus.shared.SetupStage
 import com.anezium.rokidbus.shared.TtsContract
+import com.anezium.rokidbus.shared.WirelessAdbAction
+import com.anezium.rokidbus.shared.WirelessAdbContract
+import com.anezium.rokidbus.shared.WirelessAdbReply
 import com.anezium.rokidbus.shared.plugin.PathRules
 import org.json.JSONArray
 import org.json.JSONObject
@@ -96,6 +99,9 @@ object GlassesHub {
     }
     private val setupCapabilitiesExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "RokidNexusSetupCapabilities").apply { isDaemon = true }
+    }
+    private val wirelessAdbExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "RokidNexusWirelessAdb").apply { isDaemon = true }
     }
     private val setupCapabilitiesLock = Any()
     private var wifiDisableFuture: ScheduledFuture<*>? = null
@@ -162,6 +168,9 @@ object GlassesHub {
         }
         if (started.compareAndSet(false, true)) {
             log("Glasses hub starting")
+            wirelessAdbExecutor.execute {
+                WirelessAdbController.restorePairingExpiry(applicationContext)
+            }
             SppServerManager.ensureStarted(context.applicationContext)
             CxrBusBridge.start(context.applicationContext)
             // Rokid's firmware blocks MY_PACKAGE_REPLACED (and other manifest broadcasts)
@@ -261,6 +270,10 @@ object GlassesHub {
             }
             return
         }
+        if (envelope.path == BusPaths.WIRELESS_ADB_REQUEST) {
+            handleWirelessAdbRequest(envelope)
+            return
+        }
         MediaSyncEngine.trafficMonitor.note(envelope.path)
         if (envelope.path == BusPaths.MEDIA_SYNC_CONFIG) {
             MediaSyncEngine.onConfig(envelope.payload)
@@ -302,6 +315,79 @@ object GlassesHub {
         val context = appContext
         if (context != null && GlassesClientSupervisor.enqueue(context, envelope)) return
         sendRemote(errorEnvelope(envelope.id, "NO_LOCAL_CLIENT"))
+    }
+
+    private fun handleWirelessAdbRequest(envelope: BusEnvelope) {
+        val pluginId = WirelessAdbContract.pluginId(envelope.payload)
+        val action = WirelessAdbContract.requestAction(envelope.payload)
+        if (pluginId == null || action == null || envelope.binary != null) {
+            log("wireless ADB request rejected reason=INVALID_REQUEST")
+            if (pluginId != null) {
+                sendWirelessAdbReply(
+                    envelope.id,
+                    pluginId,
+                    WirelessAdbReply(
+                        action = action ?: WirelessAdbAction.STATUS,
+                        success = false,
+                        wifiConnected = false,
+                        enabled = false,
+                        pairingActive = false,
+                        errorCode = "INVALID_REQUEST",
+                        message = "The wireless debugging request was invalid.",
+                    ),
+                )
+            }
+            return
+        }
+        val context = appContext
+        if (context == null) {
+            sendWirelessAdbReply(
+                envelope.id,
+                pluginId,
+                WirelessAdbReply(
+                    action = action,
+                    success = false,
+                    wifiConnected = false,
+                    enabled = false,
+                    pairingActive = false,
+                    errorCode = "HUB_NOT_READY",
+                    message = "The glasses hub is not ready.",
+                ),
+            )
+            return
+        }
+        wirelessAdbExecutor.execute {
+            val result = runCatching {
+                WirelessAdbController.handle(context.applicationContext, action)
+            }.getOrElse { failure ->
+                log("wireless ADB action=${action.wireValue} failed type=${failure.javaClass.simpleName}")
+                WirelessAdbReply(
+                    action = action,
+                    success = false,
+                    wifiConnected = SelfArmWirelessAdbController.isWifiNetworkReady(context),
+                    enabled = SelfArmWirelessAdbController.readWirelessPort() > 0,
+                    pairingActive = false,
+                    errorCode = "INTERNAL_ERROR",
+                    message = "Wireless debugging failed unexpectedly.",
+                )
+            }
+            sendWirelessAdbReply(envelope.id, pluginId, result)
+            log(
+                "wireless ADB action=${action.wireValue} success=${result.success} " +
+                    "code=${result.errorCode ?: "none"}",
+            )
+        }
+    }
+
+    private fun sendWirelessAdbReply(requestId: String, pluginId: String, reply: WirelessAdbReply) {
+        val error = sendRemote(
+            BusEnvelope(
+                path = BusPaths.WIRELESS_ADB_REPLY,
+                id = requestId,
+                payload = WirelessAdbContract.reply(pluginId, reply),
+            ),
+        )
+        if (error != null) log("wireless ADB reply failed code=$error")
     }
 
     fun deliverQueued(envelope: BusEnvelope): Boolean =

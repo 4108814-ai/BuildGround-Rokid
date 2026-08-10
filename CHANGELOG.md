@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.0
+
+- **Wireless ADB can be enabled and paired without driving Settings.** The
+  new Wireless ADB plugin asks for an explicit privileged capability, trusts
+  the current glasses Wi-Fi network through a fixed signed bridge command,
+  and creates a two-minute pairing code for a computer on the same LAN.
+
 ## 1.2.11
 
 - **The update banner says what the update is.** It used to offer a version

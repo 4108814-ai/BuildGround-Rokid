@@ -17,4 +17,11 @@ class WirelessAdbShellTest {
         assertEquals(emptyList<WirelessAdbShell.CandidateTarget>(), WirelessAdbShell.candidateTargets(0))
         assertEquals(emptyList<WirelessAdbShell.CandidateTarget>(), WirelessAdbShell.candidateTargets(-1))
     }
+
+    @Test
+    fun binderTransactionsAreLimitedToValidatedFirmwareApi() {
+        assertEquals(true, WirelessAdbShell.supportsApiLevel(32))
+        assertEquals(false, WirelessAdbShell.supportsApiLevel(31))
+        assertEquals(false, WirelessAdbShell.supportsApiLevel(33))
+    }
 }

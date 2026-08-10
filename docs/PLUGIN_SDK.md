@@ -54,7 +54,8 @@ does not approve it.
 ```
 
 Plugin IDs use `[a-z][a-z0-9._-]{2,63}`. Requested capabilities are `surfaces`,
-`http_proxy`, `microphone`, `stt`, `tts`, `camera`, and `mediasync`. Camera paths
+`http_proxy`, `microphone`, `stt`, `tts`, `camera`, `mediasync`, `assistant`, and
+`wireless_debugging`. Camera paths
 are protected by the approved signer-bound grant. `microphone` is grantable from
 the phone UI for any plugin that requests it (see §3.1); the plugin needs no
 Android `RECORD_AUDIO` permission — glasses-microphone PCM reaches the plugin
@@ -1135,6 +1136,24 @@ Speech uses the phone's own voice, at the voice and speed the wearer picked
 in the hub's Settings → Voice screen. Plugins cannot read or change them, and
 neither can a single utterance: they are the wearer's choice for everything
 that speaks, not a per-plugin one.
+
+### 3.4 Wireless debugging
+
+`wireless_debugging` is an explicit high-risk grant. It allows a plugin to ask
+the glasses hub to enable Android's real ADB-over-Wi-Fi transport on the current
+LAN, create a two-minute pairing code, cancel that pairing window, query status,
+or disable the transport. It never grants arbitrary shell access to the plugin
+and it does not drive Settings or Accessibility.
+
+Send `WirelessAdbContract.request(action)` to
+`BusPaths.WIRELESS_ADB_REQUEST`. The hub answers on
+`BusPaths.WIRELESS_ADB_REPLY` with the same envelope id. This is an owner-scoped
+direct reply, so it must not be declared in `RECEIVE_PREFIXES`. The phone hub
+stamps `pluginId` from the authenticated registration before forwarding the
+request; a plugin-provided identity is ignored. A successful `START_PAIRING`
+reply contains the IPv4 host, pairing port, six-digit code, connect port, and
+expiry needed to form `adb pair` and `adb connect` commands. Treat the code as
+an in-memory secret: do not persist or log it.
 
 ## 4. Approve and debug
 

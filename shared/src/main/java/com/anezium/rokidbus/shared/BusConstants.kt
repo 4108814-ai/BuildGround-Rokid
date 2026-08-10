@@ -111,6 +111,8 @@ object BusPaths {
     const val GLASSES_BRIGHTNESS_REQUEST = "/glasses/brightness/request"
     const val GLASSES_VOLUME_REQUEST = "/glasses/volume/request"
     const val GLASSES_DEVICE_INFO = "/glasses/device-info"
+    const val WIRELESS_ADB_REQUEST = "/debug/adb/request"
+    const val WIRELESS_ADB_REPLY = "/debug/adb/reply"
 
     /**
      * Phone hub to glasses hub only: the owner's switch for the boot-time repair of the

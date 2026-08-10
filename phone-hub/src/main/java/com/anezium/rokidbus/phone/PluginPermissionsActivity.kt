@@ -253,6 +253,7 @@ class PluginPermissionsActivity : Activity() {
             PluginCapability.CAMERA -> "Glasses camera"
             PluginCapability.MEDIA_SYNC -> "Glasses photos and videos"
             PluginCapability.ASSISTANT -> "Replace the glasses assistant"
+            PluginCapability.WIRELESS_DEBUGGING -> "Wireless debugging"
         }
         val note = when (capability) {
             PluginCapability.SURFACES -> "Render cards and images on the HUD"
@@ -263,6 +264,7 @@ class PluginPermissionsActivity : Activity() {
             PluginCapability.CAMERA -> "Only while the camera view is open"
             PluginCapability.MEDIA_SYNC -> "Copy captures to this phone over the glasses link"
             PluginCapability.ASSISTANT -> "Close Rokid's assistant while this plugin is open"
+            PluginCapability.WIRELESS_DEBUGGING -> "Enable ADB and create temporary pairing codes"
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL

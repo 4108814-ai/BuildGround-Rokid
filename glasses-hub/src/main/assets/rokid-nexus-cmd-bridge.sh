@@ -10,7 +10,7 @@ SEENFILE="$BASE/$NAME.seen"
 PENDING_DISABLE="$BASE/$NAME.pending-disable"
 CHANNEL="/sdcard/Android/data/com.anezium.rokidbus.glasses/files/cmd_bridge"
 DOORBELL="$CHANNEL/doorbell"
-VERSION="2026-08-06.2"
+VERSION="2026-08-10.1"
 CAPTURE_DIR="/sdcard/DCIM/Camera"
 SCRIPT_PATH="$BASE/$NAME.sh"
 PACKAGE="com.anezium.rokidbus.glasses"
@@ -206,7 +206,7 @@ EOF
     return
   fi
   case "$command" in
-    wifi_enable|wifi_disable)
+    wifi_enable|wifi_disable|adb_wifi_enable|adb_wifi_disable)
       token="$field3"
       if [ -n "$field4" ] || [ -n "$field5" ] || [ -n "$field6" ] ||
         [ "$request_line" != "$command:$nonce:$token" ]; then
@@ -279,7 +279,7 @@ EOF
   # Android 11+ scoped storage already prevents other apps from writing this app-specific
   # channel. This prefix-keyed digest is defense-in-depth against a forged request file.
   # SHA-256 length extension cannot produce an accepted request because parsing requires the
-  # exact fixed command:nonce form, only two literal commands are allowed, and an attacker
+  # exact fixed command shapes, only literal commands are allowed, and an attacker
   # cannot write the channel directory in the first place.
   expected_token="$(printf '%s' "$token_input" | sha256sum | cut -d' ' -f1)"
   if [ -z "$expected_token" ] || [ "$expected_token" != "$token" ]; then
@@ -310,6 +310,53 @@ EOF
       else
         write_response "$nonce" error schedule_failed
         log_line "command failed command=wifi_disable nonce=$nonce reason=schedule"
+      fi
+      ;;
+    adb_wifi_enable)
+      # The Android confirmation dialog ultimately calls IAdbManager with the current BSSID.
+      # This bridge is already shell uid, so it can make that same narrow call without driving
+      # Settings through accessibility. Never log the BSSID: it is a device identifier.
+      adb_api_level="$(getprop ro.build.version.sdk 2>/dev/null)"
+      adb_bssid="$(cmd wifi status 2>/dev/null | sed -n \
+        -e 's/.*BSSID: \([0-9A-Fa-f:]*\).*/\1/p' \
+        -e 's/.*BSSID[[:space:]]*=[[:space:]]*\([0-9A-Fa-f:]*\).*/\1/p' | head -n 1)"
+      case "$adb_bssid" in
+        *[!0-9A-Fa-f:]*) adb_bssid="" ;;
+      esac
+      adb_colons="$(printf '%s' "$adb_bssid" | tr -cd ':' | wc -c | tr -d '[:space:]')"
+      if [ "$adb_api_level" != "32" ]; then
+        write_response "$nonce" error unsupported_android_version
+        log_line "command failed command=adb_wifi_enable nonce=$nonce reason=unsupported_android_version"
+      elif [ "${#adb_bssid}" -ne 17 ] || [ "$adb_colons" != "5" ]; then
+        write_response "$nonce" error no_wifi_network
+        log_line "command failed command=adb_wifi_enable nonce=$nonce reason=no_wifi_network"
+      elif service call adb 4 i32 1 s16 "$adb_bssid" >/dev/null 2>&1; then
+        # IAdbManager both records the trusted network and enables its Wi-Fi transport. The app
+        # verifies the live TLS port as the effect, so a successful Binder transaction alone is
+        # never treated as success.
+        write_response "$nonce" ok ""
+        log_line "command completed command=adb_wifi_enable nonce=$nonce"
+      else
+        write_response "$nonce" error command_failed
+        log_line "command failed command=adb_wifi_enable nonce=$nonce"
+      fi
+      ;;
+    adb_wifi_disable)
+      # Transaction 11 stops any outstanding pairing server before the transport itself is
+      # disabled. It is intentionally best-effort because no active pairing server is normal.
+      adb_api_level="$(getprop ro.build.version.sdk 2>/dev/null)"
+      if [ "$adb_api_level" != "32" ]; then
+        write_response "$nonce" error unsupported_android_version
+        log_line "command failed command=adb_wifi_disable nonce=$nonce reason=unsupported_android_version"
+      else
+        service call adb 11 >/dev/null 2>&1 || true
+        if settings put global adb_wifi_enabled 0 >/dev/null 2>&1; then
+          write_response "$nonce" ok ""
+          log_line "command completed command=adb_wifi_disable nonce=$nonce"
+        else
+          write_response "$nonce" error command_failed
+          log_line "command failed command=adb_wifi_disable nonce=$nonce"
+        fi
       fi
       ;;
     delete_capture)

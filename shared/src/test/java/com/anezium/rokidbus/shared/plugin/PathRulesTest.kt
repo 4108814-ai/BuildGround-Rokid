@@ -34,6 +34,8 @@ class PathRulesTest {
         assertTrue(PathRules.isReserved("/system/plugin/open"))
         assertTrue(PathRules.isReserved("/security/revoke"))
         assertTrue(PathRules.isReserved("/error"))
+        assertTrue(PathRules.isReserved("/core/remote-input/command"))
+        assertTrue(PathRules.isReserved("/core/navigation/request"))
         assertTrue(PathRules.isHubOnly("/tts/cancel"))
         assertTrue(PathRules.isReserved("/tts/cancel"))
         assertFalse(PathRules.isReserved("/launcherish"))
@@ -147,5 +149,16 @@ class PathRulesTest {
         assertTrue(PathRules.isDirectReply("/activity/closed"))
         assertTrue(PathRules.isOwnerScoped("/activity/action"))
         assertTrue(PathRules.isOwnerScoped("/activity/closed"))
+    }
+
+    @Test
+    fun `wireless ADB request is privileged and reply is owner scoped`() {
+        assertEquals(
+            PluginCapability.WIRELESS_DEBUGGING,
+            PathRules.requiredCapability(BusPaths.WIRELESS_ADB_REQUEST),
+        )
+        assertTrue(PathRules.isDirectReply(BusPaths.WIRELESS_ADB_REPLY))
+        assertTrue(PathRules.isOwnerScoped(BusPaths.WIRELESS_ADB_REPLY))
+        assertNull(PathRules.requiredCapability(BusPaths.WIRELESS_ADB_REPLY))
     }
 }

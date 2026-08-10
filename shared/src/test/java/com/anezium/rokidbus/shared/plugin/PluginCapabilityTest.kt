@@ -1,5 +1,6 @@
 package com.anezium.rokidbus.shared.plugin
 
+import com.anezium.rokidbus.shared.BusPaths
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -35,5 +36,9 @@ class PluginCapabilityTest {
         assertEquals(PluginCapability.HTTP_PROXY, PathRules.requiredCapability("/http/request"))
         assertEquals(PluginCapability.CAMERA, PathRules.requiredCapability("/camera/freeze/result"))
         assertEquals(PluginCapability.CAMERA, PathRules.requiredCapability("/camera/overlay"))
+        assertEquals(
+            PluginCapability.WIRELESS_DEBUGGING,
+            PathRules.requiredCapability(BusPaths.WIRELESS_ADB_REQUEST),
+        )
     }
 }

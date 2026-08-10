@@ -43,13 +43,22 @@ internal object SelfArmCommandBridgeProtocol {
     const val WIFI_ENABLE = "wifi_enable"
     const val WIFI_DISABLE = "wifi_disable"
     const val WIFI_CONNECT = "wifi_connect"
+    const val ADB_WIFI_ENABLE = "adb_wifi_enable"
+    const val ADB_WIFI_DISABLE = "adb_wifi_disable"
     const val MAX_REQUEST_BYTES = 512
     private val secretRegex = Regex("[0-9a-f]{64}")
     private val nonceRegex = Regex("[0-9a-f]{32}")
     private val tokenRegex = Regex("[0-9a-f]{64}")
     private val encodedArgumentRegex = Regex("[A-Za-z0-9+/]+={0,2}")
     const val DELETE_CAPTURE = "delete_capture"
-    private val allowedCommands = setOf(WIFI_ENABLE, WIFI_DISABLE, WIFI_CONNECT, DELETE_CAPTURE)
+    private val allowedCommands = setOf(
+        WIFI_ENABLE,
+        WIFI_DISABLE,
+        WIFI_CONNECT,
+        DELETE_CAPTURE,
+        ADB_WIFI_ENABLE,
+        ADB_WIFI_DISABLE,
+    )
 
     sealed interface Verification {
         data class Accepted(
@@ -114,7 +123,7 @@ internal object SelfArmCommandBridgeProtocol {
         if (command !in allowedCommands) return Verification.Rejected("command")
         val arguments = fields.subList(2, fields.lastIndex)
         val validShape = when (command) {
-            WIFI_ENABLE, WIFI_DISABLE -> arguments.isEmpty()
+            WIFI_ENABLE, WIFI_DISABLE, ADB_WIFI_ENABLE, ADB_WIFI_DISABLE -> arguments.isEmpty()
             WIFI_CONNECT -> arguments.size == 3 &&
                 arguments[0].length in 1..172 && encodedArgumentRegex.matches(arguments[0]) &&
                 when (WifiConnectSecurity.fromCommandKeyword(arguments[2])) {
@@ -166,6 +175,27 @@ internal object SelfArmCommandBridgeClient {
             SelfArmCommandBridgeProtocol.WIFI_DISABLE
         }
         return execute(context.applicationContext, command, enabled, timeoutMs)
+    }
+
+    fun setWirelessAdbEnabled(
+        context: Context,
+        enabled: Boolean,
+        timeoutMs: Long = WIRELESS_ADB_TIMEOUT_MS,
+    ): Boolean {
+        if (timeoutMs <= 0L) return false
+        val appContext = context.applicationContext
+        if (enabled && !SelfArmWirelessAdbController.isWifiNetworkReady(appContext)) return false
+        val currentPort = SelfArmWirelessAdbController.readWirelessPort()
+        if (enabled && currentPort > 0) return true
+        if (!enabled && !SelfArmWirelessAdbController.isEnabled(appContext) && currentPort <= 0) return true
+        val command = if (enabled) {
+            SelfArmCommandBridgeProtocol.ADB_WIFI_ENABLE
+        } else {
+            SelfArmCommandBridgeProtocol.ADB_WIFI_DISABLE
+        }
+        return submit(appContext, command, emptyList(), timeoutMs) {
+            awaitWirelessAdbState(appContext, enabled, timeoutMs)
+        }
     }
 
     fun connectWifiNetwork(
@@ -440,6 +470,19 @@ internal object SelfArmCommandBridgeClient {
         return false
     }
 
+    @Throws(InterruptedException::class)
+    private fun awaitWirelessAdbState(context: Context, enabled: Boolean, timeoutMs: Long): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val port = SelfArmWirelessAdbController.readWirelessPort()
+            val settingEnabled = SelfArmWirelessAdbController.isEnabled(context)
+            if (enabled && settingEnabled && port > 0) return true
+            if (!enabled && !settingEnabled && port <= 0) return true
+            Thread.sleep(RESPONSE_POLL_MS)
+        }
+        return false
+    }
+
     @Suppress("DEPRECATION")
     @Throws(InterruptedException::class)
     private fun awaitWifiNetwork(
@@ -489,4 +532,5 @@ internal object SelfArmCommandBridgeClient {
 
     private const val TAG = "NexusCommandBridge"
     private const val CHANNEL_REPAIR_ATTEMPTS = 3
+    private const val WIRELESS_ADB_TIMEOUT_MS = 12_000L
 }
