@@ -90,9 +90,8 @@ internal data class NoticeInkMorphToken(
  * touchpad keeps working for everything the notice has not explicitly claimed.
  * Ordinary notices never keep the screen on. The assistant marks only its
  * listening, thinking, and answer-review episode as engaged; that band holds
- * until the episode closes or its Ink surface takes over with the existing
- * foreground window flag. Wake requests remain separately owned by
- * [NoticeController].
+ * until the episode closes or transfers the same bounded wake lease to its Ink
+ * surface. Wake requests remain separately owned by [NoticeController].
  */
 object NoticeOverlayRenderer {
     private var service: AccessibilityService? = null

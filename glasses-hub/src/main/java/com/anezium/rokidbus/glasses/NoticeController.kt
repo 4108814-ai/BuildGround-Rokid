@@ -544,6 +544,17 @@ internal object NoticeController {
         ) {
             return false
         }
+        SurfaceController.activeSurface()
+            ?.takeIf { surface ->
+                surface.isInk && surface.ownerPluginId == token.ownerPluginId
+            }
+            ?.let { surface ->
+                DisplayWakePolicy.transferDisplayHold(
+                    fromOwnerId = current.surfaceId,
+                    toOwnerId = surface.surfaceId,
+                    seq = surface.seq,
+                )
+            }
         applyDecision(state.close(NoticeCloseReason.OWNER))
         return true
     }
@@ -863,6 +874,10 @@ internal object NoticeController {
             previous != null &&
             previous.surfaceId != surfaceId
         ) {
+            DisplayWakePolicy.releaseDisplayHold(
+                ownerId = previous.surfaceId,
+                reason = DisplayHoldReleaseReason.NOTICE_REPLACED,
+            )
             logNoticeClosed(previous, NoticeCloseReason.REPLACED)
             reportClosed(previous.surfaceId, NoticeCloseReason.REPLACED)
         }
@@ -930,7 +945,10 @@ internal object NoticeController {
                 notifyChanged()
             }
             is NoticeStateDecision.Closed -> {
-                DisplayWakePolicy.releaseDisplayHold(decision.reason.displayHoldReleaseReason())
+                DisplayWakePolicy.releaseDisplayHold(
+                    ownerId = decision.surfaceId,
+                    reason = decision.reason.displayHoldReleaseReason(),
+                )
                 clearPendingNoticeWake()
                 cancelExpiry()
                 main.removeCallbacks(ringTapExpiry)

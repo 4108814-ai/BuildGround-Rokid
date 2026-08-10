@@ -11,9 +11,10 @@ import android.os.SystemClock
  *
  * These are the HUD tiers, and only them. Setup flows the wearer is actively
  * reading — manual pairing, the camera viewfinder, the launcher, an engaged
- * surface — hold the screen through their own window flags and are deliberately
- * not routed here: they are not events interrupting a wearer, they are the
- * wearer looking at something.
+ * surface — normally hold the screen through their own window flags and are
+ * deliberately not routed through this one-shot policy. The assistant's
+ * notice-to-Ink episode is the measured firmware exception and uses the
+ * renewable hold lifecycle below.
  */
 internal enum class DisplayWakeKind(val logValue: String) {
     SURFACE("surface"),
@@ -69,6 +70,7 @@ internal enum class DisplayHoldReleaseReason(val logValue: String) {
     SERVICE_DESTROYED("service_destroyed"),
     SESSION_CLOSED("session_closed"),
     SURFACE_HIDDEN("surface_hidden"),
+    SURFACE_REPLACED("surface_replaced"),
 }
 
 internal enum class DisplayHoldPhase {
@@ -108,6 +110,14 @@ internal sealed interface DisplayHoldTransition {
         override val seq: Long,
         override val ageMs: Long,
         val leaseMs: Long,
+    ) : DisplayHoldTransition
+
+    data class Transfer(
+        override val ownerId: String,
+        override val seq: Long,
+        override val ageMs: Long,
+        val previousOwnerId: String,
+        val lockWasHeld: Boolean,
     ) : DisplayHoldTransition
 
     data class Release(
@@ -167,7 +177,10 @@ internal class DisplayHoldLifecycle(
         leaseFactory: () -> DisplayHoldLease?,
     ): List<DisplayHoldTransition> {
         val transitions = mutableListOf<DisplayHoldTransition>()
-        end(DisplayHoldReleaseReason.NOTICE_REPLACED, nowMs)?.let(transitions::add)
+        val currentOwnerId = episode?.snapshot?.ownerId
+        if (requested || currentOwnerId == ownerId) {
+            end(DisplayHoldReleaseReason.NOTICE_REPLACED, nowMs)?.let(transitions::add)
+        }
         if (!requested) return transitions
 
         episode = Episode(
@@ -217,6 +230,31 @@ internal class DisplayHoldLifecycle(
         }
     }
 
+    fun transfer(
+        fromOwnerId: String,
+        toOwnerId: String,
+        seq: Long,
+        nowMs: Long,
+    ): DisplayHoldTransition.Transfer? {
+        val current = episode ?: return null
+        if (current.snapshot.ownerId != fromOwnerId || toOwnerId.isBlank()) return null
+        val wasHeld = current.snapshot.phase == DisplayHoldPhase.HELD
+        current.snapshot = current.snapshot.copy(
+            ownerId = toOwnerId,
+            lastSeq = seq,
+        )
+        // The handover deliberately keeps startedAtMs. The absolute ceiling
+        // runs from the engaged notice's start across the card, so transferring
+        // ownership can never buy another 90-second safety window.
+        return DisplayHoldTransition.Transfer(
+            ownerId = toOwnerId,
+            seq = seq,
+            ageMs = age(current, nowMs),
+            previousOwnerId = fromOwnerId,
+            lockWasHeld = wasHeld,
+        )
+    }
+
     fun suspend(
         reason: DisplayHoldReleaseReason,
         nowMs: Long,
@@ -249,6 +287,15 @@ internal class DisplayHoldLifecycle(
             reason = reason,
             lockWasHeld = wasHeld,
         )
+    }
+
+    fun end(
+        ownerId: String,
+        reason: DisplayHoldReleaseReason,
+        nowMs: Long,
+    ): DisplayHoldTransition.Release? {
+        if (episode?.snapshot?.ownerId != ownerId) return null
+        return end(reason, nowMs)
     }
 
     fun enforceCeiling(
@@ -546,6 +593,24 @@ internal object DisplayWakePolicy {
     }
 
     @Synchronized
+    fun transferDisplayHold(
+        fromOwnerId: String,
+        toOwnerId: String,
+        seq: Long,
+    ): Boolean {
+        val nowMs = SystemClock.elapsedRealtime()
+        val transition = displayHold.transfer(
+            fromOwnerId = fromOwnerId,
+            toOwnerId = toOwnerId,
+            seq = seq,
+            nowMs = nowMs,
+        ) ?: return false
+        logHoldTransition(transition)
+        rescheduleDisplayHoldCeiling(nowMs)
+        return true
+    }
+
+    @Synchronized
     fun suspendDisplayHold(reason: DisplayHoldReleaseReason) {
         val nowMs = SystemClock.elapsedRealtime()
         displayHold.suspend(reason, nowMs)?.let(::logHoldTransition)
@@ -556,6 +621,13 @@ internal object DisplayWakePolicy {
     fun releaseDisplayHold(reason: DisplayHoldReleaseReason) {
         val nowMs = SystemClock.elapsedRealtime()
         displayHold.end(reason, nowMs)?.let(::logHoldTransition)
+        rescheduleDisplayHoldCeiling(nowMs)
+    }
+
+    @Synchronized
+    fun releaseDisplayHold(ownerId: String, reason: DisplayHoldReleaseReason) {
+        val nowMs = SystemClock.elapsedRealtime()
+        displayHold.end(ownerId, reason, nowMs)?.let(::logHoldTransition)
         rescheduleDisplayHoldCeiling(nowMs)
     }
 
@@ -615,6 +687,9 @@ internal object DisplayWakePolicy {
                     "leaseMs=${transition.leaseMs}"
             is DisplayHoldTransition.Renew ->
                 "decision=renew reason=active leaseMs=${transition.leaseMs}"
+            is DisplayHoldTransition.Transfer ->
+                "decision=transfer reason=ink_handover held=${transition.lockWasHeld} " +
+                    "from=${transition.previousOwnerId}"
             is DisplayHoldTransition.Release ->
                 "decision=release reason=${transition.reason.logValue} " +
                     "held=${transition.lockWasHeld}"

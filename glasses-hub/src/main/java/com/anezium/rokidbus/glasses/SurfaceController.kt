@@ -311,7 +311,7 @@ object SurfaceController {
         runOnMain {
             val surface = active?.takeIf(NexusSurface::isInk) ?: return@runOnMain
             sendInkClosed(surface.surfaceId, InkSurfaceContract.CLOSE_LINK_LOST)
-            hideLocalOnMain()
+            hideLocalOnMain(DisplayHoldReleaseReason.LINK_LOSS)
         }
     }
 
@@ -452,6 +452,7 @@ object SurfaceController {
             // begin() invalidates older work; active still owns the visible bitmap.
             imageDecodeCoordinator.begin(key)
             if (surface.isMedia) {
+                notifyReplacedInk(surface)
                 clearInkRenderer()
                 recycleActiveImageUnless(surface.imageBitmap)
                 cancelBackFailsafeOnMain(surface.surfaceId)
@@ -494,8 +495,9 @@ object SurfaceController {
                                 return@post
                             }
                             recycleActiveImageUnless(decoded)
-                            clearInkRenderer()
                             val published = target.copy(imageBitmap = decoded)
+                            notifyReplacedInk(published)
+                            clearInkRenderer()
                             cancelBackFailsafeOnMain(target.surfaceId)
                             DisplayWakePolicy.requestWake(
                                 context,
@@ -557,7 +559,7 @@ object SurfaceController {
                         sendInkClosed(surfaceId, InkSurfaceContract.CLOSE_PLUGIN)
                     }
                     imageDecodeCoordinator.invalidate(surfaceId)?.recycleSafely()
-                    hideLocalOnMain()
+                    hideLocalOnMain(DisplayHoldReleaseReason.SURFACE_HIDDEN)
                 }
             }
             is SurfaceOrderDecision.Drop -> logOrderDrop(surfaceId, seq, decision)
@@ -565,11 +567,12 @@ object SurfaceController {
         }
     }
 
-    private fun hideLocal() {
-        runOnMain { hideLocalOnMain() }
+    private fun hideLocal(reason: DisplayHoldReleaseReason) {
+        runOnMain { hideLocalOnMain(reason) }
     }
 
-    private fun hideLocalOnMain() {
+    private fun hideLocalOnMain(reason: DisplayHoldReleaseReason) {
+        releaseSurfaceDisplayHold(active, reason)
         val activeSurfaceId = active?.surfaceId
         val returnToLauncher = activeSurfaceId?.let(launcherReturnCoordinator::consumeReturnOnHide) == true
         activeSurfaceId?.let { cancelBackFailsafeOnMain(it) }
@@ -599,7 +602,13 @@ object SurfaceController {
             inkPresentationGate.cancel()
         }
         val previous = active?.takeIf(NexusSurface::isInk) ?: return
-        if (next.isInk && next.surfaceId == previous.surfaceId) return
+        if (
+            next.isInk && next.surfaceId == previous.surfaceId &&
+            next.ownerPluginId == previous.ownerPluginId
+        ) {
+            return
+        }
+        releaseSurfaceDisplayHold(previous, DisplayHoldReleaseReason.SURFACE_REPLACED)
         sendInkClosed(previous.surfaceId, InkSurfaceContract.CLOSE_REPLACED)
     }
 
@@ -674,7 +683,9 @@ object SurfaceController {
             log("Ink renderer error code=${problem.code} feature=${problem.feature.orEmpty()}")
         }
         sendInkClosed(surfaceId, InkSurfaceContract.CLOSE_RENDERER_ERROR)
-        if (active?.surfaceId == surfaceId) hideLocalOnMain()
+        if (active?.surfaceId == surfaceId) {
+            hideLocalOnMain(DisplayHoldReleaseReason.SESSION_CLOSED)
+        }
     }
 
     private fun sendInkClosed(surfaceId: String, reason: String) {
@@ -798,7 +809,7 @@ object SurfaceController {
             armBackFailsafe(surface.surfaceId)
         } else {
             if (surface.isInk) sendInkClosed(surface.surfaceId, InkSurfaceContract.CLOSE_USER)
-            hideLocal()
+            hideLocal(DisplayHoldReleaseReason.SESSION_CLOSED)
         }
     }
 
@@ -819,7 +830,7 @@ object SurfaceController {
                     if (active?.isInk == true) {
                         sendInkClosed(surfaceId, InkSurfaceContract.CLOSE_USER)
                     }
-                    hideLocalOnMain()
+                    hideLocalOnMain(DisplayHoldReleaseReason.SESSION_CLOSED)
                 }
                 if (backFailsafeSurfaceId == surfaceId) {
                     backFailsafeSurfaceId = null
@@ -837,6 +848,14 @@ object SurfaceController {
         backFailsafe?.let { main.removeCallbacks(it) }
         backFailsafeSurfaceId = null
         backFailsafe = null
+    }
+
+    private fun releaseSurfaceDisplayHold(
+        surface: NexusSurface?,
+        reason: DisplayHoldReleaseReason,
+    ) {
+        val inkSurface = surface?.takeIf(NexusSurface::isInk) ?: return
+        DisplayWakePolicy.releaseDisplayHold(inkSurface.surfaceId, reason)
     }
 
     private fun runOnMain(action: () -> Unit) {
