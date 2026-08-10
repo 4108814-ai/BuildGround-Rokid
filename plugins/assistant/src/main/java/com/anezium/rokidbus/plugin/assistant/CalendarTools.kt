@@ -8,6 +8,7 @@ import java.time.DateTimeException
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -81,10 +82,12 @@ internal class CreateCalendarEventTool(
     override val name = CREATE_CALENDAR_EVENT_TOOL_NAME
     override val description =
         "Create an appointment or event in the phone's real calendar. Use set_reminder " +
-            "instead for a Nexus glasses reminder. Timed start/end values are ISO-8601 " +
-            "local date-times in the phone timezone; all-day values are dates and end is exclusive."
+            "instead for a Nexus glasses reminder. Always use this tool when the user asks " +
+            "to add, schedule, or book a calendar event. Timed start/end values are ISO-8601 " +
+            "date-times; phone-local values and explicit UTC offsets are accepted. All-day " +
+            "values are dates and end is exclusive."
     override val parametersSchema = AssistantToolJsonSchema(
-        """{"type":"object","properties":{"title":{"type":"string","minLength":1},"start":{"type":"string"},"end":{"type":["string","null"]},"duration_minutes":{"type":["integer","null"],"minimum":1,"default":60},"all_day":{"type":["boolean","null"],"default":false},"location":{"type":["string","null"]},"description":{"type":["string","null"]},"reminder_minutes_before":{"type":["integer","null"],"minimum":0}},"required":["title","start","end","duration_minutes","all_day","location","description","reminder_minutes_before"],"additionalProperties":false}""",
+        """{"type":"object","properties":{"title":{"type":"string","minLength":1},"start":{"type":"string","description":"ISO-8601 local or offset date-time; use a date for an all-day event"},"end":{"type":["string","null"],"description":"ISO-8601 local or offset date-time; for all-day events this is an exclusive date"},"duration_minutes":{"type":["integer","null"],"minimum":1,"default":60},"all_day":{"type":["boolean","null"],"default":false},"location":{"type":["string","null"]},"description":{"type":["string","null"]},"reminder_minutes_before":{"type":["integer","null"],"minimum":0}},"required":["title","start","end","duration_minutes","all_day","location","description","reminder_minutes_before"],"additionalProperties":false}""",
     )
     override val sideEffecting = true
     override val progressLabel = "Adding to calendar"
@@ -147,7 +150,9 @@ internal class ListCalendarEventsTool(
     override val name = LIST_CALENDAR_EVENTS_TOOL_NAME
     override val description =
         "List up to 50 appointments and events from the phone's real calendar over the " +
-            "next 1 to 31 days. This does not list Nexus glasses reminders."
+            "next 1 to 31 days. This does not list Nexus glasses reminders. Returned timed " +
+            "start values are already phone-local wall times; present them unchanged and do " +
+            "not apply a UTC offset."
     override val parametersSchema = AssistantToolJsonSchema(
         """{"type":"object","properties":{"days":{"type":["integer","null"],"minimum":1,"maximum":31,"default":7}},"required":["days"],"additionalProperties":false}""",
     )
@@ -195,6 +200,7 @@ internal class ListCalendarEventsTool(
         AssistantToolResult.Json(
             JSONObject()
                 .put("range_days", days)
+                .put("time_zone", zone.id)
                 .put("events", JSONArray().apply {
                     visibleInstances.forEach { instance -> put(instance.toResultJson(zone)) }
                 })
@@ -319,28 +325,43 @@ private fun parseTimedTiming(
     durationMinutes: Long,
     zoneId: ZoneId,
 ): CalendarTimingResult {
-    val start = parseLocalDateTime(startText)
+    val start = parseTimedDateTime(startText, zoneId)
         ?: return CalendarTimingResult.Invalid("invalid_calendar_start")
-    val end = if (endText == null) {
+    val endInstant = if (endText == null) {
         try {
-            start.plusMinutes(durationMinutes)
+            start.instant.plusSeconds(Math.multiplyExact(durationMinutes, 60L))
         } catch (_: DateTimeException) {
             return CalendarTimingResult.Invalid("invalid_calendar_duration")
         } catch (_: ArithmeticException) {
             return CalendarTimingResult.Invalid("invalid_calendar_duration")
         }
     } else {
-        parseLocalDateTime(endText)
+        parseTimedDateTime(endText, zoneId)?.instant
             ?: return CalendarTimingResult.Invalid("invalid_calendar_end")
     }
-    if (!end.isAfter(start)) {
+    if (!endInstant.isAfter(start.instant)) {
         return CalendarTimingResult.Invalid("calendar_end_not_after_start")
     }
     return CalendarTimingResult.Valid(
-        start.atZone(zoneId).toInstant().toEpochMilli(),
-        end.atZone(zoneId).toInstant().toEpochMilli(),
+        start.instant.toEpochMilli(),
+        endInstant.toEpochMilli(),
     )
 }
+
+private data class ParsedTimedDateTime(val instant: Instant)
+
+private fun parseTimedDateTime(value: String, zoneId: ZoneId): ParsedTimedDateTime? =
+    runCatching {
+        ParsedTimedDateTime(
+            LocalDateTime.parse(value, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                .atZone(zoneId)
+                .toInstant(),
+        )
+    }.getOrNull() ?: runCatching {
+        ParsedTimedDateTime(
+            OffsetDateTime.parse(value, DateTimeFormatter.ISO_OFFSET_DATE_TIME).toInstant(),
+        )
+    }.getOrNull()
 
 private data class CheckedOptionalString(val value: String?)
 
@@ -386,9 +407,6 @@ private fun JSONObject.nullableInt(name: String): Int? =
 private fun parseLocalDate(value: String): LocalDate? =
     runCatching { LocalDate.parse(value, DateTimeFormatter.ISO_LOCAL_DATE) }.getOrNull()
 
-private fun parseLocalDateTime(value: String): LocalDateTime? =
-    runCatching { LocalDateTime.parse(value, DateTimeFormatter.ISO_LOCAL_DATE_TIME) }.getOrNull()
-
 private fun AssistantCalendarEventWrite.humanReadableStart(zoneId: ZoneId): String =
     if (allDay) {
         Instant.ofEpochMilli(startMillis)
@@ -411,8 +429,8 @@ private fun AssistantCalendarInstance.toResultJson(zoneId: ZoneId): JSONObject =
             } else {
                 Instant.ofEpochMilli(startMillis)
                     .atZone(zoneId)
-                    .toOffsetDateTime()
-                    .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                    .toLocalDateTime()
+                    .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
             },
         )
         .put("title", title.ifBlank { "Untitled event" })

@@ -9,7 +9,6 @@ import org.junit.Test
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.ZoneOffset
 
@@ -133,6 +132,31 @@ class CalendarToolsTest {
         assertEquals(epochAtParis(2026, 8, 10, 11, 0), gateway.createdEvents[0].endMillis)
         assertEquals(epochAtParis(2026, 8, 10, 9, 45), gateway.createdEvents[1].endMillis)
         assertEquals(epochAtParis(2026, 8, 10, 10, 0), gateway.createdEvents[2].endMillis)
+    }
+
+    @Test
+    fun `create calendar event accepts offset date-times from the model`() = runTest {
+        val gateway = FakeCalendarGateway()
+
+        execute(
+            createTool(gateway),
+            """{"title":"Appointment","start":"2026-08-11T15:00:00+02:00","duration_minutes":60}""",
+        )
+
+        val event = gateway.createdEvents.single()
+        assertEquals(Instant.parse("2026-08-11T13:00:00Z").toEpochMilli(), event.startMillis)
+        assertEquals(Instant.parse("2026-08-11T14:00:00Z").toEpochMilli(), event.endMillis)
+        assertEquals(PARIS_ZONE.id, event.timeZone)
+    }
+
+    @Test
+    fun `offset end must be after start as an instant`() = runTest {
+        val result = execute(
+            createTool(FakeCalendarGateway()),
+            """{"title":"Appointment","start":"2026-08-11T15:00:00+02:00","end":"2026-08-11T16:00:00+03:00"}""",
+        )
+
+        assertEquals(AssistantToolResult.Error("calendar_end_not_after_start"), result)
     }
 
     @Test
@@ -337,6 +361,7 @@ class CalendarToolsTest {
         val blankLocation = events.getJSONObject(2)
 
         assertEquals(3, json.getInt("count"))
+        assertEquals(PARIS_ZONE.id, json.getString("time_zone"))
         assertFalse(json.has("truncated"))
         assertEquals("2026-08-11", allDay.getString("start"))
         assertEquals("Holiday", allDay.getString("title"))
@@ -345,9 +370,7 @@ class CalendarToolsTest {
         assertEquals("Untitled event", timed.getString("title"))
         assertEquals("Room 4", timed.getString("location"))
         assertFalse(timed.getBoolean("all_day"))
-        val timedStart = OffsetDateTime.parse(timed.getString("start"))
-        assertEquals(LocalDateTime.of(2026, 8, 10, 9, 30), timedStart.toLocalDateTime())
-        assertEquals(ZoneOffset.ofHours(2), timedStart.offset)
+        assertEquals("2026-08-10T09:30:00", timed.getString("start"))
         assertFalse(blankLocation.has("location"))
     }
 
