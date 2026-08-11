@@ -41,7 +41,9 @@ internal class AssistantConversationThreading(
             }
         }
         return AssistantConversationContext(
-            threadId = thread?.id,
+            // Allocate the id before the first successful turn so an upstream server can use
+            // the same conversation scope for that first request and every follow-up.
+            threadId = thread?.id ?: threadStore.newThreadId(),
             history = messages.mapIndexed { messageIndex, message ->
                 message.toHistoryMessage(replayedPhotos[messageIndex])
             },

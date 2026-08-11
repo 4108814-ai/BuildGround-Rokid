@@ -36,11 +36,12 @@ internal class OpenAiCompatApiClient(
     private val apiKeyProvider: () -> String?,
     private val baseUrlProvider: () -> String = { preset.defaultBaseUrl },
     private val effortProvider: () -> String = { "" },
+    private val backendProvider: () -> ProviderBackend = { preset.backend },
 ) : OpenAiCompatChatClient {
     private val activeConnections = ConcurrentHashMap<String, HttpURLConnection>()
 
     override fun streamChat(request: OpenAiCompatChatRequest): Flow<OpenAiChatSseEvent> = flow {
-        val connection = openConnection().apply {
+        val connection = openConnection(request).apply {
             doOutput = true
             setRequestProperty("Accept", "text/event-stream")
             outputStream.use { output ->
@@ -119,6 +120,17 @@ internal class OpenAiCompatApiClient(
         ),
     )
 
+    internal fun hermesSessionIdHeader(request: OpenAiCompatChatRequest): String? {
+        if (backendProvider() != ProviderBackend.HERMES) return null
+        return request.request.conversationId
+            ?.trim()
+            ?.takeIf { value ->
+                value.isNotEmpty() &&
+                    value.length <= MAX_HERMES_SESSION_ID_CHARS &&
+                    value.none { character -> character == '\r' || character == '\n' || character == '\u0000' }
+            }
+    }
+
     private fun compatToolDeclaration(definition: AssistantToolDefinition): JSONObject {
         val parameters = definition.parametersSchema.toJsonObject().apply {
             if (optJSONArray("required")?.length() == 0) remove("required")
@@ -134,7 +146,7 @@ internal class OpenAiCompatApiClient(
             )
     }
 
-    private fun openConnection(): HttpURLConnection =
+    private fun openConnection(request: OpenAiCompatChatRequest): HttpURLConnection =
         (URL(endpointUrl()).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 20_000
@@ -143,6 +155,9 @@ internal class OpenAiCompatApiClient(
             setRequestProperty("Authorization", "Bearer ${apiKeyProvider().orEmpty()}")
             preset.extraHeaders.forEach { (name, value) ->
                 setRequestProperty(name, value)
+            }
+            hermesSessionIdHeader(request)?.let { sessionId ->
+                setRequestProperty(HERMES_SESSION_ID_HEADER, sessionId)
             }
         }
 
@@ -171,6 +186,11 @@ internal class OpenAiCompatApiClient(
             }
             if (data.isNotEmpty()) consume(OpenAiChatSseParser.parseData(data.toString()))
         }
+    }
+
+    private companion object {
+        const val HERMES_SESSION_ID_HEADER = "X-Hermes-Session-Id"
+        const val MAX_HERMES_SESSION_ID_CHARS = 256
     }
 }
 
@@ -211,6 +231,42 @@ internal class OpenAiToolCallAccumulator {
 private data class OpenAiCompatPassResult(
     val text: String,
     val toolCalls: List<AssistantToolCall>,
+    val photoFallbackRequested: Boolean,
+)
+
+/** Keeps the private fallback token off the HUD even when SSE splits it across deltas. */
+private class ExactControlTokenStreamFilter(
+    private val token: String,
+) {
+    private val pending = StringBuilder()
+    private var passThrough = false
+
+    fun filter(delta: String): String {
+        if (passThrough) return delta
+        pending.append(delta)
+        val candidate = pending.toString().trimStart()
+        val canStillBeControlToken = token.startsWith(candidate) ||
+            (candidate.startsWith(token) && candidate.removePrefix(token).isBlank())
+        if (canStillBeControlToken) return ""
+        passThrough = true
+        return pending.toString().also { pending.clear() }
+    }
+
+    fun finish(): ControlTokenFilterResult {
+        if (passThrough) return ControlTokenFilterResult(text = "", matched = false)
+        val remaining = pending.toString()
+        pending.clear()
+        return if (remaining.trim() == token) {
+            ControlTokenFilterResult(text = "", matched = true)
+        } else {
+            ControlTokenFilterResult(text = remaining, matched = false)
+        }
+    }
+}
+
+private data class ControlTokenFilterResult(
+    val text: String,
+    val matched: Boolean,
 )
 
 internal class OpenAiCompatProvider(
@@ -220,6 +276,7 @@ internal class OpenAiCompatProvider(
     private val toolRegistry: AssistantToolRegistry,
     private val modelProvider: () -> String = { preset.defaultModel },
     private val supportsVision: () -> Boolean,
+    private val backendProvider: () -> ProviderBackend = { preset.backend },
 ) : AiProvider {
     override val id: String = preset.id
     override val displayName: String = preset.displayName
@@ -234,6 +291,7 @@ internal class OpenAiCompatProvider(
 
         try {
             val visionSupported = supportsVision()
+            val allowPhotoFallback = backendProvider() == ProviderBackend.HERMES
             val toolPhase = toolRegistry.newExecutionPhase(
                 AssistantProviderFeatures(
                     supportsTools = true,
@@ -251,6 +309,19 @@ internal class OpenAiCompatProvider(
                 val response = StringBuilder()
                 val toolCalls = OpenAiToolCallAccumulator()
                 val thinkTagFilter = ThinkTagStreamFilter()
+                val photoFallbackFilter = if (allowPhotoFallback) {
+                    ExactControlTokenStreamFilter(COMPAT_TAKE_PHOTO_REQUEST_TOKEN)
+                } else {
+                    null
+                }
+
+                suspend fun appendVisible(delta: String) {
+                    val visible = photoFallbackFilter?.filter(delta) ?: delta
+                    if (visible.isEmpty()) return
+                    response.append(visible)
+                    emit(AiProviderEvent.TextDelta(messageId, visible))
+                }
+
                 apiClient.streamChat(
                     OpenAiCompatChatRequest(
                         request = effectiveRequest,
@@ -267,8 +338,7 @@ internal class OpenAiCompatProvider(
                             if (content.isEmpty()) return@collect
                             val filteredDelta = thinkTagFilter.filter(content)
                             if (filteredDelta.isEmpty()) return@collect
-                            response.append(filteredDelta)
-                            emit(AiProviderEvent.TextDelta(messageId, filteredDelta))
+                            appendVisible(filteredDelta)
                         }
                         is OpenAiChatSseEvent.Error ->
                             throw IllegalStateException(event.message)
@@ -278,13 +348,17 @@ internal class OpenAiCompatProvider(
                     }
                 }
                 val remaining = thinkTagFilter.finish()
-                if (remaining.isNotEmpty()) {
-                    response.append(remaining)
-                    emit(AiProviderEvent.TextDelta(messageId, remaining))
+                if (remaining.isNotEmpty()) appendVisible(remaining)
+                val controlResult = photoFallbackFilter?.finish()
+                    ?: ControlTokenFilterResult(text = "", matched = false)
+                if (controlResult.text.isNotEmpty()) {
+                    response.append(controlResult.text)
+                    emit(AiProviderEvent.TextDelta(messageId, controlResult.text))
                 }
                 return OpenAiCompatPassResult(
                     text = cleanCompatResponse(response.toString()),
                     toolCalls = toolCalls.completeCalls(),
+                    photoFallbackRequested = controlResult.matched,
                 )
             }
 
@@ -328,6 +402,49 @@ internal class OpenAiCompatProvider(
                     )
                 }
                 streamPass(replayMessages, toolDefinitions = emptyList()).text
+            } else if (firstPass.photoFallbackRequested) {
+                emit(AiProviderEvent.TextReset(messageId))
+                val replayMessages = originalMessages.copyJsonArray()
+                val result = toolPhase.execute(
+                    AssistantToolCall(
+                        callId = "fallback_take_photo",
+                        name = TAKE_PHOTO_TOOL_NAME,
+                        argumentsJson = "{}",
+                    ),
+                )
+                currentCoroutineContext().ensureActive()
+                when (result) {
+                    is AssistantToolResult.Image -> replayMessages.put(
+                        JSONObject()
+                            .put("role", "user")
+                            .put(
+                                "content",
+                                chatCompletionContent(
+                                    PHOTO_TAKEN_MESSAGE,
+                                    listOf(PhotoAttachment(result.mimeType, result.base64)),
+                                ),
+                            ),
+                    )
+                    is AssistantToolResult.Error -> replayMessages.put(
+                        JSONObject()
+                            .put("role", "user")
+                            .put(
+                                "content",
+                                "$PHOTO_CAPTURE_FAILED_MESSAGE ${result.code}.",
+                            ),
+                    )
+                    is AssistantToolResult.Json -> replayMessages.put(
+                        JSONObject()
+                            .put("role", "user")
+                            .put("content", PHOTO_CAPTURE_FAILED_MESSAGE),
+                    )
+                }
+                val finalPass = streamPass(replayMessages, toolDefinitions = emptyList())
+                if (finalPass.photoFallbackRequested) {
+                    PHOTO_COULD_NOT_BE_READ_MESSAGE
+                } else {
+                    finalPass.text
+                }
             } else {
                 firstPass.text
             }
@@ -450,4 +567,11 @@ private val INLINE_THINK_BLOCKS =
     Regex("<think>.*?</think>|<think>.*$", RegexOption.DOT_MATCHES_ALL)
 
 private const val PHOTO_TAKEN_MESSAGE =
-    "Photo just taken through the glasses camera for the current question."
+    "Photo just taken through the glasses camera for the current question. " +
+        "The image is attached now; do not request another photo."
+
+private const val PHOTO_CAPTURE_FAILED_MESSAGE =
+    "Nexus could not take the requested glasses photo. Answer without current visual access. Error:"
+
+private const val PHOTO_COULD_NOT_BE_READ_MESSAGE =
+    "The selected model could not read the photo from the glasses camera."

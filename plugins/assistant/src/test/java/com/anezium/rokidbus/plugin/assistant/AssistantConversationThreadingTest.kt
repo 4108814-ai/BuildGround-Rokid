@@ -16,6 +16,8 @@ class AssistantConversationThreadingTest {
         val threading = AssistantConversationThreading(store)
         val firstRequest = threading.prepare(keepConversation = true, idleWindowMinutes = 10)
         assertTrue(firstRequest.history.isEmpty())
+        val conversationId = firstRequest.threadId
+        assertTrue(!conversationId.isNullOrBlank())
 
         threading.recordCompletedTurn(
             context = firstRequest,
@@ -25,6 +27,8 @@ class AssistantConversationThreadingTest {
         )
 
         val secondRequest = threading.prepare(keepConversation = true, idleWindowMinutes = 10)
+        assertEquals(conversationId, secondRequest.threadId)
+        assertEquals(conversationId, store.threads().single().id)
         assertEquals(
             listOf("user", "assistant"),
             secondRequest.history.map(ChatMessage::role),

@@ -24,6 +24,11 @@ import android.widget.TextView
 import android.widget.Toast
 import com.anezium.rokidbus.client.ui.BusTheme
 import com.anezium.rokidbus.client.ui.NexusUi
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
  * Settings for the voice assistant: pick a provider, connect it, steer its model,
@@ -38,6 +43,8 @@ class AssistantSettingsActivity : Activity() {
     private val authStore by lazy { CodexAuthStore(applicationContext) }
     private val threadStore by lazy { AssistantThreadStore(applicationContext) }
     private val accountContextSync by lazy { AccountContextSync(applicationContext) }
+    private val hermesCapabilitiesClient by lazy { HermesCapabilitiesClient() }
+    private val settingsScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private lateinit var providerConfigSlot: LinearLayout
     private lateinit var windowSection: LinearLayout
@@ -85,15 +92,16 @@ class AssistantSettingsActivity : Activity() {
     private val syncDots = mutableMapOf<Boolean, View>()
     private val syncNames = mutableMapOf<Boolean, TextView>()
     @Volatile private var syncing = false
+    private var hermesProbeGeneration = 0L
 
     private data class ProviderEntry(val id: String, val title: String, val caption: String)
     private data class ModelChoice(val id: String, val title: String, val caption: String)
     private data class ReasoningChoice(val id: String, val title: String, val hint: String? = null)
 
     /**
-     * ChatGPT leads because a plan needs no key, then the pay-per-token providers in
-     * the order a wearer is likely to hold a key for, and Custom last as the escape
-     * hatch for everything the catalog does not name.
+     * ChatGPT leads because a plan needs no key, followed by named API services and
+     * self-hosted Hermes. Custom stays last as the escape hatch for everything the
+     * catalog does not name.
      */
     private val providerEntries = listOf(
         ProviderEntry(
@@ -106,6 +114,7 @@ class AssistantSettingsActivity : Activity() {
         ProviderEntry(ProviderCatalog.minimax.id, "MiniMax", "Coding Plan or API key"),
         ProviderEntry(ProviderCatalog.deepSeek.id, "DeepSeek", "Chat and Reasoner models"),
         ProviderEntry(ProviderCatalog.zai.id, "GLM (Z.ai)", "Zhipu's GLM models"),
+        ProviderEntry(ProviderCatalog.hermes.id, "Hermes", "Your Hermes API server"),
         ProviderEntry(ProviderCatalog.custom.id, "Custom", "Any OpenAI-compatible server"),
     )
 
@@ -156,6 +165,12 @@ class AssistantSettingsActivity : Activity() {
         renderMemory()
         renderProductivityCard()
         renderCalendarAccess()
+        maybeDetectHermes(ProviderCatalog.custom)
+    }
+
+    override fun onDestroy() {
+        settingsScope.cancel()
+        super.onDestroy()
     }
 
     private fun buildUi() {
@@ -309,8 +324,9 @@ class AssistantSettingsActivity : Activity() {
         if (id == CodexAuthStore.CHATGPT_PROVIDER_ID) {
             authStore.oauthTokens() != null
         } else {
+            val preset = ProviderCatalog.requirePreset(id)
             !authStore.providerApiKey(id).isNullOrBlank() &&
-                (id != ProviderCatalog.custom.id || authStore.providerBaseUrl(id).isNotBlank())
+                (preset.defaultBaseUrl.isNotBlank() || authStore.providerBaseUrl(id).isNotBlank())
         }
 
     private fun providerCard(): LinearLayout =
@@ -372,9 +388,11 @@ class AssistantSettingsActivity : Activity() {
 
     private fun selectProvider(id: String) {
         if (id == selectedProvider()) return
+        hermesProbeGeneration += 1
         authStore.setSelectedProviderId(id)
         renderProviderList()
         rebuildProviderConfig()
+        if (id == ProviderCatalog.custom.id) maybeDetectHermes(ProviderCatalog.custom)
     }
 
     private fun renderProviderList() {
@@ -385,7 +403,12 @@ class AssistantSettingsActivity : Activity() {
                 NexusUi.setDotColor(it, if (isSelected) NexusUi.GREEN else NexusUi.INK4)
             }
             providerNames[entry.id]?.setTextColor(if (isSelected) NexusUi.INK else NexusUi.INK2)
-            providerStatuses[entry.id]?.text = if (providerReady(entry.id)) "Ready" else ""
+            providerStatuses[entry.id]?.text = when {
+                !providerReady(entry.id) -> ""
+                entry.id == ProviderCatalog.custom.id &&
+                    authStore.providerBackend(entry.id) == ProviderBackend.HERMES -> "Hermes"
+                else -> "Ready"
+            }
         }
     }
 
@@ -629,10 +652,10 @@ class AssistantSettingsActivity : Activity() {
     // ------------------------------------------------------------------ API provider config
 
     private fun buildApiProviderConfig(slot: LinearLayout, preset: ProviderPreset) {
-        val isCustom = preset.id == ProviderCatalog.custom.id
+        val needsEndpoint = preset.defaultBaseUrl.isBlank()
         slot.addView(BusTheme.gap(this, 18))
-        if (isCustom) {
-            // A custom server has no home until the endpoint is set; ask for it first.
+        if (needsEndpoint) {
+            // A self-hosted server has no home until the endpoint is set; ask for it first.
             slot.addView(endpointCard(preset), NexusUi.block())
             slot.addView(BusTheme.gap(this, 12))
         }
@@ -663,7 +686,7 @@ class AssistantSettingsActivity : Activity() {
             renderEffortSelection(preset)
         }
 
-        if (!isCustom) {
+        if (!needsEndpoint) {
             slot.addView(BusTheme.gap(this, 12))
             slot.addView(endpointCard(preset), NexusUi.block())
         }
@@ -813,6 +836,7 @@ class AssistantSettingsActivity : Activity() {
         renderProviderList()
         rebuildProviderConfig()
         toast("${preset.displayName} key saved.")
+        maybeDetectHermes(preset, announce = true)
     }
 
     private fun forgetApiKey(preset: ProviderPreset) {
@@ -1032,10 +1056,12 @@ class AssistantSettingsActivity : Activity() {
             addView(
                 NexusUi.rowSub(
                     this@AssistantSettingsActivity,
-                    if (preset.id == ProviderCatalog.custom.id) {
-                        "The /v1 root of your OpenAI-compatible server"
-                    } else {
-                        "Only change this if your plan answers on a different server"
+                    when {
+                        preset.backend == ProviderBackend.HERMES ->
+                            "The /v1 root of your Hermes API server"
+                        preset.defaultBaseUrl.isBlank() ->
+                            "The /v1 root of your OpenAI-compatible server"
+                        else -> "Only change this if your plan answers on a different server"
                     },
                 ),
                 NexusUi.block(),
@@ -1110,6 +1136,7 @@ class AssistantSettingsActivity : Activity() {
                 else -> "Endpoint cleared."
             },
         )
+        maybeDetectHermes(preset, announce = true)
     }
 
     private fun endpointHost(preset: ProviderPreset): String? =
@@ -1118,6 +1145,40 @@ class AssistantSettingsActivity : Activity() {
             .removePrefix("http://")
             .substringBefore('/')
             .takeIf(String::isNotBlank)
+
+    private fun maybeDetectHermes(preset: ProviderPreset, announce: Boolean = false) {
+        if (
+            preset.id != ProviderCatalog.custom.id ||
+            selectedProvider() != preset.id ||
+            authStore.providerDetectedBackend(preset.id) != null ||
+            !providerReady(preset.id)
+        ) {
+            return
+        }
+        val generation = ++hermesProbeGeneration
+        val baseUrl = authStore.providerBaseUrl(preset.id)
+        val apiKey = authStore.providerApiKey(preset.id).orEmpty()
+        settingsScope.launch {
+            when (hermesCapabilitiesClient.discover(baseUrl, apiKey)) {
+                is HermesDiscoveryResult.Detected -> {
+                    if (generation != hermesProbeGeneration) return@launch
+                    authStore.setProviderDetectedBackend(preset.id, ProviderBackend.HERMES)
+                    renderProviderList()
+                    if (selectedProvider() == preset.id) renderPhotosCapSelection(preset)
+                    if (announce) toast("Hermes server detected.")
+                }
+                HermesDiscoveryResult.NotHermes -> {
+                    if (generation != hermesProbeGeneration) return@launch
+                    authStore.setProviderDetectedBackend(
+                        preset.id,
+                        ProviderBackend.OPENAI_COMPAT,
+                    )
+                    renderProviderList()
+                }
+                HermesDiscoveryResult.Unavailable -> Unit
+            }
+        }
+    }
 
     // ------------------------------------------------------------------ personality
 
@@ -1298,9 +1359,9 @@ class AssistantSettingsActivity : Activity() {
 
     private fun windowRow(minutes: Int): LinearLayout =
         pickerRow(
-            title = "$minutes minutes",
+            title = conversationWindowLabel(minutes),
             hint = if (minutes == CodexAuthStore.DEFAULT_IDLE_WINDOW_MINUTES) "default" else null,
-            description = "Start fresh after $minutes minutes",
+            description = "Start fresh after ${conversationWindowLabel(minutes)}",
             onClick = {
                 authStore.setConversationIdleWindowMinutes(minutes)
                 renderConversationSettings()
@@ -1308,6 +1369,9 @@ class AssistantSettingsActivity : Activity() {
             nameSink = { windowNames[minutes] = it },
             dotSink = { windowDots[minutes] = it },
         )
+
+    private fun conversationWindowLabel(minutes: Int): String =
+        if (minutes == CodexAuthStore.SEVEN_DAYS_IN_MINUTES) "7 days" else "$minutes minutes"
 
     /**
      * The one-of-N row shared by every picker on this screen: label, optional hint, and

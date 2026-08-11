@@ -91,6 +91,8 @@ class AssistantThreadStore private constructor(
         activeThread.takeIf { clock() - it.updatedAtMs <= idleWindowMs }
     }
 
+    internal fun newThreadId(): String = UUID.randomUUID().toString()
+
     fun appendTurn(
         threadId: String?,
         userText: String,
@@ -116,7 +118,9 @@ class AssistantThreadStore private constructor(
         val existing = threadId?.let { requestedId ->
             state.threads.firstOrNull { it.id == requestedId }
         }
-        val usedId = existing?.id ?: UUID.randomUUID().toString()
+        val usedId = existing?.id ?: threadId
+            ?.takeIf(::isThreadId)
+            ?: newThreadId()
         val photoPath = photoJpeg
             ?.takeIf { it.isNotEmpty() }
             ?.let(::writePhotoAtomically)
@@ -525,6 +529,9 @@ class AssistantThreadStore private constructor(
     private fun log(message: String) {
         logger(message)
     }
+
+    private fun isThreadId(value: String): Boolean =
+        runCatching { UUID.fromString(value).toString() == value }.getOrDefault(false)
 
     private data class StoreState(
         val activeThreadId: String? = null,

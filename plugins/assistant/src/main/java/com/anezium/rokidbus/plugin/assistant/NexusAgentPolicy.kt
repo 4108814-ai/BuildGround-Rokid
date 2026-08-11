@@ -22,6 +22,7 @@ internal object NexusAgentPolicy {
         memory: String = "",
         currentDateTime: ZonedDateTime? = null,
         availableToolNames: Collection<String> = listOf(TAKE_PHOTO_TOOL_NAME),
+        allowTextToolFallback: Boolean = false,
     ): String {
         val base = customPrompt.trim().ifBlank { DEFAULT_SYSTEM_PROMPT }
         val productivityToolsAvailable = availableToolNames.any(PRODUCTIVITY_TOOL_NAMES::contains)
@@ -46,6 +47,19 @@ internal object NexusAgentPolicy {
                         "the current scene before a successful tool result. If no image is available for a question " +
                         "about what was seen, say so plainly and offer to look again.\n",
                 )
+                if (allowTextToolFallback) {
+                    append(
+                        "- If structured client tool calls are unavailable, request the photo by replying with " +
+                            "exactly $COMPAT_TAKE_PHOTO_REQUEST_TOKEN and nothing else. Nexus intercepts that " +
+                            "private token, takes the photo, and continues the same request; never explain or " +
+                            "quote the token.\n",
+                    )
+                } else {
+                    append(
+                        "- If this endpoint does not support structured client tool calls, say you cannot look " +
+                            "right now.\n",
+                    )
+                }
             } else {
                 append(
                     "- You cannot take photos or see the current scene. If a question needs current visual " +

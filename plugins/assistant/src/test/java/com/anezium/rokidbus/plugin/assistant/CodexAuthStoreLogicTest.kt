@@ -50,6 +50,18 @@ class CodexAuthStoreLogicTest {
     }
 
     @Test
+    fun sevenDayConversationWindowRoundTrips() {
+        val store = CodexAuthStore(FakeSharedPreferences())
+
+        store.setConversationIdleWindowMinutes(CodexAuthStore.SEVEN_DAYS_IN_MINUTES)
+
+        assertEquals(
+            CodexAuthStore.SEVEN_DAYS_IN_MINUTES,
+            store.conversationIdleWindowMinutes(),
+        )
+    }
+
+    @Test
     fun memorySetterTrimsAndTruncatesToMaximumLength() {
         val store = CodexAuthStore(FakeSharedPreferences())
         val oversized = " \n" + "x".repeat(CodexAuthStore.MAX_ASSISTANT_MEMORY_CHARS + 25) + "\t "
@@ -169,7 +181,7 @@ class CodexAuthStoreLogicTest {
     }
 
     @Test
-    fun providerReadinessUsesSelectedKeyAndRequiresCustomBaseUrl() {
+    fun providerReadinessUsesSelectedKeyAndRequiresSelfHostedBaseUrl() {
         val store = testStore(FakeSharedPreferences())
         store.saveProviderApiKey(ProviderCatalog.minimax.id, "minimax-key")
         store.setSelectedProviderId(ProviderCatalog.minimax.id)
@@ -182,6 +194,32 @@ class CodexAuthStoreLogicTest {
 
         store.setProviderBaseUrl(ProviderCatalog.custom.id, "https://custom.test/v1")
         assertTrue(store.hasUsableAuth())
+
+        store.saveProviderApiKey(ProviderCatalog.hermes.id, "hermes-key")
+        store.setSelectedProviderId(ProviderCatalog.hermes.id)
+        assertFalse(store.hasUsableAuth())
+
+        store.setProviderBaseUrl(ProviderCatalog.hermes.id, "https://hermes.test/v1")
+        assertTrue(store.hasUsableAuth())
+    }
+
+    @Test
+    fun customBackendIsOnlyHermesAfterCapabilityDetectionAndResetsWithConnectionDetails() {
+        val store = testStore(FakeSharedPreferences())
+
+        assertEquals(ProviderBackend.HERMES, store.providerBackend(ProviderCatalog.hermes.id))
+        assertEquals(ProviderBackend.OPENAI_COMPAT, store.providerBackend(ProviderCatalog.custom.id))
+        assertFalse(store.providerModelSupportsPhotos(ProviderCatalog.custom.id))
+
+        store.setProviderDetectedBackend(ProviderCatalog.custom.id, ProviderBackend.HERMES)
+
+        assertEquals(ProviderBackend.HERMES, store.providerBackend(ProviderCatalog.custom.id))
+        assertTrue(store.providerModelSupportsPhotos(ProviderCatalog.custom.id))
+
+        store.setProviderBaseUrl(ProviderCatalog.custom.id, "https://new-server.test/v1")
+
+        assertEquals(null, store.providerDetectedBackend(ProviderCatalog.custom.id))
+        assertEquals(ProviderBackend.OPENAI_COMPAT, store.providerBackend(ProviderCatalog.custom.id))
     }
 
     @Test

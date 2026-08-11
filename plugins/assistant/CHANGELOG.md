@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.4.1
+
+- **Hermes is a provider of its own.** Give Settings the `/v1` root of your Hermes
+  API server and its key, and the assistant answers from it — camera included: a
+  server that runs its own tools still gets to look through the glasses.
+- One conversation is now one Hermes session, from the first question to the last,
+  instead of a fresh session for every sentence.
+- An existing **Custom** connection recognises itself as Hermes when the server
+  says so; a plain OpenAI-compatible server is left exactly as it was.
+- Conversations can now stay open for seven days before starting fresh.
+
 ## 1.4.0
 
 - **Your phone calendar is a real tool too.** Ask the assistant to add an

@@ -60,6 +60,7 @@ class AssistantPluginService : NexusPluginService() {
     private val reminderStore by lazy { AssistantReminderStore(applicationContext) }
     private val reminderScheduler by lazy { androidReminderScheduler(applicationContext) }
     private val calendarGateway by lazy { AndroidCalendarGateway(applicationContext) }
+    private val hermesCapabilitiesClient by lazy { HermesCapabilitiesClient() }
     private val conversationThreading by lazy { AssistantConversationThreading(threadStore) }
     private val inkPageToolCapabilities by lazy { createInkPageToolCapabilities() }
     private val inkPageToolRuntime by lazy { InkPageToolRuntime(inkPageToolCapabilities) }
@@ -93,6 +94,7 @@ class AssistantPluginService : NexusPluginService() {
                 apiKeyProvider = { authStore.providerApiKey(preset.id) },
                 baseUrlProvider = { authStore.providerBaseUrl(preset.id) },
                 effortProvider = { authStore.providerEffort(preset.id) },
+                backendProvider = { authStore.providerBackend(preset.id) },
             )
         }
     }
@@ -105,6 +107,7 @@ class AssistantPluginService : NexusPluginService() {
                 toolRegistry = assistantToolRegistry,
                 modelProvider = { authStore.providerModel(preset.id) },
                 supportsVision = { providerSupportsPhotos(preset.id) },
+                backendProvider = { authStore.providerBackend(preset.id) },
             )
         }
     }
@@ -144,6 +147,7 @@ class AssistantPluginService : NexusPluginService() {
     private var ttsSession: NexusTtsSession? = null
     private var activeTtsUtteranceId: String? = null
     private var captureGeneration = 0L
+    private var customBackendProbeAttempted = false
     private var captureActive = false
     private var fallbackTranscribePending = false
     private var fallbackStopJob: Job? = null
@@ -567,6 +571,7 @@ class AssistantPluginService : NexusPluginService() {
         val noticeBandMode = uiController.isNoticeBandMode
         val providerId = selectedProviderId()
         uiController.showTransient("Thinking…")
+        ensureProviderBackendDetected(providerId)
         val keepConversation = authStore.keepConversation()
         val keepPhotosInConversations = authStore.keepPhotosInConversations()
         val conversationContext = withContext(Dispatchers.IO) {
@@ -578,6 +583,10 @@ class AssistantPluginService : NexusPluginService() {
                 idleWindowMinutes = authStore.conversationIdleWindowMinutes(),
             )
         }
+        // Hermes runs its own tools server-side and never hands a client tool call back,
+        // so only the photo bridge — which has a text fallback — is real over there.
+        val serverSideToolBackend = providerId != ChatGptCodexProvider.ID &&
+            authStore.providerBackend(providerId) == ProviderBackend.HERMES
         val request = ChatRequest(
             userText = transcript,
             systemPrompt = NexusAgentPolicy.buildSystemPrompt(
@@ -587,13 +596,16 @@ class AssistantPluginService : NexusPluginService() {
                 currentDateTime = ZonedDateTime.now(),
                 availableToolNames = assistantToolRegistry
                     .availableDefinitions(assistantProviderFeatures(providerId))
-                    .map(AssistantToolDefinition::name),
+                    .map(AssistantToolDefinition::name)
+                    .filter { name -> !serverSideToolBackend || name == TAKE_PHOTO_TOOL_NAME },
+                allowTextToolFallback = serverSideToolBackend,
             ),
             history = conversationContext.history,
             model = when (providerId) {
                 ChatGptCodexProvider.ID -> authStore.chatGptModel()
                 else -> authStore.providerModel(providerId)
             },
+            conversationId = conversationContext.threadId,
         )
         currentRequestId = request.requestId
         currentAssistantGeneration = captureGeneration
@@ -1055,6 +1067,27 @@ class AssistantPluginService : NexusPluginService() {
 
     private fun providerSupportsPhotos(providerId: String): Boolean =
         providerId == ChatGptCodexProvider.ID || authStore.providerModelSupportsPhotos(providerId)
+
+    private suspend fun ensureProviderBackendDetected(providerId: String) {
+        if (
+            providerId != ProviderCatalog.custom.id ||
+            authStore.providerDetectedBackend(providerId) != null ||
+            customBackendProbeAttempted
+        ) {
+            return
+        }
+        customBackendProbeAttempted = true
+        val baseUrl = authStore.providerBaseUrl(providerId)
+        val apiKey = authStore.providerApiKey(providerId).orEmpty()
+        if (baseUrl.isBlank() || apiKey.isBlank()) return
+        when (hermesCapabilitiesClient.discover(baseUrl, apiKey)) {
+            is HermesDiscoveryResult.Detected ->
+                authStore.setProviderDetectedBackend(providerId, ProviderBackend.HERMES)
+            HermesDiscoveryResult.NotHermes ->
+                authStore.setProviderDetectedBackend(providerId, ProviderBackend.OPENAI_COMPAT)
+            HermesDiscoveryResult.Unavailable -> Unit
+        }
+    }
 
     companion object {
         private const val TAG = "NexusAssistant"

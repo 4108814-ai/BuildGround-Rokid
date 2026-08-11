@@ -7,6 +7,11 @@ data class SuggestedModel(
     val vision: Boolean,
 )
 
+enum class ProviderBackend {
+    OPENAI_COMPAT,
+    HERMES,
+}
+
 data class ProviderPreset(
     val id: String,
     val displayName: String,
@@ -16,6 +21,7 @@ data class ProviderPreset(
     val supportedEfforts: List<String>,
     val extraHeaders: Map<String, String>,
     val keyHint: String,
+    val backend: ProviderBackend = ProviderBackend.OPENAI_COMPAT,
 )
 
 object ProviderCatalog {
@@ -124,6 +130,18 @@ object ProviderCatalog {
         keyHint = "Z.ai API key",
     )
 
+    val hermes = ProviderPreset(
+        id = "hermes",
+        displayName = "Hermes",
+        defaultBaseUrl = "",
+        defaultModel = "hermes-agent",
+        suggestedModels = emptyList(),
+        supportedEfforts = emptyList(),
+        extraHeaders = emptyMap(),
+        keyHint = "Hermes API server key",
+        backend = ProviderBackend.HERMES,
+    )
+
     val custom = ProviderPreset(
         id = "custom",
         displayName = "Custom",
@@ -141,6 +159,7 @@ object ProviderCatalog {
         minimax,
         deepSeek,
         zai,
+        hermes,
         custom,
     )
 
@@ -159,8 +178,10 @@ object ProviderCatalog {
         preset: ProviderPreset,
         model: String,
         visionOverride: Boolean?,
-    ): Boolean = visionOverride ?: preset.suggestedModels
-        .firstOrNull { suggested -> suggested.id == model.trim() }
-        ?.vision
-        ?: false
+        backend: ProviderBackend = preset.backend,
+    ): Boolean = visionOverride
+        ?: preset.suggestedModels
+            .firstOrNull { suggested -> suggested.id == model.trim() }
+            ?.vision
+        ?: (backend == ProviderBackend.HERMES)
 }

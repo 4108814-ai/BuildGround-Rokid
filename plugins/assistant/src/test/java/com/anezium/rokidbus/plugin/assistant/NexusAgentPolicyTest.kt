@@ -63,6 +63,17 @@ class NexusAgentPolicyTest {
         assertTrue(prompt.contains("never claim to see the current scene before a successful tool result"))
         assertTrue(prompt.contains("if no image is available"))
         assertTrue(prompt.contains("say so plainly and offer to look again"))
+        assertFalse(prompt.contains(COMPAT_TAKE_PHOTO_REQUEST_TOKEN.lowercase()))
+    }
+
+    @Test
+    fun `Hermes fallback policy includes the private photo control token`() {
+        val prompt = NexusAgentPolicy.buildSystemPrompt(
+            allowTextToolFallback = true,
+        )
+
+        assertTrue(prompt.contains(COMPAT_TAKE_PHOTO_REQUEST_TOKEN))
+        assertTrue(prompt.contains("Nexus intercepts that private token"))
     }
 
     @Test

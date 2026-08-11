@@ -12,7 +12,7 @@ class ProviderCatalogTest {
 
         assertEquals(ids.size, ids.toSet().size)
         assertEquals(
-            setOf("openai", "openrouter", "minimax", "deepseek", "zai", "custom"),
+            setOf("openai", "openrouter", "minimax", "deepseek", "zai", "hermes", "custom"),
             ids.toSet(),
         )
     }
@@ -44,6 +44,35 @@ class ProviderCatalogTest {
             ProviderCatalog.supportsVision(
                 preset = ProviderCatalog.minimax,
                 model = "MiniMax-M3",
+                visionOverride = false,
+            ),
+        )
+        assertTrue(
+            ProviderCatalog.supportsVision(
+                preset = ProviderCatalog.hermes,
+                model = "hermes-agent",
+                visionOverride = null,
+            ),
+        )
+        assertFalse(
+            ProviderCatalog.supportsVision(
+                preset = ProviderCatalog.custom,
+                model = "hermes-agent",
+                visionOverride = null,
+            ),
+        )
+        assertTrue(
+            ProviderCatalog.supportsVision(
+                preset = ProviderCatalog.custom,
+                model = "profile-name-can-vary",
+                visionOverride = null,
+                backend = ProviderBackend.HERMES,
+            ),
+        )
+        assertFalse(
+            ProviderCatalog.supportsVision(
+                preset = ProviderCatalog.hermes,
+                model = "hermes-agent",
                 visionOverride = false,
             ),
         )

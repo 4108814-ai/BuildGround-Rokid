@@ -103,13 +103,125 @@ class OpenAiCompatToolLoopTest {
         assertEquals(2, photoParts.length())
         assertEquals("text", photoParts.getJSONObject(0).getString("type"))
         assertEquals(
-            "Photo just taken through the glasses camera for the current question.",
+            "Photo just taken through the glasses camera for the current question. " +
+                "The image is attached now; do not request another photo.",
             photoParts.getJSONObject(0).getString("text"),
         )
         assertEquals("image_url", photoParts.getJSONObject(1).getString("type"))
         assertEquals(
             "data:image/jpeg;base64,AQID",
             photoParts.getJSONObject(1).getJSONObject("image_url").getString("url"),
+        )
+    }
+
+    @Test
+    fun `text fallback token captures and attaches a photo without leaking onto the hud`() = runTest {
+        val client = RecordingCompatClient(
+            listOf(
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(content = "<think>Need vision</think>  [[NEXUS_"),
+                    OpenAiChatSseEvent.Delta(content = "TAKE_PHOTO]]\n"),
+                ),
+                StubResponse.Events(OpenAiChatSseEvent.Delta(content = "I can see a green door.")),
+            ),
+        )
+        var executionCount = 0
+        val provider = provider(
+            client = client,
+            preset = ProviderCatalog.hermes,
+            toolExecutor = {
+                executionCount += 1
+                AssistantToolResult.Image("image/jpeg", "AQID")
+            },
+        )
+
+        val events = provider.streamEvents(ChatRequest(userText = "What do you see?")).toList()
+
+        assertEquals(1, executionCount)
+        assertTrue(events.any { event -> event is AiProviderEvent.TextReset })
+        assertEquals(
+            listOf("I can see a green door."),
+            events.filterIsInstance<AiProviderEvent.TextDelta>().map { event -> event.delta },
+        )
+        assertFalse(events.any { event -> event.toString().contains("NEXUS_TAKE_PHOTO") })
+        assertEquals(2, client.requests.size)
+        val replayMessages = client.requests[1].messages
+        assertEquals(2, replayMessages.length())
+        assertEquals("user", replayMessages.getJSONObject(1).getString("role"))
+        val photoParts = replayMessages.getJSONObject(1).getJSONArray("content")
+        assertEquals(
+            "data:image/jpeg;base64,AQID",
+            photoParts.getJSONObject(1).getJSONObject("image_url").getString("url"),
+        )
+    }
+
+    @Test
+    fun `generic OpenAI compatible provider does not interpret the Hermes control token`() = runTest {
+        val client = RecordingCompatClient(
+            listOf(
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(content = COMPAT_TAKE_PHOTO_REQUEST_TOKEN),
+                ),
+            ),
+        )
+        var executionCount = 0
+        val provider = provider(
+            client = client,
+            toolExecutor = {
+                executionCount += 1
+                AssistantToolResult.Image("image/jpeg", "AQID")
+            },
+        )
+
+        val events = provider.streamEvents(ChatRequest(userText = "Say the token")).toList()
+
+        assertEquals(0, executionCount)
+        assertEquals(1, client.requests.size)
+        assertEquals(
+            listOf(COMPAT_TAKE_PHOTO_REQUEST_TOKEN),
+            events.filterIsInstance<AiProviderEvent.TextDelta>().map(AiProviderEvent.TextDelta::delta),
+        )
+    }
+
+    @Test
+    fun `only explicit or detected Hermes carries a safe conversation session header`() {
+        val conversationId = "7baf8322-8919-4b20-95dc-5337ad5b6769"
+        val request = OpenAiCompatChatRequest(
+            request = ChatRequest(userText = "Hello", conversationId = conversationId),
+            modelId = "hermes-agent",
+            messages = ChatRequest(userText = "Hello").toChatCompletionMessages(),
+            toolDefinitions = emptyList(),
+        )
+        val hermesClient = OpenAiCompatApiClient(
+            preset = ProviderCatalog.hermes,
+            apiKeyProvider = { "key" },
+            baseUrlProvider = { "https://hermes.test/v1" },
+        )
+        val genericCustomClient = OpenAiCompatApiClient(
+            preset = ProviderCatalog.custom,
+            apiKeyProvider = { "key" },
+            baseUrlProvider = { "https://custom.test/v1" },
+        )
+        val detectedCustomClient = OpenAiCompatApiClient(
+            preset = ProviderCatalog.custom,
+            apiKeyProvider = { "key" },
+            baseUrlProvider = { "https://hermes.test/v1" },
+            backendProvider = { ProviderBackend.HERMES },
+        )
+        val openAiClient = OpenAiCompatApiClient(
+            preset = ProviderCatalog.openAi,
+            apiKeyProvider = { "key" },
+        )
+
+        assertEquals(conversationId, hermesClient.hermesSessionIdHeader(request))
+        assertEquals(null, genericCustomClient.hermesSessionIdHeader(request))
+        assertEquals(conversationId, detectedCustomClient.hermesSessionIdHeader(request))
+        assertEquals(null, openAiClient.hermesSessionIdHeader(request))
+        assertEquals(
+            null,
+            hermesClient.hermesSessionIdHeader(
+                request.copy(request = request.request.copy(conversationId = "bad\nsession")),
+            ),
         )
     }
 
@@ -334,12 +446,14 @@ class OpenAiCompatToolLoopTest {
         toolExecutor: suspend (AssistantToolCall) -> AssistantToolResult,
         supportsVision: Boolean = true,
         additionalTools: List<AssistantToolDefinition> = emptyList(),
+        preset: ProviderPreset = ProviderCatalog.openAi,
     ) = OpenAiCompatProvider(
-        preset = ProviderCatalog.openAi,
+        preset = preset,
         apiClient = client,
         apiKeyConfigured = { true },
         toolRegistry = testToolRegistry(toolExecutor, *additionalTools.toTypedArray()),
         supportsVision = { supportsVision },
+        backendProvider = { preset.backend },
     )
 
     private fun assertToolContent(content: String, vararg fields: Pair<String, String>) {

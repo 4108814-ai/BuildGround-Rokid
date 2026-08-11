@@ -29,6 +29,7 @@ data class ChatRequest(
     val photos: List<PhotoAttachment> = emptyList(),
     val model: String? = null,
     val requestId: String = UUID.randomUUID().toString(),
+    val conversationId: String? = null,
 )
 
 sealed interface AiProviderEvent {

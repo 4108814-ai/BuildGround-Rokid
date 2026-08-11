@@ -38,7 +38,7 @@ class CodexAuthStore internal constructor(
             selected != null -> {
                 val preset = ProviderCatalog.preset(selected) ?: return false
                 !providerApiKey(selected).isNullOrBlank() &&
-                    (preset.id != ProviderCatalog.custom.id || providerBaseUrl(selected).isNotBlank())
+                    (preset.defaultBaseUrl.isNotBlank() || providerBaseUrl(selected).isNotBlank())
             }
             else -> hasUsableAuth(
                 authMode = authMode(),
@@ -85,15 +85,21 @@ class CodexAuthStore internal constructor(
         val trimmed = key.trim()
         require(trimmed.isNotBlank()) { "API key is blank." }
         ensureProviderMigration()
-        prefs.edit()
-            .putString(providerKey(KEY_PROVIDER_API_KEY_PREFIX, id), encryptSecret(trimmed))
-            .apply()
+        prefs.edit().apply {
+            putString(providerKey(KEY_PROVIDER_API_KEY_PREFIX, id), encryptSecret(trimmed))
+            if (id == ProviderCatalog.custom.id) {
+                remove(providerKey(KEY_PROVIDER_DETECTED_BACKEND_PREFIX, id))
+            }
+        }.apply()
     }
 
     fun clearProviderApiKey(id: String) {
         requireProviderPreset(id)
         ensureProviderMigration()
         val editor = prefs.edit().remove(providerKey(KEY_PROVIDER_API_KEY_PREFIX, id))
+        if (id == ProviderCatalog.custom.id) {
+            editor.remove(providerKey(KEY_PROVIDER_DETECTED_BACKEND_PREFIX, id))
+        }
         // The legacy slot doubles as the OpenAI key, so forgetting OpenAI clears both.
         if (id == ProviderCatalog.openAi.id) editor.remove(KEY_API_KEY)
         editor.apply()
@@ -149,8 +155,38 @@ class CodexAuthStore internal constructor(
     fun setProviderBaseUrl(id: String, url: String) {
         requireProviderPreset(id)
         ensureProviderMigration()
+        val normalized = url.trim()
+        val changed = normalized != providerBaseUrl(id)
+        prefs.edit().apply {
+            putString(providerKey(KEY_PROVIDER_BASE_URL_PREFIX, id), normalized)
+            if (changed && id == ProviderCatalog.custom.id) {
+                remove(providerKey(KEY_PROVIDER_DETECTED_BACKEND_PREFIX, id))
+            }
+        }.apply()
+    }
+
+    internal fun providerBackend(id: String): ProviderBackend {
+        val preset = requireProviderPreset(id)
+        ensureProviderMigration()
+        return if (preset.backend == ProviderBackend.HERMES) {
+            ProviderBackend.HERMES
+        } else {
+            providerDetectedBackend(id) ?: ProviderBackend.OPENAI_COMPAT
+        }
+    }
+
+    internal fun providerDetectedBackend(id: String): ProviderBackend? {
+        requireProviderPreset(id)
+        ensureProviderMigration()
+        return prefs.getString(providerKey(KEY_PROVIDER_DETECTED_BACKEND_PREFIX, id), null)
+            ?.let { stored -> ProviderBackend.entries.firstOrNull { it.name == stored } }
+    }
+
+    internal fun setProviderDetectedBackend(id: String, backend: ProviderBackend) {
+        require(id == ProviderCatalog.custom.id) { "Only Custom providers are auto-detected." }
+        ensureProviderMigration()
         prefs.edit()
-            .putString(providerKey(KEY_PROVIDER_BASE_URL_PREFIX, id), url.trim())
+            .putString(providerKey(KEY_PROVIDER_DETECTED_BACKEND_PREFIX, id), backend.name)
             .apply()
     }
 
@@ -182,7 +218,12 @@ class CodexAuthStore internal constructor(
         ensureProviderMigration()
         val key = providerKey(KEY_PROVIDER_MODEL_SUPPORTS_PHOTOS_PREFIX, id)
         val visionOverride = prefs.getBoolean(key, false).takeIf { prefs.contains(key) }
-        return ProviderCatalog.supportsVision(preset, providerModel(id), visionOverride)
+        return ProviderCatalog.supportsVision(
+            preset = preset,
+            model = providerModel(id),
+            visionOverride = visionOverride,
+            backend = providerBackend(id),
+        )
     }
 
     fun setProviderModelSupportsPhotos(id: String, supportsPhotos: Boolean) {
@@ -478,8 +519,9 @@ class CodexAuthStore internal constructor(
         // Must equal the router id of the ChatGPT provider: selectedProviderId() feeds
         // ProviderRouter.providerFor() directly.
         const val CHATGPT_PROVIDER_ID = ChatGptCodexProvider.ID
-        val SUPPORTED_IDLE_WINDOW_MINUTES = listOf(2, 5, 10, 30)
+        val SUPPORTED_IDLE_WINDOW_MINUTES = listOf(2, 5, 10, 30, SEVEN_DAYS_IN_MINUTES)
         const val DEFAULT_IDLE_WINDOW_MINUTES = 10
+        const val SEVEN_DAYS_IN_MINUTES = 7 * 24 * 60
         const val MAX_ASSISTANT_MEMORY_CHARS = 4000
         const val MAX_CUSTOM_SYSTEM_PROMPT_CHARS = 4000
         const val MAX_SYNCED_ACCOUNT_CONTEXT_CHARS = 6000
@@ -491,6 +533,7 @@ class CodexAuthStore internal constructor(
         private const val KEY_PROVIDER_MODEL_PREFIX = "model"
         private const val KEY_PROVIDER_BASE_URL_PREFIX = "base_url"
         private const val KEY_PROVIDER_EFFORT_PREFIX = "effort"
+        private const val KEY_PROVIDER_DETECTED_BACKEND_PREFIX = "detected_backend"
         private const val KEY_PROVIDER_MODEL_SUPPORTS_PHOTOS_PREFIX = "model_supports_photos"
         private const val KEY_PROVIDER_MIGRATION_COMPLETE = "provider_migration_complete"
         private const val KEY_OAUTH_TOKENS = "oauth_tokens"

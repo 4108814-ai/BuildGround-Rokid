@@ -10,8 +10,8 @@ add, list, or delete events in the phone calendar.
 
 Answers come from the provider the wearer picks in Settings: a ChatGPT plan
 (OAuth, no key to paste), or an API key for OpenAI, OpenRouter, MiniMax,
-DeepSeek, GLM (Z.ai), or any OpenAI-compatible server. Every API preset speaks
-the same chat-completions SSE dialect through one generic client
+DeepSeek, GLM (Z.ai), Hermes, or any OpenAI-compatible server. Every API preset
+speaks the same chat-completions SSE dialect through one generic client
 (`OpenAiCompatProvider`); the preset catalog lives in `ProviderCatalog.kt`.
 Each provider keeps its own encrypted key, model, and endpoint.
 
