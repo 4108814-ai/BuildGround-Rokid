@@ -58,6 +58,7 @@ import com.anezium.rokidbus.shared.PinSurfaceContract
 import com.anezium.rokidbus.shared.PinSurfaceValidationResult
 import com.anezium.rokidbus.shared.RemoteInputContract
 import com.anezium.rokidbus.shared.RemoteNavigationContract
+import com.anezium.rokidbus.shared.RemotePointerContract
 import com.anezium.rokidbus.shared.SetupPairingFailureReason
 import com.anezium.rokidbus.shared.SetupPairingOfferContract
 import com.anezium.rokidbus.shared.TtsContract
@@ -653,9 +654,11 @@ class BusHubService : Service() {
         coreRemoteBridge = PhoneCoreRemoteBridge(
             context = applicationContext,
             sendRemote = ::sendRemote,
+            sendNativePointer = ::sendNativePointer,
             isConnected = {
                 linkState() and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) != 0
             },
+            isNativePointerAvailable = ::isCxrUp,
         ).also(PhoneCoreRemoteBridge::start)
         val phoneSpeakerRouteProbe = PhoneSpeakerRouteProbe(applicationContext) {
             prefs().getString(PREF_LAST_GLASSES_ADDRESS, null)
@@ -950,6 +953,7 @@ class BusHubService : Service() {
         stopAudioLease(InternalAudioStopReason.HUB_STOPPED)
         clearAllActivitiesForHubStop()
         snapshotCaptureJob?.cancel()
+        if (::coreRemoteBridge.isInitialized) coreRemoteBridge.close()
         runCatching { cxrLink?.disconnect() }
         cxrLink = null
         cxrConnected = false
@@ -979,6 +983,7 @@ class BusHubService : Service() {
         snapshotCaptureJob?.cancel()
         snapshotCaptureScope.cancel()
         if (::phoneTtsDispatcher.isInitialized) phoneTtsDispatcher.shutdown()
+        if (::coreRemoteBridge.isInitialized) coreRemoteBridge.close()
         runCatching { cxrLink?.disconnect() }
         closeSocket()
         PhoneClientSupervisor.detach(applicationContext, this)
@@ -1001,7 +1006,6 @@ class BusHubService : Service() {
         inkSurfaceCoordinator.close()
         if (::cameraCompanionController.isInitialized) cameraCompanionController.close()
         if (::mediaSyncCoordinator.isInitialized) mediaSyncCoordinator.close()
-        if (::coreRemoteBridge.isInitialized) coreRemoteBridge.close()
         synchronized(phoneAssistedPairingLock) { activePhoneAssistedPairing = null }
         manualPairingEngineSubscription?.close()
         manualPairingEngineSubscription = null
@@ -1318,6 +1322,7 @@ class BusHubService : Service() {
         if (envelope.path == RemoteInputContract.SESSION_PATH ||
             envelope.path == RemoteInputContract.STATUS_PATH ||
             envelope.path == RemoteNavigationContract.RESULT_PATH ||
+            envelope.path == RemotePointerContract.RESULT_PATH ||
             envelope.path == NativeAppContract.RESULT_PATH
         ) {
             val handled = ::coreRemoteBridge.isInitialized && coreRemoteBridge.handleRemote(envelope)
@@ -4112,6 +4117,25 @@ class BusHubService : Service() {
             false
         }
 
+    private fun sendNativePointer(command: RokidNativePointerCommand): Boolean {
+        val link = cxrLink ?: return false
+        if (!isCxrUp()) return false
+        return runCatching {
+            val message = RokidNativePointerProtocol.encode(command)
+            val result = link.sendCustomCmd(
+                RokidNativePointerProtocol.MODULE,
+                Caps().apply {
+                    write(message.capsCommand)
+                    write(message.payload.toString())
+                }.serialize(),
+            )
+            result != null && result >= 0
+        }.getOrElse {
+            log("Native pointer TX failed ${it.javaClass.simpleName}: ${it.message}")
+            false
+        }
+    }
+
     private fun writeSpp(envelope: BusEnvelope): Boolean {
         val out = output ?: return false
         return runCatching {
@@ -5489,7 +5513,10 @@ class BusHubService : Service() {
         lastTransportLinkState = state
         val transportBits = LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP
         if (::coreRemoteBridge.isInitialized) {
-            coreRemoteBridge.onLinkStateChanged(state and transportBits != 0)
+            coreRemoteBridge.onLinkStateChanged(
+                connected = state and transportBits != 0,
+                nativePointerAvailable = state and LinkStateBits.CXR_CONTROL_UP != 0,
+            )
         }
         if (::pluginGuardianCoordinator.isInitialized) {
             pluginGuardianCoordinator.onLinkStateChanged(state and transportBits != 0)

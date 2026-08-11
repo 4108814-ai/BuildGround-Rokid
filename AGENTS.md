@@ -8,8 +8,9 @@ Ink Surface crosses `:ink-engine`, `:shared`, `:bus-client`, `:phone-hub`, and
 `:glasses-hub`. Treat `docs/PLUGIN_SDK.md` as the public typed API and `BUSSPEC.md`
 as the wire authority; do not copy the older implementation sketch in
 `plans/020-ink-surface.md` over the delivered contracts. The
-`/core/native-apps/*`, `/core/remote-input/*`, and `/core/navigation/*` routes are
-trusted hub-to-hub controls and must never be exposed as plugin capabilities.
+`/core/native-apps/*`, `/core/remote-input/*`, `/core/navigation/*`, and
+`/core/pointer/*` routes are trusted hub-to-hub controls and must never be exposed
+as plugin capabilities.
 
 Assistant's phone-calendar tools are local Android integrations. They use the
 Calendar Provider and the plugin's own `READ_CALENDAR`/`WRITE_CALENDAR` runtime

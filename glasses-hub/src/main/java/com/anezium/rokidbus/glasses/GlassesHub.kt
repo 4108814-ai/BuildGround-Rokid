@@ -35,6 +35,7 @@ import com.anezium.rokidbus.shared.NoticeSurfaceContract
 import com.anezium.rokidbus.shared.PinSurfaceContract
 import com.anezium.rokidbus.shared.RemoteInputContract
 import com.anezium.rokidbus.shared.RemoteNavigationContract
+import com.anezium.rokidbus.shared.RemotePointerContract
 import com.anezium.rokidbus.shared.SetupNoteContract
 import com.anezium.rokidbus.shared.SetupNoteMessage
 import com.anezium.rokidbus.shared.SetupPairingOfferContract
@@ -186,6 +187,9 @@ object GlassesHub {
         RemoteInputHubBridge.initialize { path, payload ->
             sendRemote(BusEnvelope(path = path, payload = payload)) == null
         }
+        RemotePointerHubBridge.initialize { path, payload ->
+            sendRemote(BusEnvelope(path = path, payload = payload)) == null
+        }
         if (wifiOwnership == null) {
             synchronized(this) {
                 if (wifiOwnership == null) {
@@ -220,6 +224,7 @@ object GlassesHub {
         if (!phoneConnected) {
             clearRemotePhoneCapabilities()
             AssistantDisplayEpisode.end(DisplayHoldReleaseReason.LINK_LOSS)
+            RemotePointerHubBridge.onLinkLost()
             SurfaceController.onPhoneLinkLost()
             NoticeController.onPhoneLinkLost()
         }
@@ -237,6 +242,7 @@ object GlassesHub {
         if (!phoneConnected) {
             clearRemotePhoneCapabilities()
             AssistantDisplayEpisode.end(DisplayHoldReleaseReason.LINK_LOSS)
+            RemotePointerHubBridge.onLinkLost()
             SurfaceController.onPhoneLinkLost()
             NoticeController.onPhoneLinkLost()
         }
@@ -255,6 +261,11 @@ object GlassesHub {
         ) {
             val handled = envelope.binary == null &&
                 RemoteInputHubBridge.handle(envelope.path, envelope.payload)
+            if (!handled) sendRemote(errorEnvelope(envelope.id, "INVALID_CORE_REQUEST"))
+            return
+        }
+        if (envelope.path == RemotePointerContract.COMMAND_PATH) {
+            val handled = envelope.binary == null && RemotePointerHubBridge.handle(envelope.payload)
             if (!handled) sendRemote(errorEnvelope(envelope.id, "INVALID_CORE_REQUEST"))
             return
         }

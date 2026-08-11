@@ -29,5 +29,6 @@ internal object HudOverlayStack {
         PinOverlayRenderer.ensureOnTop()
         ActivityOverlayRenderer.ensureOnTop()
         NoticeOverlayRenderer.ensureOnTop()
+        RemotePointerOverlayRenderer.ensureOnTop()
     }
 }

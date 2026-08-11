@@ -36,6 +36,7 @@ class PathRulesTest {
         assertTrue(PathRules.isReserved("/error"))
         assertTrue(PathRules.isReserved("/core/remote-input/command"))
         assertTrue(PathRules.isReserved("/core/navigation/request"))
+        assertTrue(PathRules.isReserved("/core/pointer/command"))
         assertTrue(PathRules.isHubOnly("/tts/cancel"))
         assertTrue(PathRules.isReserved("/tts/cancel"))
         assertFalse(PathRules.isReserved("/launcherish"))

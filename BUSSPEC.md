@@ -1739,6 +1739,46 @@ uses Android's global BACK action. It does not inject shell or ADB commands.
 Results are kept in a bounded replay cache, so a transport retry with the same
 request id returns the prior result instead of performing the action twice.
 
+### Remote pointer
+
+- Phone → glasses `/core/pointer/command`: `show`, `move`, `move_end`,
+  `click`, `long_press`, or `hide`.
+- Glasses → phone `/core/pointer/result`: the same stream id, sequence, and
+  action with success or `service_unavailable`, `action_unavailable`,
+  `gesture_cancelled`, `stale_sequence`, `stream_retired`,
+  `stream_not_started`, or `internal`.
+
+The phone-side API accepts relative normalized trackpad deltas and coalesces
+movement to at most one update every 34 ms (29.4 updates/s). With CXR-L up, the
+phone hub normally translates those updates to the ROM's `Tools` custom-command
+protocol: `enterTouch`, relative `moving` deltas in the nominal 480×640 display,
+`move_end`, `click`, `long_press`, and `exitTouch`. Rokid's system assistserver
+draws its cursor and injects the resulting touchscreen events. This direct path
+does not enter the Nexus bus.
+
+The versioned hub-to-hub contract above is the fallback when the vendor command
+cannot be submitted. It carries the phone hub's absolute normalized position so
+a duplicate or delayed move is idempotent. Every action except `hide` carries
+`x` and `y` numbers in `[0,1]`. A click or long press always carries its own
+position, so it cannot land at an older cursor location if CXR and SPP delivery
+cross during a transport change.
+
+Every command carries a random `streamId` and a monotonically increasing
+safe-integer `sequence`. A stream begins with `show`. The glasses reserve a
+sequence before performing its effect, cache completed results, reject stale
+sequences, and retire the old stream when a new one begins. A replay therefore
+cannot move twice or synthesize a second tap, including while the original tap
+gesture is still in flight.
+
+For fallback commands the glasses draw the cursor in a non-focusable,
+non-touchable `TYPE_ACCESSIBILITY_OVERLAY` owned by the already-enabled Nexus
+accessibility service. `click` and `long_press` use
+`AccessibilityService.dispatchGesture` at the displayed cursor centre. Link
+loss and inactivity hide the overlay. Neither pointer path runs a shell command,
+writes a setting, or requests an additional permission. The fallback is a
+trusted hub-to-hub control under `/core`; it has no plugin capability, receive
+prefix, or public SDK surface.
+
 ## Audio lease v1
 
 Glasses mic PCM arrives ON THE PHONE via CXR-L (`setCXRAudioCbk` +
