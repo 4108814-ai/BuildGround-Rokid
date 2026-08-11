@@ -34,6 +34,12 @@
   the glasses' Wi-Fi radio on and waits for a saved network before enabling
   ADB. Disabling wireless debugging remains deliberately scoped to ADB and
   leaves the normal Wi-Fi connection running.
+- **The glasses remote has its buttons back, and both controls can be
+  hidden.** Previous, next, select and back were laid out in a way that gave
+  them no width at all, so the remote card was empty on every phone, and the
+  keyboard card stretched far enough to push that card off the screen. Both
+  are fixed, and Settings › Glasses now decides whether Keyboard & remote and
+  Glasses apps appear on the home screen.
 - **Manual pairing works on networks that block device discovery.** The glasses
   now tell the phone which port to connect to instead of both sides hoping
   mDNS finds the other — that lookup silently returns nothing on routers with
