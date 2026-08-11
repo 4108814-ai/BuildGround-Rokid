@@ -34,6 +34,12 @@
   the glasses' Wi-Fi radio on and waits for a saved network before enabling
   ADB. Disabling wireless debugging remains deliberately scoped to ADB and
   leaves the normal Wi-Fi connection running.
+- **Manual pairing works on networks that block device discovery.** The glasses
+  now tell the phone which port to connect to instead of both sides hoping
+  mDNS finds the other — that lookup silently returns nothing on routers with
+  multicast filtering or client isolation, which left pairing stuck with no
+  usable port. Both the phone and the glasses need this release for the new
+  path to apply.
 - **Assistant answers stay visible through their whole display episode.** A
   single episode owner now spans the listening band, handover, and answer
   surface. Notice windows keep their normal screen-on flag, while the
