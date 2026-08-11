@@ -4623,7 +4623,7 @@ class BusHubService : Service() {
 
         log("phone-assisted pairing offer accepted")
         manualPairingEngine.start(awaitGlassesConfirmation = false)
-        manualPairingEngine.onGlassesConnectPort(offer.connectPort)
+        manualPairingEngine.onPhoneAssistedConnectPort(offer.connectPort)
         if (!manualPairingEngine.submit(offer.host, offer.pairingPort, offer.pairingCode)) {
             synchronized(phoneAssistedPairingLock) {
                 activePhoneAssistedPairing
@@ -4725,6 +4725,35 @@ class BusHubService : Service() {
 
     private fun handleManualSelfArmResponse(envelope: BusEnvelope): Boolean {
         if (!::manualPairingEngine.isInitialized) return false
+        val requestId = envelope.payload.optString("forId", envelope.id).ifBlank { envelope.id }
+        if (envelope.path == BusPaths.GLASSES_SELFARM_MANUAL_REPLY &&
+            envelope.payload.optBoolean("connectPortUpdate", false)
+        ) {
+            val port = envelope.payload.optInt("connectPort")
+            val sessionId = envelope.payload.optString("sessionId")
+            val offerId = envelope.payload.optString("offerId")
+            val accepted = if (sessionId.isNotBlank() || offerId.isNotBlank()) {
+                synchronized(phoneAssistedPairingLock) {
+                    val active = activePhoneAssistedPairing
+                    if (port !in 1..65535 || active == null ||
+                        active.sessionId != sessionId || active.offerId != offerId
+                    ) {
+                        false
+                    } else {
+                        manualPairingEngine.onPhoneAssistedConnectPort(port)
+                        true
+                    }
+                }
+            } else {
+                manualPairingEngine.onGlassesConnectPort(requestId, port)
+            }
+            if (!accepted) {
+                return false
+            }
+            recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
+            log("glasses connect port updated")
+            return true
+        }
         val errorCode = when (envelope.path) {
             BusPaths.GLASSES_SELFARM_MANUAL_REPLY -> if (
                 envelope.payload.optBoolean("accepted", false)
@@ -4736,12 +4765,14 @@ class BusHubService : Service() {
             BusPaths.ERROR -> envelope.payload.optString("code", "REMOTE_ERROR")
             else -> return false
         }
-        val requestId = envelope.payload.optString("forId", envelope.id).ifBlank { envelope.id }
         if (!manualPairingEngine.onManualControlResponse(requestId, errorCode)) return false
         // Only a reply that matched the live request may teach the engine a connect port. A stale
         // ack straggling in after a cancel used to re-plant its (possibly obsolete) port, and a
         // later typed pairing would then skip discovery and dial the wrong door.
-        manualPairingEngine.onGlassesConnectPort(envelope.payload.optInt("connectPort"))
+        manualPairingEngine.onGlassesConnectPort(
+            requestId,
+            envelope.payload.optInt("connectPort"),
+        )
         recordRemoteRoute(
             envelope,
             if (errorCode == null) PluginBusJournal.Verdict.OK else PluginBusJournal.Verdict.REJECTED,

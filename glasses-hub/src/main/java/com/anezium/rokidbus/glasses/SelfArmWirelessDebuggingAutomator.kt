@@ -74,6 +74,7 @@ internal class SelfArmWirelessDebuggingAutomator(
     private var localSelfPairingLastError = ""
     private var localSelfPairingThread: Thread? = null
     private var lastLocalSelfPairingStatusAt = 0L
+    private var lastPhoneAssistedConnectPortReport = 0
     private var lastReportedProgressState = ""
     private val phonePairingOffer = SelfArmPhonePairingOfferTracker()
 
@@ -146,6 +147,7 @@ internal class SelfArmWirelessDebuggingAutomator(
         localSelfPairingFailedToken = ""
         localSelfPairingLastError = ""
         lastLocalSelfPairingStatusAt = 0L
+        lastPhoneAssistedConnectPortReport = 0
         lastReportedProgressState = ""
         lastHeartbeatAt = 0L
         awaitingWirelessDebugConfirmation = false
@@ -815,6 +817,7 @@ internal class SelfArmWirelessDebuggingAutomator(
         lastPairingConnectPort = connectPort
         lastConnectHost = host.ifBlank { lastConnectHost }
         lastConnectPort = connectPort
+        if (connectPort > 0) reportKnownConnectPort(connectPort)
         pairingRequested = true
         awaitingWirelessDebugConfirmation = false
         deviceInfoFallback = false
@@ -969,8 +972,18 @@ internal class SelfArmWirelessDebuggingAutomator(
             )
             return
         }
+        lastPhoneAssistedConnectPortReport = connectPort
         Log.i(TAG, "phone-assisted pairing offer sent")
         schedule(PAIRING_DIALOG_POLL_MS)
+    }
+
+    private fun reportKnownConnectPort(connectPort: Int) {
+        GlassesHub.reportWirelessConnectPort(connectPort)
+        val correlation = phonePairingOffer.correlation() ?: return
+        if (lastPhoneAssistedConnectPortReport == connectPort) return
+        if (GlassesHub.reportPhoneAssistedConnectPort(correlation, connectPort)) {
+            lastPhoneAssistedConnectPortReport = connectPort
+        }
     }
 
     internal fun onPhoneAssistedPairingResult(result: SetupPairingResult): Boolean {

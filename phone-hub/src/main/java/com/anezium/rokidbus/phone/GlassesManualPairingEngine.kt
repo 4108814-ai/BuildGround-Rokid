@@ -4,6 +4,7 @@ import android.content.Context
 import com.anezium.rokidbus.phone.selfarm.adb.ManualAdbSession
 import java.io.Closeable
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
@@ -60,6 +61,7 @@ internal class GlassesManualPairingEngine(
     private val timeoutScheduler: ManualPairingTimeoutScheduler,
     private val controlAckTimeoutMs: Long = DEFAULT_CONTROL_ACK_TIMEOUT_MS,
     private val confirmationTimeoutMs: Long = DEFAULT_CONFIRMATION_TIMEOUT_MS,
+    private val connectPortWaitTimeoutMs: Long = DEFAULT_CONNECT_PORT_WAIT_TIMEOUT_MS,
     private val nextRequestId: () -> String = { UUID.randomUUID().toString() },
     private val logger: (String) -> Unit = {},
     private val shutdownResources: () -> Unit = {},
@@ -102,7 +104,7 @@ internal class GlassesManualPairingEngine(
             confirmationTimeout = null
             awaitingGlassesConfirmation = false
             awaitGlassesConfirmationForAttempt = awaitGlassesConfirmation
-            reportedConnectPort = 0
+            resetReportedConnectPortLocked()
             generation
         }
         transition(attempt, GlassesManualPairingState.WAITING_FOR_CODE)
@@ -144,9 +146,22 @@ internal class GlassesManualPairingEngine(
      */
     @Volatile
     private var reportedConnectPort: Int = 0
+    private var connectPortSignal = CountDownLatch(1)
+    private var connectPortReportRequestId: String? = null
 
-    fun onGlassesConnectPort(port: Int) {
-        if (port in 1..65535) reportedConnectPort = port
+    fun onPhoneAssistedConnectPort(port: Int) {
+        acceptGlassesConnectPort(port)
+    }
+
+    /** Accepts a pushed port only when it belongs to the acknowledged live manual request. */
+    fun onGlassesConnectPort(requestId: String, port: Int): Boolean = synchronized(lock) {
+        if (requestId.isBlank() || requestId != connectPortReportRequestId || port !in 1..65535) {
+            false
+        } else {
+            reportedConnectPort = port
+            connectPortSignal.countDown()
+            true
+        }
     }
 
     fun onManualControlResponse(requestId: String, errorCode: String?): Boolean {
@@ -158,6 +173,9 @@ internal class GlassesManualPairingEngine(
                 pendingControl = null
                 controlAckTimeout?.cancel()
                 controlAckTimeout = null
+                if (errorCode.isNullOrBlank() && current.attempt == generation) {
+                    connectPortReportRequestId = requestId
+                }
                 current
             }
         } ?: return false
@@ -237,7 +255,8 @@ internal class GlassesManualPairingEngine(
 
                 stage = WorkStage.CONNECTING
                 transition(attempt, GlassesManualPairingState.CONNECTING)
-                val known = reportedConnectPort
+                val known = awaitGlassesConnectPort(attempt)
+                if (!isCurrent(attempt)) return@runAttempt
                 val endpoint = if (known in 1..65535) {
                     GlassesManualAdbEndpoint(cleanHost, known)
                 } else {
@@ -299,7 +318,7 @@ internal class GlassesManualPairingEngine(
             confirmationTimeout?.cancel()
             confirmationTimeout = null
             awaitingGlassesConfirmation = false
-            reportedConnectPort = 0
+            resetReportedConnectPortLocked()
             state != GlassesManualPairingState.IDLE
         }
         sendClose(armed = false)
@@ -316,7 +335,7 @@ internal class GlassesManualPairingEngine(
                 confirmationTimeout?.cancel()
                 confirmationTimeout = null
                 activeWork = null
-                reportedConnectPort = 0
+                resetReportedConnectPortLocked()
                 true
             }
         }
@@ -371,7 +390,7 @@ internal class GlassesManualPairingEngine(
                 false
             } else {
                 activeWork = null
-                reportedConnectPort = 0
+                resetReportedConnectPortLocked()
                 true
             }
         }
@@ -391,7 +410,7 @@ internal class GlassesManualPairingEngine(
                 awaitingGlassesConfirmation = false
                 confirmationTimeout?.cancel()
                 confirmationTimeout = null
-                reportedConnectPort = 0
+                resetReportedConnectPortLocked()
                 true
             }
         }
@@ -415,6 +434,40 @@ internal class GlassesManualPairingEngine(
     }
 
     private fun isCurrent(attempt: Long): Boolean = synchronized(lock) { attempt == generation }
+
+    private fun acceptGlassesConnectPort(port: Int) {
+        if (port !in 1..65535) return
+        synchronized(lock) {
+            reportedConnectPort = port
+            connectPortSignal.countDown()
+        }
+    }
+
+    private fun awaitGlassesConnectPort(attempt: Long): Int {
+        val signal = synchronized(lock) {
+            if (attempt != generation || reportedConnectPort in 1..65535) {
+                return@synchronized null
+            }
+            connectPortSignal
+        }
+        if (signal != null && connectPortWaitTimeoutMs > 0L) {
+            try {
+                signal.await(connectPortWaitTimeoutMs, TimeUnit.MILLISECONDS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
+        return synchronized(lock) {
+            reportedConnectPort.takeIf { attempt == generation && it in 1..65535 } ?: 0
+        }
+    }
+
+    private fun resetReportedConnectPortLocked() {
+        reportedConnectPort = 0
+        connectPortReportRequestId = null
+        connectPortSignal.countDown()
+        connectPortSignal = CountDownLatch(1)
+    }
 
     private fun requestManualControl(
         attempt: Long,
@@ -490,6 +543,7 @@ internal class GlassesManualPairingEngine(
     companion object {
         private const val DEFAULT_CONTROL_ACK_TIMEOUT_MS = 60_000L
         private const val DEFAULT_CONFIRMATION_TIMEOUT_MS = 30_000L
+        private const val DEFAULT_CONNECT_PORT_WAIT_TIMEOUT_MS = 3_000L
         private const val CONTROL_ACK_TIMEOUT = "CONTROL_ACK_TIMEOUT"
         private val PAIRING_CODE = Regex("""\d{6}""")
 

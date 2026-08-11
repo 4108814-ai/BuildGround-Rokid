@@ -2,7 +2,9 @@ package com.anezium.rokidbus.glasses
 
 import com.anezium.rokidbus.shared.SetupPairingOfferContract
 import com.anezium.rokidbus.shared.SetupPairingResult
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -26,6 +28,17 @@ class SelfArmPhonePairingOfferTrackerTest {
 
         assertTrue(tracker.expire(11L))
         assertTrue(tracker.begin(SESSION, NEXT_OFFER_ID, 12L, 10L))
+    }
+
+    @Test
+    fun `late port correlation exists only while the phone offer is outstanding`() {
+        val tracker = SelfArmPhonePairingOfferTracker()
+        assertTrue(tracker.begin(SESSION, OFFER_ID, 1L, 10L))
+
+        assertEquals(SelfArmPhonePairingCorrelation(SESSION, OFFER_ID), tracker.correlation())
+
+        assertTrue(tracker.resolve(result(SESSION, OFFER_ID)))
+        assertNull(tracker.correlation())
     }
 
     @Test

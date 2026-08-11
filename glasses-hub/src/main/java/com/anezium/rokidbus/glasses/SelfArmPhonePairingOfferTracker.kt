@@ -2,6 +2,11 @@ package com.anezium.rokidbus.glasses
 
 import com.anezium.rokidbus.shared.SetupPairingResult
 
+internal data class SelfArmPhonePairingCorrelation(
+    val sessionId: String,
+    val offerId: String,
+)
+
 /**
  * Tracks only correlation and monotonic lifetime metadata. The pairing code and endpoints are
  * deliberately never retained here after the offer has been sent.
@@ -57,6 +62,10 @@ internal class SelfArmPhonePairingOfferTracker {
     }
 
     fun hasOutstanding(): Boolean = outstanding != null
+
+    fun correlation(): SelfArmPhonePairingCorrelation? = outstanding?.let {
+        SelfArmPhonePairingCorrelation(it.sessionId, it.offerId)
+    }
 
     fun clear() {
         outstanding = null

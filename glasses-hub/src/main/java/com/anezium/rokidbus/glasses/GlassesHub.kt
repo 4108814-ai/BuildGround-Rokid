@@ -53,6 +53,17 @@ import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
+private const val MANUAL_CONNECT_PORT_WAIT_MS = 2_000L
+
+internal fun SelfArmManualAction.connectPortWaitTimeoutMs(): Long =
+    if (this == SelfArmManualAction.OPEN_WIRELESS_DEBUGGING ||
+        this == SelfArmManualAction.OPEN_PAIRING_DIALOG
+    ) {
+        MANUAL_CONNECT_PORT_WAIT_MS
+    } else {
+        0L
+    }
+
 object GlassesHub {
     private const val LOCAL_BINARY_MAX_BYTES = 512 * 1024
     private const val WIRELESS_ADB_REQUEST_SLOTS = 2
@@ -109,6 +120,11 @@ object GlassesHub {
     private val wirelessAdbExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "RokidNexusWirelessAdb").apply { isDaemon = true }
     }
+    private val manualConnectPortReporter = SelfArmConnectPortReporter(
+        waitForPort = { timeoutMs ->
+            SelfArmWirelessAdbController.waitForWirelessPort(timeoutMs)
+        },
+    )
     private val wirelessAdbSlots = Semaphore(WIRELESS_ADB_REQUEST_SLOTS, true)
     private val setupCapabilitiesLock = Any()
     private var wifiDisableFuture: ScheduledFuture<*>? = null
@@ -815,13 +831,16 @@ object GlassesHub {
         }
         val armed = action == SelfArmManualAction.CLOSE && envelope.payload.optBoolean("armed", false)
         val context = appContext
+        if (action == SelfArmManualAction.CLOSE) manualConnectPortReporter.clear()
         // Reading a pairing code off the glasses and typing it on the phone takes longer than the
         // screen stays on, and the display going dark dismisses the pairing dialog — which cancels
         // the pairing the wearer was halfway through. Hold the screen for the manual flow, and give
         // it back the moment the flow closes.
         if (context != null) {
             when (action) {
-                SelfArmManualAction.CLOSE -> releaseManualSetupScreen()
+                SelfArmManualAction.CLOSE -> {
+                    releaseManualSetupScreen()
+                }
                 else -> holdManualSetupScreen(context)
             }
         }
@@ -853,20 +872,13 @@ object GlassesHub {
                 sendRemote(errorEnvelope(envelope.id, code))
                 return@requestManualAction
             }
-            sendRemote(
-                BusEnvelope(
-                    path = BusPaths.GLASSES_SELFARM_MANUAL_REPLY,
-                    id = envelope.id,
-                    payload = JSONObject()
-                        .put("version", 1)
-                        .put("action", action.wireValue)
-                        .put("accepted", true)
-                        // The phone otherwise has to find this port by mDNS, and a router that
-                        // does not forward multicast makes the whole manual setup fail after a
-                        // perfectly good pairing. We already know it here; send it.
-                        .putOpt("connectPort", wirelessConnectPort()),
-                ),
-            )
+            manualConnectPortReporter.begin(envelope.id, action.wireValue)
+            // The accessibility callback runs on its main handler. Polling adbd belongs on the
+            // existing Wireless ADB worker, even with a short bounded deadline.
+            wirelessAdbExecutor.execute {
+                manualConnectPortReporter.initialReport(action.connectPortWaitTimeoutMs())
+                    ?.let(::sendManualConnectPortReport)
+            }
         }
         log("manual self-arm action=${action.wireValue} accepted=$accepted armed=$armed")
         if (!accepted) {
@@ -876,9 +888,49 @@ object GlassesHub {
         // Completion (and therefore acknowledgement) is asynchronous for the six-tap action.
     }
 
-    /** The live Wireless Debugging connect port, or null when the daemon is not listening. */
-    private fun wirelessConnectPort(): Int? =
-        SelfArmWirelessAdbController.readWirelessPort().takeIf { it > 0 }
+    internal fun reportWirelessConnectPort(port: Int) {
+        manualConnectPortReporter.pushKnownPort(port)?.let(::sendManualConnectPortReport)
+    }
+
+    internal fun reportPhoneAssistedConnectPort(
+        correlation: SelfArmPhonePairingCorrelation,
+        port: Int,
+    ): Boolean {
+        if (port !in 1..65535) return false
+        return sendRemote(
+            BusEnvelope(
+                path = BusPaths.GLASSES_SELFARM_MANUAL_REPLY,
+                id = correlation.offerId,
+                payload = JSONObject()
+                    .put("version", 1)
+                    .put("accepted", true)
+                    .put("connectPortUpdate", true)
+                    .put("sessionId", correlation.sessionId)
+                    .put("offerId", correlation.offerId)
+                    .put("connectPort", port),
+            ),
+        ) == null
+    }
+
+    private fun sendManualConnectPortReport(report: SelfArmConnectPortReport) {
+        val payload = JSONObject()
+            .put("version", 1)
+            .put("action", report.action)
+            .put("accepted", true)
+            .putOpt("connectPort", report.connectPort)
+        if (report.updateOnly) {
+            payload
+                .put("connectPortUpdate", true)
+                .put("forId", report.requestId)
+        }
+        sendRemote(
+            BusEnvelope(
+                path = BusPaths.GLASSES_SELFARM_MANUAL_REPLY,
+                id = report.requestId,
+                payload = payload,
+            ),
+        )
+    }
 
     private fun SelfArmManualAction.requiresDeveloperOptions(): Boolean =
         this == SelfArmManualAction.OPEN_DEVELOPER_OPTIONS ||

@@ -102,14 +102,20 @@ internal object SelfArmWirelessAdbController {
     }
 
     @Throws(InterruptedException::class)
-    fun waitForWirelessPort(timeoutMs: Long): Int {
-        val deadline = SystemClock.elapsedRealtime() + timeoutMs
-        do {
-            val port = readWirelessPort()
+    fun waitForWirelessPort(
+        timeoutMs: Long,
+        readPort: () -> Int = ::readWirelessPort,
+        elapsedRealtime: () -> Long = SystemClock::elapsedRealtime,
+        sleepFor: (Long) -> Unit = Thread::sleep,
+    ): Int {
+        val deadline = elapsedRealtime() + timeoutMs.coerceAtLeast(0L)
+        while (true) {
+            val port = readPort()
             if (port > 0) return port
-            Thread.sleep(150L)
-        } while (SystemClock.elapsedRealtime() < deadline)
-        return 0
+            val remaining = deadline - elapsedRealtime()
+            if (remaining <= 0L) return 0
+            sleepFor(minOf(WIRELESS_PORT_POLL_MS, remaining))
+        }
     }
 
     private fun isDeveloperOptionsEnabled(context: Context): Boolean =
@@ -153,4 +159,5 @@ internal object SelfArmWirelessAdbController {
         }.getOrDefault(false)
 
     private const val WIFI_NETWORK_POLL_MS = 150L
+    private const val WIRELESS_PORT_POLL_MS = 150L
 }

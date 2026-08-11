@@ -7,7 +7,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.TimeUnit
 
 class GlassesManualPairingEngineTest {
     @Test
@@ -56,11 +58,11 @@ class GlassesManualPairingEngineTest {
     }
 
     @Test
-    fun submitFromIdlePreservesTheGlassesReportedConnectPort() {
+    fun submitFromIdlePreservesThePhoneAssistedConnectPort() {
         val backend = FakeBackend()
         val fixture = fixture(backend)
 
-        fixture.engine.onGlassesConnectPort(CONNECT_PORT)
+        fixture.engine.onPhoneAssistedConnectPort(CONNECT_PORT)
         assertTrue(fixture.engine.submit(HOST, PAIR_PORT, CODE, allowStartFromIdle = true))
 
         assertEquals(
@@ -68,6 +70,69 @@ class GlassesManualPairingEngineTest {
             backend.connectedEndpoints,
         )
         assertEquals(0, backend.discoverConnectEndpointCalls)
+    }
+
+    @Test
+    fun pushedConnectPortAfterPairingSkipsMdnsFallback() {
+        val backend = FakeBackend()
+        val worker = BackgroundExecutor()
+        val fixture = fixture(
+            backend = backend,
+            worker = worker,
+            connectPortWaitTimeoutMs = 5_000L,
+        )
+        val connecting = CountDownLatch(1)
+        fixture.engine.observe { state ->
+            if (state == GlassesManualPairingState.CONNECTING) connecting.countDown()
+        }
+
+        fixture.engine.start(awaitGlassesConfirmation = false)
+        assertTrue(fixture.engine.showWirelessDebugging())
+        val requestId = fixture.control.requestIds.single()
+        assertTrue(fixture.engine.onManualControlResponse(requestId, null))
+        assertTrue(fixture.engine.submit(HOST, PAIR_PORT, CODE))
+        assertTrue(connecting.await(5, TimeUnit.SECONDS))
+
+        assertTrue(fixture.engine.onGlassesConnectPort(requestId, CONNECT_PORT))
+
+        assertTrue(worker.awaitFinished())
+        assertEquals(GlassesManualPairingState.DONE, fixture.engine.state)
+        assertEquals(
+            listOf(GlassesManualAdbEndpoint(HOST, CONNECT_PORT)),
+            backend.connectedEndpoints,
+        )
+        assertEquals(0, backend.discoverConnectEndpointCalls)
+    }
+
+    @Test
+    fun missingPushedConnectPortStillFallsBackToMdns() {
+        val backend = FakeBackend()
+        val fixture = fixture(backend)
+
+        fixture.engine.start(awaitGlassesConfirmation = false)
+        assertTrue(fixture.engine.submit(HOST, PAIR_PORT, CODE))
+
+        assertEquals(GlassesManualPairingState.DONE, fixture.engine.state)
+        assertEquals(1, backend.discoverConnectEndpointCalls)
+        assertEquals(
+            listOf(GlassesManualAdbEndpoint(HOST, CONNECT_PORT)),
+            backend.connectedEndpoints,
+        )
+    }
+
+    @Test
+    fun latePortPushMustMatchTheAcknowledgedLiveRequest() {
+        val backend = FakeBackend()
+        val fixture = fixture(backend)
+
+        assertTrue(fixture.engine.showWirelessDebugging())
+        val requestId = fixture.control.requestIds.single()
+        assertTrue(fixture.engine.onManualControlResponse(requestId, null))
+        fixture.engine.cancel()
+
+        assertFalse(fixture.engine.onGlassesConnectPort(requestId, CONNECT_PORT))
+        assertTrue(fixture.engine.submit(HOST, PAIR_PORT, CODE, allowStartFromIdle = true))
+        assertEquals(1, backend.discoverConnectEndpointCalls)
     }
 
     @Test
@@ -183,7 +248,7 @@ class GlassesManualPairingEngineTest {
         val fixture = fixture()
 
         assertTrue(fixture.engine.start(awaitGlassesConfirmation = false))
-        fixture.engine.onGlassesConnectPort(CONNECT_PORT)
+        fixture.engine.onPhoneAssistedConnectPort(CONNECT_PORT)
         assertTrue(fixture.engine.submit(HOST, PAIR_PORT, CODE))
 
         assertEquals(GlassesManualPairingState.DONE, fixture.engine.state)
@@ -398,6 +463,7 @@ class GlassesManualPairingEngineTest {
     private fun fixture(
         backend: FakeBackend = FakeBackend(),
         worker: ManualPairingTaskExecutor = DirectExecutor,
+        connectPortWaitTimeoutMs: Long = 0L,
     ): Fixture {
         val control = FakeControl()
         val scheduler = FakeScheduler()
@@ -407,6 +473,7 @@ class GlassesManualPairingEngineTest {
                 backend = backend,
                 worker = worker,
                 timeoutScheduler = scheduler,
+                connectPortWaitTimeoutMs = connectPortWaitTimeoutMs,
             ),
             control = control,
         )
@@ -484,6 +551,26 @@ class GlassesManualPairingEngineTest {
         fun runPending() {
             if (!cancelled) pending?.invoke()
         }
+    }
+
+    private class BackgroundExecutor : ManualPairingTaskExecutor {
+        private val finished = CountDownLatch(1)
+
+        override fun submit(task: () -> Unit): ManualPairingCancellation {
+            val thread = Thread {
+                try {
+                    task()
+                } finally {
+                    finished.countDown()
+                }
+            }.apply {
+                isDaemon = true
+                start()
+            }
+            return ManualPairingCancellation { thread.interrupt() }
+        }
+
+        fun awaitFinished(): Boolean = finished.await(5, TimeUnit.SECONDS)
     }
 
     private class FakeScheduler : ManualPairingTimeoutScheduler {
