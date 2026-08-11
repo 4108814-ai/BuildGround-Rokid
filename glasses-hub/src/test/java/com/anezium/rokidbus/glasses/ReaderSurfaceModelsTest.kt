@@ -73,6 +73,42 @@ class ReaderSurfaceModelsTest {
         assertEquals(40_000, surface.readerSegments.sumOf { it.text.length })
     }
 
+    @Test
+    fun `reader parser accepts top and defaults invalid anchors to bottom`() {
+        val segments = JSONArray().put(JSONObject().put("kind", "prose").put("text", "Body"))
+
+        assertEquals(
+            ReaderAnchor.TOP,
+            NexusSurface.fromPayload(readerPayload(segments).put("readerAnchor", "top")).readerAnchor,
+        )
+        assertEquals(
+            ReaderAnchor.BOTTOM,
+            NexusSurface.fromPayload(readerPayload(segments)).readerAnchor,
+        )
+        assertEquals(
+            ReaderAnchor.BOTTOM,
+            NexusSurface.fromPayload(readerPayload(segments).put("readerAnchor", "future")).readerAnchor,
+        )
+        assertEquals(
+            ReaderAnchor.BOTTOM,
+            NexusSurface.fromPayload(readerPayload(segments).put("readerAnchor", "")).readerAnchor,
+        )
+    }
+
+    @Test
+    fun `reader parser preserves anchor when merging an update without the key`() {
+        val segments = JSONArray().put(JSONObject().put("kind", "prose").put("text", "Body"))
+        val previous = NexusSurface.fromPayload(readerPayload(segments).put("readerAnchor", "top"))
+        val update = JSONObject()
+            .put("surfaceId", "agents:thread")
+            .put("seq", 43)
+            .put("kind", "reader")
+
+        val merged = NexusSurface.fromPayload(update, previous)
+
+        assertEquals(ReaderAnchor.TOP, merged.readerAnchor)
+    }
+
     private fun readerPayload(segments: JSONArray): JSONObject = JSONObject()
         .put("surfaceId", "agents:thread")
         .put("seq", 42)
@@ -82,4 +118,60 @@ class ReaderSurfaceModelsTest {
         .put("footer", "Back")
         .put("contentKey", "conversation-42")
         .put("segments", segments)
+}
+
+class ReaderScrollTargetTest {
+    @Test
+    fun `first render bottom opens at maximum scroll`() {
+        assertEquals(
+            900,
+            resolveReaderScrollTarget(false, false, 0, 900, ReaderAnchor.BOTTOM),
+        )
+    }
+
+    @Test
+    fun `first render top opens at zero`() {
+        assertEquals(
+            0,
+            resolveReaderScrollTarget(false, false, 700, 900, ReaderAnchor.TOP),
+        )
+    }
+
+    @Test
+    fun `top update near bottom restores previous offset`() {
+        assertEquals(
+            850,
+            resolveReaderScrollTarget(true, true, 850, 900, ReaderAnchor.TOP),
+        )
+    }
+
+    @Test
+    fun `bottom update near bottom follows maximum scroll`() {
+        assertEquals(
+            900,
+            resolveReaderScrollTarget(true, true, 850, 900, ReaderAnchor.BOTTOM),
+        )
+    }
+
+    @Test
+    fun `bottom update mid document restores clamped previous offset`() {
+        assertEquals(
+            400,
+            resolveReaderScrollTarget(true, false, 400, 900, ReaderAnchor.BOTTOM),
+        )
+        assertEquals(
+            900,
+            resolveReaderScrollTarget(true, false, 1_000, 900, ReaderAnchor.BOTTOM),
+        )
+    }
+
+    @Test
+    fun `zero maximum scroll resolves to zero for both anchors`() {
+        ReaderAnchor.entries.forEach { anchor ->
+            assertEquals(
+                0,
+                resolveReaderScrollTarget(true, true, 100, 0, anchor),
+            )
+        }
+    }
 }

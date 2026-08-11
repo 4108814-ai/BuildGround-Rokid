@@ -822,7 +822,7 @@ class SurfaceHudView(context: Context) : LinearLayout(context) {
         boardView.visibility = GONE
         nextView.visibility = GONE
         readerView.visibility = VISIBLE
-        readerView.render(surface.surfaceId, surface.readerSegments)
+        readerView.render(surface.surfaceId, surface.readerSegments, surface.readerAnchor)
     }
 
     private fun hideReader() {

@@ -218,6 +218,11 @@ enum class NexusReaderSegmentKind {
     ASIDE,
 }
 
+enum class NexusReaderAnchor {
+    BOTTOM,
+    TOP,
+}
+
 data class NexusReaderSegment(
     val kind: NexusReaderSegmentKind,
     val text: String,
@@ -230,6 +235,7 @@ data class NexusReader(
     val footer: String? = null,
     val contentKey: String? = null,
     val segments: List<NexusReaderSegment>,
+    val anchor: NexusReaderAnchor = NexusReaderAnchor.BOTTOM,
 )
 
 fun NexusSurfaceSession.showReader(reader: NexusReader): NexusSdkResult
@@ -283,9 +289,16 @@ shell fields and false `emphasis` are omitted from the wire payload.
 
 `showReader` uses the existing `surfaces` grant and the same result mapping as
 `showCard`; there is no reader-specific capability or grant. Call it again on
-the same session to replace the complete document. The renderer initially opens
-at the bottom; an update stays pinned there when the wearer was already near the
-end, otherwise it restores the previous offset.
+the same session to replace the complete document.
+
+`anchor` says where reading begins, and the distinction it draws is
+stream-shaped versus document-shaped content. `BOTTOM`, the default, suits a
+chat, a log, an agent transcript: the surface opens at the end, an update stays
+pinned there when the wearer was already near the end, and otherwise restores
+the previous offset. `TOP` suits an article, a recipe, a README, a saved note:
+the surface opens at the start and never follows the tail, so an update always
+restores where the wearer had scrolled to. Sending `TOP` needs glasses hub
+1.4.3 or newer; an older hub ignores it and opens at the bottom as before.
 
 Reader navigation is renderer-owned. Directional keys and media next/previous
 scroll locally and never reach `onNexusInput`; confirmation (ENTER or

@@ -150,6 +150,7 @@ class SurfaceModelsTest {
         assertEquals("2 turns", payload.getString("subtitle"))
         assertEquals("conversation-42", payload.getString("contentKey"))
         assertFalse(payload.has("footer"))
+        assertFalse(payload.has("readerAnchor"))
         val segments = payload.getJSONArray("segments")
         assertEquals("header", segments.getJSONObject(0).getString("kind"))
         assertTrue(segments.getJSONObject(0).getBoolean("emphasis"))
@@ -167,6 +168,17 @@ class SurfaceModelsTest {
         assertTrue(explicitBlanks.has("subtitle"))
         assertTrue(explicitBlanks.has("footer"))
         assertTrue(explicitBlanks.has("contentKey"))
+    }
+
+    @Test
+    fun `reader payload emits top anchor when selected`() {
+        val payload = NexusReader(
+            title = "Article",
+            segments = listOf(NexusReaderSegment(NexusReaderSegmentKind.PROSE, "Opening paragraph")),
+            anchor = NexusReaderAnchor.TOP,
+        ).toPayload("article")
+
+        assertEquals("top", payload.getString("readerAnchor"))
     }
 
     @Test

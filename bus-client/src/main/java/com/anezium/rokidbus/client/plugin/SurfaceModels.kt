@@ -132,6 +132,14 @@ enum class NexusReaderSegmentKind(val wireValue: String) {
     ASIDE("aside"),
 }
 
+enum class NexusReaderAnchor(val wireValue: String) {
+    /** Stream-shaped content (chat, log, transcript): opens at the end, follows the tail. */
+    BOTTOM("bottom"),
+
+    /** Document-shaped content (article, note, recipe): opens at the start, never auto-follows. */
+    TOP("top"),
+}
+
 data class NexusReaderSegment(
     val kind: NexusReaderSegmentKind,
     val text: String,
@@ -148,6 +156,7 @@ data class NexusReader(
     /** True hands BACK to the plugin instead of the hub hiding the surface. */
     val handlesBack: Boolean = false,
     val segments: List<NexusReaderSegment>,
+    val anchor: NexusReaderAnchor = NexusReaderAnchor.BOTTOM,
 ) {
     init {
         require(title.isNotBlank() && title.length <= MAX_TITLE_CHARS)
@@ -181,6 +190,7 @@ data class NexusReader(
             subtitle?.let { put("subtitle", it) }
             footer?.let { put("footer", it) }
             contentKey?.let { put("contentKey", it) }
+            if (anchor != NexusReaderAnchor.BOTTOM) put("readerAnchor", anchor.wireValue)
         }
 }
 

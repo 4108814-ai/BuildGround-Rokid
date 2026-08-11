@@ -27,6 +27,11 @@ enum class ReaderSegmentKind(val wireValue: String) {
     }
 }
 
+enum class ReaderAnchor {
+    BOTTOM,
+    TOP,
+}
+
 data class ReaderSegment(
     val kind: ReaderSegmentKind,
     val text: String,
@@ -210,6 +215,7 @@ data class NexusSurface(
     val imageMetadata: SurfaceImageMetadata? = null,
     val imageBitmap: Bitmap? = null,
     val readerSegments: List<ReaderSegment> = emptyList(),
+    val readerAnchor: ReaderAnchor = ReaderAnchor.BOTTOM,
     val ink: InkSurfacePayload? = null,
     val ownerPluginId: String = "",
 ) {
@@ -257,6 +263,7 @@ data class NexusSurface(
                 (contentKey.isBlank() || previous.contentKey == contentKey)
             val linesPresent = payload.has("lines")
             val segmentsPresent = payload.has("segments")
+            val readerAnchorPresent = payload.has("readerAnchor")
             val artworkPresent = payload.has("artwork")
             val mediaArtworkMetadata = when {
                 kind != KIND_MEDIA -> null
@@ -382,6 +389,12 @@ data class NexusSurface(
                     kind != KIND_READER -> emptyList()
                     !segmentsPresent && canMergePrevious -> previous?.readerSegments.orEmpty()
                     else -> parseReaderSegments(payload)
+                },
+                readerAnchor = when {
+                    kind != KIND_READER -> ReaderAnchor.BOTTOM
+                    !readerAnchorPresent && canMergePrevious -> previous?.readerAnchor ?: ReaderAnchor.BOTTOM
+                    payload.optString("readerAnchor") == "top" -> ReaderAnchor.TOP
+                    else -> ReaderAnchor.BOTTOM
                 },
                 ink = if (kind == KIND_INK) {
                     payload.optJSONObject("ink")?.let { ink ->

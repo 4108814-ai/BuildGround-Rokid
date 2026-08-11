@@ -17,6 +17,19 @@ import android.widget.TextView
 import com.anezium.rokidbus.client.ui.BusTheme
 import kotlin.math.roundToInt
 
+internal fun resolveReaderScrollTarget(
+    sameSurface: Boolean,
+    wasNearBottom: Boolean,
+    previousOffset: Int,
+    maximumScroll: Int,
+    anchor: ReaderAnchor,
+): Int = when {
+    !sameSurface -> if (anchor == ReaderAnchor.TOP) 0 else maximumScroll
+    anchor == ReaderAnchor.TOP -> previousOffset.coerceIn(0, maximumScroll)
+    wasNearBottom -> maximumScroll
+    else -> previousOffset.coerceIn(0, maximumScroll)
+}
+
 internal class ReaderSurfaceView(context: Context) : ScrollView(context) {
     private val document = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -44,7 +57,7 @@ internal class ReaderSurfaceView(context: Context) : ScrollView(context) {
         )
     }
 
-    fun render(surfaceId: String, segments: List<ReaderSegment>) {
+    fun render(surfaceId: String, segments: List<ReaderSegment>, anchor: ReaderAnchor) {
         invalidatePendingScrollRestore()
         val sameSurface = renderedSurfaceId == surfaceId
         val previousOffset = scrollY
@@ -95,11 +108,13 @@ internal class ReaderSurfaceView(context: Context) : ScrollView(context) {
                 if (pendingScrollLayoutListener === this) pendingScrollLayoutListener = null
                 post {
                     if (generation != renderGeneration || renderedSurfaceId != surfaceId) return@post
-                    val target = if (!sameSurface || wasNearBottom) {
-                        maximumScroll()
-                    } else {
-                        previousOffset.coerceIn(0, maximumScroll())
-                    }
+                    val target = resolveReaderScrollTarget(
+                        sameSurface = sameSurface,
+                        wasNearBottom = wasNearBottom,
+                        previousOffset = previousOffset,
+                        maximumScroll = maximumScroll(),
+                        anchor = anchor,
+                    )
                     scrollTo(0, target)
                 }
             }
