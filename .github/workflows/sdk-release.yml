@@ -23,9 +23,9 @@ jobs:
         shell: bash
         run: echo "version=${GITHUB_REF_NAME#sdk-v}" >> "$GITHUB_OUTPUT"
       - name: Test and lint public modules
-        run: ./gradlew :shared:testDebugUnitTest :bus-client:testDebugUnitTest :shared:lintDebug :bus-client:lintDebug -PskipCxrGlobal=true
+        run: ./gradlew :shared:testDebugUnitTest :bus-client:testDebugUnitTest :ink-engine:test :shared:lintDebug :bus-client:lintDebug -PskipCxrGlobal=true
       - name: Publish SDK to the runner Maven local repository
-        run: ./gradlew :shared:publishToMavenLocal :bus-client:publishToMavenLocal -PversionName=${{ steps.version.outputs.version }} -PskipCxrGlobal=true
+        run: ./gradlew :shared:publishToMavenLocal :bus-client:publishToMavenLocal :ink-engine:publishToMavenLocal -PversionName=${{ steps.version.outputs.version }} -PskipCxrGlobal=true
       - name: Compile sample from published coordinates
         run: ./gradlew :plugin-sample:assembleDebug -PusePublishedSdk=true -PversionName=${{ steps.version.outputs.version }} -PskipCxrGlobal=true
       - name: Verify JitPack publication
@@ -34,6 +34,7 @@ jobs:
           SDK_TAG: ${{ github.ref_name }}
         run: |
           artifact_url="https://jitpack.io/com/github/Anezium/Rokid-Nexus/bus-client/${SDK_TAG}/bus-client-${SDK_TAG}.pom"
+          engine_url="https://jitpack.io/com/github/Anezium/Rokid-Nexus/ink-engine/${SDK_TAG}/ink-engine-${SDK_TAG}.pom"
           build_api_url="https://jitpack.io/api/builds/com.github.Anezium/Rokid-Nexus/${SDK_TAG}"
           build_log_url="https://jitpack.io/com/github/Anezium/Rokid-Nexus/${SDK_TAG}/build.log"
 
@@ -46,7 +47,10 @@ jobs:
             build_status="$(curl --silent --show-error --max-time 30 "$build_api_url" || true)"
 
             if grep -q '"status"[[:space:]]*:[[:space:]]*"ok"' <<< "$build_status"; then
-              if curl --fail --silent --show-error --max-time 30 "$artifact_url" --output /tmp/jitpack-pom; then
+              # bus-client's POM depends on ink-engine, so a plugin only resolves
+              # the SDK if JitPack served both.
+              if curl --fail --silent --show-error --max-time 30 "$artifact_url" --output /tmp/jitpack-pom &&
+                curl --fail --silent --show-error --max-time 30 "$engine_url" --output /tmp/jitpack-engine-pom; then
                 echo "JitPack published ${SDK_TAG} successfully."
                 exit 0
               fi
