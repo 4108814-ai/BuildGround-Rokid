@@ -67,6 +67,11 @@ internal object RemoteNavigationController {
                 callback(RemoteNavigationResult.SERVICE_UNAVAILABLE)
                 return@runOnMain
             }
+            // Someone is holding the phone and pressing a direction: that is a live
+            // wearer, so the panel comes back on. Navigating a screen you cannot see
+            // is the same as not navigating at all.
+            DisplayWakePolicy.noteUserInteraction()
+            DisplayWakePolicy.requestWake(owner, DisplayWakeKind.ACTIVITY, requested = true)
             callback(AccessibilityNodeNavigator(owner).perform(action))
         }
     }

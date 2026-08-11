@@ -44,7 +44,6 @@ class RemoteInputActivity : Activity() {
     private var viewState = RemoteInputViewState.INITIAL
     private var receiverRegistered = false
     private var closeSent = false
-    private var keyboardOpenedForSession: String? = null
 
     private val stateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -69,7 +68,6 @@ class RemoteInputActivity : Activity() {
 
     override fun onStop() {
         resetLocalEditor()
-        keyboardOpenedForSession = null
         unregisterStateReceiver()
         super.onStop()
     }
@@ -333,10 +331,9 @@ class RemoteInputActivity : Activity() {
             sequence.reset(next.sessionId)
         }
         renderState()
-        if (next.editorEnabled && keyboardOpenedForSession != next.sessionId) {
-            keyboardOpenedForSession = next.sessionId
-            editor.post { showKeyboard() }
-        }
+        // The keyboard opens when the wearer asks for it, never because the
+        // glasses focused a field: navigating through a screen full of inputs
+        // otherwise reopens the IME under your thumb on every step.
     }
 
     private fun renderState() {
