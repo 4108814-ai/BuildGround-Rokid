@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.4.3
+
+- **A document opens where reading begins.** A reader page always opened on its
+  last paragraph. That is right for a conversation, where the newest line is
+  the one you want, and wrong for an article: plugins showing a piece of prose
+  dropped you at the closing note, and you scrolled up to find the start. A
+  plugin can now say a page is a document rather than a stream. Those pages
+  open at the top, and an update leaves you where you were reading instead of
+  pulling you to the new end. Conversations behave exactly as before. Thanks to
+  beyondlevi for the report and the diagnosis.
+
 ## 1.4.2
 
 - **Your phone is now a trackpad for the glasses.** Drag on the pad and the
