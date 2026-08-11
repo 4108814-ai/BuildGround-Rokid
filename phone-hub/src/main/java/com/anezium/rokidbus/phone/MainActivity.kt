@@ -45,6 +45,7 @@ private const val PREF_NOTIFICATIONS_ANSWERED = "onboarding_notifications_answer
 /** Companion home: fixed status/settings menubar, setup cards, plugin list, store entry and hub toggle. */
 class MainActivity : Activity() {
     private val developerModeStore by lazy { DeveloperModeStore(this) }
+    private val glassesControlsVisibility by lazy { GlassesControlsVisibilityStore(this) }
     private var renderedPluginUpdateIds: Set<String> = emptySet()
     private lateinit var updateSection: LinearLayout
     private lateinit var setupProgressSection: LinearLayout
@@ -89,6 +90,7 @@ class MainActivity : Activity() {
         super.onResume()
         resumeRecoveredNexusUpdateInstall()
         resumeRecoveredPluginInstall()
+        if (::coreControlsSection.isInitialized) rebuildCoreControlsSection()
         rebuildSetupSection()
         renderSetupProgressSection()
         rebuildPluginSection()
@@ -233,33 +235,46 @@ class MainActivity : Activity() {
 
     private fun buildCoreControlsSection(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        addView(
-            NexusUi.sectionRow(this@MainActivity, "Glasses controls", "Built in"),
+        rebuildCoreControlsSection(this)
+    }
+
+    /** Rebuilt on resume: the switches that govern this section live in Settings. */
+    private fun rebuildCoreControlsSection(section: LinearLayout = coreControlsSection) {
+        section.removeAllViews()
+        if (!glassesControlsVisibility.isSectionVisible()) return
+        section.addView(
+            NexusUi.sectionRow(this, "Glasses controls", "Built in"),
             NexusUi.block(),
         )
-        addView(BusTheme.gap(this@MainActivity, 14))
-        addView(
-            NexusUi.navCard(
-                this@MainActivity,
-                "Keyboard & remote",
-                "Type live into the active glasses field and navigate from your phone.",
-            ) {
-                startActivity(Intent(this@MainActivity, RemoteInputActivity::class.java))
-            },
-            NexusUi.block(),
-        )
-        addView(BusTheme.gap(this@MainActivity, 9))
-        addView(
-            NexusUi.navCard(
-                this@MainActivity,
-                "Glasses apps",
-                "Browse and open Android apps installed on the glasses.",
-            ) {
-                startActivity(Intent(this@MainActivity, NativeAppsActivity::class.java))
-            },
-            NexusUi.block(),
-        )
-        addView(BusTheme.gap(this@MainActivity, 22))
+        section.addView(BusTheme.gap(this, 14))
+        var previousCard = false
+        if (glassesControlsVisibility.isRemoteVisible()) {
+            section.addView(
+                NexusUi.navCard(
+                    this,
+                    "Keyboard & remote",
+                    "Type live into the active glasses field and navigate from your phone.",
+                ) {
+                    startActivity(Intent(this, RemoteInputActivity::class.java))
+                },
+                NexusUi.block(),
+            )
+            previousCard = true
+        }
+        if (glassesControlsVisibility.isNativeAppsVisible()) {
+            if (previousCard) section.addView(BusTheme.gap(this, 9))
+            section.addView(
+                NexusUi.navCard(
+                    this,
+                    "Glasses apps",
+                    "Browse and open Android apps installed on the glasses.",
+                ) {
+                    startActivity(Intent(this, NativeAppsActivity::class.java))
+                },
+                NexusUi.block(),
+            )
+        }
+        section.addView(BusTheme.gap(this, 22))
     }
 
     private fun renderPhoneState() {
@@ -1095,12 +1110,7 @@ class MainActivity : Activity() {
                         }
                         if (hasPrimaryAction) {
                             if (hasSecondaryAction) {
-                                // Horizontal spacer: BusTheme.gap is MATCH_PARENT wide and
-                                // would shove the primary button off-screen in this row.
-                                addView(
-                                    View(this@MainActivity),
-                                    LinearLayout.LayoutParams(NexusUi.dp(this@MainActivity, 8), 0),
-                                )
+                                addView(BusTheme.hgap(this@MainActivity, 8))
                             }
                             addView(
                                 NexusUi.textButton(

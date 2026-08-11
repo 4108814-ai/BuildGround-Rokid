@@ -178,11 +178,25 @@ object BusTheme {
             )
         }
 
+    /**
+     * Vertical spacer for a column. It is `MATCH_PARENT` wide, so putting one in
+     * a horizontal row claims the whole width and starves every weighted sibling
+     * down to nothing — use [hgap] between side-by-side views.
+     */
     fun gap(context: Context, value: Int): View =
         View(context).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 dp(context, value),
+            )
+        }
+
+    /** Horizontal spacer for a row — the sibling of [gap], and never interchangeable with it. */
+    fun hgap(context: Context, value: Int): View =
+        View(context).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                dp(context, value),
+                ViewGroup.LayoutParams.WRAP_CONTENT,
             )
         }
 

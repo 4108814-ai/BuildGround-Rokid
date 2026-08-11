@@ -160,7 +160,10 @@ class RemoteInputActivity : Activity() {
         }
         val scroll = ScrollView(this).apply {
             setBackgroundColor(NexusUi.BG)
-            isFillViewport = true
+            // Not fillViewport: this column is a stack of cards, and stretching it
+            // to the viewport hands the slack to the tallest card, which then eats
+            // the screen and pushes the remote off the bottom.
+            isFillViewport = false
             isVerticalScrollBarEnabled = false
             addView(
                 content,
@@ -222,7 +225,7 @@ class RemoteInputActivity : Activity() {
                     editorAction,
                     LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
                 )
-                addView(BusTheme.gap(this@RemoteInputActivity, 8))
+                addView(BusTheme.hgap(this@RemoteInputActivity, 8))
                 addView(closeAction)
             },
             NexusUi.block(),
@@ -258,7 +261,7 @@ class RemoteInputActivity : Activity() {
     ): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         addView(remoteButton(first.first, first.second), weightedButtonParams())
-        addView(BusTheme.gap(this@RemoteInputActivity, 8))
+        addView(BusTheme.hgap(this@RemoteInputActivity, 8))
         addView(remoteButton(second.first, second.second), weightedButtonParams())
     }
 
@@ -389,10 +392,12 @@ class RemoteInputActivity : Activity() {
         } else {
             EditorInfo.IME_ACTION_DONE
         }
+        // Uppercased like every other pill on this screen: outlinePillButton does it
+        // at construction, and this label is replaced after that.
         editorAction.text = if (viewState.primaryAction == RemoteInputPhoneContract.EDITOR_NEXT) {
-            getString(R.string.remote_input_next)
+            getString(R.string.remote_input_next).uppercase()
         } else {
-            getString(R.string.remote_input_enter)
+            getString(R.string.remote_input_enter).uppercase()
         }
         editorAction.isEnabled = viewState.editorEnabled
         closeAction.isEnabled = true

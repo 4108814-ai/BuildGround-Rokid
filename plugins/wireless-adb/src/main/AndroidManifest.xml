@@ -40,9 +40,6 @@
                 android:name="com.anezium.rokidbus.plugin.DISPLAY_NAME"
                 android:value="Wireless ADB" />
             <meta-data
-                android:name="com.anezium.rokidbus.plugin.ICON"
-                android:value="terminal" />
-            <meta-data
                 android:name="com.anezium.rokidbus.plugin.ICON_DRAWABLE"
                 android:resource="@drawable/nexus_glyph_wireless_adb" />
             <meta-data

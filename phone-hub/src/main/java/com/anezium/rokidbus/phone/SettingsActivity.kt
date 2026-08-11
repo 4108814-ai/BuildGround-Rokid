@@ -42,6 +42,7 @@ private const val REPAIR_STATUS_LINGER_MS = 12_000L
 
 class SettingsActivity : Activity() {
     private val developerModeStore by lazy { DeveloperModeStore(this) }
+    private val glassesControlsVisibility by lazy { GlassesControlsVisibilityStore(this) }
     private lateinit var updateSection: LinearLayout
     private lateinit var updateCheckValue: TextView
     private lateinit var cxrValue: TextView
@@ -169,6 +170,26 @@ class SettingsActivity : Activity() {
             addView(speechRow(), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 10))
             addView(voiceRow(), NexusUi.block())
+            addView(BusTheme.gap(this@SettingsActivity, 10))
+            addView(
+                controlVisibilityRow(
+                    title = "Keyboard & remote",
+                    subtitle = "Show it on the home screen",
+                    checked = glassesControlsVisibility.isRemoteVisible(),
+                    onChanged = glassesControlsVisibility::setRemoteVisible,
+                ),
+                NexusUi.block(),
+            )
+            addView(BusTheme.gap(this@SettingsActivity, 10))
+            addView(
+                controlVisibilityRow(
+                    title = "Glasses apps",
+                    subtitle = "Show it on the home screen",
+                    checked = glassesControlsVisibility.isNativeAppsVisible(),
+                    onChanged = glassesControlsVisibility::setNativeAppsVisible,
+                ),
+                NexusUi.block(),
+            )
             addView(BusTheme.gap(this@SettingsActivity, 28))
             addView(NexusUi.sectionRow(this@SettingsActivity, "Plugins"), NexusUi.block())
             addView(BusTheme.gap(this@SettingsActivity, 12))
@@ -471,6 +492,40 @@ class SettingsActivity : Activity() {
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
     }
+
+    /** A built-in glasses control, and whether the home screen offers it. */
+    private fun controlVisibilityRow(
+        title: String,
+        subtitle: String,
+        checked: Boolean,
+        onChanged: (Boolean) -> Unit,
+    ): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = NexusUi.bordered(this@SettingsActivity, NexusUi.PANEL, NexusUi.LINE, 15)
+            setPadding(
+                NexusUi.dp(this@SettingsActivity, 15),
+                NexusUi.dp(this@SettingsActivity, 10),
+                NexusUi.dp(this@SettingsActivity, 15),
+                NexusUi.dp(this@SettingsActivity, 10),
+            )
+            addView(
+                LinearLayout(this@SettingsActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(NexusUi.rowTitle(this@SettingsActivity, title))
+                    addView(BusTheme.gap(this@SettingsActivity, 3))
+                    addView(NexusUi.rowSub(this@SettingsActivity, subtitle))
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            addView(
+                NexusUi.switch(this@SettingsActivity).apply {
+                    isChecked = checked
+                    setOnCheckedChangeListener { _, value -> onChanged(value) }
+                },
+            )
+        }
 
     private fun developerModeRow(): LinearLayout =
         LinearLayout(this).apply {
