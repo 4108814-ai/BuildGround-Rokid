@@ -39,6 +39,8 @@ class RemoteInputActivity : Activity() {
     private lateinit var editor: StreamingEditText
     private lateinit var editorAction: Button
     private lateinit var closeAction: Button
+    private lateinit var trackpad: TrackpadView
+    private lateinit var trackpadPublisher: RemoteTrackpadPublisher
     private val remoteButtons = mutableListOf<Button>()
 
     private var viewState = RemoteInputViewState.INITIAL
@@ -55,6 +57,7 @@ class RemoteInputActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         publisher = BroadcastRemoteInputPublisher(applicationContext)
+        trackpadPublisher = RemoteTrackpadPublisher(applicationContext)
         buildUi()
         renderState()
     }
@@ -64,10 +67,14 @@ class RemoteInputActivity : Activity() {
         BusHubService.start(applicationContext)
         registerStateReceiver()
         publisher.requestState()
+        trackpadPublisher.show()
     }
 
     override fun onStop() {
         resetLocalEditor()
+        // The pointer belongs to this screen: leaving it takes the cursor away
+        // rather than stranding one on the glasses with nothing driving it.
+        trackpadPublisher.hide()
         unregisterStateReceiver()
         super.onStop()
     }
@@ -75,6 +82,7 @@ class RemoteInputActivity : Activity() {
     override fun onDestroy() {
         if (isFinishing && !closeSent) sendClose()
         resetLocalEditor()
+        trackpadPublisher.close()
         super.onDestroy()
     }
 
@@ -133,6 +141,12 @@ class RemoteInputActivity : Activity() {
             setSelectAllOnFocus(false)
             importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
             onInputOperation = ::publishInputOperation
+        }
+        trackpad = TrackpadView(this).apply {
+            onMove = { dx, dy -> trackpadPublisher.moveBy(dx, dy) }
+            onTap = { trackpadPublisher.click() }
+            onLongPress = { trackpadPublisher.longPress() }
+            onGestureEnd = { trackpadPublisher.endGesture() }
         }
         editorAction = NexusUi.outlinePillButton(this, getString(R.string.remote_input_enter)).apply {
             setOnClickListener { sendEditorAction() }
@@ -230,6 +244,12 @@ class RemoteInputActivity : Activity() {
         )
     }
 
+    /**
+     * Pad and cross side by side, because they are two ways to do one thing and
+     * you pick per screen, not per session: drag where a pointer helps, press the
+     * cross where a list just wants the next item. Stacking them would also put
+     * the cross under a pad that swallows the drag it needs to scroll into view.
+     */
     private fun remoteCard(): LinearLayout = NexusUi.card(this).apply {
         addView(
             NexusUi.cardBody(this@RemoteInputActivity, getString(R.string.remote_input_remote_help)),
@@ -237,20 +257,68 @@ class RemoteInputActivity : Activity() {
         )
         addView(BusTheme.gap(this@RemoteInputActivity, 12))
         addView(
-            remoteButtonRow(
-                getString(R.string.remote_input_previous) to RemoteInputPhoneContract.KEY_PREVIOUS,
-                getString(R.string.remote_input_next) to RemoteInputPhoneContract.KEY_NEXT,
-            ),
+            LinearLayout(this@RemoteInputActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(
+                    trackpad,
+                    LinearLayout.LayoutParams(
+                        0,
+                        NexusUi.dp(this@RemoteInputActivity, 190),
+                        1f,
+                    ),
+                )
+                addView(BusTheme.hgap(this@RemoteInputActivity, 10))
+                addView(
+                    directionalCross(),
+                    LinearLayout.LayoutParams(
+                        0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        1f,
+                    ),
+                )
+            },
             NexusUi.block(),
         )
+        addView(BusTheme.gap(this@RemoteInputActivity, 10))
+        addView(
+            remoteButton(getString(R.string.remote_input_back), RemoteInputPhoneContract.KEY_BACK),
+            NexusUi.block(),
+        )
+    }
+
+    /**
+     * A cross, because that is what a thumb expects: up and down where they look,
+     * select in the middle. Back sits outside it — it leaves the screen rather
+     * than moving inside it, and a thumb should not find it by accident.
+     */
+    private fun directionalCross(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(crossRow(null, R.string.remote_input_up to RemoteInputPhoneContract.KEY_UP, null))
         addView(BusTheme.gap(this@RemoteInputActivity, 8))
         addView(
-            remoteButtonRow(
-                getString(R.string.remote_input_select) to RemoteInputPhoneContract.KEY_SELECT,
-                getString(R.string.remote_input_back) to RemoteInputPhoneContract.KEY_BACK,
+            crossRow(
+                R.string.remote_input_left to RemoteInputPhoneContract.KEY_LEFT,
+                R.string.remote_input_select to RemoteInputPhoneContract.KEY_SELECT,
+                R.string.remote_input_right to RemoteInputPhoneContract.KEY_RIGHT,
             ),
-            NexusUi.block(),
         )
+        addView(BusTheme.gap(this@RemoteInputActivity, 8))
+        addView(crossRow(null, R.string.remote_input_down to RemoteInputPhoneContract.KEY_DOWN, null))
+    }
+
+    private fun crossRow(
+        left: Pair<Int, String>?,
+        center: Pair<Int, String>?,
+        right: Pair<Int, String>?,
+    ): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        listOf(left, center, right).forEachIndexed { index, cell ->
+            if (index > 0) addView(BusTheme.hgap(this@RemoteInputActivity, 8))
+            val child = cell?.let { (label, key) ->
+                remoteButton(getString(label), key)
+            } ?: View(this@RemoteInputActivity)
+            addView(child, weightedButtonParams())
+        }
     }
 
     private fun remoteButtonRow(
@@ -399,6 +467,8 @@ class RemoteInputActivity : Activity() {
         editorAction.isEnabled = viewState.editorEnabled
         closeAction.isEnabled = true
         remoteButtons.forEach { it.isEnabled = viewState.controlsEnabled }
+        trackpad.isEnabled = viewState.controlsEnabled
+        trackpad.alpha = if (viewState.controlsEnabled) 1f else 0.4f
     }
 
     private fun publishInputOperation(operation: LocalInputOperation) {

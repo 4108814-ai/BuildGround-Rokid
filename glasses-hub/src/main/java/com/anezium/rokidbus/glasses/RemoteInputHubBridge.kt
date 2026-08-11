@@ -223,6 +223,10 @@ internal object RemoteInputHubBridge {
         WireNavigationAction.NEXT -> RemoteNavigationAction.NEXT
         WireNavigationAction.SELECT -> RemoteNavigationAction.SELECT
         WireNavigationAction.BACK -> RemoteNavigationAction.BACK
+        WireNavigationAction.UP -> RemoteNavigationAction.UP
+        WireNavigationAction.DOWN -> RemoteNavigationAction.DOWN
+        WireNavigationAction.LEFT -> RemoteNavigationAction.LEFT
+        WireNavigationAction.RIGHT -> RemoteNavigationAction.RIGHT
     }
 
     internal fun isSensitiveInput(inputType: Int): Boolean {

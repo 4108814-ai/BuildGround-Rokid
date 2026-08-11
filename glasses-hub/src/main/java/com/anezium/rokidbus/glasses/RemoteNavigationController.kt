@@ -12,6 +12,10 @@ internal enum class RemoteNavigationAction {
     NEXT,
     SELECT,
     BACK,
+    UP,
+    DOWN,
+    LEFT,
+    RIGHT,
 }
 
 internal enum class RemoteNavigationResult {
@@ -26,6 +30,10 @@ internal enum class RemoteNavigationStrategy {
     FOCUS_NEXT,
     CLICK_FOCUSED,
     GLOBAL_BACK,
+    FOCUS_UP,
+    FOCUS_DOWN,
+    FOCUS_LEFT,
+    FOCUS_RIGHT,
 }
 
 internal object RemoteNavigationPolicy {
@@ -34,6 +42,22 @@ internal object RemoteNavigationPolicy {
         RemoteNavigationAction.NEXT -> RemoteNavigationStrategy.FOCUS_NEXT
         RemoteNavigationAction.SELECT -> RemoteNavigationStrategy.CLICK_FOCUSED
         RemoteNavigationAction.BACK -> RemoteNavigationStrategy.GLOBAL_BACK
+        RemoteNavigationAction.UP -> RemoteNavigationStrategy.FOCUS_UP
+        RemoteNavigationAction.DOWN -> RemoteNavigationStrategy.FOCUS_DOWN
+        RemoteNavigationAction.LEFT -> RemoteNavigationStrategy.FOCUS_LEFT
+        RemoteNavigationAction.RIGHT -> RemoteNavigationStrategy.FOCUS_RIGHT
+    }
+
+    /**
+     * Where a direction falls back when the layout offers nothing that way.
+     *
+     * A press that does nothing reads as a broken remote, and plenty of glasses
+     * screens are a single column whose items only answer to forward/backward.
+     */
+    fun sequentialFallback(action: RemoteNavigationAction): Boolean? = when (action) {
+        RemoteNavigationAction.DOWN, RemoteNavigationAction.RIGHT -> true
+        RemoteNavigationAction.UP, RemoteNavigationAction.LEFT -> false
+        else -> null
     }
 }
 
@@ -101,9 +125,47 @@ private class AccessibilityNodeNavigator(
                 RemoteNavigationAction.NEXT -> move(root, forward = true)
                 RemoteNavigationAction.SELECT -> select(root)
                 RemoteNavigationAction.BACK -> error("Handled above")
+                RemoteNavigationAction.UP,
+                RemoteNavigationAction.DOWN,
+                RemoteNavigationAction.LEFT,
+                RemoteNavigationAction.RIGHT,
+                -> moveDirectional(root, action)
             }
         } finally {
             root.recycle()
+        }
+    }
+
+    private fun moveDirectional(
+        root: AccessibilityNodeInfo,
+        action: RemoteNavigationAction,
+    ): RemoteNavigationResult {
+        val direction = when (action) {
+            RemoteNavigationAction.UP -> View.FOCUS_UP
+            RemoteNavigationAction.DOWN -> View.FOCUS_DOWN
+            RemoteNavigationAction.LEFT -> View.FOCUS_LEFT
+            RemoteNavigationAction.RIGHT -> View.FOCUS_RIGHT
+            else -> error("Not a direction")
+        }
+        val focused = findFocused(root)
+        try {
+            if (focused != null && focusSearchDirection(focused, direction)) {
+                return RemoteNavigationResult.PERFORMED
+            }
+        } finally {
+            focused?.recycle()
+        }
+        val forward = RemoteNavigationPolicy.sequentialFallback(action)
+            ?: return RemoteNavigationResult.NO_TARGET
+        return move(root, forward)
+    }
+
+    private fun focusSearchDirection(node: AccessibilityNodeInfo, direction: Int): Boolean {
+        val target = runCatching { node.focusSearch(direction) }.getOrNull() ?: return false
+        return try {
+            target.isVisibleToUser && target.isEnabled && focus(target)
+        } finally {
+            target.recycle()
         }
     }
 

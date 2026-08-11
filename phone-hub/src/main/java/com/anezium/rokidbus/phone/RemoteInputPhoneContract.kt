@@ -34,6 +34,21 @@ object RemoteInputPhoneContract {
     const val KEY_NEXT = "next"
     const val KEY_SELECT = "select"
     const val KEY_BACK = "back"
+    const val KEY_UP = "up"
+    const val KEY_DOWN = "down"
+    const val KEY_LEFT = "left"
+    const val KEY_RIGHT = "right"
+
+    internal val NAVIGATION_KEYS = setOf(
+        KEY_PREVIOUS,
+        KEY_NEXT,
+        KEY_SELECT,
+        KEY_BACK,
+        KEY_UP,
+        KEY_DOWN,
+        KEY_LEFT,
+        KEY_RIGHT,
+    )
 
     const val IME_ACTION_NONE = "none"
     const val IME_ACTION_ENTER = "enter"
@@ -152,7 +167,7 @@ object RemoteInputPhoneContract {
             ?.takeIf(String::isNotEmpty)
             ?: return null
         val action = intent.getStringExtra(EXTRA_NAVIGATION_ACTION)
-            ?.takeIf { it == KEY_PREVIOUS || it == KEY_NEXT || it == KEY_SELECT || it == KEY_BACK }
+            ?.takeIf { it in NAVIGATION_KEYS }
             ?: return null
         return PhoneRemoteNavigation(requestId, action)
     }

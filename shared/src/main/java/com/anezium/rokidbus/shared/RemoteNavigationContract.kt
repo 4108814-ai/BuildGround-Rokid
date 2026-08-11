@@ -7,6 +7,16 @@ enum class RemoteNavigationAction(val wireValue: String) {
     NEXT("next"),
     SELECT("select"),
     BACK("back"),
+
+    /**
+     * Directional focus, added for the on-screen cross. A hub that predates these
+     * refuses them as an unknown action rather than guessing a direction, which is
+     * why they are new values instead of a reinterpretation of previous/next.
+     */
+    UP("up"),
+    DOWN("down"),
+    LEFT("left"),
+    RIGHT("right"),
     ;
 
     companion object {

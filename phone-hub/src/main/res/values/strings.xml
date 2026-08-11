@@ -198,7 +198,14 @@
     <string name="remote_input_next">Next</string>
     <string name="remote_input_select">Select</string>
     <string name="remote_input_back">Back</string>
-    <string name="remote_input_remote_help">Move through any native glasses app without touching the lens.</string>
+    <string name="remote_input_remote_help">Drag the pad to move the pointer on the glasses; tap it to click, hold to long-press. Or press the cross to step through what is on screen.</string>
+    <string name="remote_input_up">Up</string>
+    <string name="remote_input_down">Down</string>
+    <string name="remote_input_left">Left</string>
+    <string name="remote_input_right">Right</string>
+    <string name="remote_input_trackpad_section">Trackpad</string>
+    <string name="remote_input_trackpad_help">Drag to move the pointer on the glasses. Tap to click, hold to long-press.</string>
+    <string name="remote_input_trackpad_description">Trackpad. Drag to move the glasses pointer, tap to click.</string>
     <string name="remote_input_status_connecting">Checking the glasses link</string>
     <string name="remote_input_status_connecting_body">Nexus is asking the glasses for the active field.</string>
     <string name="remote_input_status_disconnected">Glasses disconnected</string>
