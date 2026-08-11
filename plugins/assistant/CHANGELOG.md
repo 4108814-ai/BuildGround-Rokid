@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.4.2
+
+- **Reminders, notes, timers and the calendar now work on Hermes.** A server that
+  runs its own tools never hands one back to the phone, so the assistant asks for
+  a Nexus phone tool in plain text and Nexus runs it — the same twelve tools every
+  other provider gets, minus the Ink pages.
+
 ## 1.4.1
 
 - **Hermes is a provider of its own.** Give Settings the `/v1` root of your Hermes

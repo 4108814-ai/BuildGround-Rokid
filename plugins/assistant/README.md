@@ -24,6 +24,13 @@ stripped gracefully for models that cannot. `render_ink_page` and
 surface exposed by the public Nexus SDK; the template tool offers seven bounded
 layouts. A server that rejects tools outright is retried once without them.
 
+A Hermes backend runs its tools server-side and never returns a client tool
+call, so the same twelve phone tools are described in the system prompt and
+asked for on one private control line (`[[NEXUS_TOOL]]` plus a JSON object, or
+an array of them). The provider filters that line out of the stream, executes
+the calls in order, and replays the turn with their results as plain text. Ink
+is deliberately absent from that bridge.
+
 Ink requires the separate `ink_surface` grant and a live compatible renderer.
 When either is unavailable, Assistant keeps the text answer and ordinary card
 path. The listening notice and final surface belong to one display episode, so
