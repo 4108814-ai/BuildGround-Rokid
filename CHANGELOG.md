@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 1.4.2
+
+- **Your phone is now a trackpad for the glasses.** Drag on the pad and the
+  glasses' own pointer moves with your finger; tap to click, hold to
+  long-press. It drives the pointer the system already has rather than drawing
+  one of ours, so it behaves the same everywhere — the Rokid launcher, a
+  third-party app, anything on the lens. If the control link drops, Nexus falls
+  back to its own cursor rather than leaving you stranded.
+- **The remote has a real directional cross.** Up, down, left and right where a
+  thumb expects them, select in the middle, back on its own line. The glasses
+  move focus in the direction you pressed, and fall back to the next or
+  previous item when a screen has nothing that way, so a press is never
+  silently ignored. The pad and the cross sit side by side: use whichever fits
+  the screen you are on.
+- **The keyboard stops opening on its own.** Every time the glasses focused a
+  text field, the phone raised the keyboard — so walking through a screen full
+  of fields reopened it under your thumb at every step. It now opens when you
+  tap the field.
+- **Navigating wakes the display.** A direction press means someone is holding
+  the phone and driving, so the glasses light the panel back up instead of
+  moving through a screen you cannot see.
+
 ## 1.4.1
 
 - **Assistant can act on the phone calendar.** It can add and list events after
