@@ -38,6 +38,7 @@ sealed interface AssistantToolResult {
 }
 
 internal const val TAKE_PHOTO_TOOL_NAME = "take_photo"
+internal const val COMPAT_TEXT_TOOL_REQUEST_TOKEN = "[[NEXUS_TOOL]]"
 internal const val TOOL_ERROR_NOT_AUTHORIZED = "not_authorized"
 internal const val TOOL_ERROR_GLASSES_DISCONNECTED = "glasses_disconnected"
 internal const val TOOL_ERROR_CAMERA_BUSY = "camera_busy"
@@ -45,5 +46,20 @@ internal const val TOOL_ERROR_ALREADY_USED = "already_used"
 internal const val TOOL_ERROR_CANCELLED = "cancelled"
 internal const val TOOL_ERROR_CAPTURE_FAILED = "capture_failed"
 internal const val TOOL_ERROR_INVALID_CALL = "invalid_call"
+
+internal val HERMES_TEXT_TOOL_NAMES = setOf(
+    TAKE_PHOTO_TOOL_NAME,
+    TAKE_NOTE_TOOL_NAME,
+    LIST_NOTES_TOOL_NAME,
+    SEARCH_NOTES_TOOL_NAME,
+    DELETE_NOTE_TOOL_NAME,
+    SET_REMINDER_TOOL_NAME,
+    LIST_REMINDERS_TOOL_NAME,
+    CANCEL_REMINDER_TOOL_NAME,
+    SET_TIMER_TOOL_NAME,
+    CREATE_CALENDAR_EVENT_TOOL_NAME,
+    LIST_CALENDAR_EVENTS_TOOL_NAME,
+    DELETE_CALENDAR_EVENT_TOOL_NAME,
+)
 
 private val ASSISTANT_TOOL_ERROR_CODE = Regex("[a-z][a-z0-9_]{0,95}")

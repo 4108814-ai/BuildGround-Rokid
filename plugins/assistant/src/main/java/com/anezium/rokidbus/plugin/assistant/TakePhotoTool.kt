@@ -279,8 +279,6 @@ internal const val TAKE_PHOTO_TOOL_DESCRIPTION =
         "behavior or settings, discussion of a previous photo, or questions answerable " +
         "from text or web information."
 
-internal const val COMPAT_TAKE_PHOTO_REQUEST_TOKEN = "[[NEXUS_TAKE_PHOTO]]"
-
 internal val TAKE_PHOTO_PARAMETERS_SCHEMA = AssistantToolJsonSchema(
     """{"type":"object","properties":{},"required":[],"additionalProperties":false}""",
 )

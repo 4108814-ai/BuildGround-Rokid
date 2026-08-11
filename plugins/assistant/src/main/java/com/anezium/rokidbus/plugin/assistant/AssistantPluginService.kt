@@ -583,10 +583,18 @@ class AssistantPluginService : NexusPluginService() {
                 idleWindowMinutes = authStore.conversationIdleWindowMinutes(),
             )
         }
-        // Hermes runs its own tools server-side and never hands a client tool call back,
-        // so only the photo bridge — which has a text fallback — is real over there.
-        val serverSideToolBackend = providerId != ChatGptCodexProvider.ID &&
+        // Hermes consumes structured calls server-side, so Nexus advertises its phone tools in text.
+        val hermesTextToolBackend = providerId != ChatGptCodexProvider.ID &&
             authStore.providerBackend(providerId) == ProviderBackend.HERMES
+        val availableToolDefinitions = assistantToolRegistry
+            .availableDefinitions(assistantProviderFeatures(providerId))
+        val promptToolDefinitions = if (hermesTextToolBackend) {
+            availableToolDefinitions.filter { definition ->
+                definition.name in HERMES_TEXT_TOOL_NAMES
+            }
+        } else {
+            availableToolDefinitions
+        }
         val request = ChatRequest(
             userText = transcript,
             systemPrompt = NexusAgentPolicy.buildSystemPrompt(
@@ -594,11 +602,9 @@ class AssistantPluginService : NexusPluginService() {
                 noticeBand = noticeBandMode,
                 memory = authStore.combinedAssistantContextForPrompt(),
                 currentDateTime = ZonedDateTime.now(),
-                availableToolNames = assistantToolRegistry
-                    .availableDefinitions(assistantProviderFeatures(providerId))
-                    .map(AssistantToolDefinition::name)
-                    .filter { name -> !serverSideToolBackend || name == TAKE_PHOTO_TOOL_NAME },
-                allowTextToolFallback = serverSideToolBackend,
+                availableToolNames = promptToolDefinitions.map(AssistantToolDefinition::name),
+                textToolDefinitions = promptToolDefinitions,
+                allowTextToolFallback = hermesTextToolBackend,
             ),
             history = conversationContext.history,
             model = when (providerId) {

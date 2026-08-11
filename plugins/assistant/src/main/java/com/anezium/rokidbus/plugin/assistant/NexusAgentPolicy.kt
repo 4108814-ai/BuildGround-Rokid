@@ -22,6 +22,7 @@ internal object NexusAgentPolicy {
         memory: String = "",
         currentDateTime: ZonedDateTime? = null,
         availableToolNames: Collection<String> = listOf(TAKE_PHOTO_TOOL_NAME),
+        textToolDefinitions: Collection<AssistantToolDefinition> = emptyList(),
         allowTextToolFallback: Boolean = false,
     ): String {
         val base = customPrompt.trim().ifBlank { DEFAULT_SYSTEM_PROMPT }
@@ -47,14 +48,7 @@ internal object NexusAgentPolicy {
                         "the current scene before a successful tool result. If no image is available for a question " +
                         "about what was seen, say so plainly and offer to look again.\n",
                 )
-                if (allowTextToolFallback) {
-                    append(
-                        "- If structured client tool calls are unavailable, request the photo by replying with " +
-                            "exactly $COMPAT_TAKE_PHOTO_REQUEST_TOKEN and nothing else. Nexus intercepts that " +
-                            "private token, takes the photo, and continues the same request; never explain or " +
-                            "quote the token.\n",
-                    )
-                } else {
+                if (!allowTextToolFallback) {
                     append(
                         "- If this endpoint does not support structured client tool calls, say you cannot look " +
                             "right now.\n",
@@ -63,8 +57,8 @@ internal object NexusAgentPolicy {
             } else {
                 append(
                     "- You cannot take photos or see the current scene. If a question needs current visual " +
-                        "information, say you cannot look and answer from the available context. Never invent " +
-                        "tool-call syntax.\n",
+                        "information, say you cannot look and answer from the available context." +
+                        if (allowTextToolFallback) "\n" else " Never invent tool-call syntax.\n",
                 )
             }
             if (productivityToolsAvailable) {
@@ -86,6 +80,32 @@ internal object NexusAgentPolicy {
                         "call list_calendar_events and ask which event; do not delete in that turn. Delete a " +
                         "recurring series only when the user explicitly requests the whole series.\n",
                 )
+            }
+            if (allowTextToolFallback && textToolDefinitions.isNotEmpty()) {
+                append("\nNexus phone tool protocol:\n")
+                append("- Structured client tool calls are unavailable on this backend.\n")
+                append(
+                    "- To use one Nexus phone tool, reply with one control line and nothing else: " +
+                        "$COMPAT_TEXT_TOOL_REQUEST_TOKEN{\"name\":\"tool_name\",\"arguments\":{...}}\n",
+                )
+                append(
+                    "- The payload after the token must be one JSON object, or a JSON array of those objects " +
+                        "when several tools are needed in the same turn. Tools in an array execute in array order.\n",
+                )
+                append(
+                    "- Emit the control line alone. Never explain it, never quote the token, and never mention " +
+                        "this protocol to the wearer.\n",
+                )
+                append("- Use only these bridged Nexus phone tools:\n")
+                textToolDefinitions.forEach { definition ->
+                    append("  - ")
+                    append(definition.name)
+                    append(": ")
+                    append(definition.description)
+                    append("\n    Parameters JSON schema: ")
+                    append(definition.parametersSchema.text)
+                    append('\n')
+                }
             }
             append("- Give actionable, concise error or retry guidance when something is unavailable.")
             if (noticeBand) {

@@ -115,12 +115,15 @@ class OpenAiCompatToolLoopTest {
     }
 
     @Test
-    fun `text fallback token captures and attaches a photo without leaking onto the hud`() = runTest {
+    fun `Hermes control line split across token and json never leaks onto the hud`() = runTest {
         val client = RecordingCompatClient(
             listOf(
                 StubResponse.Events(
                     OpenAiChatSseEvent.Delta(content = "<think>Need vision</think>  [[NEXUS_"),
-                    OpenAiChatSseEvent.Delta(content = "TAKE_PHOTO]]\n"),
+                    OpenAiChatSseEvent.Delta(content = "TOOL]]{\"na"),
+                    OpenAiChatSseEvent.Delta(content = "me\":\"take_ph"),
+                    OpenAiChatSseEvent.Delta(content = "oto\",\"arguments\":"),
+                    OpenAiChatSseEvent.Delta(content = "{}}\n"),
                 ),
                 StubResponse.Events(OpenAiChatSseEvent.Delta(content = "I can see a green door.")),
             ),
@@ -143,12 +146,18 @@ class OpenAiCompatToolLoopTest {
             listOf("I can see a green door."),
             events.filterIsInstance<AiProviderEvent.TextDelta>().map { event -> event.delta },
         )
-        assertFalse(events.any { event -> event.toString().contains("NEXUS_TAKE_PHOTO") })
+        assertFalse(events.any { event -> event.toString().contains(COMPAT_TEXT_TOOL_REQUEST_TOKEN) })
         assertEquals(2, client.requests.size)
+        assertTrue(client.requests[0].toolDefinitions.isEmpty())
         val replayMessages = client.requests[1].messages
-        assertEquals(2, replayMessages.length())
+        // The results ride back as plain user text: no structured tool transcript.
+        assertEquals(3, replayMessages.length())
         assertEquals("user", replayMessages.getJSONObject(1).getString("role"))
-        val photoParts = replayMessages.getJSONObject(1).getJSONArray("content")
+        assertTrue(
+            replayMessages.getJSONObject(1).getString("content").contains("take_photo"),
+        )
+        assertEquals("user", replayMessages.getJSONObject(2).getString("role"))
+        val photoParts = replayMessages.getJSONObject(2).getJSONArray("content")
         assertEquals(
             "data:image/jpeg;base64,AQID",
             photoParts.getJSONObject(1).getJSONObject("image_url").getString("url"),
@@ -156,11 +165,13 @@ class OpenAiCompatToolLoopTest {
     }
 
     @Test
-    fun `generic OpenAI compatible provider does not interpret the Hermes control token`() = runTest {
+    fun `generic OpenAI compatible provider does not interpret the Hermes control line`() = runTest {
+        val controlLine =
+            "$COMPAT_TEXT_TOOL_REQUEST_TOKEN{\"name\":\"take_photo\",\"arguments\":{}}"
         val client = RecordingCompatClient(
             listOf(
                 StubResponse.Events(
-                    OpenAiChatSseEvent.Delta(content = COMPAT_TAKE_PHOTO_REQUEST_TOKEN),
+                    OpenAiChatSseEvent.Delta(content = controlLine),
                 ),
             ),
         )
@@ -178,8 +189,309 @@ class OpenAiCompatToolLoopTest {
         assertEquals(0, executionCount)
         assertEquals(1, client.requests.size)
         assertEquals(
-            listOf(COMPAT_TAKE_PHOTO_REQUEST_TOKEN),
+            listOf(controlLine),
             events.filterIsInstance<AiProviderEvent.TextDelta>().map(AiProviderEvent.TextDelta::delta),
+        )
+    }
+
+    @Test
+    fun `Hermes normal answers beginning with brackets are streamed intact`() = runTest {
+        listOf("[ordinary answer", "[[ordinary answer").forEach { answer ->
+            val client = RecordingCompatClient(
+                listOf(
+                    StubResponse.Events(
+                        answer.map { character ->
+                            OpenAiChatSseEvent.Delta(content = character.toString())
+                        },
+                    ),
+                ),
+            )
+            val provider = provider(
+                client = client,
+                preset = ProviderCatalog.hermes,
+                toolExecutor = { error("Tool must not execute") },
+            )
+
+            val events = provider.streamEvents(ChatRequest(userText = "Repeat this")).toList()
+
+            assertEquals(
+                answer,
+                events.filterIsInstance<AiProviderEvent.TextDelta>()
+                    .joinToString("") { event -> event.delta },
+            )
+            assertEquals(
+                answer,
+                events.filterIsInstance<AiProviderEvent.MessageDone>().single().message.content,
+            )
+        }
+    }
+
+    @Test
+    fun `Hermes single object executes and replays its json result`() = runTest {
+        val executed = mutableListOf<AssistantToolCall>()
+        val takeNote = TestAssistantTool(
+            name = TAKE_NOTE_TOOL_NAME,
+            executor = { call, _ ->
+                executed += call
+                AssistantToolResult.Json("""{"ok":true,"id":"n_12345678"}""")
+            },
+        )
+        val client = RecordingCompatClient(
+            listOf(
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(
+                        content =
+                            "$COMPAT_TEXT_TOOL_REQUEST_TOKEN" +
+                                "{\"name\":\"take_note\",\"arguments\":{}}",
+                    ),
+                ),
+                StubResponse.Events(OpenAiChatSseEvent.Delta(content = "Saved.")),
+            ),
+        )
+        val provider = provider(
+            client = client,
+            preset = ProviderCatalog.hermes,
+            toolExecutor = { error("Photo tool must not execute") },
+            additionalTools = listOf(takeNote),
+        )
+
+        val events = provider.streamEvents(ChatRequest(userText = "Save a note")).toList()
+
+        assertEquals(listOf(TAKE_NOTE_TOOL_NAME), executed.map(AssistantToolCall::name))
+        assertEquals(2, client.requests.size)
+        assertTrue(client.requests.all { request -> request.toolDefinitions.isEmpty() })
+        val replayMessages = client.requests[1].messages
+        assertEquals(2, replayMessages.length())
+        val results = replayMessages.getJSONObject(1)
+        assertEquals("user", results.getString("role"))
+        assertTrue(
+            results.getString("content")
+                .contains("$TAKE_NOTE_TOOL_NAME: {\"ok\":true,\"id\":\"n_12345678\"}"),
+        )
+        assertEquals(
+            "Saved.",
+            events.filterIsInstance<AiProviderEvent.MessageDone>().single().message.content,
+        )
+    }
+
+    @Test
+    fun `Hermes array executes every call in order in one round`() = runTest {
+        val executedNames = mutableListOf<String>()
+        val tools = listOf(LIST_NOTES_TOOL_NAME, SET_TIMER_TOOL_NAME).map { name ->
+            TestAssistantTool(
+                name = name,
+                executor = { call, _ ->
+                    executedNames += call.name
+                    AssistantToolResult.Json("""{"ok":true,"tool":"${call.name}"}""")
+                },
+            )
+        }
+        val client = RecordingCompatClient(
+            listOf(
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(
+                        content =
+                            "$COMPAT_TEXT_TOOL_REQUEST_TOKEN" +
+                                "[{\"name\":\"list_notes\",\"arguments\":{}}," +
+                                "{\"name\":\"set_timer\",\"arguments\":{}}]",
+                    ),
+                ),
+                StubResponse.Events(OpenAiChatSseEvent.Delta(content = "Both done.")),
+            ),
+        )
+        val provider = provider(
+            client = client,
+            preset = ProviderCatalog.hermes,
+            toolExecutor = { error("Photo tool must not execute") },
+            additionalTools = tools,
+        )
+
+        provider.streamEvents(ChatRequest(userText = "Do both")).toList()
+
+        assertEquals(listOf(LIST_NOTES_TOOL_NAME, SET_TIMER_TOOL_NAME), executedNames)
+        assertEquals(2, client.requests.size)
+        val replayMessages = client.requests[1].messages
+        assertEquals(2, replayMessages.length())
+        val results = replayMessages.getJSONObject(1).getString("content")
+        // Both results in one plain-text message, in the order the model asked for them.
+        assertTrue(
+            results.indexOf(LIST_NOTES_TOOL_NAME) < results.indexOf(SET_TIMER_TOOL_NAME),
+        )
+    }
+
+    @Test
+    fun `Hermes unknown tool is rejected as malformed without executing it`() = runTest {
+        var executionCount = 0
+        val renderTool = TestAssistantTool(
+            name = RENDER_INK_PAGE_TOOL_NAME,
+            executor = { _, _ ->
+                executionCount += 1
+                AssistantToolResult.Json("{}")
+            },
+        )
+        val client = RecordingCompatClient(
+            listOf(
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(
+                        content =
+                            "$COMPAT_TEXT_TOOL_REQUEST_TOKEN" +
+                                "{\"name\":\"render_ink_page\",\"arguments\":{}}",
+                    ),
+                ),
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(content = "I could not complete that tool request."),
+                ),
+            ),
+        )
+        val provider = provider(
+            client = client,
+            preset = ProviderCatalog.hermes,
+            toolExecutor = { error("Photo tool must not execute") },
+            additionalTools = listOf(renderTool),
+        )
+
+        val events = provider.streamEvents(ChatRequest(userText = "Draw it")).toList()
+
+        assertEquals(0, executionCount)
+        val replayError = client.requests[1].messages.getJSONObject(1)
+        assertEquals("user", replayError.getString("role"))
+        assertTrue(replayError.getString("content").contains("malformed"))
+        assertFalse(replayError.getString("content").contains(RENDER_INK_PAGE_TOOL_NAME))
+        assertFalse(events.any { event -> event is AiProviderEvent.Failed })
+    }
+
+    @Test
+    fun `Hermes call without an arguments key still runs the tool`() = runTest {
+        val executed = mutableListOf<AssistantToolCall>()
+        val listNotes = TestAssistantTool(
+            name = LIST_NOTES_TOOL_NAME,
+            executor = { call, _ ->
+                executed += call
+                AssistantToolResult.Json("""{"notes":[]}""")
+            },
+        )
+        val client = RecordingCompatClient(
+            listOf(
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(
+                        content = "$COMPAT_TEXT_TOOL_REQUEST_TOKEN{\"name\":\"list_notes\"}",
+                    ),
+                ),
+                StubResponse.Events(OpenAiChatSseEvent.Delta(content = "Nothing saved yet.")),
+            ),
+        )
+        val provider = provider(
+            client = client,
+            preset = ProviderCatalog.hermes,
+            toolExecutor = { error("Photo tool must not execute") },
+            additionalTools = listOf(listNotes),
+        )
+
+        provider.streamEvents(ChatRequest(userText = "Read my notes")).toList()
+
+        assertEquals(listOf(LIST_NOTES_TOOL_NAME), executed.map(AssistantToolCall::name))
+        assertEquals("{}", executed.single().argumentsJson)
+    }
+
+    @Test
+    fun `Hermes malformed json follows the spoken safe error path`() = runTest {
+        var executionCount = 0
+        val client = RecordingCompatClient(
+            listOf(
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(
+                        content =
+                            "$COMPAT_TEXT_TOOL_REQUEST_TOKEN" +
+                                "{\"name\":\"take_photo\",\"arguments\":",
+                    ),
+                ),
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(content = "I could not complete that tool request."),
+                ),
+            ),
+        )
+        val provider = provider(
+            client = client,
+            preset = ProviderCatalog.hermes,
+            toolExecutor = {
+                executionCount += 1
+                AssistantToolResult.Image("image/jpeg", "AQID")
+            },
+        )
+
+        val events = provider.streamEvents(ChatRequest(userText = "Take a photo")).toList()
+
+        assertEquals(0, executionCount)
+        assertTrue(
+            client.requests[1].messages.getJSONObject(1).getString("content").contains("malformed"),
+        )
+        assertFalse(events.any { event -> event is AiProviderEvent.Failed })
+        assertEquals(
+            "I could not complete that tool request.",
+            events.filterIsInstance<AiProviderEvent.MessageDone>().single().message.content,
+        )
+    }
+
+    @Test
+    fun `Hermes tool errors replay plain text with the tool name and code`() = runTest {
+        val takeNote = TestAssistantTool(
+            name = TAKE_NOTE_TOOL_NAME,
+            executor = { _, _ -> AssistantToolResult.Error(TOOL_ERROR_INVALID_CALL) },
+        )
+        val client = RecordingCompatClient(
+            listOf(
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(
+                        content =
+                            "$COMPAT_TEXT_TOOL_REQUEST_TOKEN" +
+                                "{\"name\":\"take_note\",\"arguments\":{}}",
+                    ),
+                ),
+                StubResponse.Events(OpenAiChatSseEvent.Delta(content = "I could not save it.")),
+            ),
+        )
+        val provider = provider(
+            client = client,
+            preset = ProviderCatalog.hermes,
+            toolExecutor = { error("Photo tool must not execute") },
+            additionalTools = listOf(takeNote),
+        )
+
+        provider.streamEvents(ChatRequest(userText = "Save it")).toList()
+
+        assertTrue(
+            client.requests[1].messages
+                .getJSONObject(1)
+                .getString("content")
+                .contains("$TAKE_NOTE_TOOL_NAME: failed with error code $TOOL_ERROR_INVALID_CALL."),
+        )
+    }
+
+    @Test
+    fun `Hermes final replay control line ends without a deeper loop`() = runTest {
+        val takeNote = TestAssistantTool(name = TAKE_NOTE_TOOL_NAME)
+        val controlLine =
+            "$COMPAT_TEXT_TOOL_REQUEST_TOKEN{\"name\":\"take_note\",\"arguments\":{}}"
+        val client = RecordingCompatClient(
+            listOf(
+                StubResponse.Events(OpenAiChatSseEvent.Delta(content = controlLine)),
+                StubResponse.Events(OpenAiChatSseEvent.Delta(content = controlLine)),
+            ),
+        )
+        val provider = provider(
+            client = client,
+            preset = ProviderCatalog.hermes,
+            toolExecutor = { error("Photo tool must not execute") },
+            additionalTools = listOf(takeNote),
+        )
+
+        val events = provider.streamEvents(ChatRequest(userText = "Save it")).toList()
+
+        assertEquals(2, client.requests.size)
+        assertTrue(events.filterIsInstance<AiProviderEvent.TextDelta>().isEmpty())
+        assertEquals(
+            "The selected model could not use the Nexus phone tool result.",
+            events.filterIsInstance<AiProviderEvent.MessageDone>().single().message.content,
         )
     }
 

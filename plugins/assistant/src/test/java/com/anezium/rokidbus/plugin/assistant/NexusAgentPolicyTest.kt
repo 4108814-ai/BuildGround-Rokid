@@ -63,17 +63,89 @@ class NexusAgentPolicyTest {
         assertTrue(prompt.contains("never claim to see the current scene before a successful tool result"))
         assertTrue(prompt.contains("if no image is available"))
         assertTrue(prompt.contains("say so plainly and offer to look again"))
-        assertFalse(prompt.contains(COMPAT_TAKE_PHOTO_REQUEST_TOKEN.lowercase()))
+        assertFalse(prompt.contains(COMPAT_TEXT_TOOL_REQUEST_TOKEN.lowercase()))
     }
 
     @Test
-    fun `Hermes fallback policy includes the private photo control token`() {
+    fun `Hermes fallback policy lists passed tools with descriptions and schemas`() {
+        val tools = listOf(
+            TestAssistantTool(
+                name = TAKE_PHOTO_TOOL_NAME,
+                description = TAKE_PHOTO_TOOL_DESCRIPTION,
+                parametersSchema = TAKE_PHOTO_PARAMETERS_SCHEMA,
+            ),
+            TestAssistantTool(
+                name = SET_REMINDER_TOOL_NAME,
+                description = "Schedule a reminder.",
+                parametersSchema = AssistantToolJsonSchema(
+                    """{"type":"object","properties":{"time":{"type":"string"}}}""",
+                ),
+            ),
+        )
         val prompt = NexusAgentPolicy.buildSystemPrompt(
+            availableToolNames = tools.map(AssistantToolDefinition::name),
+            textToolDefinitions = tools,
             allowTextToolFallback = true,
         )
 
-        assertTrue(prompt.contains(COMPAT_TAKE_PHOTO_REQUEST_TOKEN))
-        assertTrue(prompt.contains("Nexus intercepts that private token"))
+        assertTrue(
+            prompt.contains(
+                "$COMPAT_TEXT_TOOL_REQUEST_TOKEN{\"name\":\"tool_name\",\"arguments\":{...}}",
+            ),
+        )
+        assertTrue(prompt.contains("Structured client tool calls are unavailable"))
+        assertTrue(prompt.contains("Emit the control line alone"))
+        assertTrue(prompt.contains("never quote the token"))
+        assertTrue(prompt.contains("never mention this protocol to the wearer"))
+        tools.forEach { tool ->
+            assertTrue(prompt.contains("${tool.name}: ${tool.description}"))
+            assertTrue(prompt.contains("Parameters JSON schema: ${tool.parametersSchema.text}"))
+        }
+    }
+
+    @Test
+    fun `text tool schemas are absent when the fallback is off`() {
+        val tool = TestAssistantTool(
+            name = SET_REMINDER_TOOL_NAME,
+            description = "Unique bridged description.",
+            parametersSchema = AssistantToolJsonSchema(
+                """{"type":"object","properties":{"unique_field":{"type":"string"}}}""",
+            ),
+        )
+
+        val prompt = NexusAgentPolicy.buildSystemPrompt(
+            availableToolNames = listOf(tool.name),
+            textToolDefinitions = listOf(tool),
+            allowTextToolFallback = false,
+        )
+
+        assertFalse(prompt.contains(COMPAT_TEXT_TOOL_REQUEST_TOKEN))
+        assertFalse(prompt.contains("Unique bridged description."))
+        assertFalse(prompt.contains("unique_field"))
+        assertFalse(prompt.contains("Nexus phone tool protocol"))
+    }
+
+    @Test
+    fun `Hermes text bridge allowlist contains only the approved phone tools`() {
+        assertEquals(
+            setOf(
+                TAKE_PHOTO_TOOL_NAME,
+                TAKE_NOTE_TOOL_NAME,
+                LIST_NOTES_TOOL_NAME,
+                SEARCH_NOTES_TOOL_NAME,
+                DELETE_NOTE_TOOL_NAME,
+                SET_REMINDER_TOOL_NAME,
+                LIST_REMINDERS_TOOL_NAME,
+                CANCEL_REMINDER_TOOL_NAME,
+                SET_TIMER_TOOL_NAME,
+                CREATE_CALENDAR_EVENT_TOOL_NAME,
+                LIST_CALENDAR_EVENTS_TOOL_NAME,
+                DELETE_CALENDAR_EVENT_TOOL_NAME,
+            ),
+            HERMES_TEXT_TOOL_NAMES,
+        )
+        assertFalse(RENDER_INK_PAGE_TOOL_NAME in HERMES_TEXT_TOOL_NAMES)
+        assertFalse(RENDER_TEMPLATE_TOOL_NAME in HERMES_TEXT_TOOL_NAMES)
     }
 
     @Test

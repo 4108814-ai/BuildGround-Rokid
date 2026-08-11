@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import org.json.JSONArray
+import org.json.JSONTokener
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -231,11 +232,11 @@ internal class OpenAiToolCallAccumulator {
 private data class OpenAiCompatPassResult(
     val text: String,
     val toolCalls: List<AssistantToolCall>,
-    val photoFallbackRequested: Boolean,
+    val textToolPayload: String?,
 )
 
-/** Keeps the private fallback token off the HUD even when SSE splits it across deltas. */
-private class ExactControlTokenStreamFilter(
+/** Keeps a private control line off the HUD even when SSE splits it across deltas. */
+private class ControlLineStreamFilter(
     private val token: String,
 ) {
     private val pending = StringBuilder()
@@ -245,28 +246,30 @@ private class ExactControlTokenStreamFilter(
         if (passThrough) return delta
         pending.append(delta)
         val candidate = pending.toString().trimStart()
-        val canStillBeControlToken = token.startsWith(candidate) ||
-            (candidate.startsWith(token) && candidate.removePrefix(token).isBlank())
-        if (canStillBeControlToken) return ""
+        if (token.startsWith(candidate) || candidate.startsWith(token)) return ""
         passThrough = true
         return pending.toString().also { pending.clear() }
     }
 
-    fun finish(): ControlTokenFilterResult {
-        if (passThrough) return ControlTokenFilterResult(text = "", matched = false)
+    fun finish(): ControlLineFilterResult {
+        if (passThrough) return ControlLineFilterResult(text = "", payload = null)
         val remaining = pending.toString()
         pending.clear()
-        return if (remaining.trim() == token) {
-            ControlTokenFilterResult(text = "", matched = true)
+        val candidate = remaining.trimStart()
+        return if (candidate.startsWith(token)) {
+            ControlLineFilterResult(
+                text = "",
+                payload = candidate.removePrefix(token).trim(),
+            )
         } else {
-            ControlTokenFilterResult(text = remaining, matched = false)
+            ControlLineFilterResult(text = remaining, payload = null)
         }
     }
 }
 
-private data class ControlTokenFilterResult(
+private data class ControlLineFilterResult(
     val text: String,
-    val matched: Boolean,
+    val payload: String?,
 )
 
 internal class OpenAiCompatProvider(
@@ -291,13 +294,19 @@ internal class OpenAiCompatProvider(
 
         try {
             val visionSupported = supportsVision()
-            val allowPhotoFallback = backendProvider() == ProviderBackend.HERMES
+            val useTextToolBridge = backendProvider() == ProviderBackend.HERMES
             val toolPhase = toolRegistry.newExecutionPhase(
                 AssistantProviderFeatures(
                     supportsTools = true,
                     supportsVision = visionSupported,
                 ),
             )
+            val textToolDefinitions = toolPhase.availableDefinitions.filter { definition ->
+                definition.name in HERMES_TEXT_TOOL_NAMES
+            }
+            val textToolNames = textToolDefinitions.mapTo(mutableSetOf()) { definition ->
+                definition.name
+            }
             val effectiveRequest = request.forVisionSupport(visionSupported)
             val modelId = request.model ?: modelProvider()
             val originalMessages = effectiveRequest.toChatCompletionMessages()
@@ -309,14 +318,14 @@ internal class OpenAiCompatProvider(
                 val response = StringBuilder()
                 val toolCalls = OpenAiToolCallAccumulator()
                 val thinkTagFilter = ThinkTagStreamFilter()
-                val photoFallbackFilter = if (allowPhotoFallback) {
-                    ExactControlTokenStreamFilter(COMPAT_TAKE_PHOTO_REQUEST_TOKEN)
+                val textToolFilter = if (useTextToolBridge) {
+                    ControlLineStreamFilter(COMPAT_TEXT_TOOL_REQUEST_TOKEN)
                 } else {
                     null
                 }
 
                 suspend fun appendVisible(delta: String) {
-                    val visible = photoFallbackFilter?.filter(delta) ?: delta
+                    val visible = textToolFilter?.filter(delta) ?: delta
                     if (visible.isEmpty()) return
                     response.append(visible)
                     emit(AiProviderEvent.TextDelta(messageId, visible))
@@ -349,8 +358,8 @@ internal class OpenAiCompatProvider(
                 }
                 val remaining = thinkTagFilter.finish()
                 if (remaining.isNotEmpty()) appendVisible(remaining)
-                val controlResult = photoFallbackFilter?.finish()
-                    ?: ControlTokenFilterResult(text = "", matched = false)
+                val controlResult = textToolFilter?.finish()
+                    ?: ControlLineFilterResult(text = "", payload = null)
                 if (controlResult.text.isNotEmpty()) {
                     response.append(controlResult.text)
                     emit(AiProviderEvent.TextDelta(messageId, controlResult.text))
@@ -358,15 +367,20 @@ internal class OpenAiCompatProvider(
                 return OpenAiCompatPassResult(
                     text = cleanCompatResponse(response.toString()),
                     toolCalls = toolCalls.completeCalls(),
-                    photoFallbackRequested = controlResult.matched,
+                    textToolPayload = controlResult.payload,
                 )
             }
 
+            val firstPassToolDefinitions = if (useTextToolBridge) {
+                emptyList()
+            } else {
+                toolPhase.availableDefinitions
+            }
             val firstPass = try {
-                streamPass(originalMessages, toolDefinitions = toolPhase.availableDefinitions)
+                streamPass(originalMessages, toolDefinitions = firstPassToolDefinitions)
             } catch (error: OpenAiCompatHttpException) {
                 if (
-                    toolPhase.availableDefinitions.isEmpty() ||
+                    firstPassToolDefinitions.isEmpty() ||
                     error.statusCode !in 400..499
                 ) {
                     throw error
@@ -375,7 +389,7 @@ internal class OpenAiCompatProvider(
             }
             currentCoroutineContext().ensureActive()
 
-            val finalText = if (firstPass.toolCalls.isNotEmpty()) {
+            val finalText = if (!useTextToolBridge && firstPass.toolCalls.isNotEmpty()) {
                 emit(AiProviderEvent.TextReset(messageId))
                 val replayMessages = originalMessages.copyJsonArray()
                 replayMessages.put(assistantToolCallMessage(firstPass.text, firstPass.toolCalls))
@@ -402,46 +416,51 @@ internal class OpenAiCompatProvider(
                     )
                 }
                 streamPass(replayMessages, toolDefinitions = emptyList()).text
-            } else if (firstPass.photoFallbackRequested) {
+            } else if (useTextToolBridge && firstPass.textToolPayload != null) {
                 emit(AiProviderEvent.TextReset(messageId))
                 val replayMessages = originalMessages.copyJsonArray()
-                val result = toolPhase.execute(
-                    AssistantToolCall(
-                        callId = "fallback_take_photo",
-                        name = TAKE_PHOTO_TOOL_NAME,
-                        argumentsJson = "{}",
-                    ),
-                )
-                currentCoroutineContext().ensureActive()
-                when (result) {
-                    is AssistantToolResult.Image -> replayMessages.put(
+                val calls = parseTextToolCalls(firstPass.textToolPayload, textToolNames)
+                if (calls == null) {
+                    replayMessages.put(
                         JSONObject()
                             .put("role", "user")
-                            .put(
-                                "content",
-                                chatCompletionContent(
-                                    PHOTO_TAKEN_MESSAGE,
-                                    listOf(PhotoAttachment(result.mimeType, result.base64)),
+                            .put("content", TEXT_TOOL_CALL_MALFORMED_MESSAGE),
+                    )
+                } else {
+                    // A backend without structured tool calls has no reason to accept the
+                    // structured transcript either, so the results ride back as plain text.
+                    var capturedPhoto: PhotoAttachment? = null
+                    val results = StringBuilder(TEXT_TOOL_RESULTS_MESSAGE)
+                    calls.forEach { call ->
+                        val result = toolPhase.execute(call)
+                        currentCoroutineContext().ensureActive()
+                        if (result is AssistantToolResult.Image) {
+                            capturedPhoto = PhotoAttachment(result.mimeType, result.base64)
+                        }
+                        results.append("\n- ").append(textToolResultLine(call, result))
+                    }
+                    replayMessages.put(
+                        JSONObject()
+                            .put("role", "user")
+                            .put("content", results.toString()),
+                    )
+                    capturedPhoto?.let { photo ->
+                        replayMessages.put(
+                            JSONObject()
+                                .put("role", "user")
+                                .put(
+                                    "content",
+                                    chatCompletionContent(
+                                        PHOTO_TAKEN_MESSAGE,
+                                        listOf(photo),
+                                    ),
                                 ),
-                            ),
-                    )
-                    is AssistantToolResult.Error -> replayMessages.put(
-                        JSONObject()
-                            .put("role", "user")
-                            .put(
-                                "content",
-                                "$PHOTO_CAPTURE_FAILED_MESSAGE ${result.code}.",
-                            ),
-                    )
-                    is AssistantToolResult.Json -> replayMessages.put(
-                        JSONObject()
-                            .put("role", "user")
-                            .put("content", PHOTO_CAPTURE_FAILED_MESSAGE),
-                    )
+                        )
+                    }
                 }
                 val finalPass = streamPass(replayMessages, toolDefinitions = emptyList())
-                if (finalPass.photoFallbackRequested) {
-                    PHOTO_COULD_NOT_BE_READ_MESSAGE
+                if (finalPass.textToolPayload != null) {
+                    TEXT_TOOL_RESULT_COULD_NOT_BE_USED_MESSAGE
                 } else {
                     finalPass.text
                 }
@@ -505,6 +524,39 @@ private fun assistantToolCallMessage(
             },
         )
 
+private fun parseTextToolCalls(
+    payload: String,
+    allowedNames: Set<String>,
+): List<AssistantToolCall>? = runCatching {
+    val tokener = JSONTokener(payload)
+    val value = tokener.nextValue()
+    require(tokener.nextClean() == '\u0000')
+    val objects = when (value) {
+        is JSONObject -> listOf(value)
+        is JSONArray -> {
+            require(value.length() > 0)
+            (0 until value.length()).map { index -> value.get(index) as JSONObject }
+        }
+        else -> error("Text tool payload must be an object or array.")
+    }
+    objects.mapIndexed { index, item ->
+        val name = item.opt("name") as? String
+            ?: error("Text tool name must be a string.")
+        require(name in allowedNames)
+        // A tool that takes nothing is usually called without an arguments key at all.
+        val arguments = when (val raw = item.opt("arguments")) {
+            null, JSONObject.NULL -> JSONObject()
+            is JSONObject -> raw
+            else -> error("Text tool arguments must be an object.")
+        }
+        AssistantToolCall(
+            callId = "text_tool_$index",
+            name = name,
+            argumentsJson = arguments.toString(),
+        )
+    }
+}.getOrNull()
+
 private fun toolResultMessage(
     call: AssistantToolCall,
     result: AssistantToolResult,
@@ -534,6 +586,15 @@ private fun toolResultMessage(
         .put("role", "tool")
         .put("tool_call_id", call.callId)
         .put("content", content.toString())
+}
+
+private fun textToolResultLine(
+    call: AssistantToolCall,
+    result: AssistantToolResult,
+): String = when (result) {
+    is AssistantToolResult.Error -> "${call.name}: failed with error code ${result.code}."
+    is AssistantToolResult.Image -> "${call.name}: the photo is attached to the next message."
+    is AssistantToolResult.Json -> "${call.name}: ${result.text}"
 }
 
 private fun JSONArray.copyJsonArray(): JSONArray = JSONArray().also { copy ->
@@ -570,8 +631,13 @@ private const val PHOTO_TAKEN_MESSAGE =
     "Photo just taken through the glasses camera for the current question. " +
         "The image is attached now; do not request another photo."
 
-private const val PHOTO_CAPTURE_FAILED_MESSAGE =
-    "Nexus could not take the requested glasses photo. Answer without current visual access. Error:"
+private const val TEXT_TOOL_RESULTS_MESSAGE =
+    "Nexus ran the phone tools you asked for and these are their results. Answer the wearer " +
+        "from them, and do not send another control line for this question."
 
-private const val PHOTO_COULD_NOT_BE_READ_MESSAGE =
-    "The selected model could not read the photo from the glasses camera."
+private const val TEXT_TOOL_CALL_MALFORMED_MESSAGE =
+    "The Nexus phone tool call was malformed. Do not claim that any requested action succeeded; " +
+        "tell the wearer the tool request could not be completed."
+
+private const val TEXT_TOOL_RESULT_COULD_NOT_BE_USED_MESSAGE =
+    "The selected model could not use the Nexus phone tool result."
