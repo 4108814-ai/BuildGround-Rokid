@@ -39,6 +39,12 @@
   surface. Notice windows keep their normal screen-on flag, while the
   Assistant's scoped wake lock covers the band-to-card or band-to-Ink handover
   and is released when that episode ends.
+- **Relay keeps delivering after days, even on phones that kill background
+  apps.** Some Android systems (ColorOS in particular) quietly kill the
+  process that listens for notifications, and Relay went silent until the app
+  was opened again — typically a day or two after setup, with every battery
+  setting already correct. The hub now holds a guardian binding on the
+  listener plugin, so the system restarts it instead of leaving it dead.
 - **Relay conversations are readable and live.** Inbox threads open as native
   full-screen reader documents, and a thread already on screen refreshes in
   place when its notification gains a message. Scroll position is preserved,
