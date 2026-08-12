@@ -131,6 +131,22 @@ class ConsoleActivity : Activity() {
                         LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
                     )
                     addView(
+                        NexusUi.metaLabel(this@ConsoleActivity, "RUNTIME", NexusUi.GREEN).apply {
+                            background = NexusUi.pressed(this@ConsoleActivity, Color.TRANSPARENT, 10)
+                            setPadding(
+                                NexusUi.dp(this@ConsoleActivity, 10),
+                                NexusUi.dp(this@ConsoleActivity, 8),
+                                NexusUi.dp(this@ConsoleActivity, 10),
+                                NexusUi.dp(this@ConsoleActivity, 8),
+                            )
+                            isClickable = true
+                            isFocusable = true
+                            setOnClickListener {
+                                BusHubService.startHardwareGateZero(applicationContext)
+                            }
+                        },
+                    )
+                    addView(
                         NexusUi.metaLabel(this@ConsoleActivity, "HUD TEST", NexusUi.GREEN).apply {
                             background = NexusUi.pressed(
                                 this@ConsoleActivity,

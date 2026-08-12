@@ -4,7 +4,9 @@ Status: **hardware compatibility gate pending**. Source support is not evidence 
 
 ## Baseline build record
 
-The repository requires the checked-in Gradle 9.5.1 wrapper, JDK 17, the configured Android SDK, and the real `CxrGlobal` dependency. The wrapper initially encountered an HTTP 403 proxy response but was subsequently downloaded and verified as Gradle 9.5.1. The build still cannot proceed: only JDK 25 is installed, `local.properties` is absent, and `../CxrGlobal` is absent. The observed Gradle failure is `SDK location not found`. Repository policy forbids creating or rewriting any of those machine-owned inputs.
+The repository requires the checked-in Gradle 9.5.1 wrapper, JDK 17, a configured Android SDK with platform 36/build tools, and the real `CxrGlobal` dependency. JDK 17.0.2 and Gradle 9.5.1 are available. The Android SDK is not installed or exposed through `ANDROID_HOME`/`ANDROID_SDK_ROOT`, and downloading the official command-line tools is rejected by the environment proxy with HTTP 403. The observed Gradle failure is therefore `SDK location not found`; repository policy forbids creating a private SDK or machine-specific `local.properties` as a workaround.
+
+`../CxrGlobal` is **optional**, not a baseline prerequisite. `phone-hub` declares the real Maven coordinate `com.example.cxrglobal:lib:0.2.0`; the sibling composite in `settings.gradle.kts` substitutes it only when that directory exists. Maven resolution must be attempted first after the Android SDK is configured. Only an observed dependency-resolution error may establish a `CxrGlobal` blocker; no fake or stub is permitted.
 
 Expected unchanged artifacts are:
 
@@ -15,6 +17,21 @@ Expected unchanged artifacts are:
 | `:plugin-assistant` | `com.anezium.rokidbus.plugin.assistant` | 1.4.2 (9) | min 30, target 36 |
 
 No APK or hash is reported until a build actually completes.
+
+Commands attempted with `JAVA_HOME` and `PATH` pointing to JDK 17.0.2 were:
+
+```sh
+./gradlew :phone-hub:testDebugUnitTest :phone-hub:assembleDebug \
+  :glasses-hub:testDebugUnitTest :glasses-hub:assembleDebug \
+  :plugin-assistant:testDebugUnitTest :plugin-assistant:assembleDebug
+./gradlew :ink-engine:test --no-daemon
+```
+
+The Android command stopped during task dependency calculation with `SDK location not found`. The
+pure Kotlin test reached dependency resolution, but every declared remote repository returned HTTP
+403 for ordinary Kotlin/JSON artifacts. Consequently no Android task, unit test, APK metadata, APK
+hash, or signing-certificate hash can be reported as completed. `CxrGlobal` resolution was not
+reached and is not listed as a blocker.
 
 ## Bootstrap flow and diagnostic boundaries
 
@@ -33,7 +50,9 @@ No APK or hash is reported until a build actually completes.
 | Package start | `openGlassesAppOnLens` / `startGlassesSetupOnLens` | Calls vendor `appStart` | Callback is only success/failure. |
 | Glasses runtime | `RokidBusAccessibilityService.onServiceConnected` then `GlassesHub.start` | Starts overlays, CXR-S, and SPP server | A package replace may disable Accessibility before this point. The phone cannot inspect that setting through the vendor install API. |
 | Handshake | CXR `/hub/probe`, link callbacks, and SPP frames | Establishes CXR control and/or SPP data link | Phone console separates CXR, glass Bluetooth, and Nexus SPP states. |
-| HUD gate | Console **HUD TEST** -> `BusHubService.startHardwareGate` | Sends an ordinary card over existing routing | The phone reports `hardware_gate_sent` only for transport acceptance. The wearer must confirm that `NEXUS TEST OK` rendered on real glasses. |
+| Gate 0: install query | Console **RUNTIME** -> `runHardwareGateZero` | Calls vendor `appIsInstalled` | Reports `INSTALLED`, `NOT_INSTALLED`, or `UNKNOWN`; `INSTALLED` is Boolean-only until the glasses runtime reports its own metadata. |
+| Gate 0: runtime | `appStart(MainActivity)` followed by glasses `/hub/probe` | Requests package start and waits for evidence emitted by the running hub | `appStart=true` is not proof. Only a received hub probe records `gate0_runtime state=RUNNING`. |
+| Gate 1: HUD | Console **HUD TEST** -> `BusHubService.startHardwareGate` | Sends an ordinary card over existing routing | Rejected unless a recent Gate 0 runtime probe exists. The wearer must still confirm that `NEXUS TEST OK` rendered on real glasses. |
 
 ### Critical blind spot
 
@@ -66,7 +85,8 @@ The phone console now emits structured, secret-free events:
 - `glasses_apk_download_progress`, `glasses_apk_verified`, `glasses_apk_upload_start`;
 - `glasses_install_invoked`, `glasses_install_dispatch_return`, `glasses_install_callback`, `glasses_install_exception`, and delayed `glasses_post_install_query` checks;
 - glasses-local `glasses_package_state` with package/version/signer/install-source/platform metadata when the hub process can start;
-- `hardware_gate_waiting`, `hardware_gate_sent`, or `hardware_gate_failed`.
+- Gate 0 `gate0_installation`, `gate0_start_requested`, and `gate0_runtime`;
+- Gate 1 `gate1_rejected`, `hardware_gate_waiting`, `hardware_gate_sent`, or `hardware_gate_failed`.
 
 Tokens, Bluetooth addresses, serial numbers, Wi-Fi identifiers, transcripts, and user content are not logged.
 
@@ -78,18 +98,20 @@ These steps require APKs produced by a successful trusted build; none were produ
 2. Open Nexus on the phone and approve Bluetooth/notification permissions when Android asks.
 3. Complete **Hi Rokid authorization** from Nexus. Do not send authorization tokens or pairing codes to anyone.
 4. Open **Settings -> Console** on the phone.
-5. Confirm whether the console contains `cxr_link_state connected=true` or `spp_state connected=true`.
-6. Tap **HUD TEST** in the Console header.
-7. Look at the glasses. The required result is a card reading **NEXUS TEST OK**.
-8. If it appears, take one photo of the glasses display and tap **SHARE** in Console to send the log.
-9. If it does not appear, wait ten seconds, tap **SHARE**, and send the complete console log plus a photo/video of what the glasses show.
-10. If an install/update is attempted, start a screen recording before tapping **Update**. Send the recording and the console log. Do not repeatedly retry or uninstall until the log is reviewed.
+5. Tap **RUNTIME** once. This is Gate 0; do not tap HUD TEST yet.
+6. If the Console reports `gate0_installation state=NOT_INSTALLED` or `UNKNOWN`, stop and share the log. Installer/bootstrap diagnosis remains the primary task.
+7. If it reports `INSTALLED`, wait up to ten seconds for `gate0_runtime state=RUNNING evidence=hub_probe`. `gate0_start_requested success=true` alone is not sufficient.
+8. Only after `gate0_runtime state=RUNNING`, tap **HUD TEST**. This is Gate 1.
+9. Look at the glasses. The required result is a card reading **NEXUS TEST OK**.
+10. If it appears, take one photo of the glasses display and tap **SHARE** in Console to send the log.
+11. If it does not appear, wait ten seconds, tap **SHARE**, and send the complete console log plus a photo/video of what the glasses show.
+12. If an install/update is attempted, start a screen recording before tapping **Update**. Send the recording and the console log. Do not repeatedly retry or uninstall until the log is reviewed.
 
-A `hardware_gate_sent` line alone is not a pass. Gate 1 passes only when a person observes **NEXUS TEST OK** on the RV101 Global display.
+Gate 0 passes only when installation state is `INSTALLED` and a real glasses-originated hub probe proves the runtime is `RUNNING`. A `hardware_gate_sent` line alone is not a Gate 1 pass; Gate 1 passes only when a person observes **NEXUS TEST OK** on the RV101 Global display.
 
 ## Hardware gates and architecture decision
 
-Gate 1 requires physical confirmation of phone-to-glasses transport, a running glasses hub, and HUD render. Gate 2 remains entirely **NOT TESTED** until Gate 1 passes: touchpad return traffic, STT, Russian STT, TTS, Russian TTS through glasses speakers, AI-button callback, and reconnect recovery.
+Gate 0 requires confirmed installation plus a running glasses hub. Gate 1 then requires physical confirmation of phone-to-glasses transport and HUD render. Gate 2 remains entirely **NOT TESTED** until Gate 1 passes: touchpad return traffic, STT, Russian STT, TTS, Russian TTS through glasses speakers, AI-button callback, and reconnect recovery.
 
 Preliminary recommendation is **Option A (Nexus Runtime)** only if Gate 1 passes reproducibly after disconnect/reconnect. If independent installation succeeds but Nexus pairing does not, repair the provisioning layer before considering a fork. Choose **Option B (minimal bridge)** only after logs establish a fundamental runtime/provisioning incompatibility; a new glasses APK is otherwise exposed to the same installer restriction.
 

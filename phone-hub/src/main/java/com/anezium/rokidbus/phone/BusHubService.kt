@@ -135,6 +135,7 @@ private const val ACTION_LOG = "com.anezium.rokidbus.phone.LOG"
 private const val ACTION_SET_TOKEN = "com.anezium.rokidbus.phone.SET_TOKEN"
 private const val ACTION_STOP = "com.anezium.rokidbus.phone.STOP"
 private const val ACTION_DEBUG_IMAGE = "com.anezium.rokidbus.phone.DEBUG_IMAGE_SURFACE"
+private const val ACTION_HARDWARE_GATE_ZERO = "com.anezium.rokidbus.phone.HARDWARE_GATE_ZERO"
 private const val ACTION_HARDWARE_GATE = "com.anezium.rokidbus.phone.HARDWARE_GATE_SURFACE"
 private const val ACTION_DEBUG_MANUAL_PAIRING = "com.anezium.rokidbus.phone.DEBUG_MANUAL_PAIRING"
 private const val ACTION_INSTALL_GLASSES_APP = "com.anezium.rokidbus.phone.INSTALL_GLASSES_APP"
@@ -157,6 +158,7 @@ private const val PREF_LAST_NOTIFIED_PLUGIN_UPDATES = "last-notified-plugin-upda
 private const val LOCAL_BINARY_MAX_BYTES = 512 * 1024
 private const val GLASSES_RELEASE_CHECK_INTERVAL_MILLIS = 4L * 60L * 60L * 1000L
 private const val BACKGROUND_UPDATE_CHECK_INTERVAL_MILLIS = 60L * 60L * 1000L
+private const val HARDWARE_GATE_RUNTIME_PROBE_MAX_AGE_MS = 60_000L
 private const val AUDIO_LEASE_ACQUIRE = "/audio/lease/acquire"
 private const val AUDIO_LEASE_RELEASE = "/audio/lease/release"
 private const val AUDIO_FRAMES = "/audio/frames"
@@ -254,6 +256,7 @@ class BusHubService : Service() {
     private val externalSurfaceSeq = ConcurrentHashMap<String, AtomicLong>()
     private val debugImageSeq = AtomicLong(System.currentTimeMillis())
     private val hardwareGateSeq = AtomicLong(System.currentTimeMillis())
+    @Volatile private var lastGlassesRuntimeProbeAtMs = 0L
     private val externalSurfaceIds = ConcurrentHashMap<String, MutableSet<String>>()
     private val inkSurfaceCoordinator = PhoneInkSurfaceCoordinator(
         postResult = { action -> inkResultHandler.post { action() } },
@@ -917,6 +920,15 @@ class BusHubService : Service() {
                     log("diag event=hardware_gate_rejected reason=release_build")
                 }
             }
+            ACTION_HARDWARE_GATE_ZERO -> {
+                if (isDebuggableBuild()) {
+                    enableHub()
+                    startCxrIfTokenAvailable()
+                    executor.execute(::runHardwareGateZero)
+                } else {
+                    log("diag event=gate0_rejected reason=release_build")
+                }
+            }
             ACTION_DEBUG_MANUAL_PAIRING -> {
                 if (isDebuggableBuild()) {
                     enableHub()
@@ -1317,7 +1329,8 @@ class BusHubService : Service() {
     private fun routeRemote(envelope: BusEnvelope) {
         if (envelope.path == "/hub/probe") {
             recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
-            log("hub probe received from glasses")
+            lastGlassesRuntimeProbeAtMs = SystemClock.elapsedRealtime()
+            log("diag event=gate0_runtime state=RUNNING evidence=hub_probe")
             return
         }
         if (envelope.path == BusPaths.HUB_CAPABILITIES) {
@@ -5921,6 +5934,11 @@ class BusHubService : Service() {
     }
 
     private fun pushHardwareGateWhenReady() {
+        val probeAgeMs = SystemClock.elapsedRealtime() - lastGlassesRuntimeProbeAtMs
+        if (lastGlassesRuntimeProbeAtMs == 0L || probeAgeMs > HARDWARE_GATE_RUNTIME_PROBE_MAX_AGE_MS) {
+            log("diag event=gate1_rejected reason=GATE0_RUNTIME_NOT_CONFIRMED")
+            return
+        }
         repeat(20) { attempt ->
             if (isCxrUp() || output != null) {
                 val envelope = BusEnvelope(
@@ -5948,6 +5966,56 @@ class BusHubService : Service() {
             sleepQuietly(250L)
         }
         log("diag event=hardware_gate_failed reason=NO_LINK")
+    }
+
+    private fun runHardwareGateZero() {
+        val probeAgeMs = SystemClock.elapsedRealtime() - lastGlassesRuntimeProbeAtMs
+        if (lastGlassesRuntimeProbeAtMs != 0L && probeAgeMs <= HARDWARE_GATE_RUNTIME_PROBE_MAX_AGE_MS) {
+            log("diag event=gate0_installation state=INSTALLED evidence=runtime_probe")
+            log("diag event=gate0_runtime state=RUNNING evidence=hub_probe")
+            return
+        }
+        val link = cxrLink
+        if (!isCxrUp() || link == null) {
+            log("diag event=gate0_installation state=UNKNOWN reason=CXR_LINK_DOWN")
+            return
+        }
+        runCatching {
+            link.appIsInstalled(
+                object : IGlassAppCbk {
+                    override fun onQueryAppResult(installed: Boolean) {
+                        if (!installed) {
+                            log("diag event=gate0_installation state=NOT_INSTALLED evidence=vendor_query")
+                            return
+                        }
+                        log("diag event=gate0_installation state=INSTALLED evidence=vendor_query detail=boolean_only")
+                        runCatching {
+                            link.appStart(
+                                "$GLASSES_HUB_PACKAGE.MainActivity",
+                                object : IGlassAppCbk {
+                                    override fun onOpenAppResult(success: Boolean) {
+                                        log("diag event=gate0_start_requested success=$success")
+                                        if (!success) {
+                                            log("diag event=gate0_runtime state=UNKNOWN reason=APP_START_NOT_CONFIRMED")
+                                        }
+                                    }
+                                },
+                            )
+                        }.onFailure { failure ->
+                            log(
+                                "diag event=gate0_runtime state=UNKNOWN reason=APP_START_EXCEPTION " +
+                                    "type=${failure.javaClass.simpleName}",
+                            )
+                        }
+                    }
+                },
+            )
+        }.onFailure { failure ->
+            log(
+                "diag event=gate0_installation state=UNKNOWN reason=QUERY_EXCEPTION " +
+                    "type=${failure.javaClass.simpleName}",
+            )
+        }
     }
 
     private fun pushDebugImage() {
@@ -6165,6 +6233,19 @@ class BusHubService : Service() {
                 return
             }
             val intent = Intent(context, BusHubService::class.java).setAction(ACTION_HARDWARE_GATE)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
+
+        fun startHardwareGateZero(context: android.content.Context) {
+            if (!canRunHub(context)) {
+                Log.i(TAG, "startHardwareGateZero skipped: BLUETOOTH_CONNECT permission not granted")
+                return
+            }
+            val intent = Intent(context, BusHubService::class.java).setAction(ACTION_HARDWARE_GATE_ZERO)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
