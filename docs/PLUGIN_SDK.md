@@ -291,6 +291,13 @@ shell fields and false `emphasis` are omitted from the wire payload.
 `showCard`; there is no reader-specific capability or grant. Call it again on
 the same session to replace the complete document.
 
+Reader input is renderer-owned, and the allow list is narrower than a card's.
+Directional keys and media next/previous scroll the document on the glasses and
+never reach `onNexusInput`; only ENTER, DPAD_CENTER, and BACK are forwarded to
+the surface callback. So a reader that models a selection index is writing dead
+code: there is no per-segment focus, and the keys that would move one never
+arrive.
+
 `anchor` says where reading begins, and the distinction it draws is
 stream-shaped versus document-shaped content. `BOTTOM`, the default, suits a
 chat, a log, an agent transcript: the surface opens at the end, an update stays
@@ -299,10 +306,6 @@ the previous offset. `TOP` suits an article, a recipe, a README, a saved note:
 the surface opens at the start and never follows the tail, so an update always
 restores where the wearer had scrolled to. Sending `TOP` needs glasses hub
 1.4.3 or newer; an older hub ignores it and opens at the bottom as before.
-
-Reader navigation is renderer-owned. Directional keys and media next/previous
-scroll locally and never reach `onNexusInput`; confirmation (ENTER or
-DPAD_CENTER) and BACK keep the ordinary surface callback behavior.
 
 ### Live activities
 
