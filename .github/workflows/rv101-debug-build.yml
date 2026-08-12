@@ -1,0 +1,109 @@
+name: RV101 debug APK build
+
+on:
+  push:
+    branches:
+      - codex
+    paths:
+      - '.github/workflows/rv101-debug-build.yml'
+      - 'phone-hub/**'
+      - 'glasses-hub/**'
+      - 'plugins/assistant/**'
+      - 'plugin-assistant/**'
+      - 'shared/**'
+      - 'bus-client/**'
+      - 'ink-engine/**'
+      - 'settings.gradle.kts'
+      - 'build.gradle.kts'
+      - 'gradle/**'
+      - 'gradle.properties'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-debug-apks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RokidNexus
+
+    steps:
+      - name: Check out BuildGround-Rokid
+        uses: actions/checkout@v6
+        with:
+          path: RokidNexus
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: v0.2.3
+          path: CxrGlobal
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build debug APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew \
+            :phone-hub:assembleDebug \
+            :glasses-hub:assembleDebug \
+            :plugin-assistant:assembleDebug
+
+      - name: Show APK metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          find phone-hub/build/outputs/apk/debug glasses-hub/build/outputs/apk/debug plugin-assistant/build/outputs/apk/debug \
+            -maxdepth 1 -type f -name '*.apk' -print -exec sha256sum {} \;
+
+      - name: Upload phone debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: rv101-phone-hub-debug
+          path: RokidNexus/phone-hub/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload glasses debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: rv101-glasses-hub-debug
+          path: RokidNexus/glasses-hub/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload assistant debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: rv101-plugin-assistant-debug
+          path: RokidNexus/plugin-assistant/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew \
+            :phone-hub:testDebugUnitTest \
+            :glasses-hub:testDebugUnitTest \
+            :plugin-assistant:testDebugUnitTest
