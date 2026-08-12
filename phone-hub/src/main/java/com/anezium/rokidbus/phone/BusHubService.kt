@@ -159,6 +159,8 @@ private const val LOCAL_BINARY_MAX_BYTES = 512 * 1024
 private const val GLASSES_RELEASE_CHECK_INTERVAL_MILLIS = 4L * 60L * 60L * 1000L
 private const val BACKGROUND_UPDATE_CHECK_INTERVAL_MILLIS = 60L * 60L * 1000L
 private const val HARDWARE_GATE_RUNTIME_PROBE_MAX_AGE_MS = 60_000L
+private const val GLASSES_RUNTIME_EVIDENCE_HUB_PROBE = "hub_probe"
+private const val GLASSES_RUNTIME_EVIDENCE_HUB_CAPABILITIES = "hub_capabilities"
 private const val AUDIO_LEASE_ACQUIRE = "/audio/lease/acquire"
 private const val AUDIO_LEASE_RELEASE = "/audio/lease/release"
 private const val AUDIO_FRAMES = "/audio/frames"
@@ -175,6 +177,18 @@ private const val CXR_AUDIO_PCM = 1
 private const val AUDIO_SAMPLE_RATE = 16_000
 private const val AUDIO_CHANNELS = 1
 private const val AUDIO_ENCODING = "pcm16le"
+
+internal fun glassesRuntimeEvidenceForPath(path: String): String? = when (path) {
+    "/hub/probe" -> GLASSES_RUNTIME_EVIDENCE_HUB_PROBE
+    BusPaths.HUB_CAPABILITIES -> GLASSES_RUNTIME_EVIDENCE_HUB_CAPABILITIES
+    else -> null
+}
+
+internal fun hasRecentGlassesRuntimeEvidence(
+    lastEvidenceAtMs: Long,
+    nowMs: Long,
+    maxAgeMs: Long,
+): Boolean = lastEvidenceAtMs != 0L && nowMs - lastEvidenceAtMs in 0L..maxAgeMs
 
 class BusHubService : Service() {
     private data class Registration(
@@ -1327,10 +1341,12 @@ class BusHubService : Service() {
     }
 
     private fun routeRemote(envelope: BusEnvelope) {
+        glassesRuntimeEvidenceForPath(envelope.path)?.let { evidence ->
+            lastGlassesRuntimeProbeAtMs = SystemClock.elapsedRealtime()
+            log("diag event=gate0_runtime state=RUNNING evidence=$evidence")
+        }
         if (envelope.path == "/hub/probe") {
             recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
-            lastGlassesRuntimeProbeAtMs = SystemClock.elapsedRealtime()
-            log("diag event=gate0_runtime state=RUNNING evidence=hub_probe")
             return
         }
         if (envelope.path == BusPaths.HUB_CAPABILITIES) {
@@ -5934,8 +5950,12 @@ class BusHubService : Service() {
     }
 
     private fun pushHardwareGateWhenReady() {
-        val probeAgeMs = SystemClock.elapsedRealtime() - lastGlassesRuntimeProbeAtMs
-        if (lastGlassesRuntimeProbeAtMs == 0L || probeAgeMs > HARDWARE_GATE_RUNTIME_PROBE_MAX_AGE_MS) {
+        if (!hasRecentGlassesRuntimeEvidence(
+                lastEvidenceAtMs = lastGlassesRuntimeProbeAtMs,
+                nowMs = SystemClock.elapsedRealtime(),
+                maxAgeMs = HARDWARE_GATE_RUNTIME_PROBE_MAX_AGE_MS,
+            )
+        ) {
             log("diag event=gate1_rejected reason=GATE0_RUNTIME_NOT_CONFIRMED")
             return
         }
@@ -5969,8 +5989,12 @@ class BusHubService : Service() {
     }
 
     private fun runHardwareGateZero() {
-        val probeAgeMs = SystemClock.elapsedRealtime() - lastGlassesRuntimeProbeAtMs
-        if (lastGlassesRuntimeProbeAtMs != 0L && probeAgeMs <= HARDWARE_GATE_RUNTIME_PROBE_MAX_AGE_MS) {
+        if (hasRecentGlassesRuntimeEvidence(
+                lastEvidenceAtMs = lastGlassesRuntimeProbeAtMs,
+                nowMs = SystemClock.elapsedRealtime(),
+                maxAgeMs = HARDWARE_GATE_RUNTIME_PROBE_MAX_AGE_MS,
+            )
+        ) {
             log("diag event=gate0_installation state=INSTALLED evidence=runtime_probe")
             log("diag event=gate0_runtime state=RUNNING evidence=hub_probe")
             return
