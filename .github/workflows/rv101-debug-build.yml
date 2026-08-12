@@ -75,7 +75,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          find phone-hub/build/outputs/apk/debug glasses-hub/build/outputs/apk/debug plugin-assistant/build/outputs/apk/debug \
+          find phone-hub/build/outputs/apk/debug glasses-hub/build/outputs/apk/debug plugins/assistant/build/outputs/apk/debug \
             -maxdepth 1 -type f -name '*.apk' -print -exec sha256sum {} \;
 
       - name: Upload phone debug APK
@@ -96,7 +96,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rv101-plugin-assistant-debug
-          path: RokidNexus/plugin-assistant/build/outputs/apk/debug/*.apk
+          path: RokidNexus/plugins/assistant/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
       - name: Run unit tests
