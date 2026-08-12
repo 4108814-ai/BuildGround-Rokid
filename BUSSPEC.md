@@ -175,9 +175,9 @@ Surface kinds v1:
   `tone` is one of `alert`, `normal` (the default), `dim`, or `body`; a `body`
   row wraps as prose and puts its `badge` in a label column beside it. See
   [surface-list-rows.html](docs/surface-list-rows.html).
-- `reader`: `title`, optional `subtitle`/`footer`/`contentKey`, and a complete
-  `segments` document. The renderer owns wrapping and scrolling; see the reader
-  contract below.
+- `reader`: `title`, optional `subtitle`/`footer`/`contentKey`, a complete
+  `segments` document, and an optional `readerAnchor`. The renderer owns
+  wrapping and scrolling; see the reader contract below.
 - `timed-lines`: `title`, optional `subtitle`/`footer`, full `lines` as
   `{ "timeMs": 1234, "text": "..." }`, and an `anchor`.
 - `media`: `title`/`subtitle` shell labels, `mediaTitle`, optional
@@ -247,6 +247,7 @@ page it:
   "subtitle": "3 turns",
   "footer": "tap · back",
   "contentKey": "conversation-42",
+  "readerAnchor": "top",
   "segments": [
     { "kind": "header", "text": "CX · 5 min ago", "emphasis": true },
     { "kind": "prose", "text": "The complete response wraps on the glasses." },
@@ -262,6 +263,20 @@ segment has a known `kind` and `text` of at most 4,096 characters, and the sum
 of all segment text is at most 40,000 characters. Null shell fields are omitted,
 as is `emphasis` when false. The phone adds verified ownership and the monotonic
 wire `seq` in the same way it does for a card.
+
+`readerAnchor` is optional and says where reading begins. It is `bottom` or
+`top`, and the distinction it draws is stream-shaped versus document-shaped
+content. `bottom` is the default and is omitted from the wire payload: the
+surface opens at the end, an update stays pinned there when the wearer was
+already near the end, and otherwise restores the previous offset — a chat, a
+log, an agent transcript. `top` opens the surface at the start and never
+follows the tail, so an update always restores where the wearer had scrolled
+to — an article, a recipe, a saved note. An absent or unrecognised value is
+read as `bottom`, so a glasses hub older than 1.4.3 opens at the bottom as
+before. Like a timed-line or media anchor, an update that omits the field
+inherits the active surface's anchor when it merges into a reader with the same
+`surfaceId` and a matching or blank `contentKey`, and otherwise falls back to
+`bottom`.
 
 Segment kinds are:
 

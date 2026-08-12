@@ -7,5 +7,6 @@ and intentionally does not duplicate the spec.
 
 External developers should normally use the typed `bus-client` API described in
 [PLUGIN_SDK.md](PLUGIN_SDK.md), not construct reserved paths or trusted metadata.
-The `/core/native-apps/*`, `/core/remote-input/*`, and `/core/navigation/*`
-families are platform-only and are never plugin SDK endpoints.
+The `/core/native-apps/*`, `/core/remote-input/*`, `/core/navigation/*`, and
+`/core/pointer/*` families are platform-only and are never plugin SDK
+endpoints.

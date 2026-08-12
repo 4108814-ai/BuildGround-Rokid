@@ -167,8 +167,9 @@ Paths a plugin **receives** (reserved, hub-generated — you never send these):
 `/plugin/<id>/…` namespace.
 Reserved sender roots you can never use: `/launcher`, `/surface/input`, `/ink/event`,
 `/core`, `/system`, `/security`, `/error`. Rejections and undeliverable traffic
-come back on `/error`. `/core/native-apps/*`, `/core/remote-input/*`, and
-`/core/navigation/*` are trusted phone-hub/glasses-hub controls, never plugin APIs.
+come back on `/error`. `/core/native-apps/*`, `/core/remote-input/*`,
+`/core/navigation/*`, and `/core/pointer/*` are trusted phone-hub/glasses-hub
+controls, never plugin APIs.
 
 Every approved, live registration receives glasses hardware signals without an
 additional capability grant. `onNexusLinkState` includes

@@ -840,5 +840,95 @@ On both devices:
   text appears in bus inspection, preferences, saved state, or logs. Only the
   newly typed transient delta may cross to the glasses.
 - From a test plugin, attempt every `/core/native-apps/*`,
-  `/core/remote-input/*`, and `/core/navigation/*` path and receive prefix.
-  Confirm the hub rejects them before routing regardless of the plugin's grants.
+  `/core/remote-input/*`, `/core/navigation/*`, and `/core/pointer/*` path and
+  receive prefix. Confirm the hub rejects them before routing regardless of the
+  plugin's grants.
+
+## Remote pointer and trackpad validation
+
+Software gate:
+
+```powershell
+.\gradlew.bat :shared:test :phone-hub:testDebugUnitTest :phone-hub:assembleDebug :glasses-hub:testDebugUnitTest :glasses-hub:assembleDebug
+```
+
+On both devices:
+
+- Open **Keyboard & remote** and drag on the trackpad with CXR-L up. Confirm the
+  glasses' own system pointer moves with the finger, that Nexus draws no cursor
+  of its own on this path, and that the behaviour is identical in the Rokid
+  launcher and in a third-party app. Tap must click and hold must long-press
+  where the pointer sits.
+- Sustain a fast drag and confirm movement is coalesced to at most one update
+  every 34 ms, with no queue growth or lag that outlives the gesture.
+- Force the vendor `Tools` custom command to be unavailable. Confirm the phone
+  falls back to the versioned `/core/pointer/*` contract with the Nexus-drawn
+  cursor and an absolute normalized position, and that the wearer is never left
+  without a pointer.
+- On the fallback path, exercise the error contract: a stale sequence reports
+  `stale_sequence`, a command after `hide` reports `stream_retired` or
+  `stream_not_started`, an interrupted gesture reports `gesture_cancelled`, and
+  stopping the glasses AccessibilityService reports `service_unavailable`
+  rather than a silent success.
+- Exercise the directional cross: up, down, left, right, select, and back.
+  Confirm focus moves in the direction pressed, falls back to the next or
+  previous item when the screen has nothing that way, and that no press is
+  silently ignored.
+- Focus a text field on the glasses and confirm the phone keyboard does **not**
+  open on its own. It opens when the field is tapped on the phone.
+- Let the glasses display sleep, then press a direction. Confirm the panel wakes
+  instead of navigating a screen the wearer cannot see.
+
+## Reader start anchor validation
+
+Software gate:
+
+```powershell
+.\gradlew.bat :bus-client:testDebugUnitTest :glasses-hub:testDebugUnitTest :glasses-hub:assembleDebug
+```
+
+On both devices:
+
+- Show a reader with no anchor and confirm today's behaviour is unchanged: it
+  opens at the bottom, an update stays pinned there when the wearer was already
+  near the end, and otherwise restores the previous offset.
+- Show a reader with `NexusReaderAnchor.TOP`. Confirm it opens at the first
+  segment. Scroll to the middle, replace the document with the same
+  `contentKey`, and confirm the wearer keeps their offset and is never pulled
+  to the new end.
+- Send an update that omits `readerAnchor` with the same `surfaceId` and a
+  matching or blank `contentKey`: the anchor is inherited. Send one with a
+  different `contentKey` and confirm it falls back to the bottom.
+- Send an unrecognised anchor value and confirm it is read as `bottom` rather
+  than rejected. Against a pre-1.4.3 glasses hub, confirm `top` is ignored and
+  the surface opens at the bottom as before.
+
+## Assistant Hermes provider validation
+
+Software gate:
+
+```powershell
+.\gradlew.bat :plugin-assistant:testDebugUnitTest :plugin-assistant:assembleDebug -PskipCxrGlobal=true
+```
+
+On the phone and glasses:
+
+1. In Assistant settings, pick **Hermes**, enter the `/v1` root of a Hermes API
+   server and its key, and confirm an ordinary spoken question streams back an
+   answer.
+2. Ask several questions in one conversation and confirm every request carries
+   the same `X-Hermes-Session-Id`. Confirm a conversation older than seven days
+   starts a fresh session.
+3. Point an existing **Custom** connection at a Hermes server and confirm it
+   recognises itself as Hermes from the capability manifest's own object name.
+   Point it at a plain OpenAI-compatible server and confirm it stays Custom.
+4. Ask what you are looking at. Confirm the private photo token never reaches
+   the wearer's band or card, the glasses take the shot, and the turn is
+   replayed with the image attached.
+5. Ask for a reminder, a timer, a note, and a calendar add/list/delete. Confirm
+   the `[[NEXUS_TOOL]]` control line is filtered out of the stream, the calls
+   run in order, and the turn is replayed with their results as plain text. The
+   calendar fail-closed cases above must behave identically on this path.
+6. Confirm Ink is absent from the Hermes bridge: no `render_ink_page` or
+   `render_template` is offered, and answers land on the ordinary text/card
+   path.

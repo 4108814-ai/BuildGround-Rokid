@@ -1,6 +1,6 @@
 # Rokid Nexus — Roadmap
 
-Status: 2026-08-10. This file is the public roadmap and the source the
+Status: 2026-08-12. This file is the public roadmap and the source the
 [project site](https://rokid-nexus.anezium.me) renders. The founding product
 argument lives in [VISION.md](VISION.md); what actually shipped in each release
 lives in [CHANGELOG.md](CHANGELOG.md).
@@ -70,6 +70,12 @@ plugins from the Store.
 Plus the shared glyph set, plugin marks travelling to the glasses as bare
 geometry, and the phone's own battery in the ROM status row.
 
+A reader says where reading begins, because the answer is not the same for a
+conversation and for an article: a stream opens on its last line, a document
+opens on its first and keeps the wearer's place across updates. The plugin
+knows which one it is sending, so the plugin chooses; the hub used to guess
+from the surface id alone (1.4.3).
+
 One motion layer sits under all of it: three duration tokens (180 ms in place,
 280 ms arriving or changing shape, 240 ms leaving) and two interpolators, none
 of it dialable by a plugin. Native Views, not a WebView — the WebView spike
@@ -112,33 +118,33 @@ A notice worth it can pulse the display awake: at most one wake every five
 seconds *across every plugin*, always a short pulse, never held on. No other
 tier may do it at all, including activities.
 
+### Ink Surface
+
+The public SDK has a typed, separately granted `ink_surface` session. A plugin
+submits a strict subset of Rokid's `.ink` format; the phone compiles it into
+bounded revisioned documents and the glasses project them to native Views. Data
+patches, tap actions, charts, progress, inline Lottie, and declarative canvas
+are implemented without WebView, JavaScript, URL loading, or page-side network.
+Assistant is the first production consumer and Sample is the copyable SDK
+reference (1.4.1).
+
+### Phone control for native glasses apps
+
+The phone lists and opens launchable APKs already installed on the glasses,
+moves focus with previous/next/select/back, and supplies an ephemeral keyboard
+to the focused glasses editor (1.4.1). The phone is also a trackpad: a drag
+moves the pointer the glasses system already has rather than one of ours, so it
+behaves the same in the Rokid launcher and in any third-party app, and Nexus
+draws its own cursor only when that path is unavailable (1.4.2). The four
+versioned `/core/*` protocol families are hub-only and replay-safe; no plugin
+grant reaches them. Sensitive editors secure the phone window, and existing
+field contents never cross back to the phone. Installing native APKs is not
+part of this slice.
+
 ### Eleven plugins, none of them built in
 
 Relay · Assistant · Lens · Feeds · Transit · Lyrics · Media Deck · Photos Sync
 · Wireless ADB · Tasker · Sample
-
----
-
-## Ready for the next release
-
-### Ink Surface
-
-The public SDK now has a typed, separately granted `ink_surface` session. A
-plugin submits a strict subset of Rokid's `.ink` format; the phone compiles it
-into bounded revisioned documents and the glasses project them to native Views.
-Data patches, tap actions, charts, progress, inline Lottie, and declarative
-canvas are implemented without WebView, JavaScript, URL loading, or page-side
-network. Assistant is the first production consumer and Sample is the copyable
-SDK reference.
-
-### Phone control for native glasses apps
-
-The phone can list and open launchable APKs already installed on the glasses,
-move focus with previous/next/select/back, and supply an ephemeral keyboard to
-the focused glasses editor. The three versioned `/core/*` protocol families are
-hub-only and replay-safe; no plugin grant reaches them. Sensitive editors secure
-the phone window, and existing field contents never cross back to the phone.
-Installing native APKs is not part of this slice.
 
 ---
 
@@ -199,7 +205,7 @@ assistant" was a table row on this page, and it shipped as Assistant.
 | Plugin | Still owed |
 |---|---|
 | Relay | Notifications from ordinary apps, not just messengers · an app picker, so the wearer chooses which apps may reach the eye |
-| Assistant | More tools that act — control the music, ask Transit · a keyboard mode — the request typed on the phone instead of spoken, for the places where talking to your glasses is not an option. Providers beyond ChatGPT shipped in 1.1.0 — MiniMax, DeepSeek, GLM, OpenRouter, or any OpenAI-compatible server; reminders, timers and notes shipped in 1.3.0, on every provider; phone-calendar creation, listing, and safe deletion are ready for the next release |
+| Assistant | More tools that act — control the music, ask Transit · a keyboard mode — the request typed on the phone instead of spoken, for the places where talking to your glasses is not an option. Providers beyond ChatGPT shipped in 1.1.0 — MiniMax, DeepSeek, GLM, OpenRouter, or any OpenAI-compatible server; reminders, timers and notes shipped in 1.3.0, on every provider; phone-calendar creation, listing, and safe deletion in 1.4.0; Hermes, which runs its agent on its own side, in 1.4.1, with the phone tools bridged to it in plain text in 1.4.2 |
 | Feeds | Posting and replying by voice · sources beyond Bluesky and X · video in the timeline |
 | Media Deck | Voice control — "next" and "pause" said instead of tapped |
 | Photos Sync | Sync rules — Wi-Fi only, photos but not videos · freeing glasses storage once a shot is safely across · a video's location tag, which Android strips on the way out |
