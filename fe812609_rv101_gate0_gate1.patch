@@ -1,0 +1,270 @@
+From fe812609371032850c7988e0b549814aab3e43cf Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Wed, 12 Aug 2026 17:39:57 +0000
+Subject: [PATCH] Separate RV101 runtime and HUD gates
+
+---
+ docs/RV101_BOOTSTRAP_DIAGNOSTICS.md           | 44 +++++++---
+ .../anezium/rokidbus/phone/BusHubService.kt   | 83 ++++++++++++++++++-
+ .../anezium/rokidbus/phone/ConsoleActivity.kt | 16 ++++
+ 3 files changed, 131 insertions(+), 12 deletions(-)
+
+diff --git a/docs/RV101_BOOTSTRAP_DIAGNOSTICS.md b/docs/RV101_BOOTSTRAP_DIAGNOSTICS.md
+index 7a6be48a..211475c0 100644
+--- a/docs/RV101_BOOTSTRAP_DIAGNOSTICS.md
++++ b/docs/RV101_BOOTSTRAP_DIAGNOSTICS.md
+@@ -4,7 +4,9 @@ Status: **hardware compatibility gate pending**. Source support is not evidence
+ 
+ ## Baseline build record
+ 
+-The repository requires the checked-in Gradle 9.5.1 wrapper, JDK 17, the configured Android SDK, and the real `CxrGlobal` dependency. The wrapper initially encountered an HTTP 403 proxy response but was subsequently downloaded and verified as Gradle 9.5.1. The build still cannot proceed: only JDK 25 is installed, `local.properties` is absent, and `../CxrGlobal` is absent. The observed Gradle failure is `SDK location not found`. Repository policy forbids creating or rewriting any of those machine-owned inputs.
++The repository requires the checked-in Gradle 9.5.1 wrapper, JDK 17, a configured Android SDK with platform 36/build tools, and the real `CxrGlobal` dependency. JDK 17.0.2 and Gradle 9.5.1 are available. The Android SDK is not installed or exposed through `ANDROID_HOME`/`ANDROID_SDK_ROOT`, and downloading the official command-line tools is rejected by the environment proxy with HTTP 403. The observed Gradle failure is therefore `SDK location not found`; repository policy forbids creating a private SDK or machine-specific `local.properties` as a workaround.
++
++`../CxrGlobal` is **optional**, not a baseline prerequisite. `phone-hub` declares the real Maven coordinate `com.example.cxrglobal:lib:0.2.0`; the sibling composite in `settings.gradle.kts` substitutes it only when that directory exists. Maven resolution must be attempted first after the Android SDK is configured. Only an observed dependency-resolution error may establish a `CxrGlobal` blocker; no fake or stub is permitted.
+ 
+ Expected unchanged artifacts are:
+ 
+@@ -16,6 +18,21 @@ Expected unchanged artifacts are:
+ 
+ No APK or hash is reported until a build actually completes.
+ 
++Commands attempted with `JAVA_HOME` and `PATH` pointing to JDK 17.0.2 were:
++
++```sh
++./gradlew :phone-hub:testDebugUnitTest :phone-hub:assembleDebug \
++  :glasses-hub:testDebugUnitTest :glasses-hub:assembleDebug \
++  :plugin-assistant:testDebugUnitTest :plugin-assistant:assembleDebug
++./gradlew :ink-engine:test --no-daemon
++```
++
++The Android command stopped during task dependency calculation with `SDK location not found`. The
++pure Kotlin test reached dependency resolution, but every declared remote repository returned HTTP
++403 for ordinary Kotlin/JSON artifacts. Consequently no Android task, unit test, APK metadata, APK
++hash, or signing-certificate hash can be reported as completed. `CxrGlobal` resolution was not
++reached and is not listed as a blocker.
++
+ ## Bootstrap flow and diagnostic boundaries
+ 
+ | Stage | File / entry point | Input and output | Failure visibility |
+@@ -33,7 +50,9 @@ No APK or hash is reported until a build actually completes.
+ | Package start | `openGlassesAppOnLens` / `startGlassesSetupOnLens` | Calls vendor `appStart` | Callback is only success/failure. |
+ | Glasses runtime | `RokidBusAccessibilityService.onServiceConnected` then `GlassesHub.start` | Starts overlays, CXR-S, and SPP server | A package replace may disable Accessibility before this point. The phone cannot inspect that setting through the vendor install API. |
+ | Handshake | CXR `/hub/probe`, link callbacks, and SPP frames | Establishes CXR control and/or SPP data link | Phone console separates CXR, glass Bluetooth, and Nexus SPP states. |
+-| HUD gate | Console **HUD TEST** -> `BusHubService.startHardwareGate` | Sends an ordinary card over existing routing | The phone reports `hardware_gate_sent` only for transport acceptance. The wearer must confirm that `NEXUS TEST OK` rendered on real glasses. |
++| Gate 0: install query | Console **RUNTIME** -> `runHardwareGateZero` | Calls vendor `appIsInstalled` | Reports `INSTALLED`, `NOT_INSTALLED`, or `UNKNOWN`; `INSTALLED` is Boolean-only until the glasses runtime reports its own metadata. |
++| Gate 0: runtime | `appStart(MainActivity)` followed by glasses `/hub/probe` | Requests package start and waits for evidence emitted by the running hub | `appStart=true` is not proof. Only a received hub probe records `gate0_runtime state=RUNNING`. |
++| Gate 1: HUD | Console **HUD TEST** -> `BusHubService.startHardwareGate` | Sends an ordinary card over existing routing | Rejected unless a recent Gate 0 runtime probe exists. The wearer must still confirm that `NEXUS TEST OK` rendered on real glasses. |
+ 
+ ### Critical blind spot
+ 
+@@ -66,7 +85,8 @@ The phone console now emits structured, secret-free events:
+ - `glasses_apk_download_progress`, `glasses_apk_verified`, `glasses_apk_upload_start`;
+ - `glasses_install_invoked`, `glasses_install_dispatch_return`, `glasses_install_callback`, `glasses_install_exception`, and delayed `glasses_post_install_query` checks;
+ - glasses-local `glasses_package_state` with package/version/signer/install-source/platform metadata when the hub process can start;
+-- `hardware_gate_waiting`, `hardware_gate_sent`, or `hardware_gate_failed`.
++- Gate 0 `gate0_installation`, `gate0_start_requested`, and `gate0_runtime`;
++- Gate 1 `gate1_rejected`, `hardware_gate_waiting`, `hardware_gate_sent`, or `hardware_gate_failed`.
+ 
+ Tokens, Bluetooth addresses, serial numbers, Wi-Fi identifiers, transcripts, and user content are not logged.
+ 
+@@ -78,18 +98,20 @@ These steps require APKs produced by a successful trusted build; none were produ
+ 2. Open Nexus on the phone and approve Bluetooth/notification permissions when Android asks.
+ 3. Complete **Hi Rokid authorization** from Nexus. Do not send authorization tokens or pairing codes to anyone.
+ 4. Open **Settings -> Console** on the phone.
+-5. Confirm whether the console contains `cxr_link_state connected=true` or `spp_state connected=true`.
+-6. Tap **HUD TEST** in the Console header.
+-7. Look at the glasses. The required result is a card reading **NEXUS TEST OK**.
+-8. If it appears, take one photo of the glasses display and tap **SHARE** in Console to send the log.
+-9. If it does not appear, wait ten seconds, tap **SHARE**, and send the complete console log plus a photo/video of what the glasses show.
+-10. If an install/update is attempted, start a screen recording before tapping **Update**. Send the recording and the console log. Do not repeatedly retry or uninstall until the log is reviewed.
++5. Tap **RUNTIME** once. This is Gate 0; do not tap HUD TEST yet.
++6. If the Console reports `gate0_installation state=NOT_INSTALLED` or `UNKNOWN`, stop and share the log. Installer/bootstrap diagnosis remains the primary task.
++7. If it reports `INSTALLED`, wait up to ten seconds for `gate0_runtime state=RUNNING evidence=hub_probe`. `gate0_start_requested success=true` alone is not sufficient.
++8. Only after `gate0_runtime state=RUNNING`, tap **HUD TEST**. This is Gate 1.
++9. Look at the glasses. The required result is a card reading **NEXUS TEST OK**.
++10. If it appears, take one photo of the glasses display and tap **SHARE** in Console to send the log.
++11. If it does not appear, wait ten seconds, tap **SHARE**, and send the complete console log plus a photo/video of what the glasses show.
++12. If an install/update is attempted, start a screen recording before tapping **Update**. Send the recording and the console log. Do not repeatedly retry or uninstall until the log is reviewed.
+ 
+-A `hardware_gate_sent` line alone is not a pass. Gate 1 passes only when a person observes **NEXUS TEST OK** on the RV101 Global display.
++Gate 0 passes only when installation state is `INSTALLED` and a real glasses-originated hub probe proves the runtime is `RUNNING`. A `hardware_gate_sent` line alone is not a Gate 1 pass; Gate 1 passes only when a person observes **NEXUS TEST OK** on the RV101 Global display.
+ 
+ ## Hardware gates and architecture decision
+ 
+-Gate 1 requires physical confirmation of phone-to-glasses transport, a running glasses hub, and HUD render. Gate 2 remains entirely **NOT TESTED** until Gate 1 passes: touchpad return traffic, STT, Russian STT, TTS, Russian TTS through glasses speakers, AI-button callback, and reconnect recovery.
++Gate 0 requires confirmed installation plus a running glasses hub. Gate 1 then requires physical confirmation of phone-to-glasses transport and HUD render. Gate 2 remains entirely **NOT TESTED** until Gate 1 passes: touchpad return traffic, STT, Russian STT, TTS, Russian TTS through glasses speakers, AI-button callback, and reconnect recovery.
+ 
+ Preliminary recommendation is **Option A (Nexus Runtime)** only if Gate 1 passes reproducibly after disconnect/reconnect. If independent installation succeeds but Nexus pairing does not, repair the provisioning layer before considering a fork. Choose **Option B (minimal bridge)** only after logs establish a fundamental runtime/provisioning incompatibility; a new glasses APK is otherwise exposed to the same installer restriction.
+ 
+diff --git a/phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt b/phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt
+index af6b777f..0ced2580 100644
+--- a/phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt
++++ b/phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt
+@@ -135,6 +135,7 @@ private const val ACTION_LOG = "com.anezium.rokidbus.phone.LOG"
+ private const val ACTION_SET_TOKEN = "com.anezium.rokidbus.phone.SET_TOKEN"
+ private const val ACTION_STOP = "com.anezium.rokidbus.phone.STOP"
+ private const val ACTION_DEBUG_IMAGE = "com.anezium.rokidbus.phone.DEBUG_IMAGE_SURFACE"
++private const val ACTION_HARDWARE_GATE_ZERO = "com.anezium.rokidbus.phone.HARDWARE_GATE_ZERO"
+ private const val ACTION_HARDWARE_GATE = "com.anezium.rokidbus.phone.HARDWARE_GATE_SURFACE"
+ private const val ACTION_DEBUG_MANUAL_PAIRING = "com.anezium.rokidbus.phone.DEBUG_MANUAL_PAIRING"
+ private const val ACTION_INSTALL_GLASSES_APP = "com.anezium.rokidbus.phone.INSTALL_GLASSES_APP"
+@@ -157,6 +158,7 @@ private const val PREF_LAST_NOTIFIED_PLUGIN_UPDATES = "last-notified-plugin-upda
+ private const val LOCAL_BINARY_MAX_BYTES = 512 * 1024
+ private const val GLASSES_RELEASE_CHECK_INTERVAL_MILLIS = 4L * 60L * 60L * 1000L
+ private const val BACKGROUND_UPDATE_CHECK_INTERVAL_MILLIS = 60L * 60L * 1000L
++private const val HARDWARE_GATE_RUNTIME_PROBE_MAX_AGE_MS = 60_000L
+ private const val AUDIO_LEASE_ACQUIRE = "/audio/lease/acquire"
+ private const val AUDIO_LEASE_RELEASE = "/audio/lease/release"
+ private const val AUDIO_FRAMES = "/audio/frames"
+@@ -254,6 +256,7 @@ class BusHubService : Service() {
+     private val externalSurfaceSeq = ConcurrentHashMap<String, AtomicLong>()
+     private val debugImageSeq = AtomicLong(System.currentTimeMillis())
+     private val hardwareGateSeq = AtomicLong(System.currentTimeMillis())
++    @Volatile private var lastGlassesRuntimeProbeAtMs = 0L
+     private val externalSurfaceIds = ConcurrentHashMap<String, MutableSet<String>>()
+     private val inkSurfaceCoordinator = PhoneInkSurfaceCoordinator(
+         postResult = { action -> inkResultHandler.post { action() } },
+@@ -917,6 +920,15 @@ class BusHubService : Service() {
+                     log("diag event=hardware_gate_rejected reason=release_build")
+                 }
+             }
++            ACTION_HARDWARE_GATE_ZERO -> {
++                if (isDebuggableBuild()) {
++                    enableHub()
++                    startCxrIfTokenAvailable()
++                    executor.execute(::runHardwareGateZero)
++                } else {
++                    log("diag event=gate0_rejected reason=release_build")
++                }
++            }
+             ACTION_DEBUG_MANUAL_PAIRING -> {
+                 if (isDebuggableBuild()) {
+                     enableHub()
+@@ -1317,7 +1329,8 @@ class BusHubService : Service() {
+     private fun routeRemote(envelope: BusEnvelope) {
+         if (envelope.path == "/hub/probe") {
+             recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
+-            log("hub probe received from glasses")
++            lastGlassesRuntimeProbeAtMs = SystemClock.elapsedRealtime()
++            log("diag event=gate0_runtime state=RUNNING evidence=hub_probe")
+             return
+         }
+         if (envelope.path == BusPaths.HUB_CAPABILITIES) {
+@@ -5921,6 +5934,11 @@ class BusHubService : Service() {
+     }
+ 
+     private fun pushHardwareGateWhenReady() {
++        val probeAgeMs = SystemClock.elapsedRealtime() - lastGlassesRuntimeProbeAtMs
++        if (lastGlassesRuntimeProbeAtMs == 0L || probeAgeMs > HARDWARE_GATE_RUNTIME_PROBE_MAX_AGE_MS) {
++            log("diag event=gate1_rejected reason=GATE0_RUNTIME_NOT_CONFIRMED")
++            return
++        }
+         repeat(20) { attempt ->
+             if (isCxrUp() || output != null) {
+                 val envelope = BusEnvelope(
+@@ -5950,6 +5968,56 @@ class BusHubService : Service() {
+         log("diag event=hardware_gate_failed reason=NO_LINK")
+     }
+ 
++    private fun runHardwareGateZero() {
++        val probeAgeMs = SystemClock.elapsedRealtime() - lastGlassesRuntimeProbeAtMs
++        if (lastGlassesRuntimeProbeAtMs != 0L && probeAgeMs <= HARDWARE_GATE_RUNTIME_PROBE_MAX_AGE_MS) {
++            log("diag event=gate0_installation state=INSTALLED evidence=runtime_probe")
++            log("diag event=gate0_runtime state=RUNNING evidence=hub_probe")
++            return
++        }
++        val link = cxrLink
++        if (!isCxrUp() || link == null) {
++            log("diag event=gate0_installation state=UNKNOWN reason=CXR_LINK_DOWN")
++            return
++        }
++        runCatching {
++            link.appIsInstalled(
++                object : IGlassAppCbk {
++                    override fun onQueryAppResult(installed: Boolean) {
++                        if (!installed) {
++                            log("diag event=gate0_installation state=NOT_INSTALLED evidence=vendor_query")
++                            return
++                        }
++                        log("diag event=gate0_installation state=INSTALLED evidence=vendor_query detail=boolean_only")
++                        runCatching {
++                            link.appStart(
++                                "$GLASSES_HUB_PACKAGE.MainActivity",
++                                object : IGlassAppCbk {
++                                    override fun onOpenAppResult(success: Boolean) {
++                                        log("diag event=gate0_start_requested success=$success")
++                                        if (!success) {
++                                            log("diag event=gate0_runtime state=UNKNOWN reason=APP_START_NOT_CONFIRMED")
++                                        }
++                                    }
++                                },
++                            )
++                        }.onFailure { failure ->
++                            log(
++                                "diag event=gate0_runtime state=UNKNOWN reason=APP_START_EXCEPTION " +
++                                    "type=${failure.javaClass.simpleName}",
++                            )
++                        }
++                    }
++                },
++            )
++        }.onFailure { failure ->
++            log(
++                "diag event=gate0_installation state=UNKNOWN reason=QUERY_EXCEPTION " +
++                    "type=${failure.javaClass.simpleName}",
++            )
++        }
++    }
++
+     private fun pushDebugImage() {
+         val resourceId = resources.getIdentifier("image_surface_sample", "raw", packageName)
+         if (resourceId == 0) {
+@@ -6172,6 +6240,19 @@ class BusHubService : Service() {
+             }
+         }
+ 
++        fun startHardwareGateZero(context: android.content.Context) {
++            if (!canRunHub(context)) {
++                Log.i(TAG, "startHardwareGateZero skipped: BLUETOOTH_CONNECT permission not granted")
++                return
++            }
++            val intent = Intent(context, BusHubService::class.java).setAction(ACTION_HARDWARE_GATE_ZERO)
++            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
++                context.startForegroundService(intent)
++            } else {
++                context.startService(intent)
++            }
++        }
++
+         fun installGlassesApp(context: android.content.Context) {
+             context.startService(
+                 Intent(context, BusHubService::class.java).setAction(ACTION_INSTALL_GLASSES_APP),
+diff --git a/phone-hub/src/main/java/com/anezium/rokidbus/phone/ConsoleActivity.kt b/phone-hub/src/main/java/com/anezium/rokidbus/phone/ConsoleActivity.kt
+index 90d4d890..6a89aae0 100644
+--- a/phone-hub/src/main/java/com/anezium/rokidbus/phone/ConsoleActivity.kt
++++ b/phone-hub/src/main/java/com/anezium/rokidbus/phone/ConsoleActivity.kt
+@@ -130,6 +130,22 @@ class ConsoleActivity : Activity() {
+                         },
+                         LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                     )
++                    addView(
++                        NexusUi.metaLabel(this@ConsoleActivity, "RUNTIME", NexusUi.GREEN).apply {
++                            background = NexusUi.pressed(this@ConsoleActivity, Color.TRANSPARENT, 10)
++                            setPadding(
++                                NexusUi.dp(this@ConsoleActivity, 10),
++                                NexusUi.dp(this@ConsoleActivity, 8),
++                                NexusUi.dp(this@ConsoleActivity, 10),
++                                NexusUi.dp(this@ConsoleActivity, 8),
++                            )
++                            isClickable = true
++                            isFocusable = true
++                            setOnClickListener {
++                                BusHubService.startHardwareGateZero(applicationContext)
++                            }
++                        },
++                    )
+                     addView(
+                         NexusUi.metaLabel(this@ConsoleActivity, "HUD TEST", NexusUi.GREEN).apply {
+                             background = NexusUi.pressed(
+-- 
+2.43.0
