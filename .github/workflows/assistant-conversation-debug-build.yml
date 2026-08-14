@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/assistant-conversation-debug-build.yml'
       - '.github/patches/assistant-conversation-mode.patch'
+      - '.github/patches/assistant-conversation-timeout-ui-fix.patch'
   workflow_dispatch:
 
 permissions:
@@ -51,17 +52,24 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Verify and apply Conversation Mode patch
+      - name: Verify and apply Conversation Mode patches
         shell: bash
         run: |
           set -euo pipefail
-          patch_file='.github/patches/assistant-conversation-mode.patch'
-          expected='a3e3bd757480267fcdf4a51d7acf60651efb6ba76f2ee33af4677c28e168df5a'
-          actual="$(sha256sum "$patch_file" | cut -d ' ' -f 1)"
-          echo "patch sha256=$actual"
-          test "$actual" = "$expected"
-          git apply --check "$patch_file"
-          git apply "$patch_file"
+          conversation_patch='.github/patches/assistant-conversation-mode.patch'
+          conversation_expected='a3e3bd757480267fcdf4a51d7acf60651efb6ba76f2ee33af4677c28e168df5a'
+          conversation_actual="$(sha256sum "$conversation_patch" | cut -d ' ' -f 1)"
+          echo "conversation patch sha256=$conversation_actual"
+          test "$conversation_actual" = "$conversation_expected"
+          git apply --check "$conversation_patch"
+          git apply "$conversation_patch"
+
+          timeout_patch='.github/patches/assistant-conversation-timeout-ui-fix.patch'
+          timeout_actual="$(sha256sum "$timeout_patch" | cut -d ' ' -f 1)"
+          echo "timeout UI patch sha256=$timeout_actual"
+          git apply --check "$timeout_patch"
+          git apply "$timeout_patch"
+
           mapfile -t changed < <(
             {
               git diff --name-only
@@ -73,6 +81,7 @@ jobs:
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt'
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt'
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantSettingsActivity.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt'
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStore.kt'
             'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpControllerTest.kt'
             'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStoreLogicTest.kt'
@@ -81,6 +90,8 @@ jobs:
           test "$(printf '%s\n' "${changed[@]}")" = "$(printf '%s\n' "${expected_sorted[@]}")"
           grep -q 'FOLLOW_UP_DELAY_MS = 3_000L' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt
           grep -q 'FOLLOW_UP_SILENCE_TIMEOUT_MS = 10_000L' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt
+          grep -q 'fun dismissTransient()' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt
+          grep -q 'uiController.dismissTransient()' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
 
       - name: Run Assistant unit tests and build debug APK
         shell: bash
