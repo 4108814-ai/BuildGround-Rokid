@@ -1,7 +1,6 @@
 package com.anezium.rokidbus.plugin.assistant
 
 import android.app.Notification
-import android.app.PendingIntent
 import android.app.RemoteInput
 import android.content.ComponentName
 import android.content.Context
@@ -55,7 +54,9 @@ internal object AssistantNotificationBridge {
         val title = notification.extras.getCharSequence(Notification.EXTRA_TITLE)
             ?.toString().orEmpty().trim()
         val text = notification.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
-            ?.toString()?.trim().takeUnless(String?::isNullOrBlank)
+            ?.toString()
+            ?.trim()
+            ?.takeUnless { it.isBlank() }
             ?: notification.extras.getCharSequence(Notification.EXTRA_TEXT)
                 ?.toString().orEmpty().trim()
         if (title.isBlank() && text.isBlank()) return
@@ -107,7 +108,7 @@ internal object AssistantNotificationBridge {
         val entry = live[key] ?: return false
         val action = entry.replyAction ?: return false
         val remoteInputs = action.remoteInputs ?: return false
-        val freeFormInputs = remoteInputs.filter(RemoteInput::getAllowFreeFormInput)
+        val freeFormInputs = remoteInputs.filter { input -> input.allowFreeFormInput }
         if (freeFormInputs.isEmpty()) return false
         return runCatching {
             val intent = Intent()
