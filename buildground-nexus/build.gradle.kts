@@ -40,7 +40,8 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".dev"
+            // Keep the production package identity during hardware tests so the phone can
+            // address the exact same glasses package through CXR CUSTOMAPP.
             versionNameSuffix = "-dev"
         }
         release {
