@@ -9,6 +9,7 @@ on:
       - '.github/patches/assistant-conversation-mode.patch'
       - '.github/patches/assistant-conversation-timeout-ui-fix.patch'
       - '.github/scripts/apply-assistant-phone-calls.py'
+      - '.github/scripts/fix-assistant-phone-contact-constants.py'
   workflow_dispatch:
 
 permissions:
@@ -72,6 +73,7 @@ jobs:
           git apply "$timeout_patch"
 
           python .github/scripts/apply-assistant-phone-calls.py
+          python .github/scripts/fix-assistant-phone-contact-constants.py
 
           mapfile -t changed < <(
             {
@@ -102,6 +104,7 @@ jobs:
           grep -q 'android.permission.READ_CONTACTS' plugins/assistant/src/main/AndroidManifest.xml
           grep -q 'android.permission.CALL_PHONE' plugins/assistant/src/main/AndroidManifest.xml
           grep -q 'CALL_CONTACT_TOOL_NAME = "call_contact"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt
+          grep -q 'ContactsContract.CommonDataKinds.Phone.CONTENT_URI' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt
           grep -q 'TelecomManager' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt
 
       - name: Run Assistant unit tests and build debug APK
