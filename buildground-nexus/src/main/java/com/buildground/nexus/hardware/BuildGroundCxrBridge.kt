@@ -7,12 +7,14 @@ import android.content.ServiceConnection
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.ParcelFileDescriptor
 import com.rokid.cxr.Caps
 import com.rokid.sprite.aiapp.externalapp.ICustomCmdCallback
 import com.rokid.sprite.aiapp.externalapp.IDeviceStatusCallback
 import com.rokid.sprite.aiapp.externalapp.IGlassAppCallback
 import com.rokid.sprite.aiapp.externalapp.IMediaStreamService
 import org.json.JSONObject
+import java.io.File
 import java.util.UUID
 
 /**
@@ -72,6 +74,42 @@ class BuildGroundCxrBridge(
 
         update(message = if (bound) "Binding to Hi Rokid…" else "Hi Rokid MediaStreamService bind failed")
         return bound
+    }
+
+    /**
+     * Installs the already locally verified BuildGround glasses APK through Hi Rokid.
+     * Package/signature verification is deliberately performed by the caller before
+     * this function receives the file.
+     */
+    fun installCompanion(apk: File): Boolean {
+        val svc = service
+        if (svc == null || !currentState.serviceConnected) {
+            update(message = "Connect Hi Rokid before installing the glasses companion")
+            return false
+        }
+        if (!currentState.glassesConnected) {
+            update(message = "Connect Rokid Glasses before installing the companion")
+            return false
+        }
+        if (!apk.isFile || apk.length() <= 0L) {
+            update(message = "Selected BuildGround glasses APK is invalid")
+            return false
+        }
+
+        update(
+            companionOpened = false,
+            bridgeVerified = false,
+            message = "Installing verified BuildGround glasses companion…",
+        )
+
+        return runCatching {
+            ParcelFileDescriptor.open(apk, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
+                svc.uploadAndInstallApk(apk.name, fd, glassAppCallback)
+            }
+            true
+        }.onFailure {
+            update(message = "BuildGround glasses companion install request failed")
+        }.getOrDefault(false)
     }
 
     fun sendChallenge(): Boolean {
@@ -173,7 +211,20 @@ class BuildGroundCxrBridge(
     }
 
     private val glassAppCallback = object : IGlassAppCallback.Stub() {
-        override fun onInstallAppResult(success: Boolean) = Unit
+        override fun onInstallAppResult(success: Boolean) {
+            update(
+                companionInstalled = success,
+                companionOpened = false,
+                bridgeVerified = false,
+                message = if (success) {
+                    "BuildGround glasses companion installed"
+                } else {
+                    "BuildGround glasses companion installation failed"
+                },
+            )
+            if (success) main.postDelayed({ queryAndOpenCompanion() }, 700L)
+        }
+
         override fun onUnInstallAppResult(success: Boolean) = Unit
         override fun onStopAppResult(success: Boolean) = Unit
 
