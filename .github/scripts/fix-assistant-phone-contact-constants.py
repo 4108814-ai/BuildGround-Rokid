@@ -1,8 +1,8 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-path = ROOT / "plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt"
-text = path.read_text(encoding="utf-8")
+phone_path = ROOT / "plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt"
+text = phone_path.read_text(encoding="utf-8")
 
 old = '''        val phone = ContactsContract.CommonDataKinds.Phone
         val projection = arrayOf(
@@ -72,4 +72,20 @@ new = '''        val projection = arrayOf(
 count = text.count(old)
 if count != 1:
     raise SystemExit(f"Expected exactly one generated Phone constants block, found {count}")
-path.write_text(text.replace(old, new, 1), encoding="utf-8")
+phone_path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+policy_test_path = ROOT / "plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/NexusAgentPolicyTest.kt"
+policy_test = policy_test_path.read_text(encoding="utf-8")
+old_allowlist = '''                DELETE_CALENDAR_EVENT_TOOL_NAME,
+            ),
+            HERMES_TEXT_TOOL_NAMES,
+'''
+new_allowlist = '''                DELETE_CALENDAR_EVENT_TOOL_NAME,
+                CALL_CONTACT_TOOL_NAME,
+            ),
+            HERMES_TEXT_TOOL_NAMES,
+'''
+count = policy_test.count(old_allowlist)
+if count != 1:
+    raise SystemExit(f"Expected exactly one Hermes tool allowlist assertion, found {count}")
+policy_test_path.write_text(policy_test.replace(old_allowlist, new_allowlist, 1), encoding="utf-8")
