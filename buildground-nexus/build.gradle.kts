@@ -59,6 +59,11 @@ android {
     }
 }
 
+dependencies {
+    // Official Rokid CXR-L API/AIDL surface. No CxrGlobal/Anezium wrapper is used.
+    implementation("com.rokid.cxr:client-l:1.1.0")
+}
+
 // A distributable release must never be produced with the Android debug key or unsigned.
 tasks.configureEach {
     if (name.contains("Release", ignoreCase = true)) {
