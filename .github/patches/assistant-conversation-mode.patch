@@ -1,0 +1,539 @@
+From 2c18d31bfbcec7dbf4253d8c6aeb8949aa10f04c Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Fri, 14 Aug 2026 14:48:51 +0000
+Subject: [PATCH] Add hands-free Assistant conversation mode
+
+---
+ .../assistant/AssistantFollowUpController.kt  |  86 +++++++++++
+ .../assistant/AssistantPluginService.kt       |  51 +++++-
+ .../assistant/AssistantSettingsActivity.kt    |  41 +++++
+ .../plugin/assistant/CodexAuthStore.kt        |   7 +
+ .../AssistantFollowUpControllerTest.kt        | 145 ++++++++++++++++++
+ .../assistant/CodexAuthStoreLogicTest.kt      |  13 ++
+ 6 files changed, 341 insertions(+), 2 deletions(-)
+ create mode 100644 plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt
+ create mode 100644 plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpControllerTest.kt
+
+diff --git a/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt b/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt
+new file mode 100644
+index 00000000..cef707d4
+--- /dev/null
++++ b/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt
+@@ -0,0 +1,86 @@
++package com.anezium.rokidbus.plugin.assistant
++
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.launch
++
++internal class AssistantFollowUpController(
++    private val scope: CoroutineScope,
++    private val startFollowUp: () -> Unit,
++    private val silenceExpired: () -> Unit,
++    private val followUpDelayMs: Long = FOLLOW_UP_DELAY_MS,
++    private val silenceTimeoutMs: Long = FOLLOW_UP_SILENCE_TIMEOUT_MS,
++) {
++    private var session = 0L
++    private var active = false
++    private var awaitingTts = false
++    private var followUpJob: Job? = null
++    private var silenceJob: Job? = null
++
++    fun start(enabled: Boolean) {
++        cancelJobs()
++        session += 1
++        active = enabled
++        awaitingTts = false
++    }
++
++    fun answerCompleted(waitForTts: Boolean) {
++        if (!active) return
++        awaitingTts = waitForTts
++        if (!waitForTts) scheduleFollowUp()
++    }
++
++    fun ttsDone() {
++        if (!active || !awaitingTts) return
++        awaitingTts = false
++        scheduleFollowUp()
++    }
++
++    fun ttsUnavailable() {
++        ttsDone()
++    }
++
++    fun markUserSpeechStarted() {
++        silenceJob?.cancel()
++        silenceJob = null
++    }
++
++    fun cancel() {
++        cancelJobs()
++        session += 1
++        active = false
++        awaitingTts = false
++    }
++
++    private fun scheduleFollowUp() {
++        followUpJob?.cancel()
++        val scheduledSession = session
++        followUpJob = scope.launch {
++            delay(followUpDelayMs)
++            followUpJob = null
++            if (!active || session != scheduledSession) return@launch
++            startFollowUp()
++            if (!active || session != scheduledSession) return@launch
++            silenceJob = scope.launch {
++                delay(silenceTimeoutMs)
++                silenceJob = null
++                if (!active || session != scheduledSession) return@launch
++                active = false
++                silenceExpired()
++            }
++        }
++    }
++
++    private fun cancelJobs() {
++        followUpJob?.cancel()
++        followUpJob = null
++        silenceJob?.cancel()
++        silenceJob = null
++    }
++
++    companion object {
++        const val FOLLOW_UP_DELAY_MS = 3_000L
++        const val FOLLOW_UP_SILENCE_TIMEOUT_MS = 10_000L
++    }
++}
+diff --git a/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt b/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
+index 68f705d7..98dfa07f 100644
+--- a/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
++++ b/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
+@@ -159,7 +159,23 @@ class AssistantPluginService : NexusPluginService() {
+     private var photoCapturedRequestId: String? = null
+     private var photoJpegForCompletedTurn: ByteArray? = null
+     private var currentLinkState = 0
++    private var automaticFollowUpCapture = false
+     private val captureTriggerGate = AssistantCaptureTriggerGate()
++    private val followUpController = AssistantFollowUpController(
++        scope = serviceScope,
++        startFollowUp = {
++            if (isNexusSessionOpen) {
++                automaticFollowUpCapture = true
++                startCaptureOnce(manual = false)
++            }
++        },
++        silenceExpired = {
++            if (automaticFollowUpCapture) {
++                resetCapture()
++                automaticFollowUpCapture = false
++            }
++        },
++    )
+     private val answerSpeaker = AssistantAnswerSpeaker(
+         // A bound reference here would read authStore while the service is still
+         // being constructed, before it has a base context to build one from.
+@@ -178,6 +194,7 @@ class AssistantPluginService : NexusPluginService() {
+             if (utteranceId != activeTtsUtteranceId) return
+             activeTtsUtteranceId = null
+             uiController.onAnswerSpeechFinished()
++            followUpController.ttsDone()
+         }
+     }
+     private val uiController = AssistantUiController(
+@@ -319,9 +336,13 @@ class AssistantPluginService : NexusPluginService() {
+         super.onDestroy()
+     }
+ 
+-    private fun startCaptureOnce() {
++    private fun startCaptureOnce(manual: Boolean = true) {
+         stopAnswerSpeech()
+         if (captureActive) return
++        if (manual) {
++            automaticFollowUpCapture = false
++            followUpController.start(authStore.conversationMode())
++        }
+         beginCapture()
+     }
+ 
+@@ -367,6 +388,7 @@ class AssistantPluginService : NexusPluginService() {
+ 
+             override fun onSpeechPartial(text: String) {
+                 if (generation != captureGeneration || !captureActive || finalDelivered) return
++                if (text.isNotBlank()) followUpController.markUserSpeechStarted()
+                 uiController.showTranscript(text)
+             }
+ 
+@@ -374,6 +396,8 @@ class AssistantPluginService : NexusPluginService() {
+                 if (generation != captureGeneration || !captureActive || finalDelivered) return
+                 val transcript = normalizeTranscript(text)
+                 if (transcript.isEmpty()) return
++                followUpController.markUserSpeechStarted()
++                automaticFollowUpCapture = false
+                 finalDelivered = true
+                 launchAssistantPipeline(transcript)
+             }
+@@ -386,6 +410,14 @@ class AssistantPluginService : NexusPluginService() {
+                 if (generation != captureGeneration) return
+                 captureActive = false
+                 if (finalDelivered) return
++                if (automaticFollowUpCapture &&
++                    (reason == NexusSpeechStopReason.NO_SPEECH ||
++                        reason == NexusSpeechStopReason.COMPLETED)
++                ) {
++                    automaticFollowUpCapture = false
++                    followUpController.cancel()
++                    return
++                }
+                 if (shouldUseRawCaptureFallback(reason)) {
+                     startFallbackCapture(generation)
+                     return
+@@ -643,6 +675,7 @@ class AssistantPluginService : NexusPluginService() {
+                         completed = true
+                         val finalText = event.message.content.ifBlank { answer.toString() }
+                         if (finalText.isBlank()) {
++                            followUpController.cancel()
+                             uiController.showError("No answer received. Try again.")
+                         } else {
+                             finalAnswer = finalText
+@@ -652,12 +685,14 @@ class AssistantPluginService : NexusPluginService() {
+                     is AiProviderEvent.Failed -> {
+                         completed = true
+                         failed = true
++                        followUpController.cancel()
+                         showError(event.message)
+                     }
+                 }
+             }
+             if (!completed) {
+                 if (answer.isBlank()) {
++                    followUpController.cancel()
+                     uiController.showError("No answer received. Try again.")
+                 } else {
+                     finalAnswer = answer.toString()
+@@ -666,7 +701,13 @@ class AssistantPluginService : NexusPluginService() {
+             }
+             if (!failed) {
+                 currentCoroutineContext().ensureActive()
+-                answerSpeaker.speakCompletedAnswer(stripHudMarkdown(finalAnswer.orEmpty()))
++                val completedAnswer = stripHudMarkdown(finalAnswer.orEmpty())
++                val waitForTts = authStore.speakAnswers()
++                followUpController.answerCompleted(waitForTts)
++                val speakResult = answerSpeaker.speakCompletedAnswer(completedAnswer)
++                if (waitForTts && speakResult != NexusSdkResult.SENT) {
++                    followUpController.ttsUnavailable()
++                }
+                 try {
+                     val keepPhotosAtCompletion = authStore.keepPhotosInConversations()
+                     withContext(Dispatchers.IO) {
+@@ -922,6 +963,8 @@ class AssistantPluginService : NexusPluginService() {
+         reason: NexusSpeechStopReason,
+         error: NexusSpeechError?,
+     ) {
++        followUpController.cancel()
++        automaticFollowUpCapture = false
+         when (reason) {
+             NexusSpeechStopReason.COMPLETED,
+             NexusSpeechStopReason.NO_SPEECH,
+@@ -958,6 +1001,8 @@ class AssistantPluginService : NexusPluginService() {
+     }
+ 
+     private fun showError(message: String) {
++        followUpController.cancel()
++        automaticFollowUpCapture = false
+         val concise = message
+             .replace(Regex("\\s+"), " ")
+             .trim()
+@@ -1032,6 +1077,8 @@ class AssistantPluginService : NexusPluginService() {
+ 
+     private fun resetCapture() {
+         captureGeneration += 1
++        followUpController.cancel()
++        automaticFollowUpCapture = false
+         captureActive = false
+         fallbackTranscribePending = false
+         fallbackStopJob?.cancel()
+diff --git a/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantSettingsActivity.kt b/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantSettingsActivity.kt
+index a866aec0..a5d39e3f 100644
+--- a/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantSettingsActivity.kt
++++ b/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantSettingsActivity.kt
+@@ -83,6 +83,8 @@ class AssistantSettingsActivity : Activity() {
+ 
+     private val keepDots = mutableMapOf<Boolean, View>()
+     private val keepNames = mutableMapOf<Boolean, TextView>()
++    private val conversationModeDots = mutableMapOf<Boolean, View>()
++    private val conversationModeNames = mutableMapOf<Boolean, TextView>()
+     private val photosDots = mutableMapOf<Boolean, View>()
+     private val photosNames = mutableMapOf<Boolean, TextView>()
+     private val voiceDots = mutableMapOf<Boolean, View>()
+@@ -209,6 +211,8 @@ class AssistantSettingsActivity : Activity() {
+             )
+             addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
+             addView(keepCard(), NexusUi.block())
++            addView(BusTheme.gap(this@AssistantSettingsActivity, 12))
++            addView(conversationModeCard(), NexusUi.block())
+             windowSection = LinearLayout(this@AssistantSettingsActivity).apply {
+                 orientation = LinearLayout.VERTICAL
+                 addView(BusTheme.gap(this@AssistantSettingsActivity, 18))
+@@ -1284,6 +1288,36 @@ class AssistantSettingsActivity : Activity() {
+             dotSink = { keepDots[keep] = it },
+         )
+ 
++    private fun conversationModeCard(): LinearLayout =
++        NexusUi.card(this).apply {
++            addView(
++                conversationModeRow(true, "Conversation mode", "automatically listen for follow-ups"),
++                NexusUi.block(),
++            )
++            addView(NexusUi.divider(this@AssistantSettingsActivity))
++            addView(
++                conversationModeRow(false, "One question", "press the assist button each time"),
++                NexusUi.block(),
++            )
++        }
++
++    private fun conversationModeRow(enabled: Boolean, title: String, hint: String): LinearLayout =
++        pickerRow(
++            title = title,
++            hint = hint,
++            description = if (enabled) {
++                "Automatically listen for follow-up questions"
++            } else {
++                "Listen once per assist-button press"
++            },
++            onClick = {
++                authStore.setConversationMode(enabled)
++                renderConversationSettings()
++            },
++            nameSink = { conversationModeNames[enabled] = it },
++            dotSink = { conversationModeDots[enabled] = it },
++        )
++
+     private fun photosCard(): LinearLayout =
+         NexusUi.card(this).apply {
+             addView(
+@@ -1447,6 +1481,13 @@ class AssistantSettingsActivity : Activity() {
+         keepNames.forEach { (value, nameView) ->
+             nameView.setTextColor(if (value == keep) NexusUi.INK else NexusUi.INK2)
+         }
++        val conversationMode = authStore.conversationMode()
++        conversationModeDots.forEach { (value, dotView) ->
++            NexusUi.setDotColor(dotView, if (value == conversationMode) NexusUi.GREEN else NexusUi.INK4)
++        }
++        conversationModeNames.forEach { (value, nameView) ->
++            nameView.setTextColor(if (value == conversationMode) NexusUi.INK else NexusUi.INK2)
++        }
+ 
+         val window = authStore.conversationIdleWindowMinutes()
+         windowDots.forEach { (minutes, dotView) ->
+diff --git a/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStore.kt b/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStore.kt
+index 9f4e8957..db9548ad 100644
+--- a/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStore.kt
++++ b/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStore.kt
+@@ -296,6 +296,8 @@ class CodexAuthStore internal constructor(
+ 
+     fun keepConversation(): Boolean = prefs.getBoolean(KEY_KEEP_CONVERSATION, true)
+ 
++    fun conversationMode(): Boolean = prefs.getBoolean(KEY_CONVERSATION_MODE, false)
++
+     fun keepPhotosInConversations(): Boolean =
+         prefs.getBoolean(KEY_KEEP_PHOTOS_IN_CONVERSATIONS, true)
+ 
+@@ -348,6 +350,10 @@ class CodexAuthStore internal constructor(
+         prefs.edit().putBoolean(KEY_KEEP_CONVERSATION, enabled).apply()
+     }
+ 
++    fun setConversationMode(enabled: Boolean) {
++        prefs.edit().putBoolean(KEY_CONVERSATION_MODE, enabled).apply()
++    }
++
+     fun setKeepPhotosInConversations(enabled: Boolean) {
+         prefs.edit().putBoolean(KEY_KEEP_PHOTOS_IN_CONVERSATIONS, enabled).apply()
+     }
+@@ -541,6 +547,7 @@ class CodexAuthStore internal constructor(
+         private const val KEY_CHATGPT_MODEL = "chatgpt_model"
+         private const val KEY_CHATGPT_REASONING_EFFORT = "chatgpt_reasoning_effort"
+         private const val KEY_KEEP_CONVERSATION = "keep_conversation"
++        private const val KEY_CONVERSATION_MODE = "conversation_mode"
+         private const val KEY_KEEP_PHOTOS_IN_CONVERSATIONS =
+             "keep_photos_in_conversations"
+         private const val KEY_SPEAK_ANSWERS = "speak_answers"
+diff --git a/plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpControllerTest.kt b/plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpControllerTest.kt
+new file mode 100644
+index 00000000..3585cdd8
+--- /dev/null
++++ b/plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpControllerTest.kt
+@@ -0,0 +1,145 @@
++package com.anezium.rokidbus.plugin.assistant
++
++import kotlinx.coroutines.ExperimentalCoroutinesApi
++import kotlinx.coroutines.test.advanceTimeBy
++import kotlinx.coroutines.test.runCurrent
++import kotlinx.coroutines.test.runTest
++import org.junit.Assert.assertEquals
++import org.junit.Test
++
++@OptIn(ExperimentalCoroutinesApi::class)
++class AssistantFollowUpControllerTest {
++    @Test
++    fun silentAnswerStartsExactlyAtThreeSeconds() = runTest {
++        val events = mutableListOf<String>()
++        val controller = controller(events)
++        controller.start(true)
++        controller.answerCompleted(waitForTts = false)
++
++        advanceTimeBy(2_999L)
++        runCurrent()
++        assertEquals(emptyList<String>(), events)
++        advanceTimeBy(1L)
++        runCurrent()
++        assertEquals(listOf("capture"), events)
++    }
++
++    @Test
++    fun spokenAnswerWaitsForTtsThenThreeSeconds() = runTest {
++        val events = mutableListOf<String>()
++        val controller = controller(events)
++        controller.start(true)
++        controller.answerCompleted(waitForTts = true)
++        advanceTimeBy(20_000L)
++        runCurrent()
++        assertEquals(emptyList<String>(), events)
++
++        controller.ttsDone()
++        advanceTimeBy(2_999L)
++        runCurrent()
++        assertEquals(emptyList<String>(), events)
++        advanceTimeBy(1L)
++        runCurrent()
++        assertEquals(listOf("capture"), events)
++    }
++
++    @Test
++    fun cancelDuringDelayPreventsFollowUp() = runTest {
++        val events = mutableListOf<String>()
++        val controller = controller(events)
++        controller.start(true)
++        controller.answerCompleted(false)
++        controller.cancel()
++        advanceTimeBy(3_000L)
++        runCurrent()
++        assertEquals(emptyList<String>(), events)
++    }
++
++    @Test
++    fun manualStartReplacesScheduledFollowUp() = runTest {
++        val events = mutableListOf<String>()
++        val controller = controller(events)
++        controller.start(true)
++        controller.answerCompleted(false)
++        controller.start(true)
++        events += "manual"
++        advanceTimeBy(3_000L)
++        runCurrent()
++        assertEquals(listOf("manual"), events)
++    }
++
++    @Test
++    fun providerFailureCancellationDoesNotFollowUp() = runTest {
++        val events = mutableListOf<String>()
++        val controller = controller(events)
++        controller.start(true)
++        controller.cancel()
++        advanceTimeBy(30_000L)
++        runCurrent()
++        assertEquals(emptyList<String>(), events)
++    }
++
++    @Test
++    fun staleSessionCannotStart() = runTest {
++        val events = mutableListOf<String>()
++        val controller = controller(events)
++        controller.start(true)
++        controller.answerCompleted(false)
++        controller.start(false)
++        advanceTimeBy(3_000L)
++        runCurrent()
++        assertEquals(emptyList<String>(), events)
++    }
++
++    @Test
++    fun silenceTimeoutEndsSessionOnce() = runTest {
++        val events = mutableListOf<String>()
++        val controller = controller(events)
++        controller.start(true)
++        controller.answerCompleted(false)
++        advanceTimeBy(3_000L)
++        runCurrent()
++        advanceTimeBy(9_999L)
++        runCurrent()
++        assertEquals(listOf("capture"), events)
++        advanceTimeBy(1L)
++        runCurrent()
++        assertEquals(listOf("capture", "silence"), events)
++        advanceTimeBy(20_000L)
++        runCurrent()
++        assertEquals(listOf("capture", "silence"), events)
++    }
++
++    @Test
++    fun userSpeechCancelsSilenceTimeout() = runTest {
++        val events = mutableListOf<String>()
++        val controller = controller(events)
++        controller.start(true)
++        controller.answerCompleted(false)
++        advanceTimeBy(3_000L)
++        runCurrent()
++        advanceTimeBy(9_000L)
++        controller.markUserSpeechStarted()
++        advanceTimeBy(2_000L)
++        runCurrent()
++        assertEquals(listOf("capture"), events)
++    }
++
++    @Test
++    fun modeOffLeavesSingleTurnBehaviour() = runTest {
++        val events = mutableListOf<String>()
++        val controller = controller(events)
++        controller.start(false)
++        controller.answerCompleted(false)
++        advanceTimeBy(30_000L)
++        runCurrent()
++        assertEquals(emptyList<String>(), events)
++    }
++
++    private fun kotlinx.coroutines.test.TestScope.controller(events: MutableList<String>) =
++        AssistantFollowUpController(
++            scope = this,
++            startFollowUp = { events += "capture" },
++            silenceExpired = { events += "silence" },
++        )
++}
+diff --git a/plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStoreLogicTest.kt b/plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStoreLogicTest.kt
+index 0ac888b6..fe74f364 100644
+--- a/plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStoreLogicTest.kt
++++ b/plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStoreLogicTest.kt
+@@ -8,6 +8,19 @@ import org.junit.Assert.assertTrue
+ import org.junit.Test
+ 
+ class CodexAuthStoreLogicTest {
++    @Test
++    fun conversationModeDefaultsOffAndPersistsIndependently() {
++        val store = CodexAuthStore(FakeSharedPreferences())
++
++        assertFalse(store.conversationMode())
++        assertTrue(store.keepConversation())
++
++        store.setConversationMode(true)
++
++        assertTrue(store.conversationMode())
++        assertTrue(store.keepConversation())
++    }
++
+     @Test
+     fun conversationSettingsHaveExpectedDefaults() {
+         val store = CodexAuthStore(FakeSharedPreferences())
+-- 
+2.43.0
+
