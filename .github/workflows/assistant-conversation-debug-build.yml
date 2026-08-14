@@ -91,7 +91,7 @@ jobs:
           grep -q 'FOLLOW_UP_DELAY_MS = 3_000L' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt
           grep -q 'FOLLOW_UP_SILENCE_TIMEOUT_MS = 10_000L' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt
           grep -q 'fun dismissTransient()' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt
-          grep -q 'uiController.dismissTransient()' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
+          test "$(grep -c 'uiController.dismissTransient()' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt)" -eq 2
 
       - name: Run Assistant unit tests and build debug APK
         shell: bash
@@ -102,12 +102,46 @@ jobs:
             :plugin-assistant:testDebugUnitTest \
             :plugin-assistant:assembleDebug
 
+      - name: Detect stable release signing
+        shell: bash
+        env:
+          NEXUS_RELEASE_KEYSTORE_B64: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          NEXUS_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          NEXUS_RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$NEXUS_RELEASE_KEYSTORE_B64" && -n "$NEXUS_RELEASE_KEYSTORE_PASSWORD" && -n "$NEXUS_RELEASE_KEY_ALIAS" ]]; then
+            keystore_path="$RUNNER_TEMP/nexus-release.keystore"
+            umask 077
+            printf '%s' "$NEXUS_RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore_path"
+            echo "NEXUS_RELEASE_KEYSTORE=$keystore_path" >> "$GITHUB_ENV"
+            echo "HAS_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+            echo "Stable release signing is configured."
+          else
+            echo "HAS_RELEASE_SIGNING=false" >> "$GITHUB_ENV"
+            echo "Stable release signing is not configured on this repository."
+          fi
+
+      - name: Build stable signed release APK
+        if: env.HAS_RELEASE_SIGNING == 'true'
+        shell: bash
+        env:
+          NEXUS_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          NEXUS_RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          ./gradlew :plugin-assistant:assembleRelease -PskipCxrGlobal=true
+
       - name: Show APK metadata
         shell: bash
         run: |
           set -euo pipefail
           find plugins/assistant/build/outputs/apk/debug \
             -maxdepth 1 -type f -name '*.apk' -print -exec sha256sum {} \;
+          if [[ "$HAS_RELEASE_SIGNING" == 'true' ]]; then
+            find plugins/assistant/build/outputs/apk/release \
+              -maxdepth 1 -type f -name '*.apk' -print -exec sha256sum {} \;
+          fi
 
       - name: Upload Assistant Conversation Mode debug APK
         uses: actions/upload-artifact@v4
@@ -115,3 +149,16 @@ jobs:
           name: rv101-plugin-assistant-conversation-debug
           path: RokidNexus/plugins/assistant/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Upload stable signed Assistant APK
+        if: env.HAS_RELEASE_SIGNING == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rv101-plugin-assistant-conversation-release
+          path: RokidNexus/plugins/assistant/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Remove decoded release keystore
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/nexus-release.keystore"
