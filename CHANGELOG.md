@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.4.4
+
 - **Setup now asks for the one switch it cannot see.** The Hi Rokid app has an
   ADB debugging switch in its developer section. With it off, the glasses still
   pair and still report developer options as available, while every command
