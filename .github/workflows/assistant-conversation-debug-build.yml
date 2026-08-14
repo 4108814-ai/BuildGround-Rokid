@@ -1,0 +1,101 @@
+name: Assistant conversation debug APK build
+
+on:
+  push:
+    branches:
+      - feature/assistant-conversation-mode
+    paths:
+      - '.github/workflows/assistant-conversation-debug-build.yml'
+      - '.github/patches/assistant-conversation-mode.patch'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-assistant-conversation-debug:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RokidNexus
+
+    steps:
+      - name: Check out BuildGround-Rokid
+        uses: actions/checkout@v6
+        with:
+          path: RokidNexus
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: v0.2.3
+          path: CxrGlobal
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Verify and apply Conversation Mode patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch_file='.github/patches/assistant-conversation-mode.patch'
+          expected='a3e3bd757480267fcdf4a51d7acf60651efb6ba76f2ee33af4677c28e168df5a'
+          actual="$(sha256sum "$patch_file" | cut -d ' ' -f 1)"
+          echo "patch sha256=$actual"
+          test "$actual" = "$expected"
+          git apply --check "$patch_file"
+          git apply "$patch_file"
+          mapfile -t changed < <(git diff --name-only | sort)
+          printf '%s\n' "${changed[@]}"
+          expected_files=(
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantSettingsActivity.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStore.kt'
+            'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpControllerTest.kt'
+            'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStoreLogicTest.kt'
+          )
+          mapfile -t expected_sorted < <(printf '%s\n' "${expected_files[@]}" | sort)
+          test "$(printf '%s\n' "${changed[@]}")" = "$(printf '%s\n' "${expected_sorted[@]}")"
+          grep -q 'FOLLOW_UP_DELAY_MS = 3_000L' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt
+          grep -q 'FOLLOW_UP_SILENCE_TIMEOUT_MS = 10_000L' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt
+
+      - name: Run Assistant unit tests and build debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew \
+            :plugin-assistant:testDebugUnitTest \
+            :plugin-assistant:assembleDebug
+
+      - name: Show APK metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          find plugins/assistant/build/outputs/apk/debug \
+            -maxdepth 1 -type f -name '*.apk' -print -exec sha256sum {} \;
+
+      - name: Upload Assistant Conversation Mode debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: rv101-plugin-assistant-conversation-debug
+          path: RokidNexus/plugins/assistant/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
