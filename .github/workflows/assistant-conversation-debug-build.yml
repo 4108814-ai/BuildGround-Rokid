@@ -8,6 +8,7 @@ on:
       - '.github/workflows/assistant-conversation-debug-build.yml'
       - '.github/patches/assistant-conversation-mode.patch'
       - '.github/patches/assistant-conversation-timeout-ui-fix.patch'
+      - '.github/scripts/apply-assistant-phone-calls.py'
   workflow_dispatch:
 
 permissions:
@@ -52,7 +53,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Verify and apply Conversation Mode patches
+      - name: Verify and apply Assistant feature patches
         shell: bash
         run: |
           set -euo pipefail
@@ -70,6 +71,8 @@ jobs:
           git apply --check "$timeout_patch"
           git apply "$timeout_patch"
 
+          python .github/scripts/apply-assistant-phone-calls.py
+
           mapfile -t changed < <(
             {
               git diff --name-only
@@ -78,13 +81,17 @@ jobs:
           )
           printf '%s\n' "${changed[@]}"
           expected_files=(
+            'plugins/assistant/src/main/AndroidManifest.xml'
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt'
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt'
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantSettingsActivity.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantTool.kt'
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt'
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStore.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt'
             'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpControllerTest.kt'
             'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStoreLogicTest.kt'
+            'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/PhoneCallToolsTest.kt'
           )
           mapfile -t expected_sorted < <(printf '%s\n' "${expected_files[@]}" | sort)
           test "$(printf '%s\n' "${changed[@]}")" = "$(printf '%s\n' "${expected_sorted[@]}")"
@@ -92,6 +99,10 @@ jobs:
           grep -q 'FOLLOW_UP_SILENCE_TIMEOUT_MS = 10_000L' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt
           grep -q 'fun dismissTransient()' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt
           test "$(grep -c 'uiController.dismissTransient()' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt)" -eq 2
+          grep -q 'android.permission.READ_CONTACTS' plugins/assistant/src/main/AndroidManifest.xml
+          grep -q 'android.permission.CALL_PHONE' plugins/assistant/src/main/AndroidManifest.xml
+          grep -q 'CALL_CONTACT_TOOL_NAME = "call_contact"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt
+          grep -q 'TelecomManager' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt
 
       - name: Run Assistant unit tests and build debug APK
         shell: bash
