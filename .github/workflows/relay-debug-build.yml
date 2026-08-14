@@ -1,0 +1,71 @@
+name: Relay debug APK build
+
+on:
+  push:
+    branches:
+      - fix/relay-duplicate-guardian-permission
+    paths:
+      - '.github/workflows/relay-debug-build.yml'
+      - 'plugins/relay/**'
+      - 'shared/**'
+      - 'bus-client/**'
+      - 'settings.gradle.kts'
+      - 'build.gradle.kts'
+      - 'gradle/**'
+      - 'gradle.properties'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-relay-debug:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out BuildGround-Rokid
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build Relay debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :plugin-relay:assembleDebug -PskipCxrGlobal=true --no-daemon
+
+      - name: Verify Relay manifest and APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -q '<permission' plugins/relay/src/main/AndroidManifest.xml | grep -q 'BIND_PLUGIN_GUARDIAN'; then
+            echo '::error::Relay still declares BIND_PLUGIN_GUARDIAN'
+            exit 1
+          fi
+          grep -q 'android:permission="com.anezium.rokidbus.permission.BIND_PLUGIN_GUARDIAN"' plugins/relay/src/main/AndroidManifest.xml
+          find plugins/relay/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print -exec sha256sum {} \;
+
+      - name: Upload Relay debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: rv101-plugin-relay-debug
+          path: plugins/relay/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
