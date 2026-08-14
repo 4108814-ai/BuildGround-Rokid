@@ -1,0 +1,33 @@
+diff --git a/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt b/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
+--- a/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
++++ b/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
+@@ -172,6 +172,7 @@ class AssistantPluginService : NexusPluginService() {
+             if (automaticFollowUpCapture) {
+                 resetCapture()
+                 automaticFollowUpCapture = false
++                uiController.dismissTransient()
+             }
+         },
+     )
+diff --git a/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt b/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt
+--- a/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt
++++ b/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt
+@@ -128,6 +128,18 @@ internal class AssistantUiController(
+         }
+     }
+ 
++    fun dismissTransient() {
++        cancelLauncherHint()
++        stopKeepalive()
++        startNewState(flushTranscript = false)
++        answerCardStarted = false
++        if (useNoticeBand()) {
++            hideNoticeIfShown()
++        } else if (surfaceShown) {
++            showCard(listOf(LAUNCHER_HINT), forceShow = false)
++        }
++    }
++
+     fun showTranscript(text: String) {
+         if (!useNoticeBand()) return
+         val body = truncateTranscriptTail(text)
