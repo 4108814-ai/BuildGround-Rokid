@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Setup now asks for the one switch it cannot see.** The Hi Rokid app has an
+  ADB debugging switch in its developer section. With it off, the glasses still
+  pair and still report developer options as available, while every command
+  setup needs is refused — so setup stopped halfway with nothing naming the
+  cause, and it read as though the phone were unsupported. It never was.
+  Onboarding now asks for that switch before automatic setup and opens Hi Rokid
+  for you, manual setup says it before its checks rather than after they all
+  pass, and the developer-options error points at Hi Rokid instead of at the
+  step that had just failed. Thanks to MayonezSlap, Shon-z and JFernandes2612,
+  who found it and posted the workaround before we knew what it was.
+
 ## 1.4.3
 
 - **A document opens where reading begins.** A reader page always opened on its

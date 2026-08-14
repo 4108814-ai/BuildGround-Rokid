@@ -7,7 +7,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 
 object CxrLAuth {
-    private const val GLOBAL_AI_APP_PACKAGE = "com.rokid.sprite.global.aiapp"
+    /** Hi Rokid itself. Onboarding sends the owner here for the one switch Nexus cannot flip. */
+    const val GLOBAL_AI_APP_PACKAGE = "com.rokid.sprite.global.aiapp"
     private const val AUTH_ACTIVITY_CLASS = "com.rokid.sprite.aiapp.externalapp.auth.AuthorizationActivity"
     private const val AUTH_ACTION = "com.rokid.sprite.aiapp.externalapp.AUTHORIZATION"
     private const val EXTRA_AUTH_RESULT = "auth_result"

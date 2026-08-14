@@ -232,6 +232,17 @@ class GlassesManualSetupActivity : Activity() {
         body.addView(NexusUi.cardBody(this, getString(R.string.guided_intro)), NexusUi.block())
         body.addView(BusTheme.gap(this, 14))
         body.addView(preflightCard(preflight), NexusUi.block())
+        // Not one of the checks above, because it cannot be checked: the switch is a vendor
+        // property Hi Rokid owns. Every check in that card can pass with it off, so it is said
+        // out loud here instead of being inferred from a run that fails without naming it.
+        if (!preflight.alreadyComplete) {
+            body.addView(BusTheme.gap(this, 14))
+            body.addView(
+                NexusUi.cardBody(this, getString(R.string.guided_adb_reminder))
+                    .apply { textSize = 12f },
+                NexusUi.block(),
+            )
+        }
 
         if (preflight.alreadyComplete) {
             body.addView(BusTheme.gap(this, 20))

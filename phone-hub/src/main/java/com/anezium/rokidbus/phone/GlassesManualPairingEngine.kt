@@ -521,7 +521,8 @@ internal class GlassesManualPairingEngine(
             "Nexus can't move through the glasses menus. Run step 1 to turn on Accessibility " +
                 "access, then try again."
         "DEVELOPER_OPTIONS_DISABLED" ->
-            "Developer options are still disabled on the glasses. Run step 2 and wait for it to finish."
+            "Developer options are still disabled on the glasses. Turn on ADB debugging in the " +
+                "Hi Rokid app (developer section), then run step 2 and wait for it to finish."
         "DEVELOPER_OPTIONS_ENABLE_FAILED" ->
             "Nexus could not enable Developer options. Run step 2 again while wearing the glasses."
         "SETTINGS_UNAVAILABLE" ->

@@ -41,6 +41,7 @@ private const val TAG = "RokidNexusHome"
 private const val BLUETOOTH_PERMISSION_REQUEST = 20
 private const val NOTIFICATION_PERMISSION_REQUEST = 22
 private const val PREF_NOTIFICATIONS_ANSWERED = "onboarding_notifications_answered"
+private const val PREF_ADB_DEBUGGING_ACKNOWLEDGED = "onboarding_adb_debugging_acknowledged"
 
 /** Companion home: fixed status/settings menubar, setup cards, plugin list, store entry and hub toggle. */
 class MainActivity : Activity() {
@@ -897,6 +898,28 @@ class MainActivity : Activity() {
                     glassesStatus
                 },
             ),
+            // The one prerequisite Nexus can neither flip nor see. Hi Rokid owns a vendor ADB
+            // switch, and with it off the glasses still report developer options as available and
+            // still accept the pairing -- while every command the bootstrap runs over that session
+            // is killed. Asked before the automatic run rather than diagnosed after it fails,
+            // because the failure it produces names nothing the owner could act on.
+            OnboardingStep(
+                title = getString(R.string.onb_adb_title),
+                body = getString(R.string.onb_adb_body),
+                done = adbDebuggingAcknowledged(),
+                actionLabel = if (hiRokidInstalled()) {
+                    getString(R.string.onb_adb_action)
+                } else {
+                    getString(R.string.onb_adb_action_done)
+                },
+                onAction = {
+                    if (hiRokidInstalled()) openHiRokid() else recordAdbDebuggingAcknowledged()
+                },
+                statusLine = getString(R.string.onb_adb_status),
+                secondaryActionLabel = getString(R.string.onb_adb_action_done)
+                    .takeIf { hiRokidInstalled() },
+                onSecondaryAction = { recordAdbDebuggingAcknowledged() },
+            ),
             OnboardingStep(
                 title = getString(R.string.onb_glasses_title),
                 body = getString(R.string.onb_glasses_body),
@@ -1231,6 +1254,34 @@ class MainActivity : Activity() {
             .edit()
             .putBoolean(PREF_NOTIFICATIONS_ANSWERED, true)
             .apply()
+    }
+
+    private fun hiRokidInstalled(): Boolean = isPackageInstalled(CxrLAuth.GLOBAL_AI_APP_PACKAGE)
+
+    /**
+     * An acknowledgement, not a check: the switch lives on the glasses under a vendor property no
+     * ordinary app can read, and every AOSP flag around it reads healthy whether it is on or off.
+     * Taking the owner at their word beats a green tick Nexus would be inventing.
+     */
+    private fun adbDebuggingAcknowledged(): Boolean =
+        getSharedPreferences(NexusPhoneState.PREFS, MODE_PRIVATE)
+            .getBoolean(PREF_ADB_DEBUGGING_ACKNOWLEDGED, false)
+
+    private fun recordAdbDebuggingAcknowledged() {
+        getSharedPreferences(NexusPhoneState.PREFS, MODE_PRIVATE)
+            .edit()
+            .putBoolean(PREF_ADB_DEBUGGING_ACKNOWLEDGED, true)
+            .apply()
+        rebuildSetupSection()
+    }
+
+    private fun openHiRokid() {
+        val launch = packageManager.getLaunchIntentForPackage(CxrLAuth.GLOBAL_AI_APP_PACKAGE)
+        // Nothing to hand off to, so the step would otherwise dead-end on a button that does
+        // nothing: settle it here rather than leave the owner stuck behind it.
+        if (launch == null || runCatching { startActivity(launch) }.isFailure) {
+            recordAdbDebuggingAcknowledged()
+        }
     }
 
     private fun canInstallApps(): Boolean = packageManager.canRequestPackageInstalls()

@@ -34,6 +34,12 @@
     <string name="onb_install_status_installed">Nexus is installed on your glasses.</string>
     <string name="onb_install_status_wifi_needed">The app reaches the glasses over Wi-Fi — turn it on first.</string>
 
+    <string name="onb_adb_title">Turn on ADB debugging</string>
+    <string name="onb_adb_body">In the Hi Rokid app, open the developer section and turn on ADB debugging. Without it your glasses still pair, and setup stops halfway.</string>
+    <string name="onb_adb_action">Open Hi Rokid</string>
+    <string name="onb_adb_action_done">I turned it on</string>
+    <string name="onb_adb_status">Nexus has no way to read this switch, so it has to ask.</string>
+
     <string name="onb_glasses_title">Set up your glasses</string>
     <string name="onb_glasses_body">Put the glasses on and tap Automatic setup. Nexus opens the one switch you need to flip, then finishes the rest on its own.</string>
     <string name="onb_glasses_action">Automatic setup</string>
@@ -107,7 +113,8 @@
     <string name="guided_check_wifi">Glasses on Wi-Fi</string>
     <string name="guided_check_wifi_fail">Connect the glasses to Wi-Fi from the Hi Rokid app.</string>
     <string name="guided_check_developer">Developer options available</string>
-    <string name="guided_check_developer_fail">Nexus unlocks this for you during the next step.</string>
+    <string name="guided_check_developer_fail">Nexus unlocks this during the next step, as long as ADB debugging is on in Hi Rokid.</string>
+    <string name="guided_adb_reminder">Before anything else: ADB debugging has to be on in the Hi Rokid app, developer section. Nexus cannot read that switch, and with it off your glasses pair normally and setup goes nowhere.</string>
     <string name="guided_check_pending">Checking…</string>
     <string name="guided_check_skipped">Already done</string>
 
