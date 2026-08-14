@@ -62,7 +62,12 @@ jobs:
           test "$actual" = "$expected"
           git apply --check "$patch_file"
           git apply "$patch_file"
-          mapfile -t changed < <(git diff --name-only | sort)
+          mapfile -t changed < <(
+            {
+              git diff --name-only
+              git ls-files --others --exclude-standard
+            } | sort -u
+          )
           printf '%s\n' "${changed[@]}"
           expected_files=(
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt'
