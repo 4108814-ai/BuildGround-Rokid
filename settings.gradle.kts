@@ -18,7 +18,12 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "RokidNexus"
+rootProject.name = "BuildGroundNexusWorkspace"
+
+// New independent BuildGround product. This module must not depend on the donor modules below.
+include(":buildground-nexus")
+
+// Legacy Rokid Nexus modules retained only as migration donors and rollback reference.
 include(":shared")
 include(":bus-client")
 include(":plugin-lyrics")
@@ -38,8 +43,6 @@ include(":plugin-sample")
 include(":plugin-wireless-adb")
 include(":ink-engine")
 
-// Plugin modules live under plugins/ (one folder per plugin, each with its own
-// README and CHANGELOG); feeds moves there once the in-flight feeds branch lands.
 project(":plugin-lyrics").projectDir = file("plugins/lyrics")
 project(":plugin-media").projectDir = file("plugins/media")
 project(":plugin-transit").projectDir = file("plugins/transit")
