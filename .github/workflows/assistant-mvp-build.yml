@@ -1,0 +1,210 @@
+name: Assistant MVP feature pack build
+
+on:
+  push:
+    branches:
+      - feature/assistant-conversation-mode
+    paths:
+      - '.github/workflows/assistant-mvp-build.yml'
+      - '.github/patches/assistant-conversation-mode.patch'
+      - '.github/patches/assistant-conversation-timeout-ui-fix.patch'
+      - '.github/scripts/apply-assistant-phone-calls.py'
+      - '.github/scripts/fix-assistant-phone-contact-constants.py'
+      - '.github/scripts/apply-assistant-mvp-pack.py'
+      - '.github/scripts/prepare-assistant-release-signing.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-assistant-mvp:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RokidNexus
+
+    steps:
+      - name: Check out BuildGround-Rokid
+        uses: actions/checkout@v6
+        with:
+          path: RokidNexus
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: v0.2.3
+          path: CxrGlobal
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Apply Assistant MVP feature pack
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          conversation_patch='.github/patches/assistant-conversation-mode.patch'
+          conversation_expected='a3e3bd757480267fcdf4a51d7acf60651efb6ba76f2ee33af4677c28e168df5a'
+          conversation_actual="$(sha256sum "$conversation_patch" | cut -d ' ' -f 1)"
+          echo "conversation patch sha256=$conversation_actual"
+          test "$conversation_actual" = "$conversation_expected"
+          git apply --check "$conversation_patch"
+          git apply "$conversation_patch"
+
+          timeout_patch='.github/patches/assistant-conversation-timeout-ui-fix.patch'
+          timeout_actual="$(sha256sum "$timeout_patch" | cut -d ' ' -f 1)"
+          echo "timeout UI patch sha256=$timeout_actual"
+          git apply --check "$timeout_patch"
+          git apply "$timeout_patch"
+
+          python .github/scripts/apply-assistant-phone-calls.py
+          python .github/scripts/fix-assistant-phone-contact-constants.py
+          python .github/scripts/apply-assistant-mvp-pack.py
+
+          mapfile -t changed < <(
+            {
+              git diff --name-only
+              git ls-files --others --exclude-standard
+            } | sort -u
+          )
+          printf '%s\n' "${changed[@]}"
+
+          expected_files=(
+            'plugins/assistant/build.gradle.kts'
+            'plugins/assistant/src/main/AndroidManifest.xml'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantNotificationListenerService.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantSettingsActivity.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantTool.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/CalendarTools.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStore.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/NexusAgentPolicy.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt'
+            'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpControllerTest.kt'
+            'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpLogicTest.kt'
+            'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStoreLogicTest.kt'
+            'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/NexusAgentPolicyTest.kt'
+            'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/PhoneCallToolsTest.kt'
+          )
+          mapfile -t expected_sorted < <(printf '%s\n' "${expected_files[@]}" | sort)
+          test "$(printf '%s\n' "${changed[@]}")" = "$(printf '%s\n' "${expected_sorted[@]}")"
+
+          grep -q 'versionCode = 10' plugins/assistant/build.gradle.kts
+          grep -q 'versionName = "1.5.0"' plugins/assistant/build.gradle.kts
+          grep -q 'android.permission.SEND_SMS' plugins/assistant/src/main/AndroidManifest.xml
+          grep -q 'android.permission.READ_CALL_LOG' plugins/assistant/src/main/AndroidManifest.xml
+          grep -q 'AssistantNotificationListenerService' plugins/assistant/src/main/AndroidManifest.xml
+          grep -q 'SEND_SMS_TOOL_NAME = "send_sms"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt
+          grep -q 'DAILY_AGENDA_TOOL_NAME = "daily_agenda"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt
+          grep -q 'ENGINEERING_CALC_TOOL_NAME = "engineering_calc"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt
+          grep -q 'MEETING_START_TOOL_NAME = "meeting_start"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt
+          grep -q 'LIST_NOTIFICATIONS_TOOL_NAME = "list_notifications"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt
+          grep -q 'BUILDGROUND_QUERY_TOOL_NAME = "buildground_query"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt
+          grep -q 'fun disabled(): BuildGroundDataBridge' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt
+          grep -q 'fresh photo' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/NexusAgentPolicy.kt
+          grep -q 'This is not Relay' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/NexusAgentPolicy.kt
+
+      - name: Run Assistant unit tests and build debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew \
+            :plugin-assistant:testDebugUnitTest \
+            :plugin-assistant:assembleDebug
+
+      - name: Recover stable release signing
+        shell: bash
+        env:
+          NEXUS_RELEASE_KEYSTORE_B64_RAW: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          NEXUS_RELEASE_KEYSTORE_PASSWORD_RAW: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          NEXUS_RELEASE_KEY_ALIAS_RAW: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: python .github/scripts/prepare-assistant-release-signing.py
+
+      - name: Validate stable release signing key
+        if: env.HAS_RELEASE_SIGNING == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          keytool -list \
+            -storetype PKCS12 \
+            -keystore "$NEXUS_RELEASE_KEYSTORE" \
+            -storepass "$NEXUS_RELEASE_KEYSTORE_PASSWORD" \
+            -alias "$NEXUS_RELEASE_KEY_ALIAS" >/dev/null
+          echo "Stable release signing key decoded and validated."
+
+      - name: Build stable signed release APK
+        if: env.HAS_RELEASE_SIGNING == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :plugin-assistant:assembleRelease -PskipCxrGlobal=true
+
+      - name: Verify stable BuildGround certificate
+        if: env.HAS_RELEASE_SIGNING == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_apk="$(find plugins/assistant/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$release_apk"
+          expected='55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097'
+          actual="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$release_apk" \
+            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' \
+            | head -n 1 \
+            | tr '[:upper:]' '[:lower:]' \
+            | tr -d ':[:space:]')"
+          echo "release signer sha256=$actual"
+          test "$actual" = "$expected"
+          echo "Stable BuildGround release certificate verified."
+
+      - name: Show APK metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          find plugins/assistant/build/outputs/apk/debug \
+            -maxdepth 1 -type f -name '*.apk' -print -exec sha256sum {} \;
+          if [[ "$HAS_RELEASE_SIGNING" == 'true' ]]; then
+            find plugins/assistant/build/outputs/apk/release \
+              -maxdepth 1 -type f -name '*.apk' -print -exec sha256sum {} \;
+          fi
+
+      - name: Upload Assistant MVP debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: rv101-plugin-assistant-mvp-debug
+          path: RokidNexus/plugins/assistant/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload stable signed Assistant MVP APK
+        if: env.HAS_RELEASE_SIGNING == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rv101-plugin-assistant-mvp-release
+          path: RokidNexus/plugins/assistant/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Remove decoded release keystore
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/nexus-release.p12"
