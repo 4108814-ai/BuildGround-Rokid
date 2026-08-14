@@ -1,0 +1,54 @@
+name: Assistant signing key check
+
+on:
+  push:
+    branches:
+      - feature/assistant-conversation-mode
+    paths:
+      - '.github/workflows/assistant-signing-check.yml'
+      - '.github/scripts/prepare-assistant-release-signing.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-assistant-signing-key:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out BuildGround-Rokid
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Recover signing key
+        env:
+          NEXUS_RELEASE_KEYSTORE_B64_RAW: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          NEXUS_RELEASE_KEYSTORE_PASSWORD_RAW: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          NEXUS_RELEASE_KEY_ALIAS_RAW: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: python .github/scripts/prepare-assistant-release-signing.py
+
+      - name: Validate signing key and certificate
+        if: env.HAS_RELEASE_SIGNING == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='55:B2:21:85:39:2B:8C:1F:08:4C:3D:EC:58:BB:0F:34:2E:CE:71:02:28:95:56:AE:23:CA:DE:E6:CC:EC:20:97'
+          details="$(keytool -list -v \
+            -storetype PKCS12 \
+            -keystore "$NEXUS_RELEASE_KEYSTORE" \
+            -storepass "$NEXUS_RELEASE_KEYSTORE_PASSWORD" \
+            -alias "$NEXUS_RELEASE_KEY_ALIAS")"
+          actual="$(printf '%s\n' "$details" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1)"
+          test -n "$actual"
+          echo "certificate SHA256=$actual"
+          test "$actual" = "$expected"
+          echo "Permanent BuildGround Assistant signing key verified."
+
+      - name: Remove decoded keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/nexus-release.p12"
