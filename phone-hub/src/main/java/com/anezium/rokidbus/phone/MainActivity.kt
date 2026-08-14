@@ -906,7 +906,10 @@ class MainActivity : Activity() {
             OnboardingStep(
                 title = getString(R.string.onb_adb_title),
                 body = getString(R.string.onb_adb_body),
-                done = adbDebuggingAcknowledged(),
+                // Setup cannot have completed with the switch off, so anyone already paired has
+                // answered this by having got here. Asking them would reopen a finished wizard on
+                // update over a step they cleared months ago.
+                done = adbDebuggingAcknowledged() || NexusPhoneState.glassesSetupComplete,
                 actionLabel = if (hiRokidInstalled()) {
                     getString(R.string.onb_adb_action)
                 } else {
