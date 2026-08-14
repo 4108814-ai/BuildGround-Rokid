@@ -1,7 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Phase 1 intentionally has no INTERNET permission. -->
+    <!-- Hardware Bridge intentionally has no INTERNET permission. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <queries>
+        <package android:name="com.rokid.sprite.global.aiapp" />
+        <intent>
+            <action android:name="com.rokid.sprite.aiapp.externalapp.AUTHORIZATION" />
+        </intent>
+        <intent>
+            <action android:name="com.rokid.sprite.aiapp.externalapp.MEDIA_STREAM_SERVICE" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="false"
