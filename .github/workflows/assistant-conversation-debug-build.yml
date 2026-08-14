@@ -10,6 +10,7 @@ on:
       - '.github/patches/assistant-conversation-timeout-ui-fix.patch'
       - '.github/scripts/apply-assistant-phone-calls.py'
       - '.github/scripts/fix-assistant-phone-contact-constants.py'
+      - '.github/scripts/prepare-assistant-release-signing.py'
   workflow_dispatch:
 
 permissions:
@@ -118,46 +119,24 @@ jobs:
             :plugin-assistant:testDebugUnitTest \
             :plugin-assistant:assembleDebug
 
-      - name: Detect and validate stable release signing
+      - name: Recover stable release signing
         shell: bash
         env:
           NEXUS_RELEASE_KEYSTORE_B64_RAW: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
           NEXUS_RELEASE_KEYSTORE_PASSWORD_RAW: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
           NEXUS_RELEASE_KEY_ALIAS_RAW: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: python .github/scripts/prepare-assistant-release-signing.py
+
+      - name: Validate stable release signing key
+        if: env.HAS_RELEASE_SIGNING == 'true'
+        shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "$NEXUS_RELEASE_KEYSTORE_B64_RAW" || -z "$NEXUS_RELEASE_KEYSTORE_PASSWORD_RAW" || -z "$NEXUS_RELEASE_KEY_ALIAS_RAW" ]]; then
-            echo "HAS_RELEASE_SIGNING=false" >> "$GITHUB_ENV"
-            echo "Stable release signing is not configured on this repository."
-            exit 0
-          fi
-
-          clean_b64="${NEXUS_RELEASE_KEYSTORE_B64_RAW#NEXUS_RELEASE_KEYSTORE_B64=}"
-          clean_b64="$(printf '%s' "$clean_b64" | tr -d '[:space:]')"
-          clean_password="${NEXUS_RELEASE_KEYSTORE_PASSWORD_RAW#NEXUS_RELEASE_KEYSTORE_PASSWORD=}"
-          clean_password="$(printf '%s' "$clean_password" | tr -d '\r\n')"
-          clean_alias="${NEXUS_RELEASE_KEY_ALIAS_RAW#NEXUS_RELEASE_KEY_ALIAS=}"
-          clean_alias="$(printf '%s' "$clean_alias" | tr -d '\r\n')"
-
-          echo "::add-mask::$clean_password"
-          echo "::add-mask::$clean_alias"
-
-          keystore_path="$RUNNER_TEMP/nexus-release.p12"
-          umask 077
-          printf '%s' "$clean_b64" | base64 --decode > "$keystore_path"
-
           keytool -list \
             -storetype PKCS12 \
-            -keystore "$keystore_path" \
-            -storepass "$clean_password" \
-            -alias "$clean_alias" >/dev/null
-
-          {
-            echo "NEXUS_RELEASE_KEYSTORE=$keystore_path"
-            echo "NEXUS_RELEASE_KEYSTORE_PASSWORD=$clean_password"
-            echo "NEXUS_RELEASE_KEY_ALIAS=$clean_alias"
-            echo "HAS_RELEASE_SIGNING=true"
-          } >> "$GITHUB_ENV"
+            -keystore "$NEXUS_RELEASE_KEYSTORE" \
+            -storepass "$NEXUS_RELEASE_KEYSTORE_PASSWORD" \
+            -alias "$NEXUS_RELEASE_KEY_ALIAS" >/dev/null
           echo "Stable release signing key decoded and validated."
 
       - name: Build stable signed release APK
