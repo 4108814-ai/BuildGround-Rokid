@@ -1,0 +1,48 @@
+name: BuildGround Nexus Core
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - buildground-nexus-v1
+    paths:
+      - 'buildground-nexus/**'
+      - '.github/workflows/buildground-nexus-core.yml'
+      - 'settings.gradle.kts'
+      - 'build.gradle.kts'
+      - 'gradle/**'
+      - 'gradle.properties'
+
+permissions:
+  contents: read
+
+jobs:
+  build-debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build isolated BuildGround Nexus debug APK
+        run: ./gradlew :buildground-nexus:assembleDebug --stacktrace
+
+      - name: Verify manifest has no Internet permission
+        run: |
+          MANIFEST='buildground-nexus/src/main/AndroidManifest.xml'
+          if grep -q 'android.permission.INTERNET' "$MANIFEST"; then
+            echo 'Unexpected INTERNET permission in independent core' >&2
+            exit 1
+          fi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BuildGround-Nexus-Core-debug
+          path: buildground-nexus/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
