@@ -1,4 +1,4 @@
-name: BuildGround Nexus Core
+name: BuildGround Nexus Hardware Bridge
 
 on:
   workflow_dispatch:
@@ -7,6 +7,7 @@ on:
       - buildground-nexus-v1
     paths:
       - 'buildground-nexus/**'
+      - 'buildground-glasses-bridge/**'
       - '.github/workflows/buildground-nexus-core.yml'
       - 'settings.gradle.kts'
       - 'build.gradle.kts'
@@ -29,20 +30,37 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Build isolated BuildGround Nexus debug APK
-        run: ./gradlew :buildground-nexus:assembleDebug --stacktrace
+      - name: Build independent phone and glasses bridge APKs
+        run: ./gradlew :buildground-nexus:assembleDebug :buildground-glasses-bridge:assembleDebug --stacktrace
 
-      - name: Verify manifest has no Internet permission
+      - name: Verify Hardware Bridge stays offline-only
+        shell: bash
         run: |
-          MANIFEST='buildground-nexus/src/main/AndroidManifest.xml'
-          if grep -q 'android.permission.INTERNET' "$MANIFEST"; then
-            echo 'Unexpected INTERNET permission in independent core' >&2
+          set -euo pipefail
+          for manifest in \
+            buildground-nexus/src/main/AndroidManifest.xml \
+            buildground-glasses-bridge/src/main/AndroidManifest.xml; do
+            if grep -q 'android.permission.INTERNET' "$manifest"; then
+              echo "Unexpected INTERNET permission in $manifest" >&2
+              exit 1
+            fi
+          done
+
+      - name: Verify no legacy Nexus runtime dependency leaked into BuildGround modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R -n -E 'com\.anezium|com\.example\.cxrglobal|anezium\.me|raw\.githubusercontent\.com/Anezium' \
+            buildground-nexus buildground-glasses-bridge; then
+            echo 'Legacy Anezium/Nexus runtime dependency detected in BuildGround modules' >&2
             exit 1
           fi
 
-      - name: Upload APK
+      - name: Upload Hardware Bridge APKs
         uses: actions/upload-artifact@v4
         with:
-          name: BuildGround-Nexus-Core-debug
-          path: buildground-nexus/build/outputs/apk/debug/*.apk
+          name: BuildGround-Nexus-Hardware-Bridge-debug
+          path: |
+            buildground-nexus/build/outputs/apk/debug/*.apk
+            buildground-glasses-bridge/build/outputs/apk/debug/*.apk
           if-no-files-found: error
