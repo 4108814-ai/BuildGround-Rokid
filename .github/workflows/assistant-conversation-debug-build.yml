@@ -13,6 +13,7 @@ on:
       - '.github/scripts/normalize-assistant-phone-sms-input.py'
       - '.github/scripts/extend-assistant-phone-sms.py'
       - '.github/scripts/apply-assistant-mvp-integration.py'
+      - '.github/scripts/fix-assistant-mvp-generated-settings.py'
       - '.github/scripts/prepare-assistant-release-signing.py'
       - 'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt'
       - 'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingMode.kt'
@@ -87,6 +88,7 @@ jobs:
           python .github/scripts/normalize-assistant-phone-sms-input.py
           python .github/scripts/extend-assistant-phone-sms.py
           python .github/scripts/apply-assistant-mvp-integration.py
+          python .github/scripts/fix-assistant-mvp-generated-settings.py
 
           echo 'Assistant build-time changes:'
           {
@@ -104,6 +106,7 @@ jobs:
           grep -q 'FOLLOW_UP_SILENCE_TIMEOUT_MS = 10_000L' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt
           grep -q 'fun dismissTransient()' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt
           test "$(grep -c 'uiController.dismissTransient()' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt)" -eq 3
+          test "$(grep -c 'override fun onResume()' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantSettingsActivity.kt)" -eq 1
           grep -q 'MEETING_REARM_DELAY_MS = 350L' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
           grep -q 'android.permission.READ_CONTACTS' plugins/assistant/src/main/AndroidManifest.xml
           grep -q 'android.permission.CALL_PHONE' plugins/assistant/src/main/AndroidManifest.xml
