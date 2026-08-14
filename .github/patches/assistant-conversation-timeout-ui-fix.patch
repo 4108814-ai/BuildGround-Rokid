@@ -9,6 +9,14 @@ diff --git a/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assista
              }
          },
      )
+@@ -417,6 +418,7 @@ class AssistantPluginService : NexusPluginService() {
+                 ) {
+                     automaticFollowUpCapture = false
+                     followUpController.cancel()
++                    uiController.dismissTransient()
+                     return
+                 }
+                 if (shouldUseRawCaptureFallback(reason)) {
 diff --git a/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt b/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt
 --- a/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt
 +++ b/plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt
