@@ -16,6 +16,8 @@ import android.widget.TextView
 import com.buildground.nexus.hardware.BuildGroundCxrBridge
 import com.buildground.nexus.hardware.RokidAuthorization
 import com.buildground.nexus.hardware.RokidTokenStore
+import com.buildground.nexus.security.CompanionApkVerifier
+import java.io.File
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
@@ -60,6 +62,7 @@ class MainActivity : Activity() {
 
         content.addView(actionButton("AUTHORIZE HI ROKID") { authorize() })
         content.addView(actionButton("CONNECT GLASSES") { connectBridge() })
+        content.addView(actionButton("INSTALL GLASSES BRIDGE APK") { chooseCompanionApk() })
         content.addView(actionButton("VERIFY HARDWARE BRIDGE") { bridge.sendChallenge() })
         content.addView(secondaryButton("FORGET ROKID AUTHORIZATION") {
             bridge.close()
@@ -68,7 +71,7 @@ class MainActivity : Activity() {
         })
 
         content.addView(TextView(this).apply {
-            text = "Offline hardware layer • BuildGround package identity • No Anezium registry/updater"
+            text = "Offline hardware layer • BuildGround package identity • Same-signer companion policy • No Anezium registry/updater"
             textSize = 12f
             setTextColor(SECONDARY)
             gravity = Gravity.CENTER
@@ -89,15 +92,10 @@ class MainActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != AUTH_REQUEST) return
-        val result = RokidAuthorization.parse(data)
-        if (!result.success || result.token.isNullOrBlank()) {
-            status.text = result.message
-            return
+        when (requestCode) {
+            AUTH_REQUEST -> handleAuthorizationResult(data)
+            APK_REQUEST -> handleCompanionApkResult(resultCode, data)
         }
-        tokenStore.save(result.token)
-        status.text = "${result.message}. Token encrypted in Android Keystore-backed storage."
-        connectBridge()
     }
 
     override fun onRequestPermissionsResult(
@@ -116,6 +114,53 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         bridge.close()
         super.onDestroy()
+    }
+
+    private fun handleAuthorizationResult(data: Intent?) {
+        val result = RokidAuthorization.parse(data)
+        if (!result.success || result.token.isNullOrBlank()) {
+            status.text = result.message
+            return
+        }
+        tokenStore.save(result.token)
+        status.text = "${result.message}. Token encrypted in Android Keystore-backed storage."
+        connectBridge()
+    }
+
+    private fun handleCompanionApkResult(resultCode: Int, data: Intent?) {
+        if (resultCode != RESULT_OK) {
+            status.text = "BuildGround glasses APK selection cancelled."
+            return
+        }
+        val uri = data?.data
+        if (uri == null) {
+            status.text = "No glasses APK was selected."
+            return
+        }
+
+        val cachedApk = File(cacheDir, "buildground-glasses-bridge-selected.apk")
+        val copied = runCatching {
+            contentResolver.openInputStream(uri)?.use { input ->
+                cachedApk.outputStream().use { output -> input.copyTo(output) }
+            } ?: error("Could not open selected APK")
+            cachedApk.isFile && cachedApk.length() > 0L
+        }.getOrDefault(false)
+
+        if (!copied) {
+            cachedApk.delete()
+            status.text = "Could not read the selected glasses APK."
+            return
+        }
+
+        val verification = CompanionApkVerifier.verify(this, cachedApk)
+        if (!verification.trusted) {
+            cachedApk.delete()
+            status.text = verification.message
+            return
+        }
+
+        status.text = "${verification.message}. Sending only this verified APK to Rokid Glasses."
+        bridge.installCompanion(cachedApk)
     }
 
     private fun authorize() {
@@ -143,6 +188,21 @@ class MainActivity : Activity() {
             return
         }
         bridge.connect(token)
+    }
+
+    private fun chooseCompanionApk() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/vnd.android.package-archive"
+        }
+        runCatching { startActivityForResult(intent, APK_REQUEST) }
+            .onFailure {
+                val fallback = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                }
+                startActivityForResult(fallback, APK_REQUEST)
+            }
     }
 
     private fun renderState(state: BuildGroundCxrBridge.State) {
@@ -188,6 +248,7 @@ class MainActivity : Activity() {
     private companion object {
         const val AUTH_REQUEST = 5101
         const val BLUETOOTH_REQUEST = 5102
+        const val APK_REQUEST = 5103
         val BG = Color.rgb(27, 27, 27)
         val SURFACE = Color.rgb(36, 36, 36)
         val ELEVATED = Color.rgb(46, 46, 46)
