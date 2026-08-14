@@ -10,7 +10,14 @@ on:
       - '.github/patches/assistant-conversation-timeout-ui-fix.patch'
       - '.github/scripts/apply-assistant-phone-calls.py'
       - '.github/scripts/fix-assistant-phone-contact-constants.py'
+      - '.github/scripts/extend-assistant-phone-sms.py'
+      - '.github/scripts/apply-assistant-mvp-integration.py'
       - '.github/scripts/prepare-assistant-release-signing.py'
+      - 'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt'
+      - 'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingMode.kt'
+      - 'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantNotificationBridge.kt'
+      - 'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpToolsTest.kt'
+      - 'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingModeTest.kt'
   workflow_dispatch:
 
 permissions:
@@ -55,7 +62,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Verify and apply Assistant feature patches
+      - name: Verify and apply Assistant feature bundle
         shell: bash
         run: |
           set -euo pipefail
@@ -75,6 +82,8 @@ jobs:
 
           python .github/scripts/apply-assistant-phone-calls.py
           python .github/scripts/fix-assistant-phone-contact-constants.py
+          python .github/scripts/extend-assistant-phone-sms.py
+          python .github/scripts/apply-assistant-mvp-integration.py
 
           mapfile -t changed < <(
             {
@@ -84,6 +93,7 @@ jobs:
           )
           printf '%s\n' "${changed[@]}"
           expected_files=(
+            'plugins/assistant/build.gradle.kts'
             'plugins/assistant/src/main/AndroidManifest.xml'
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt'
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt'
@@ -91,6 +101,7 @@ jobs:
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantTool.kt'
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt'
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStore.kt'
+            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/NexusAgentPolicy.kt'
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt'
             'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpControllerTest.kt'
             'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStoreLogicTest.kt'
@@ -99,16 +110,29 @@ jobs:
           )
           mapfile -t expected_sorted < <(printf '%s\n' "${expected_files[@]}" | sort)
           test "$(printf '%s\n' "${changed[@]}")" = "$(printf '%s\n' "${expected_sorted[@]}")"
+
+          grep -q 'versionCode = 10' plugins/assistant/build.gradle.kts
+          grep -q 'versionName = "1.5.1"' plugins/assistant/build.gradle.kts
           grep -q 'FOLLOW_UP_DELAY_MS = 3_000L' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt
           grep -q 'FOLLOW_UP_SILENCE_TIMEOUT_MS = 10_000L' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt
           grep -q 'fun dismissTransient()' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt
-          test "$(grep -c 'uiController.dismissTransient()' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt)" -eq 2
+          test "$(grep -c 'uiController.dismissTransient()' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt)" -eq 3
+          grep -q 'MEETING_REARM_DELAY_MS = 350L' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
           grep -q 'android.permission.READ_CONTACTS' plugins/assistant/src/main/AndroidManifest.xml
           grep -q 'android.permission.CALL_PHONE' plugins/assistant/src/main/AndroidManifest.xml
+          grep -q 'android.permission.SEND_SMS' plugins/assistant/src/main/AndroidManifest.xml
+          grep -q 'AssistantNotificationListenerService' plugins/assistant/src/main/AndroidManifest.xml
           grep -q 'CALL_CONTACT_TOOL_NAME = "call_contact"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt
+          grep -q 'REDIAL_LAST_ASSISTANT_CALL_TOOL_NAME = "redial_last_assistant_call"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt
+          grep -q 'SEND_SMS_CONTACT_TOOL_NAME = "send_sms_to_contact"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt
+          grep -q 'TODAY_BRIEF_TOOL_NAME = "today_brief"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt
+          grep -q 'ENGINEERING_CALCULATOR_TOOL_NAME = "engineering_calculator"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt
+          grep -q 'LIST_NOTIFICATIONS_TOOL_NAME = "list_recent_notifications"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantNotificationBridge.kt
+          grep -q 'REPLY_NOTIFICATION_TOOL_NAME = "reply_to_notification"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantNotificationBridge.kt
           grep -q 'ContactsContract.CommonDataKinds.Phone.CONTENT_URI' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt
           grep -q 'TelecomManager' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt
-          grep -q 'CALL_CONTACT_TOOL_NAME,' plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/NexusAgentPolicyTest.kt
+          grep -q 'SmsManager' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt
+          test -z "$(git diff --name-only | grep -i relay || true)"
 
       - name: Run Assistant unit tests and build debug APK
         shell: bash
@@ -177,7 +201,7 @@ jobs:
       - name: Upload Assistant Conversation Mode debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: rv101-plugin-assistant-conversation-debug
+          name: rv101-plugin-assistant-mvp-debug
           path: RokidNexus/plugins/assistant/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -185,7 +209,7 @@ jobs:
         if: env.HAS_RELEASE_SIGNING == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: rv101-plugin-assistant-conversation-release
+          name: rv101-plugin-assistant-mvp-release
           path: RokidNexus/plugins/assistant/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
