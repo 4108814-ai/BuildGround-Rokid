@@ -93,6 +93,7 @@ jobs:
             'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt'
             'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpControllerTest.kt'
             'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStoreLogicTest.kt'
+            'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/NexusAgentPolicyTest.kt'
             'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/PhoneCallToolsTest.kt'
           )
           mapfile -t expected_sorted < <(printf '%s\n' "${expected_files[@]}" | sort)
@@ -106,6 +107,7 @@ jobs:
           grep -q 'CALL_CONTACT_TOOL_NAME = "call_contact"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt
           grep -q 'ContactsContract.CommonDataKinds.Phone.CONTENT_URI' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt
           grep -q 'TelecomManager' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt
+          grep -q 'CALL_CONTACT_TOOL_NAME,' plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/NexusAgentPolicyTest.kt
 
       - name: Run Assistant unit tests and build debug APK
         shell: bash
