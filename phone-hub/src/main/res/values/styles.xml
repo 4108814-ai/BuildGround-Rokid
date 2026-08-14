@@ -3,11 +3,11 @@
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowActionBar">false</item>
         <item name="android:fontFamily">monospace</item>
-        <item name="android:windowBackground">#030C06</item>
-        <item name="android:navigationBarColor">#030C06</item>
-        <item name="android:statusBarColor">#030C06</item>
+        <item name="android:windowBackground">#1B1B1B</item>
+        <item name="android:navigationBarColor">#151515</item>
+        <item name="android:statusBarColor">#151515</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
-        <item name="android:colorAccent">#71FF97</item>
+        <item name="android:colorAccent">#FF7A00</item>
     </style>
 </resources>
