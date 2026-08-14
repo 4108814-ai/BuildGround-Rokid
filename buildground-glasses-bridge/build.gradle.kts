@@ -38,7 +38,7 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".dev"
+            // CXR CUSTOMAPP addresses the real package name; keep it identical in debug tests.
             versionNameSuffix = "-dev"
         }
         release {
