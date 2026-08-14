@@ -20,8 +20,9 @@ dependencyResolutionManagement {
 
 rootProject.name = "BuildGroundNexusWorkspace"
 
-// New independent BuildGround product. This module must not depend on the donor modules below.
+// New independent BuildGround product. These modules must not depend on donor modules below.
 include(":buildground-nexus")
+include(":buildground-glasses-bridge")
 
 // Legacy Rokid Nexus modules retained only as migration donors and rollback reference.
 include(":shared")
@@ -54,6 +55,7 @@ project(":plugin-relay").projectDir = file("plugins/relay")
 project(":plugin-sample").projectDir = file("plugins/sample")
 project(":plugin-wireless-adb").projectDir = file("plugins/wireless-adb")
 
+// Legacy donor build can still use an adjacent CxrGlobal checkout. BuildGround modules do not.
 val cxrGlobalDirectory = file("../CxrGlobal")
 val skipCxrGlobal = providers.gradleProperty("skipCxrGlobal")
     .map(String::toBoolean)
