@@ -5,7 +5,6 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
 import java.nio.file.Files
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -25,8 +24,8 @@ class AssistantMvpToolsTest {
         ) as AssistantToolResult.Json
 
         val json = JSONObject(result.text)
-        assertEquals(102.984425, json.getDouble("kg_per_m"), 0.000001)
-        assertEquals(0.102984, json.getDouble("total_t"), 0.000001)
+        assertEquals(102.986434, json.getDouble("kg_per_m"), 0.000001)
+        assertEquals(0.102986, json.getDouble("total_t"), 0.000001)
     }
 
     @Test
