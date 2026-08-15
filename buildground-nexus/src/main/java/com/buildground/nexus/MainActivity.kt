@@ -13,6 +13,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.buildground.nexus.hardware.BuildGroundCompanionRemover
 import com.buildground.nexus.hardware.BuildGroundCxrBridge
 import com.buildground.nexus.hardware.RokidAuthorization
 import com.buildground.nexus.hardware.RokidTokenStore
@@ -24,11 +25,13 @@ class MainActivity : Activity() {
     private lateinit var verifyButton: Button
     private lateinit var tokenStore: RokidTokenStore
     private lateinit var bridge: BuildGroundCxrBridge
+    private lateinit var companionRemover: BuildGroundCompanionRemover
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tokenStore = RokidTokenStore(this)
         bridge = BuildGroundCxrBridge(this) { state -> renderState(state) }
+        companionRemover = BuildGroundCompanionRemover(this)
 
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -64,6 +67,7 @@ class MainActivity : Activity() {
         content.addView(actionButton("AUTHORIZE HI ROKID") { authorize() })
         content.addView(actionButton("CONNECT GLASSES") { connectBridge() })
         content.addView(actionButton("INSTALL GLASSES BRIDGE APK") { chooseCompanionApk() })
+        content.addView(secondaryButton("REMOVE TEST GLASSES BRIDGE") { removeTestCompanion() })
         verifyButton = actionButton("VERIFY HARDWARE BRIDGE") {
             verifyButton.text = "VERIFYING…"
             bridge.sendChallenge()
@@ -118,6 +122,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        companionRemover.close()
         bridge.close()
         super.onDestroy()
     }
@@ -194,6 +199,26 @@ class MainActivity : Activity() {
             return
         }
         bridge.connect(token)
+    }
+
+    private fun removeTestCompanion() {
+        val token = tokenStore.load()
+        if (token.isNullOrBlank()) {
+            status.text = "Authorize Hi Rokid before removing the BuildGround test companion."
+            return
+        }
+        status.text = "Removing only com.buildground.nexus.glasses from Rokid Glasses…"
+        companionRemover.remove(token) { result ->
+            runOnUiThread {
+                if (result.success) {
+                    bridge.close()
+                    verifyButton.text = "VERIFY HARDWARE BRIDGE"
+                    status.text = result.message + "\n\nReconnect glasses, then install the NEW paired BuildGround Glasses Bridge APK."
+                } else {
+                    status.text = result.message
+                }
+            }
+        }
     }
 
     private fun chooseCompanionApk() {
