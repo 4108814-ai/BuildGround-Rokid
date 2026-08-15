@@ -1,21 +1,20 @@
 package com.buildground.nexus.hardware
 
 import android.content.Context
-import android.content.Intent
-import android.content.ServiceConnection
+import com.example.cxrglobal.CXRLink
+import com.example.cxrglobal.CxrDefs
+import com.example.cxrglobal.GlassInfo
+import com.example.cxrglobal.callbacks.ICXRLinkCbk
+import com.example.cxrglobal.callbacks.ICustomCmdCbk
 import com.rokid.cxr.Caps
-import com.rokid.cxr.link.CXRLink
-import com.rokid.cxr.link.callbacks.ICXRLinkCbk
-import com.rokid.cxr.link.callbacks.ICustomCmdCbk
-import com.rokid.cxr.link.utils.CxrDefs
-import com.rokid.cxr.link.utils.GlassInfo
 
 /**
  * BuildGround-owned CXR-L CUSTOMAPP transport.
  *
- * The important distinction from the raw Hi Rokid AIDL service is that CXR-L
- * must be configured for the exact glasses package before custom commands are
- * routed bidirectionally between phone and CXR-S on the glasses.
+ * This intentionally mirrors the transport primitives used by the known-working
+ * Nexus phone hub: com.example.cxrglobal CXRLink, direct connect(token), and a
+ * serialized Caps payload for sendCustomCmd(). The package identity and protocol
+ * remain BuildGround-owned.
  */
 class BuildGroundCustomAppSession(
     context: Context,
@@ -25,45 +24,35 @@ class BuildGroundCustomAppSession(
 ) {
     private val appContext = context.applicationContext
     private var link: CXRLink? = null
-    private var serviceConnection: ServiceConnection? = null
-    private var bound = false
     @Volatile private var cxrConnected = false
     @Volatile private var glassesConnected = false
 
     fun start(token: String): Boolean {
         if (token.isBlank()) return false
-        if (link != null && bound) return true
+        if (link != null) return true
 
         stop()
-        val next = CXRLink(appContext)
-        val configured = next.configCXRSession(
-            CxrDefs.CXRSession(CxrDefs.CXRSessionType.CUSTOMAPP, glassesPackage),
-        )
-        if (!configured) return false
-
-        next.setCXRLinkCbk(linkCallback)
-        next.setCXRCustomCmdCbk(customCmdCallback)
+        val next = CXRLink(appContext).apply {
+            configCXRSession(
+                CxrDefs.CXRSession(
+                    CxrDefs.CXRSessionType.CUSTOMAPP,
+                    glassesPackage,
+                ),
+            )
+            setCXRLinkCbk(linkCallback)
+            setCXRCustomCmdCbk(customCmdCallback)
+        }
         link = next
 
-        val connection = runCatching { findServiceConnection(next) }.getOrNull() ?: run {
+        val requested = runCatching { next.connect(token) }.getOrDefault(false)
+        if (!requested) {
+            runCatching { next.disconnect() }
             link = null
-            return false
+            cxrConnected = false
+            glassesConnected = false
+            publishState()
         }
-        serviceConnection = connection
-
-        val intent = Intent(MEDIA_STREAM_ACTION)
-            .setPackage(RokidAuthorization.GLOBAL_APP_PACKAGE)
-            .putExtra(EXTRA_AUTH_TOKEN, token)
-            .putExtra(EXTRA_AUTH_PACKAGE, appContext.packageName)
-
-        bound = runCatching {
-            appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE)
-        }.getOrDefault(false)
-        if (!bound) {
-            serviceConnection = null
-            link = null
-        }
-        return bound
+        return requested
     }
 
     fun send(key: String, payload: ByteArray): Boolean {
@@ -75,22 +64,17 @@ class BuildGroundCustomAppSession(
         val active = link ?: return false
         if (!cxrConnected || !glassesConnected) return false
         return runCatching {
-            val result = active.sendCustomCmd(key, payload)
+            val result = active.sendCustomCmd(key, payload.serialize())
             result != null && result >= 0
         }.getOrDefault(false)
     }
 
     fun stop() {
-        if (bound) {
-            serviceConnection?.let { connection -> runCatching { appContext.unbindService(connection) } }
-        }
         runCatching { link?.disconnect() }
-        bound = false
-        serviceConnection = null
         link = null
         cxrConnected = false
         glassesConnected = false
-        onLinkState(false, false)
+        publishState()
     }
 
     private val linkCallback = object : ICXRLinkCbk {
@@ -104,12 +88,10 @@ class BuildGroundCustomAppSession(
             publishState()
         }
 
-        override fun onGlassAiAssistStart() = Unit
-        override fun onGlassAiAssistStop() = Unit
         override fun onGlassDeviceInfo(info: GlassInfo) = Unit
         override fun onGlassWearingStatus(wearing: Boolean) = Unit
-        override fun onGlassAiInterrupt(interrupted: Boolean) = Unit
-        override fun onGlassLauncherResume() = Unit
+        override fun onGlassAiAssistStart() = Unit
+        override fun onGlassAiAssistStop() = Unit
     }
 
     private val customCmdCallback = object : ICustomCmdCbk {
@@ -120,26 +102,5 @@ class BuildGroundCustomAppSession(
 
     private fun publishState() {
         onLinkState(cxrConnected, glassesConnected)
-    }
-
-    private fun findServiceConnection(cxrLink: CXRLink): ServiceConnection {
-        var type: Class<*>? = cxrLink.javaClass
-        while (type != null) {
-            val field = type.declaredFields.firstOrNull { field ->
-                ServiceConnection::class.java.isAssignableFrom(field.type)
-            }
-            if (field != null) {
-                field.isAccessible = true
-                return field.get(cxrLink) as ServiceConnection
-            }
-            type = type.superclass
-        }
-        error("CXR-L ServiceConnection field not found")
-    }
-
-    private companion object {
-        const val MEDIA_STREAM_ACTION = "com.rokid.sprite.aiapp.externalapp.MEDIA_STREAM_SERVICE"
-        const val EXTRA_AUTH_TOKEN = "auth_token"
-        const val EXTRA_AUTH_PACKAGE = "auth_package"
     }
 }
