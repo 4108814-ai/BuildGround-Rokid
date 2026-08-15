@@ -209,8 +209,9 @@ class MainActivity : Activity() {
         runOnUiThread {
             status.text = buildString {
                 append(state.message)
-                append("\n\nCXR service: ").append(if (state.serviceConnected) "CONNECTED" else "OFFLINE")
+                append("\n\nHi Rokid service: ").append(if (state.serviceConnected) "CONNECTED" else "OFFLINE")
                 append("\nRokid Glasses: ").append(if (state.glassesConnected) "CONNECTED" else "OFFLINE")
+                append("\nCXR CUSTOMAPP: ").append(if (state.customAppConnected) "CONNECTED" else "OFFLINE")
                 append("\nBuildGround companion: ").append(
                     when {
                         state.companionOpened -> "RUNNING"
