@@ -9,10 +9,10 @@ import org.json.JSONObject
 /**
  * Minimal BuildGround-owned CXR-S endpoint.
  *
- * Transport deliberately mirrors the known-working Nexus glasses hub:
- * MsgCallback for phone -> glasses traffic and sendMessage() for glasses -> phone
- * traffic. No Nexus registry, updater, plugin store or remote command surface is
- * present here.
+ * r23 is diagnostic only: it does not change the transport. It records the
+ * exact phone -> glasses challenge count and the result returned by the existing
+ * CXRServiceBridge.sendMessage() glasses -> phone call so we can locate the
+ * failing hop without changing another variable at the same time.
  */
 object BuildGroundGlassesBridge {
     const val CHANNEL = "buildground.nexus.control.v1"
@@ -23,11 +23,18 @@ object BuildGroundGlassesBridge {
     @Volatile private var connected = false
     @Volatile private var stateListener: ((String) -> Unit)? = null
 
+    @Volatile private var challengeRxCount = 0
+    @Volatile private var replyTxAttempts = 0
+    @Volatile private var replyTxAccepted = 0
+    @Volatile private var lastSendResult: Int? = null
+    @Volatile private var lastSendError: String? = null
+    @Volatile private var lastNonce = "—"
+
     fun start(listener: (String) -> Unit) {
         stateListener = listener
         val existing = bridge
         if (existing != null) {
-            publish(if (connected) "CXR bridge connected" else "CXR bridge waiting")
+            publishDiagnostics(if (connected) "CXR bridge connected" else "CXR bridge waiting")
             return
         }
 
@@ -35,7 +42,7 @@ object BuildGroundGlassesBridge {
         bridge = next
         next.setStatusListener(statusListener)
         val result = next.subscribe(CHANNEL, messageCallback)
-        publish("BuildGround CXR endpoint ready (subscribe=$result)")
+        publishDiagnostics("BuildGround CXR endpoint ready (subscribe=$result)")
     }
 
     fun isConnected(): Boolean = connected
@@ -44,26 +51,26 @@ object BuildGroundGlassesBridge {
         override fun onConnected(name: String?, mac: String?, deviceType: Int) {
             main.post {
                 connected = true
-                publish("Phone link connected")
+                publishDiagnostics("Phone link connected")
             }
         }
 
         override fun onDisconnected() {
             main.post {
                 connected = false
-                publish("Phone link disconnected")
+                publishDiagnostics("Phone link disconnected")
             }
         }
 
         override fun onConnecting(name: String?, mac: String?, deviceType: Int) {
-            main.post { publish("Phone link connecting") }
+            main.post { publishDiagnostics("Phone link connecting") }
         }
 
         override fun onARTCStatus(latency: Float, connected: Boolean) {
             if (connected) {
                 main.post {
                     this@BuildGroundGlassesBridge.connected = true
-                    publish("Phone link connected")
+                    publishDiagnostics("Phone link connected")
                 }
             }
         }
@@ -84,19 +91,26 @@ object BuildGroundGlassesBridge {
                 "bridge_challenge" -> {
                     val nonce = message.optString("nonce")
                     if (nonce.isBlank()) return
+
+                    challengeRxCount += 1
+                    lastNonce = shortNonce(nonce)
                     val response = JSONObject()
                         .put("type", "bridge_ready")
                         .put("protocol", PROTOCOL_VERSION)
                         .put("nonce", nonce)
                         .put("companion", "com.buildground.nexus.glasses")
-                    val sent = send(response)
+
+                    replyTxAttempts += 1
+                    val result = sendWithResult(response)
+                    if (result != null && result >= 0) replyTxAccepted += 1
+
                     main.post {
                         connected = true
-                        publish(
-                            if (sent) {
-                                "Hardware Bridge reply sent to phone"
-                            } else {
-                                "Hardware Bridge challenge received, but TX failed"
+                        publishDiagnostics(
+                            when {
+                                result == null -> "Challenge RX; sendMessage threw/returned no result"
+                                result >= 0 -> "Challenge RX; CXR-S accepted reply (result=$result)"
+                                else -> "Challenge RX; CXR-S rejected reply (result=$result)"
                             },
                         )
                     }
@@ -105,25 +119,36 @@ object BuildGroundGlassesBridge {
                 "bridge_ping" -> {
                     val nonce = message.optString("nonce")
                     if (nonce.isBlank()) return
-                    send(
+                    lastNonce = shortNonce(nonce)
+                    replyTxAttempts += 1
+                    val result = sendWithResult(
                         JSONObject()
                             .put("type", "bridge_pong")
                             .put("protocol", PROTOCOL_VERSION)
                             .put("nonce", nonce),
                     )
+                    if (result != null && result >= 0) replyTxAccepted += 1
+                    main.post { publishDiagnostics("Ping RX; sendMessage result=${result ?: "null"}") }
                 }
             }
         }
     }
 
-    private fun send(message: JSONObject): Boolean =
-        runCatching {
+    private fun sendWithResult(message: JSONObject): Int? {
+        lastSendError = null
+        return try {
             val result = bridge?.sendMessage(
                 CHANNEL,
                 Caps().apply { write(message.toString()) },
             )
-            result != null && result >= 0
-        }.getOrDefault(false)
+            lastSendResult = result
+            result
+        } catch (t: Throwable) {
+            lastSendResult = null
+            lastSendError = t.javaClass.simpleName + (t.message?.let { ": $it" } ?: "")
+            null
+        }
+    }
 
     private fun decode(caps: Caps?, data: ByteArray?): String {
         if (data != null && data.isNotEmpty()) {
@@ -141,6 +166,27 @@ object BuildGroundGlassesBridge {
         }
         return ""
     }
+
+    private fun publishDiagnostics(headline: String) {
+        val resultText = lastSendResult?.toString() ?: "—"
+        val errorText = lastSendError ?: "none"
+        publish(
+            buildString {
+                append(headline)
+                append("\n\nDIAGNOSTICS r23")
+                append("\nPhone link: ").append(if (connected) "CONNECTED" else "WAITING")
+                append("\nChallenge RX: ").append(challengeRxCount)
+                append("\nReply TX attempts: ").append(replyTxAttempts)
+                append("\nReply TX accepted: ").append(replyTxAccepted)
+                append("\nLast sendMessage result: ").append(resultText)
+                append("\nLast send error: ").append(errorText)
+                append("\nNonce: ").append(lastNonce)
+            },
+        )
+    }
+
+    private fun shortNonce(value: String): String =
+        if (value.length <= 8) value else value.take(8)
 
     private fun publish(message: String) {
         stateListener?.invoke(message)
