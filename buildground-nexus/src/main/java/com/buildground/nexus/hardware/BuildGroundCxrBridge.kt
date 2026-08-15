@@ -20,9 +20,10 @@ import java.util.UUID
 /**
  * BuildGround-owned phone side of the Rokid Hardware Bridge.
  *
- * This binds directly to the Global Hi Rokid MediaStreamService from the
- * official Rokid client-l API. It does not use CxrGlobal, Rokid Nexus,
- * Anezium registry/update infrastructure or the legacy RokidBus protocol.
+ * The raw Hi Rokid AIDL service is kept only for package lifecycle operations
+ * (query/open/install). Bidirectional BuildGround control traffic is routed
+ * through an explicit CXR-L CUSTOMAPP session for the BuildGround glasses
+ * package, matching the proven CXR-L/CXR-S transport model.
  */
 class BuildGroundCxrBridge(
     context: Context,
@@ -31,6 +32,7 @@ class BuildGroundCxrBridge(
     data class State(
         val serviceConnected: Boolean = false,
         val glassesConnected: Boolean = false,
+        val customAppConnected: Boolean = false,
         val companionInstalled: Boolean = false,
         val companionOpened: Boolean = false,
         val bridgeVerified: Boolean = false,
@@ -49,6 +51,24 @@ class BuildGroundCxrBridge(
     private var pendingChallengeNonce: String? = null
     private var installProbeGeneration = 0L
 
+    private val customAppSession = BuildGroundCustomAppSession(
+        context = appContext,
+        glassesPackage = GLASSES_PACKAGE,
+        onLinkState = { cxrConnected, glassesConnected ->
+            val ready = cxrConnected && glassesConnected
+            update(
+                customAppConnected = ready,
+                bridgeVerified = if (ready) currentState.bridgeVerified else false,
+                message = when {
+                    ready -> "CXR CUSTOMAPP channel connected"
+                    cxrConnected -> "CXR CUSTOMAPP waiting for glasses"
+                    else -> "CXR CUSTOMAPP waiting for Hi Rokid"
+                },
+            )
+        },
+        onCustomCommand = ::handleCustomCommand,
+    )
+
     private val nativeCapsReady: Boolean = runCatching {
         System.loadLibrary("cxr-sock-proto-jni")
         true
@@ -59,9 +79,15 @@ class BuildGroundCxrBridge(
             update(message = "No Hi Rokid authorization token")
             return false
         }
+
+        val customStarted = customAppSession.start(token)
+        if (!customStarted) {
+            update(customAppConnected = false, message = "Could not start CXR CUSTOMAPP session")
+        }
+
         if (bound && service != null) {
             queryAndOpenCompanion()
-            return true
+            return customStarted
         }
 
         val intent = Intent(MEDIA_STREAM_ACTION)
@@ -73,8 +99,14 @@ class BuildGroundCxrBridge(
             appContext.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         }.getOrDefault(false)
 
-        update(message = if (bound) "Binding to Hi Rokid…" else "Hi Rokid MediaStreamService bind failed")
-        return bound
+        update(
+            message = when {
+                bound && customStarted -> "Binding BuildGround Hardware Bridge to Hi Rokid…"
+                bound -> "Hi Rokid service bound; CXR CUSTOMAPP session failed to start"
+                else -> "Hi Rokid MediaStreamService bind failed"
+            },
+        )
+        return bound && customStarted
     }
 
     /**
@@ -120,7 +152,11 @@ class BuildGroundCxrBridge(
             return false
         }
         if (service == null || !currentState.serviceConnected) {
-            update(message = "CXR service is not connected")
+            update(message = "Hi Rokid service is not connected")
+            return false
+        }
+        if (!currentState.customAppConnected) {
+            update(message = "CXR CUSTOMAPP channel is not connected")
             return false
         }
         if (!currentState.companionOpened) {
@@ -140,7 +176,7 @@ class BuildGroundCxrBridge(
         val sent = send(message)
         update(
             bridgeVerified = false,
-            message = if (sent) "Hardware Bridge challenge sent" else "Hardware Bridge send failed",
+            message = if (sent) "Hardware Bridge challenge sent via CXR CUSTOMAPP" else "Hardware Bridge CUSTOMAPP send failed",
         )
         return sent
     }
@@ -159,6 +195,7 @@ class BuildGroundCxrBridge(
 
     fun close() {
         installProbeGeneration += 1L
+        customAppSession.stop()
         val svc = service
         if (svc != null) {
             runCatching { svc.unregisterDeviceStatusCallback(deviceStatusCallback) }
@@ -181,6 +218,8 @@ class BuildGroundCxrBridge(
             val connectedService = IMediaStreamService.Stub.asInterface(binder)
             service = connectedService
             runCatching { connectedService.registerDeviceStatusCallback(deviceStatusCallback) }
+            // Keep this callback as a compatibility fallback. The primary control
+            // route is BuildGroundCustomAppSession/CXRLink.
             runCatching { connectedService.registerCustomCmdCallback(customCmdCallback) }
             val glasses = runCatching { connectedService.isDeviceConnected }.getOrDefault(false)
             update(
@@ -215,9 +254,6 @@ class BuildGroundCxrBridge(
 
     private val glassAppCallback = object : IGlassAppCallback.Stub() {
         override fun onInstallAppResult(success: Boolean) {
-            // Hi Rokid can report the transport/install callback before the package is visible
-            // to its package query. The donor Nexus therefore re-queried after installation;
-            // treat the callback as advisory and verify the actual package state ourselves.
             update(
                 companionOpened = false,
                 bridgeVerified = false,
@@ -258,25 +294,30 @@ class BuildGroundCxrBridge(
 
     private val customCmdCallback = object : ICustomCmdCallback.Stub() {
         override fun onCustomCmdResult(key: String?, payload: ByteArray?) {
-            if (key != CHANNEL || payload == null || payload.isEmpty()) return
-            val text = decode(payload)
-            if (text.isBlank()) return
-            val message = runCatching { JSONObject(text) }.getOrNull() ?: return
-            if (message.optInt("protocol", -1) != PROTOCOL_VERSION) return
+            if (key == null || payload == null) return
+            handleCustomCommand(key, payload)
+        }
+    }
 
-            val nonce = message.optString("nonce")
-            if (nonce.isBlank() || nonce != pendingChallengeNonce) return
+    private fun handleCustomCommand(key: String, payload: ByteArray) {
+        if (key != CHANNEL || payload.isEmpty()) return
+        val text = decode(payload)
+        if (text.isBlank()) return
+        val message = runCatching { JSONObject(text) }.getOrNull() ?: return
+        if (message.optInt("protocol", -1) != PROTOCOL_VERSION) return
 
-            when (message.optString("type")) {
-                "bridge_ready" -> {
-                    if (message.optString("companion") != GLASSES_PACKAGE) return
-                    pendingChallengeNonce = null
-                    update(bridgeVerified = true, message = "BUILDGROUND HARDWARE BRIDGE: VERIFIED")
-                }
-                "bridge_pong" -> {
-                    pendingChallengeNonce = null
-                    update(bridgeVerified = true, message = "Hardware Bridge link OK")
-                }
+        val nonce = message.optString("nonce")
+        if (nonce.isBlank() || nonce != pendingChallengeNonce) return
+
+        when (message.optString("type")) {
+            "bridge_ready" -> {
+                if (message.optString("companion") != GLASSES_PACKAGE) return
+                pendingChallengeNonce = null
+                update(bridgeVerified = true, message = "BUILDGROUND HARDWARE BRIDGE: VERIFIED")
+            }
+            "bridge_pong" -> {
+                pendingChallengeNonce = null
+                update(bridgeVerified = true, message = "Hardware Bridge link OK")
             }
         }
     }
@@ -345,18 +386,21 @@ class BuildGroundCxrBridge(
     }
 
     private fun send(message: JSONObject): Boolean {
-        val svc = service ?: return false
         if (!nativeCapsReady) return false
         return runCatching {
-            val caps = Caps().apply { write(message.toString()) }
-            svc.sendCustomCmd(CHANNEL, caps.serialize()) >= 0
+            val payload = Caps().apply { write(message.toString()) }.serialize()
+            customAppSession.send(CHANNEL, payload)
         }.getOrDefault(false)
     }
 
-    private fun decode(payload: ByteArray): String = runCatching {
-        val caps = Caps.fromBytes(payload)
-        if (caps.size() > 0) caps.at(0).string else ""
-    }.getOrDefault("")
+    private fun decode(payload: ByteArray): String {
+        val raw = runCatching { String(payload, Charsets.UTF_8).trim() }.getOrDefault("")
+        if (raw.startsWith("{")) return raw
+        return runCatching {
+            val caps = Caps.fromBytes(payload)
+            if (caps.size() > 0) caps.at(0).string else ""
+        }.getOrDefault("")
+    }
 
     private fun onServiceLost(message: String) {
         installProbeGeneration += 1L
@@ -366,6 +410,7 @@ class BuildGroundCxrBridge(
         update(
             serviceConnected = false,
             glassesConnected = false,
+            customAppConnected = false,
             companionInstalled = false,
             companionOpened = false,
             bridgeVerified = false,
@@ -376,6 +421,7 @@ class BuildGroundCxrBridge(
     private fun update(
         serviceConnected: Boolean = currentState.serviceConnected,
         glassesConnected: Boolean = currentState.glassesConnected,
+        customAppConnected: Boolean = currentState.customAppConnected,
         companionInstalled: Boolean = currentState.companionInstalled,
         companionOpened: Boolean = currentState.companionOpened,
         bridgeVerified: Boolean = currentState.bridgeVerified,
@@ -384,6 +430,7 @@ class BuildGroundCxrBridge(
         currentState = State(
             serviceConnected = serviceConnected,
             glassesConnected = glassesConnected,
+            customAppConnected = customAppConnected,
             companionInstalled = companionInstalled,
             companionOpened = companionOpened,
             bridgeVerified = bridgeVerified,
