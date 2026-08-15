@@ -61,9 +61,9 @@ android {
 }
 
 dependencies {
-    // Match the transport proven by the working Nexus phone hub exactly. This is
-    // a packaged CXR compatibility client, not the Nexus registry/runtime layer.
-    implementation("com.example.cxrglobal:lib:0.2.0")
+    // Official Rokid CXR-L/AIDL classes and native Caps serializer. The BuildGround
+    // transport itself talks directly to Hi Rokid's IMediaStreamService.
+    implementation("com.rokid.cxr:client-l:1.1.0")
 }
 
 // A distributable release must never be produced with the Android debug key or unsigned.
