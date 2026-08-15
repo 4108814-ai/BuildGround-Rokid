@@ -21,10 +21,10 @@ import java.util.UUID
 /**
  * BuildGround-owned phone side of the Rokid Hardware Bridge.
  *
- * The raw Hi Rokid AIDL service is kept only for package lifecycle operations
- * (query/open/install). Bidirectional BuildGround control traffic is routed
- * through an explicit CXR-L CUSTOMAPP session for the BuildGround glasses
- * package, matching the proven CXR-L/CXR-S transport model.
+ * r22 deliberately uses exactly one Hi Rokid MediaStreamService binding and one
+ * ICustomCmdCallback for lifecycle + bidirectional control traffic. This mirrors
+ * the proven CxrGlobal transport semantics without retaining a second CXR session
+ * or any Anezium runtime dependency.
  */
 class BuildGroundCxrBridge(
     context: Context,
@@ -65,25 +65,6 @@ class BuildGroundCxrBridge(
     private var challengeGeneration = 0L
     private var installProbeGeneration = 0L
 
-    private val customAppSession = BuildGroundCustomAppSession(
-        context = appContext,
-        glassesPackage = GLASSES_PACKAGE,
-        onLinkState = { cxrConnected, glassesConnected ->
-            val ready = cxrConnected && glassesConnected
-            update(
-                customAppConnected = ready,
-                bridgeVerified = if (ready) currentState.bridgeVerified else false,
-                handshakePhase = if (ready) currentState.handshakePhase else "WAITING_LINK",
-                message = when {
-                    ready -> "CXR CUSTOMAPP channel connected"
-                    cxrConnected -> "CXR CUSTOMAPP waiting for glasses"
-                    else -> "CXR CUSTOMAPP waiting for Hi Rokid"
-                },
-            )
-        },
-        onCustomCommand = ::handleCustomCommand,
-    )
-
     private val nativeCapsReady: Boolean = runCatching {
         System.loadLibrary("cxr-sock-proto-jni")
         true
@@ -95,14 +76,10 @@ class BuildGroundCxrBridge(
             return false
         }
 
-        val customStarted = customAppSession.start(token)
-        if (!customStarted) {
-            update(customAppConnected = false, handshakePhase = "CUSTOMAPP_START_FAILED", message = "Could not start CXR CUSTOMAPP session")
-        }
-
         if (bound && service != null) {
+            rearmCustomCmdCallback()
             queryAndOpenCompanion()
-            return customStarted
+            return true
         }
 
         val intent = Intent(MEDIA_STREAM_ACTION)
@@ -115,20 +92,17 @@ class BuildGroundCxrBridge(
         }.getOrDefault(false)
 
         update(
-            message = when {
-                bound && customStarted -> "Binding BuildGround Hardware Bridge to Hi Rokid…"
-                bound -> "Hi Rokid service bound; CXR CUSTOMAPP session failed to start"
-                else -> "Hi Rokid MediaStreamService bind failed"
+            customAppConnected = false,
+            handshakePhase = if (bound) "BINDING" else "BIND_FAILED",
+            message = if (bound) {
+                "Binding single BuildGround Hardware Bridge transport to Hi Rokid…"
+            } else {
+                "Hi Rokid MediaStreamService bind failed"
             },
         )
-        return bound && customStarted
+        return bound
     }
 
-    /**
-     * Installs the already locally verified BuildGround glasses APK through Hi Rokid.
-     * Package/signature verification is deliberately performed by the caller before
-     * this function receives the file.
-     */
     fun installCompanion(apk: File): Boolean {
         val svc = service
         if (svc == null || !currentState.serviceConnected) {
@@ -162,13 +136,6 @@ class BuildGroundCxrBridge(
         }.getOrDefault(false)
     }
 
-    /**
-     * Starts or re-sends one nonce-stable verification handshake.
-     *
-     * r17 could replace the nonce while the first reply was still in flight. r18
-     * keeps one nonce for the whole attempt and retries that exact nonce until a
-     * matching reply arrives or the attempt times out.
-     */
     fun sendChallenge(): Boolean {
         if (!nativeCapsReady) {
             update(handshakePhase = "BLOCKED", message = "Rokid Caps native library unavailable")
@@ -179,7 +146,7 @@ class BuildGroundCxrBridge(
             return false
         }
         if (!currentState.customAppConnected) {
-            update(handshakePhase = "BLOCKED", message = "CXR CUSTOMAPP channel is not connected")
+            update(handshakePhase = "BLOCKED", message = "Hi Rokid custom command transport is not connected")
             return false
         }
         if (!currentState.companionOpened) {
@@ -221,7 +188,7 @@ class BuildGroundCxrBridge(
         challengeGeneration += 1L
         pendingChallenge = null
         lastVerifiedNonce = null
-        customAppSession.stop()
+
         val svc = service
         if (svc != null) {
             runCatching { svc.unregisterDeviceStatusCallback(deviceStatusCallback) }
@@ -240,17 +207,23 @@ class BuildGroundCxrBridge(
                 onServiceLost("Hi Rokid returned an empty binder")
                 return
             }
+
             val connectedService = IMediaStreamService.Stub.asInterface(binder)
             service = connectedService
             runCatching { connectedService.registerDeviceStatusCallback(deviceStatusCallback) }
-            // Keep this callback as a compatibility fallback. The primary control
-            // route is BuildGroundCustomAppSession/CXRLink.
-            runCatching { connectedService.registerCustomCmdCallback(customCmdCallback) }
+            rearmCustomCmdCallback(connectedService)
+
             val glasses = runCatching { connectedService.isDeviceConnected }.getOrDefault(false)
             update(
                 serviceConnected = true,
                 glassesConnected = glasses,
-                message = if (glasses) "Hi Rokid connected; checking BuildGround companion…" else "Hi Rokid connected; glasses not connected",
+                customAppConnected = glasses,
+                handshakePhase = if (glasses) "TRANSPORT_READY" else "WAITING_GLASSES",
+                message = if (glasses) {
+                    "Single Hi Rokid command transport connected; checking BuildGround companion…"
+                } else {
+                    "Hi Rokid connected; glasses not connected"
+                },
             )
             if (glasses) queryAndOpenCompanion()
         }
@@ -265,14 +238,22 @@ class BuildGroundCxrBridge(
             if (!connected) {
                 challengeGeneration += 1L
                 pendingChallenge = null
+            } else {
+                rearmCustomCmdCallback()
             }
+
             update(
                 glassesConnected = connected,
+                customAppConnected = connected && currentState.serviceConnected,
                 companionInstalled = if (connected) currentState.companionInstalled else false,
                 companionOpened = if (connected) currentState.companionOpened else false,
                 bridgeVerified = if (connected) currentState.bridgeVerified else false,
-                handshakePhase = if (connected) currentState.handshakePhase else "GLASSES_OFFLINE",
-                message = if (connected) "Glasses connected; checking BuildGround companion…" else "Glasses disconnected",
+                handshakePhase = if (connected) "TRANSPORT_READY" else "GLASSES_OFFLINE",
+                message = if (connected) {
+                    "Glasses connected on single Hi Rokid transport; checking BuildGround companion…"
+                } else {
+                    "Glasses disconnected"
+                },
             )
             if (connected) queryAndOpenCompanion()
         }
@@ -311,6 +292,7 @@ class BuildGroundCxrBridge(
         }
 
         override fun onOpenAppResult(success: Boolean) {
+            if (success) rearmCustomCmdCallback()
             update(
                 companionOpened = success,
                 bridgeVerified = false,
@@ -318,8 +300,6 @@ class BuildGroundCxrBridge(
                 message = if (success) "BuildGround glasses companion started" else "Could not start BuildGround glasses companion",
             )
             if (success) {
-                // Start only one handshake. Retries are owned by scheduleChallengeRetries()
-                // and always reuse the same nonce.
                 main.postDelayed({ if (!currentState.bridgeVerified) sendChallenge() }, 700L)
             }
         }
@@ -330,6 +310,20 @@ class BuildGroundCxrBridge(
             if (key == null || payload == null) return
             handleCustomCommand(key, payload)
         }
+    }
+
+    /**
+     * Re-register the same single callback immediately before traffic. If Hi Rokid
+     * internally exposes a single custom-command callback slot, this also makes the
+     * BuildGround callback the current owner without creating a second binder/session.
+     */
+    private fun rearmCustomCmdCallback(active: IMediaStreamService? = service): Boolean {
+        val svc = active ?: return false
+        return runCatching {
+            runCatching { svc.unregisterCustomCmdCallback(customCmdCallback) }
+            svc.registerCustomCmdCallback(customCmdCallback)
+            true
+        }.getOrDefault(false)
     }
 
     private fun transmitChallenge(pending: PendingChallenge, manualRetry: Boolean): Boolean {
@@ -348,7 +342,7 @@ class BuildGroundCxrBridge(
             txCount = currentState.txCount + 1,
             nonceStatus = "PENDING ${shortNonce(pending.nonce)} · attempt ${pending.attempts}",
             message = when {
-                sent && manualRetry -> "TX challenge retry #${pending.attempts}; same nonce"
+                sent && manualRetry -> "TX challenge retry #${pending.attempts}; single callback armed"
                 sent -> "TX challenge #${pending.attempts}; awaiting RX bridge_ready"
                 else -> "TX challenge #${pending.attempts} failed"
             },
@@ -463,6 +457,7 @@ class BuildGroundCxrBridge(
                     message = "BUILDGROUND HARDWARE BRIDGE: VERIFIED",
                 )
             }
+
             "bridge_pong" -> {
                 pendingChallenge = null
                 lastVerifiedNonce = nonce
@@ -543,9 +538,13 @@ class BuildGroundCxrBridge(
 
     private fun send(message: JSONObject): Boolean {
         if (!nativeCapsReady) return false
+        val svc = service ?: return false
+        if (!currentState.serviceConnected || !currentState.glassesConnected) return false
+
         return runCatching {
+            rearmCustomCmdCallback(svc)
             val payload = Caps().apply { write(message.toString()) }.serialize()
-            customAppSession.send(CHANNEL, payload)
+            svc.sendCustomCmd(CHANNEL, payload) >= 0
         }.getOrDefault(false)
     }
 
