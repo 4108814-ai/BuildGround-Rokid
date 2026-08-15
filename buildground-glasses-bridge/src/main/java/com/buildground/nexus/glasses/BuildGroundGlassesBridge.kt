@@ -12,6 +12,11 @@ import org.json.JSONObject
  * It understands only the Hardware Bridge bootstrap protocol. No legacy Nexus
  * bus, registry, updater, plugin store, HTTP proxy or remote command surface is
  * present here.
+ *
+ * CXR-L sendCustomCmd() is request/reply oriented. A standalone sendMessage()
+ * from the glasses is not the response callback awaited by CXR-L, so the
+ * bootstrap channel uses MsgReplyCallback and Reply.end(Caps) for the actual
+ * phone-bound reply.
  */
 object BuildGroundGlassesBridge {
     const val CHANNEL = "buildground.nexus.control.v1"
@@ -33,8 +38,8 @@ object BuildGroundGlassesBridge {
         val next = CXRServiceBridge()
         bridge = next
         next.setStatusListener(statusListener)
-        val result = next.subscribe(CHANNEL, messageCallback)
-        publish("BuildGround CXR endpoint ready (subscribe=$result)")
+        val result = next.subscribe(CHANNEL, messageReplyCallback)
+        publish("BuildGround CXR reply endpoint ready (subscribe=$result)")
     }
 
     fun isConnected(): Boolean = connected
@@ -71,8 +76,13 @@ object BuildGroundGlassesBridge {
         override fun onRokidAccountChanged(account: String?) = Unit
     }
 
-    private val messageCallback = object : CXRServiceBridge.MsgCallback {
-        override fun onReceive(msgType: String?, caps: Caps?, data: ByteArray?) {
+    private val messageReplyCallback = object : CXRServiceBridge.MsgReplyCallback {
+        override fun onReceive(
+            msgType: String?,
+            caps: Caps?,
+            data: ByteArray?,
+            reply: CXRServiceBridge.Reply?,
+        ) {
             if (msgType != CHANNEL) return
             val text = decode(caps, data)
             if (text.isBlank()) return
@@ -83,37 +93,45 @@ object BuildGroundGlassesBridge {
                 "bridge_challenge" -> {
                     val nonce = message.optString("nonce")
                     if (nonce.isBlank()) return
-                    val reply = JSONObject()
+                    val response = JSONObject()
                         .put("type", "bridge_ready")
                         .put("protocol", PROTOCOL_VERSION)
                         .put("nonce", nonce)
                         .put("companion", "com.buildground.nexus.glasses")
-                    send(reply)
+                    val ended = endReply(reply, response)
                     main.post {
                         connected = true
-                        publish("BuildGround Hardware Bridge verified")
+                        publish(
+                            if (ended) {
+                                "Hardware Bridge reply returned to phone"
+                            } else {
+                                "Hardware Bridge challenge received, but reply failed"
+                            },
+                        )
                     }
                 }
 
                 "bridge_ping" -> {
                     val nonce = message.optString("nonce")
                     if (nonce.isBlank()) return
-                    send(
-                        JSONObject()
-                            .put("type", "bridge_pong")
-                            .put("protocol", PROTOCOL_VERSION)
-                            .put("nonce", nonce),
-                    )
+                    val response = JSONObject()
+                        .put("type", "bridge_pong")
+                        .put("protocol", PROTOCOL_VERSION)
+                        .put("nonce", nonce)
+                    endReply(reply, response)
                 }
             }
         }
     }
 
-    private fun send(message: JSONObject): Boolean = runCatching {
-        val payload = Caps().apply { write(message.toString()) }
-        val result = bridge?.sendMessage(CHANNEL, payload)
-        result != null && result >= 0
-    }.getOrDefault(false)
+    private fun endReply(reply: CXRServiceBridge.Reply?, message: JSONObject): Boolean {
+        val target = reply ?: return false
+        return runCatching {
+            val payload = Caps().apply { write(message.toString()) }
+            target.end(payload)
+            true
+        }.getOrDefault(false)
+    }
 
     private fun decode(caps: Caps?, data: ByteArray?): String {
         if (data != null && data.isNotEmpty()) {
