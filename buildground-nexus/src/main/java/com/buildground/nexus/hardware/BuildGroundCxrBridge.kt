@@ -47,6 +47,7 @@ class BuildGroundCxrBridge(
     private var bound = false
     private var currentState = State()
     private var pendingChallengeNonce: String? = null
+    private var installProbeGeneration = 0L
 
     private val nativeCapsReady: Boolean = runCatching {
         System.loadLibrary("cxr-sock-proto-jni")
@@ -96,6 +97,7 @@ class BuildGroundCxrBridge(
             return false
         }
 
+        installProbeGeneration += 1L
         update(
             companionOpened = false,
             bridgeVerified = false,
@@ -108,7 +110,7 @@ class BuildGroundCxrBridge(
             }
             true
         }.onFailure {
-            update(message = "BuildGround glasses companion install request failed")
+            update(message = "BuildGround glasses companion install request failed: ${it.javaClass.simpleName}")
         }.getOrDefault(false)
     }
 
@@ -156,6 +158,7 @@ class BuildGroundCxrBridge(
     }
 
     fun close() {
+        installProbeGeneration += 1L
         val svc = service
         if (svc != null) {
             runCatching { svc.unregisterDeviceStatusCallback(deviceStatusCallback) }
@@ -212,17 +215,19 @@ class BuildGroundCxrBridge(
 
     private val glassAppCallback = object : IGlassAppCallback.Stub() {
         override fun onInstallAppResult(success: Boolean) {
+            // Hi Rokid can report the transport/install callback before the package is visible
+            // to its package query. The donor Nexus therefore re-queried after installation;
+            // treat the callback as advisory and verify the actual package state ourselves.
             update(
-                companionInstalled = success,
                 companionOpened = false,
                 bridgeVerified = false,
                 message = if (success) {
-                    "BuildGround glasses companion installed"
+                    "Rokid accepted install; confirming package on glasses…"
                 } else {
-                    "BuildGround glasses companion installation failed"
+                    "Rokid install callback returned false; checking actual package state…"
                 },
             )
-            if (success) main.postDelayed({ queryAndOpenCompanion() }, 700L)
+            schedulePostInstallQueries(installProbeGeneration)
         }
 
         override fun onUnInstallAppResult(success: Boolean) = Unit
@@ -276,6 +281,53 @@ class BuildGroundCxrBridge(
         }
     }
 
+    private fun schedulePostInstallQueries(generation: Long) {
+        val delays = listOf(2_000L, 5_000L, 15_000L)
+        delays.forEachIndexed { index, delayMs ->
+            main.postDelayed({
+                if (generation != installProbeGeneration) return@postDelayed
+                val svc = service ?: return@postDelayed
+                if (!currentState.glassesConnected) return@postDelayed
+
+                val finalProbe = index == delays.lastIndex
+                val callback = object : IGlassAppCallback.Stub() {
+                    override fun onInstallAppResult(success: Boolean) = Unit
+                    override fun onUnInstallAppResult(success: Boolean) = Unit
+                    override fun onOpenAppResult(success: Boolean) = Unit
+                    override fun onStopAppResult(success: Boolean) = Unit
+
+                    override fun onQueryAppResult(pkg: String?, installed: Boolean) {
+                        if (generation != installProbeGeneration) return
+                        if (installed) {
+                            installProbeGeneration += 1L
+                            update(
+                                companionInstalled = true,
+                                companionOpened = false,
+                                bridgeVerified = false,
+                                message = "BuildGround glasses companion installation CONFIRMED",
+                            )
+                            openCompanion()
+                        } else if (finalProbe) {
+                            update(
+                                companionInstalled = false,
+                                companionOpened = false,
+                                bridgeVerified = false,
+                                message = "BuildGround companion still not found after 15 s; Hi Rokid rejected or failed the APK installation",
+                            )
+                        } else {
+                            update(message = "Waiting for BuildGround companion to appear on glasses…")
+                        }
+                    }
+                }
+
+                runCatching { svc.queryGlassAppInstalled(GLASSES_PACKAGE, callback) }
+                    .onFailure {
+                        if (finalProbe) update(message = "Could not confirm BuildGround companion installation")
+                    }
+            }, delayMs)
+        }
+    }
+
     private fun queryAndOpenCompanion() {
         val svc = service ?: return
         if (!currentState.glassesConnected) return
@@ -307,6 +359,7 @@ class BuildGroundCxrBridge(
     }.getOrDefault("")
 
     private fun onServiceLost(message: String) {
+        installProbeGeneration += 1L
         service = null
         bound = false
         pendingChallengeNonce = null
