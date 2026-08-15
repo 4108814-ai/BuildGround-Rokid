@@ -80,6 +80,15 @@ class BuildGroundCustomAppSession(
         }.getOrDefault(false)
     }
 
+    // Compiler probe: the next CI run tells us the exact client-l 1.1.0 signature.
+    fun uninstallCompanionProbe(): Boolean {
+        val active = link ?: return false
+        return runCatching {
+            active.uninstallApp()
+            true
+        }.getOrDefault(false)
+    }
+
     fun stop() {
         if (bound) {
             serviceConnection?.let { connection -> runCatching { appContext.unbindService(connection) } }
