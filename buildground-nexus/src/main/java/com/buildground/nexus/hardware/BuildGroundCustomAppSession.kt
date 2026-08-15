@@ -66,6 +66,11 @@ class BuildGroundCustomAppSession(
         return bound
     }
 
+    fun send(key: String, payload: ByteArray): Boolean {
+        val caps = runCatching { Caps.fromBytes(payload) }.getOrNull() ?: return false
+        return send(key, caps)
+    }
+
     fun send(key: String, payload: Caps): Boolean {
         val active = link ?: return false
         if (!cxrConnected || !glassesConnected) return false
