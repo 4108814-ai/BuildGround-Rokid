@@ -66,10 +66,13 @@ class BuildGroundCustomAppSession(
         return bound
     }
 
-    fun send(key: String, payload: ByteArray): Boolean {
+    fun send(key: String, payload: Caps): Boolean {
         val active = link ?: return false
         if (!cxrConnected || !glassesConnected) return false
-        return runCatching { active.sendCustomCmd(key, payload) >= 0 }.getOrDefault(false)
+        return runCatching {
+            val result = active.sendCustomCmd(key, payload)
+            result != null && result >= 0
+        }.getOrDefault(false)
     }
 
     fun stop() {
@@ -101,6 +104,7 @@ class BuildGroundCustomAppSession(
         override fun onGlassDeviceInfo(info: GlassInfo) = Unit
         override fun onGlassWearingStatus(wearing: Boolean) = Unit
         override fun onGlassAiInterrupt(interrupted: Boolean) = Unit
+        override fun onGlassLauncherResume() = Unit
     }
 
     private val customCmdCallback = object : ICustomCmdCbk {
