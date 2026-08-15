@@ -21,6 +21,7 @@ import java.io.File
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
+    private lateinit var verifyButton: Button
     private lateinit var tokenStore: RokidTokenStore
     private lateinit var bridge: BuildGroundCxrBridge
 
@@ -63,11 +64,16 @@ class MainActivity : Activity() {
         content.addView(actionButton("AUTHORIZE HI ROKID") { authorize() })
         content.addView(actionButton("CONNECT GLASSES") { connectBridge() })
         content.addView(actionButton("INSTALL GLASSES BRIDGE APK") { chooseCompanionApk() })
-        content.addView(actionButton("VERIFY HARDWARE BRIDGE") { bridge.sendChallenge() })
+        verifyButton = actionButton("VERIFY HARDWARE BRIDGE") {
+            verifyButton.text = "VERIFYING…"
+            bridge.sendChallenge()
+        }
+        content.addView(verifyButton)
         content.addView(secondaryButton("FORGET ROKID AUTHORIZATION") {
             bridge.close()
             tokenStore.clear()
             status.text = "Authorization removed from this BuildGround Nexus installation."
+            verifyButton.text = "VERIFY HARDWARE BRIDGE"
         })
 
         content.addView(TextView(this).apply {
@@ -220,6 +226,15 @@ class MainActivity : Activity() {
                     },
                 )
                 append("\nHardware Bridge: ").append(if (state.bridgeVerified) "VERIFIED" else "NOT VERIFIED")
+                append("\n\nHandshake: ").append(state.handshakePhase)
+                append("\nTX / RX: ").append(state.txCount).append(" / ").append(state.rxCount)
+                append("\nNonce: ").append(state.nonceStatus)
+            }
+
+            verifyButton.text = when {
+                state.bridgeVerified -> "HARDWARE BRIDGE VERIFIED"
+                state.handshakePhase.startsWith("TX_") || state.handshakePhase.startsWith("RX_") -> "VERIFYING… TAP TO RESEND"
+                else -> "VERIFY HARDWARE BRIDGE"
             }
         }
     }
