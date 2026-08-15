@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import com.rokid.cxr.Caps
 import com.rokid.sprite.aiapp.externalapp.ICustomCmdCallback
 import com.rokid.sprite.aiapp.externalapp.IDeviceStatusCallback
@@ -36,6 +37,10 @@ class BuildGroundCxrBridge(
         val companionInstalled: Boolean = false,
         val companionOpened: Boolean = false,
         val bridgeVerified: Boolean = false,
+        val handshakePhase: String = "IDLE",
+        val txCount: Int = 0,
+        val rxCount: Int = 0,
+        val nonceStatus: String = "—",
         val message: String = "Idle",
     )
 
@@ -43,12 +48,21 @@ class BuildGroundCxrBridge(
         fun onState(state: State)
     }
 
+    private data class PendingChallenge(
+        val nonce: String,
+        val generation: Long,
+        val startedAtMs: Long,
+        var attempts: Int = 0,
+    )
+
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
     private var service: IMediaStreamService? = null
     private var bound = false
     private var currentState = State()
-    private var pendingChallengeNonce: String? = null
+    private var pendingChallenge: PendingChallenge? = null
+    private var lastVerifiedNonce: String? = null
+    private var challengeGeneration = 0L
     private var installProbeGeneration = 0L
 
     private val customAppSession = BuildGroundCustomAppSession(
@@ -59,6 +73,7 @@ class BuildGroundCxrBridge(
             update(
                 customAppConnected = ready,
                 bridgeVerified = if (ready) currentState.bridgeVerified else false,
+                handshakePhase = if (ready) currentState.handshakePhase else "WAITING_LINK",
                 message = when {
                     ready -> "CXR CUSTOMAPP channel connected"
                     cxrConnected -> "CXR CUSTOMAPP waiting for glasses"
@@ -82,7 +97,7 @@ class BuildGroundCxrBridge(
 
         val customStarted = customAppSession.start(token)
         if (!customStarted) {
-            update(customAppConnected = false, message = "Could not start CXR CUSTOMAPP session")
+            update(customAppConnected = false, handshakePhase = "CUSTOMAPP_START_FAILED", message = "Could not start CXR CUSTOMAPP session")
         }
 
         if (bound && service != null) {
@@ -133,6 +148,7 @@ class BuildGroundCxrBridge(
         update(
             companionOpened = false,
             bridgeVerified = false,
+            handshakePhase = "INSTALLING",
             message = "Installing verified BuildGround glasses companion…",
         )
 
@@ -146,55 +162,65 @@ class BuildGroundCxrBridge(
         }.getOrDefault(false)
     }
 
+    /**
+     * Starts or re-sends one nonce-stable verification handshake.
+     *
+     * r17 could replace the nonce while the first reply was still in flight. r18
+     * keeps one nonce for the whole attempt and retries that exact nonce until a
+     * matching reply arrives or the attempt times out.
+     */
     fun sendChallenge(): Boolean {
         if (!nativeCapsReady) {
-            update(message = "Rokid Caps native library unavailable")
+            update(handshakePhase = "BLOCKED", message = "Rokid Caps native library unavailable")
             return false
         }
         if (service == null || !currentState.serviceConnected) {
-            update(message = "Hi Rokid service is not connected")
+            update(handshakePhase = "BLOCKED", message = "Hi Rokid service is not connected")
             return false
         }
         if (!currentState.customAppConnected) {
-            update(message = "CXR CUSTOMAPP channel is not connected")
+            update(handshakePhase = "BLOCKED", message = "CXR CUSTOMAPP channel is not connected")
             return false
         }
         if (!currentState.companionOpened) {
             queryAndOpenCompanion()
-            update(message = "Starting BuildGround glasses companion…")
+            update(handshakePhase = "WAITING_COMPANION", message = "Starting BuildGround glasses companion…")
             return false
         }
 
-        val nonce = UUID.randomUUID().toString()
-        pendingChallengeNonce = nonce
-        val message = JSONObject()
-            .put("type", "bridge_challenge")
-            .put("protocol", PROTOCOL_VERSION)
-            .put("nonce", nonce)
-            .put("host", "com.buildground.nexus")
+        val now = SystemClock.elapsedRealtime()
+        val active = pendingChallenge
+        if (active != null && now - active.startedAtMs < CHALLENGE_TIMEOUT_MS) {
+            return transmitChallenge(active, manualRetry = true)
+        }
 
-        val sent = send(message)
+        val generation = ++challengeGeneration
+        val pending = PendingChallenge(
+            nonce = UUID.randomUUID().toString(),
+            generation = generation,
+            startedAtMs = now,
+        )
+        pendingChallenge = pending
+        lastVerifiedNonce = null
         update(
             bridgeVerified = false,
-            message = if (sent) "Hardware Bridge challenge sent via CXR CUSTOMAPP" else "Hardware Bridge CUSTOMAPP send failed",
+            handshakePhase = "TX_READY",
+            nonceStatus = "PENDING ${shortNonce(pending.nonce)}",
+            message = "Hardware Bridge verification started",
         )
+
+        val sent = transmitChallenge(pending, manualRetry = false)
+        scheduleChallengeRetries(pending)
         return sent
     }
 
-    fun ping(): Boolean {
-        if (!currentState.bridgeVerified) return sendChallenge()
-        val nonce = UUID.randomUUID().toString()
-        pendingChallengeNonce = nonce
-        return send(
-            JSONObject()
-                .put("type", "bridge_ping")
-                .put("protocol", PROTOCOL_VERSION)
-                .put("nonce", nonce),
-        )
-    }
+    fun ping(): Boolean = sendChallenge()
 
     fun close() {
         installProbeGeneration += 1L
+        challengeGeneration += 1L
+        pendingChallenge = null
+        lastVerifiedNonce = null
         customAppSession.stop()
         val svc = service
         if (svc != null) {
@@ -204,7 +230,6 @@ class BuildGroundCxrBridge(
         if (bound) runCatching { appContext.unbindService(serviceConnection) }
         bound = false
         service = null
-        pendingChallengeNonce = null
         currentState = State(message = "Hardware Bridge stopped")
         publish()
     }
@@ -237,11 +262,16 @@ class BuildGroundCxrBridge(
 
     private val deviceStatusCallback = object : IDeviceStatusCallback.Stub() {
         override fun onDeviceConnectChanged(connected: Boolean) {
+            if (!connected) {
+                challengeGeneration += 1L
+                pendingChallenge = null
+            }
             update(
                 glassesConnected = connected,
                 companionInstalled = if (connected) currentState.companionInstalled else false,
                 companionOpened = if (connected) currentState.companionOpened else false,
                 bridgeVerified = if (connected) currentState.bridgeVerified else false,
+                handshakePhase = if (connected) currentState.handshakePhase else "GLASSES_OFFLINE",
                 message = if (connected) "Glasses connected; checking BuildGround companion…" else "Glasses disconnected",
             )
             if (connected) queryAndOpenCompanion()
@@ -257,6 +287,7 @@ class BuildGroundCxrBridge(
             update(
                 companionOpened = false,
                 bridgeVerified = false,
+                handshakePhase = "INSTALL_CONFIRM",
                 message = if (success) {
                     "Rokid accepted install; confirming package on glasses…"
                 } else {
@@ -283,11 +314,13 @@ class BuildGroundCxrBridge(
             update(
                 companionOpened = success,
                 bridgeVerified = false,
+                handshakePhase = if (success) "COMPANION_RUNNING" else "COMPANION_OPEN_FAILED",
                 message = if (success) "BuildGround glasses companion started" else "Could not start BuildGround glasses companion",
             )
             if (success) {
-                main.postDelayed({ sendChallenge() }, 900L)
-                main.postDelayed({ if (!currentState.bridgeVerified) sendChallenge() }, 2200L)
+                // Start only one handshake. Retries are owned by scheduleChallengeRetries()
+                // and always reuse the same nonce.
+                main.postDelayed({ if (!currentState.bridgeVerified) sendChallenge() }, 700L)
             }
         }
     }
@@ -299,25 +332,146 @@ class BuildGroundCxrBridge(
         }
     }
 
+    private fun transmitChallenge(pending: PendingChallenge, manualRetry: Boolean): Boolean {
+        if (pendingChallenge?.generation != pending.generation) return false
+        pending.attempts += 1
+        val message = JSONObject()
+            .put("type", "bridge_challenge")
+            .put("protocol", PROTOCOL_VERSION)
+            .put("nonce", pending.nonce)
+            .put("host", "com.buildground.nexus")
+
+        val sent = send(message)
+        update(
+            bridgeVerified = false,
+            handshakePhase = if (sent) "TX_CHALLENGE" else "TX_FAILED",
+            txCount = currentState.txCount + 1,
+            nonceStatus = "PENDING ${shortNonce(pending.nonce)} · attempt ${pending.attempts}",
+            message = when {
+                sent && manualRetry -> "TX challenge retry #${pending.attempts}; same nonce"
+                sent -> "TX challenge #${pending.attempts}; awaiting RX bridge_ready"
+                else -> "TX challenge #${pending.attempts} failed"
+            },
+        )
+        return sent
+    }
+
+    private fun scheduleChallengeRetries(pending: PendingChallenge) {
+        CHALLENGE_RETRY_DELAYS_MS.forEach { delayMs ->
+            main.postDelayed({
+                val active = pendingChallenge ?: return@postDelayed
+                if (active.generation != pending.generation || currentState.bridgeVerified) return@postDelayed
+                transmitChallenge(active, manualRetry = false)
+            }, delayMs)
+        }
+
+        main.postDelayed({
+            val active = pendingChallenge ?: return@postDelayed
+            if (active.generation != pending.generation || currentState.bridgeVerified) return@postDelayed
+            pendingChallenge = null
+            update(
+                bridgeVerified = false,
+                handshakePhase = "RX_TIMEOUT",
+                nonceStatus = "TIMEOUT ${shortNonce(active.nonce)}",
+                message = "RX timeout: no matching bridge_ready received from glasses",
+            )
+        }, CHALLENGE_TIMEOUT_MS)
+    }
+
     private fun handleCustomCommand(key: String, payload: ByteArray) {
-        if (key != CHANNEL || payload.isEmpty()) return
+        if (key != CHANNEL) return
+        val rxCount = currentState.rxCount + 1
+        if (payload.isEmpty()) {
+            update(
+                rxCount = rxCount,
+                handshakePhase = "RX_EMPTY",
+                message = "RX callback reached phone, but payload was empty",
+            )
+            return
+        }
+
         val text = decode(payload)
-        if (text.isBlank()) return
-        val message = runCatching { JSONObject(text) }.getOrNull() ?: return
-        if (message.optInt("protocol", -1) != PROTOCOL_VERSION) return
+        if (text.isBlank()) {
+            update(
+                rxCount = rxCount,
+                handshakePhase = "RX_DECODE_FAILED",
+                message = "RX callback reached phone, but payload decode failed",
+            )
+            return
+        }
 
+        val message = runCatching { JSONObject(text) }.getOrNull()
+        if (message == null) {
+            update(
+                rxCount = rxCount,
+                handshakePhase = "RX_JSON_FAILED",
+                message = "RX callback reached phone, but JSON parse failed",
+            )
+            return
+        }
+
+        val type = message.optString("type", "unknown")
         val nonce = message.optString("nonce")
-        if (nonce.isBlank() || nonce != pendingChallengeNonce) return
+        if (message.optInt("protocol", -1) != PROTOCOL_VERSION) {
+            update(
+                rxCount = rxCount,
+                handshakePhase = "RX_PROTOCOL_MISMATCH",
+                message = "RX $type received with wrong protocol version",
+            )
+            return
+        }
 
-        when (message.optString("type")) {
+        val active = pendingChallenge
+        if (active == null && nonce.isNotBlank() && nonce == lastVerifiedNonce && currentState.bridgeVerified) {
+            update(
+                rxCount = rxCount,
+                handshakePhase = "VERIFIED",
+                nonceStatus = "MATCH ${shortNonce(nonce)} · duplicate RX",
+                message = "Duplicate verified reply received; Hardware Bridge remains VERIFIED",
+            )
+            return
+        }
+
+        val nonceMatched = active != null && nonce.isNotBlank() && nonce == active.nonce
+        update(
+            rxCount = rxCount,
+            handshakePhase = "RX_${type.uppercase()}",
+            nonceStatus = if (nonceMatched) {
+                "MATCH ${shortNonce(nonce)}"
+            } else {
+                "MISMATCH rx=${shortNonce(nonce)} expected=${shortNonce(active?.nonce)}"
+            },
+            message = if (nonceMatched) "RX $type; nonce matched" else "RX $type; nonce mismatch",
+        )
+        if (!nonceMatched || active == null) return
+
+        when (type) {
             "bridge_ready" -> {
-                if (message.optString("companion") != GLASSES_PACKAGE) return
-                pendingChallengeNonce = null
-                update(bridgeVerified = true, message = "BUILDGROUND HARDWARE BRIDGE: VERIFIED")
+                if (message.optString("companion") != GLASSES_PACKAGE) {
+                    update(
+                        handshakePhase = "RX_COMPANION_MISMATCH",
+                        message = "RX bridge_ready matched nonce but companion identity was wrong",
+                    )
+                    return
+                }
+                pendingChallenge = null
+                lastVerifiedNonce = nonce
+                update(
+                    bridgeVerified = true,
+                    handshakePhase = "VERIFIED",
+                    nonceStatus = "MATCH ${shortNonce(nonce)}",
+                    message = "BUILDGROUND HARDWARE BRIDGE: VERIFIED",
+                )
             }
             "bridge_pong" -> {
-                pendingChallengeNonce = null
-                update(bridgeVerified = true, message = "Hardware Bridge link OK")
+                pendingChallenge = null
+                lastVerifiedNonce = nonce
+                update(
+                    bridgeVerified = true,
+                    handshakePhase = "VERIFIED",
+                    nonceStatus = "MATCH ${shortNonce(nonce)}",
+                    message = "Hardware Bridge link OK",
+                )
             }
         }
     }
@@ -345,6 +499,7 @@ class BuildGroundCxrBridge(
                                 companionInstalled = true,
                                 companionOpened = false,
                                 bridgeVerified = false,
+                                handshakePhase = "INSTALL_CONFIRMED",
                                 message = "BuildGround glasses companion installation CONFIRMED",
                             )
                             openCompanion()
@@ -353,6 +508,7 @@ class BuildGroundCxrBridge(
                                 companionInstalled = false,
                                 companionOpened = false,
                                 bridgeVerified = false,
+                                handshakePhase = "INSTALL_FAILED",
                                 message = "BuildGround companion still not found after 15 s; Hi Rokid rejected or failed the APK installation",
                             )
                         } else {
@@ -404,9 +560,11 @@ class BuildGroundCxrBridge(
 
     private fun onServiceLost(message: String) {
         installProbeGeneration += 1L
+        challengeGeneration += 1L
         service = null
         bound = false
-        pendingChallengeNonce = null
+        pendingChallenge = null
+        lastVerifiedNonce = null
         update(
             serviceConnected = false,
             glassesConnected = false,
@@ -414,6 +572,8 @@ class BuildGroundCxrBridge(
             companionInstalled = false,
             companionOpened = false,
             bridgeVerified = false,
+            handshakePhase = "SERVICE_LOST",
+            nonceStatus = "—",
             message = message,
         )
     }
@@ -425,6 +585,10 @@ class BuildGroundCxrBridge(
         companionInstalled: Boolean = currentState.companionInstalled,
         companionOpened: Boolean = currentState.companionOpened,
         bridgeVerified: Boolean = currentState.bridgeVerified,
+        handshakePhase: String = currentState.handshakePhase,
+        txCount: Int = currentState.txCount,
+        rxCount: Int = currentState.rxCount,
+        nonceStatus: String = currentState.nonceStatus,
         message: String = currentState.message,
     ) {
         currentState = State(
@@ -434,6 +598,10 @@ class BuildGroundCxrBridge(
             companionInstalled = companionInstalled,
             companionOpened = companionOpened,
             bridgeVerified = bridgeVerified,
+            handshakePhase = handshakePhase,
+            txCount = txCount,
+            rxCount = rxCount,
+            nonceStatus = nonceStatus,
             message = message,
         )
         publish()
@@ -444,6 +612,12 @@ class BuildGroundCxrBridge(
         main.post { listener.onState(snapshot) }
     }
 
+    private fun shortNonce(nonce: String?): String = when {
+        nonce.isNullOrBlank() -> "—"
+        nonce.length <= 8 -> nonce
+        else -> nonce.take(8)
+    }
+
     private companion object {
         const val MEDIA_STREAM_ACTION = "com.rokid.sprite.aiapp.externalapp.MEDIA_STREAM_SERVICE"
         const val EXTRA_AUTH_TOKEN = "auth_token"
@@ -451,5 +625,7 @@ class BuildGroundCxrBridge(
         const val GLASSES_PACKAGE = "com.buildground.nexus.glasses"
         const val CHANNEL = "buildground.nexus.control.v1"
         const val PROTOCOL_VERSION = 1
+        const val CHALLENGE_TIMEOUT_MS = 9_000L
+        val CHALLENGE_RETRY_DELAYS_MS = longArrayOf(1_200L, 3_000L, 6_000L)
     }
 }
