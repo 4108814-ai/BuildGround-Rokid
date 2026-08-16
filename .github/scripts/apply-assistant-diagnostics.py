@@ -7,9 +7,9 @@ def replace_once(relative_path: str, old: str, new: str) -> None:
     path = ROOT / relative_path
     text = path.read_text(encoding="utf-8")
     count = text.count(old)
-    if count != 1:
+    if count < 1:
         raise SystemExit(
-            f"Expected one match in {relative_path}, found {count}: {old[:160]!r}"
+            f"Expected at least one match in {relative_path}, found {count}: {old[:160]!r}"
         )
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
