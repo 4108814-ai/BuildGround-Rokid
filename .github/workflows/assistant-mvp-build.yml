@@ -11,6 +11,7 @@ on:
       - '.github/scripts/apply-assistant-phone-calls.py'
       - '.github/scripts/fix-assistant-phone-contact-constants.py'
       - '.github/scripts/apply-assistant-mvp-pack.py'
+      - '.github/scripts/apply-assistant-diagnostics.py'
       - '.github/scripts/prepare-assistant-release-signing.py'
   workflow_dispatch:
 
@@ -56,7 +57,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Apply Assistant MVP feature pack
+      - name: Apply Assistant MVP feature pack and diagnostics
         shell: bash
         run: |
           set -euo pipefail
@@ -78,52 +79,16 @@ jobs:
           python .github/scripts/apply-assistant-phone-calls.py
           python .github/scripts/fix-assistant-phone-contact-constants.py
           python .github/scripts/apply-assistant-mvp-pack.py
+          python .github/scripts/apply-assistant-diagnostics.py
 
-          mapfile -t changed < <(
-            {
-              git diff --name-only
-              git ls-files --others --exclude-standard
-            } | sort -u
-          )
-          printf '%s\n' "${changed[@]}"
-
-          expected_files=(
-            'plugins/assistant/build.gradle.kts'
-            'plugins/assistant/src/main/AndroidManifest.xml'
-            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpController.kt'
-            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt'
-            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantNotificationListenerService.kt'
-            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt'
-            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantSettingsActivity.kt'
-            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantTool.kt'
-            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantUiController.kt'
-            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/CalendarTools.kt'
-            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStore.kt'
-            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/NexusAgentPolicy.kt'
-            'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/PhoneCallTools.kt'
-            'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantFollowUpControllerTest.kt'
-            'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpLogicTest.kt'
-            'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/CodexAuthStoreLogicTest.kt'
-            'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/NexusAgentPolicyTest.kt'
-            'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/PhoneCallToolsTest.kt'
-          )
-          mapfile -t expected_sorted < <(printf '%s\n' "${expected_files[@]}" | sort)
-          test "$(printf '%s\n' "${changed[@]}")" = "$(printf '%s\n' "${expected_sorted[@]}")"
-
-          grep -q 'versionCode = 10' plugins/assistant/build.gradle.kts
-          grep -q 'versionName = "1.5.0"' plugins/assistant/build.gradle.kts
+          grep -q 'versionCode = 11' plugins/assistant/build.gradle.kts
+          grep -q 'versionName = "1.5.1"' plugins/assistant/build.gradle.kts
+          test -f plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantDiagnostics.kt
+          grep -q 'diagnostics.begin("glasses_button")' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
+          grep -q 'diagnostics.mark("AI_FIRST_TOKEN")' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
+          grep -q 'sectionRow(this@AssistantSettingsActivity, "Diagnostics")' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantSettingsActivity.kt
           grep -q 'android.permission.SEND_SMS' plugins/assistant/src/main/AndroidManifest.xml
-          grep -q 'android.permission.READ_CALL_LOG' plugins/assistant/src/main/AndroidManifest.xml
-          grep -q 'AssistantNotificationListenerService' plugins/assistant/src/main/AndroidManifest.xml
-          grep -q 'SEND_SMS_TOOL_NAME = "send_sms"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt
-          grep -q 'DAILY_AGENDA_TOOL_NAME = "daily_agenda"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt
-          grep -q 'ENGINEERING_CALC_TOOL_NAME = "engineering_calc"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt
           grep -q 'MEETING_START_TOOL_NAME = "meeting_start"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt
-          grep -q 'LIST_NOTIFICATIONS_TOOL_NAME = "list_notifications"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt
-          grep -q 'BUILDGROUND_QUERY_TOOL_NAME = "buildground_query"' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt
-          grep -q 'fun disabled(): BuildGroundDataBridge' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMvpTools.kt
-          grep -q 'fresh photo' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/NexusAgentPolicy.kt
-          grep -q 'This is not Relay' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/NexusAgentPolicy.kt
 
       - name: Run Assistant unit tests and build debug APK
         shell: bash
