@@ -12,6 +12,7 @@ on:
       - '.github/scripts/fix-assistant-phone-contact-constants.py'
       - '.github/scripts/apply-assistant-mvp-pack.py'
       - '.github/scripts/apply-assistant-diagnostics.py'
+      - '.github/scripts/fix-assistant-diagnostics-conversation-mode.py'
       - '.github/scripts/prepare-assistant-release-signing.py'
   workflow_dispatch:
 
@@ -79,6 +80,7 @@ jobs:
           python .github/scripts/apply-assistant-phone-calls.py
           python .github/scripts/fix-assistant-phone-contact-constants.py
           python .github/scripts/apply-assistant-mvp-pack.py
+          python .github/scripts/fix-assistant-diagnostics-conversation-mode.py
           python .github/scripts/apply-assistant-diagnostics.py
 
           grep -q 'versionCode = 11' plugins/assistant/build.gradle.kts
