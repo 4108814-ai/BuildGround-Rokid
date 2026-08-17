@@ -11,6 +11,7 @@ on:
       - '.github/scripts/apply-assistant-phone-calls.py'
       - '.github/scripts/fix-assistant-phone-contact-constants.py'
       - '.github/scripts/apply-assistant-mvp-pack.py'
+      - '.github/scripts/fix-assistant-notification-duplicates.py'
       - '.github/scripts/apply-assistant-diagnostics.py'
       - '.github/scripts/apply-assistant-diagnostics-final.py'
       - '.github/scripts/fix-assistant-diagnostics-conversation-mode.py'
@@ -81,6 +82,7 @@ jobs:
           python .github/scripts/apply-assistant-phone-calls.py
           python .github/scripts/fix-assistant-phone-contact-constants.py
           python .github/scripts/apply-assistant-mvp-pack.py
+          python .github/scripts/fix-assistant-notification-duplicates.py
           python .github/scripts/fix-assistant-diagnostics-conversation-mode.py
           python .github/scripts/apply-assistant-diagnostics-final.py
 
