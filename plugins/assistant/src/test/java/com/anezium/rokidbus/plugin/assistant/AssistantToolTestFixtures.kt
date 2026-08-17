@@ -45,8 +45,12 @@ internal fun testTakePhotoTool(
 internal fun testToolRegistry(
     executor: suspend (AssistantToolCall) -> AssistantToolResult,
     vararg additionalTools: AssistantToolDefinition,
+    sessionContext: () -> AssistantToolSessionContext = {
+        AssistantToolSessionContext(active = true)
+    },
 ): AssistantToolRegistry = AssistantToolRegistry(
     listOf(testTakePhotoTool(executor)) + additionalTools,
+    sessionContext = sessionContext,
 )
 
 internal fun unusedToolRegistry(): AssistantToolRegistry = testToolRegistry(

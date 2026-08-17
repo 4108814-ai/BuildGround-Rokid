@@ -104,6 +104,39 @@ class NexusAgentPolicyTest {
     }
 
     @Test
+    fun `bridged render_template keeps its multi-line description under its own bullet`() {
+        val tool = TestAssistantTool(
+            name = RENDER_TEMPLATE_TOOL_NAME,
+            description = RENDER_TEMPLATE_TOOL_DESCRIPTION,
+            parametersSchema = RENDER_TEMPLATE_PARAMETERS_SCHEMA,
+        )
+
+        val prompt = NexusAgentPolicy.buildSystemPrompt(
+            availableToolNames = listOf(tool.name),
+            textToolDefinitions = listOf(tool),
+            allowTextToolFallback = true,
+        )
+
+        val lines = prompt.lines()
+        val bullet = lines.indexOfFirst { line ->
+            line.startsWith("  - $RENDER_TEMPLATE_TOOL_NAME: ")
+        }
+        assertTrue(bullet >= 0)
+        val descriptionLines = RENDER_TEMPLATE_TOOL_DESCRIPTION.lines()
+        val continuation = lines.subList(bullet + 1, bullet + descriptionLines.size)
+        assertEquals(descriptionLines.size - 1, continuation.size)
+        continuation.forEach { line -> assertTrue(line.startsWith("    ")) }
+        InkTemplateId.entries.forEach { template ->
+            assertTrue(prompt.contains("\n    ${template.wireValue} - "))
+        }
+        assertTrue(
+            prompt.contains(
+                "\n    Parameters JSON schema: ${RENDER_TEMPLATE_PARAMETERS_SCHEMA.text}\n",
+            ),
+        )
+    }
+
+    @Test
     fun `text tool schemas are absent when the fallback is off`() {
         val tool = TestAssistantTool(
             name = SET_REMINDER_TOOL_NAME,
@@ -141,11 +174,12 @@ class NexusAgentPolicyTest {
                 CREATE_CALENDAR_EVENT_TOOL_NAME,
                 LIST_CALENDAR_EVENTS_TOOL_NAME,
                 DELETE_CALENDAR_EVENT_TOOL_NAME,
+                RENDER_TEMPLATE_TOOL_NAME,
             ),
             HERMES_TEXT_TOOL_NAMES,
         )
         assertFalse(RENDER_INK_PAGE_TOOL_NAME in HERMES_TEXT_TOOL_NAMES)
-        assertFalse(RENDER_TEMPLATE_TOOL_NAME in HERMES_TEXT_TOOL_NAMES)
+        assertTrue(RENDER_TEMPLATE_TOOL_NAME in HERMES_TEXT_TOOL_NAMES)
     }
 
     @Test

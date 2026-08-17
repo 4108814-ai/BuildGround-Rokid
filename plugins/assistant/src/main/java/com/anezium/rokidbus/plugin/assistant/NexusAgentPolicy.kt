@@ -101,7 +101,8 @@ internal object NexusAgentPolicy {
                     append("  - ")
                     append(definition.name)
                     append(": ")
-                    append(definition.description)
+                    // A description that spans lines would otherwise read as new top-level rules.
+                    append(definition.description.replace("\n", "\n    "))
                     append("\n    Parameters JSON schema: ")
                     append(definition.parametersSchema.text)
                     append('\n')

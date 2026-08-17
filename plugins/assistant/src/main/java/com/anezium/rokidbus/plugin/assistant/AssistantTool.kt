@@ -60,6 +60,9 @@ internal val HERMES_TEXT_TOOL_NAMES = setOf(
     CREATE_CALENDAR_EVENT_TOOL_NAME,
     LIST_CALENDAR_EVENTS_TOOL_NAME,
     DELETE_CALENDAR_EVENT_TOOL_NAME,
+    // Bounded template cards fit one control line; render_ink_page stays out because a
+    // whole freeform page does not.
+    RENDER_TEMPLATE_TOOL_NAME,
 )
 
 private val ASSISTANT_TOOL_ERROR_CODE = Regex("[a-z][a-z0-9_]{0,95}")

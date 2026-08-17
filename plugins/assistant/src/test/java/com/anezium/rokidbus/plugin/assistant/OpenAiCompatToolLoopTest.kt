@@ -1,5 +1,6 @@
 package com.anezium.rokidbus.plugin.assistant
 
+import com.anezium.rokidbus.shared.plugin.PluginCapability
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
@@ -357,6 +358,161 @@ class OpenAiCompatToolLoopTest {
         assertEquals("user", replayError.getString("role"))
         assertTrue(replayError.getString("content").contains("malformed"))
         assertFalse(replayError.getString("content").contains(RENDER_INK_PAGE_TOOL_NAME))
+        assertFalse(events.any { event -> event is AiProviderEvent.Failed })
+    }
+
+    @Test
+    fun `Hermes render template draws the card and replays its result`() = runTest {
+        val capabilities = FakeBridgeInkCapabilities()
+        val client = RecordingCompatClient(
+            listOf(
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(
+                        content = COMPAT_TEXT_TOOL_REQUEST_TOKEN +
+                            """{"name":"render_template","arguments":{"template":"weather",""" +
+                            """"title":"Paris","data":{"temperature":"21 C","condition":"Clear",""" +
+                            """"hourly":[{"label":"10:00","temp":20},{"label":"11:00","temp":21}]}}}""",
+                    ),
+                ),
+                StubResponse.Events(OpenAiChatSseEvent.Delta(content = "21 degrees and clear.")),
+            ),
+        )
+        val provider = provider(
+            client = client,
+            preset = ProviderCatalog.hermes,
+            toolExecutor = { error("Photo tool must not execute") },
+            additionalTools = listOf(renderTemplateTool(capabilities)),
+            sessionContext = { inkGrantedSession() },
+        )
+
+        val events = provider.streamEvents(ChatRequest(userText = "Weather in Paris")).toList()
+
+        assertEquals(1, capabilities.showCalls)
+        assertEquals("<page>weather</page>", capabilities.shownPage)
+        val shown = checkNotNull(capabilities.shownData)
+        assertEquals("Paris", shown.getString("title"))
+        assertEquals(2, shown.getJSONArray("hourly").length())
+        assertTrue(
+            client.requests[1].messages
+                .getJSONObject(1)
+                .getString("content")
+                .contains("$RENDER_TEMPLATE_TOOL_NAME: {\"status\":\"shown\"}"),
+        )
+        assertTrue(events.filterIsInstance<AiProviderEvent.TextDelta>().none { event ->
+            event.delta.contains(RENDER_TEMPLATE_TOOL_NAME)
+        })
+        assertEquals(
+            "21 degrees and clear.",
+            events.filterIsInstance<AiProviderEvent.MessageDone>().single().message.content,
+        )
+    }
+
+    @Test
+    fun `Hermes render template accepts the schema's JSON encoded data string`() = runTest {
+        val capabilities = FakeBridgeInkCapabilities()
+        val client = RecordingCompatClient(
+            listOf(
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(
+                        content = COMPAT_TEXT_TOOL_REQUEST_TOKEN +
+                            """{"name":"render_template","arguments":{"template":"metrics",""" +
+                            """"title":null,"data":"{\"cells\":[{\"label\":\"CPU\",\"value\":\"42%\"},""" +
+                            """{\"label\":\"RAM\",\"value\":\"61%\"}]}"}}""",
+                    ),
+                ),
+                StubResponse.Events(OpenAiChatSseEvent.Delta(content = "CPU is at 42 percent.")),
+            ),
+        )
+        val provider = provider(
+            client = client,
+            preset = ProviderCatalog.hermes,
+            toolExecutor = { error("Photo tool must not execute") },
+            additionalTools = listOf(renderTemplateTool(capabilities)),
+            sessionContext = { inkGrantedSession() },
+        )
+
+        provider.streamEvents(ChatRequest(userText = "Show the load")).toList()
+
+        assertEquals(1, capabilities.showCalls)
+        assertEquals("<page>metrics</page>", capabilities.shownPage)
+        assertEquals(2, checkNotNull(capabilities.shownData).getJSONArray("cells").length())
+    }
+
+    @Test
+    fun `Hermes render template with unusable data fails safe and still answers`() = runTest {
+        val capabilities = FakeBridgeInkCapabilities()
+        val client = RecordingCompatClient(
+            listOf(
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(
+                        // Weather without an hourly curve or forecast periods has nothing to draw.
+                        content = COMPAT_TEXT_TOOL_REQUEST_TOKEN +
+                            """{"name":"render_template","arguments":{"template":"weather",""" +
+                            """"data":{"temperature":"21 C","condition":"Clear"}}}""",
+                    ),
+                ),
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(content = "It is 21 degrees and clear in Paris."),
+                ),
+            ),
+        )
+        val provider = provider(
+            client = client,
+            preset = ProviderCatalog.hermes,
+            toolExecutor = { error("Photo tool must not execute") },
+            additionalTools = listOf(renderTemplateTool(capabilities)),
+            sessionContext = { inkGrantedSession() },
+        )
+
+        val events = provider.streamEvents(ChatRequest(userText = "Weather in Paris")).toList()
+
+        assertEquals(0, capabilities.showCalls)
+        assertTrue(
+            client.requests[1].messages
+                .getJSONObject(1)
+                .getString("content")
+                .contains(
+                    "$RENDER_TEMPLATE_TOOL_NAME: failed with error code " +
+                        "$TOOL_ERROR_INVALID_TEMPLATE_DATA.",
+                ),
+        )
+        assertFalse(events.any { event -> event is AiProviderEvent.Failed })
+        assertEquals(
+            "It is 21 degrees and clear in Paris.",
+            events.filterIsInstance<AiProviderEvent.MessageDone>().single().message.content,
+        )
+    }
+
+    @Test
+    fun `Hermes render template stays unavailable without the ink surface grant`() = runTest {
+        val capabilities = FakeBridgeInkCapabilities()
+        val client = RecordingCompatClient(
+            listOf(
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(
+                        content = COMPAT_TEXT_TOOL_REQUEST_TOKEN +
+                            """{"name":"render_template","arguments":{"template":"weather",""" +
+                            """"data":{"temperature":"21 C","condition":"Clear",""" +
+                            """"hourly":[{"label":"10:00","temp":20},{"label":"11:00","temp":21}]}}}""",
+                    ),
+                ),
+                StubResponse.Events(
+                    OpenAiChatSseEvent.Delta(content = "I could not complete that tool request."),
+                ),
+            ),
+        )
+        val provider = provider(
+            client = client,
+            preset = ProviderCatalog.hermes,
+            toolExecutor = { error("Photo tool must not execute") },
+            additionalTools = listOf(renderTemplateTool(capabilities)),
+        )
+
+        val events = provider.streamEvents(ChatRequest(userText = "Weather in Paris")).toList()
+
+        assertEquals(0, capabilities.showCalls)
+        val replayError = client.requests[1].messages.getJSONObject(1)
+        assertTrue(replayError.getString("content").contains("malformed"))
         assertFalse(events.any { event -> event is AiProviderEvent.Failed })
     }
 
@@ -759,13 +915,32 @@ class OpenAiCompatToolLoopTest {
         supportsVision: Boolean = true,
         additionalTools: List<AssistantToolDefinition> = emptyList(),
         preset: ProviderPreset = ProviderCatalog.openAi,
+        sessionContext: () -> AssistantToolSessionContext = {
+            AssistantToolSessionContext(active = true)
+        },
     ) = OpenAiCompatProvider(
         preset = preset,
         apiClient = client,
         apiKeyConfigured = { true },
-        toolRegistry = testToolRegistry(toolExecutor, *additionalTools.toTypedArray()),
+        toolRegistry = testToolRegistry(
+            toolExecutor,
+            *additionalTools.toTypedArray(),
+            sessionContext = sessionContext,
+        ),
         supportsVision = { supportsVision },
         backendProvider = { preset.backend },
+    )
+
+    private fun renderTemplateTool(
+        capabilities: InkPageToolCapabilities,
+    ): RenderTemplateTool = RenderTemplateTool(
+        runtime = InkPageToolRuntime(capabilities),
+        templateLoader = InkTemplateLoader { template -> "<page>${template.wireValue}</page>" },
+    )
+
+    private fun inkGrantedSession(): AssistantToolSessionContext = AssistantToolSessionContext(
+        active = true,
+        grantedCapabilities = setOf(PluginCapability.INK_SURFACE.wireValue),
     )
 
     private fun assertToolContent(content: String, vararg fields: Pair<String, String>) {
@@ -800,6 +975,31 @@ class OpenAiCompatToolLoopTest {
         }
 
         data class Failure(val error: Throwable) : StubResponse
+    }
+
+    private class FakeBridgeInkCapabilities : InkPageToolCapabilities {
+        var showCalls = 0
+        var shownPage: String? = null
+        var shownData: JSONObject? = null
+
+        override fun currentSession(): InkPageToolSession = InkPageToolSession("request", 1L)
+
+        override fun isSessionActive(session: InkPageToolSession): Boolean = true
+
+        override fun supportsInkSurface(): Boolean = true
+
+        override suspend fun showInkPage(
+            session: InkPageToolSession,
+            page: String,
+            data: JSONObject?,
+        ): InkPageShowResult {
+            showCalls += 1
+            shownPage = page
+            shownData = data
+            return InkPageShowResult.Shown
+        }
+
+        override fun markInkShown(session: InkPageToolSession): Boolean = true
     }
 
     private class RecordingCompatClient(
