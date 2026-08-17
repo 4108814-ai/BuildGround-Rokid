@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.4.3
+
+- **Hermes draws the cards now.** A weather question through a Hermes backend
+  came back as plain text while the same model on any other provider drew the
+  card. The seven bounded templates — weather, charts, metrics, rankings,
+  comparisons, schedules and steps — now travel the same plain-text bridge as
+  the other phone tools. Freeform Ink pages remain out of it.
+
 ## 1.4.2
 
 - **Reminders, notes, timers and the calendar now work on Hermes.** A server that
