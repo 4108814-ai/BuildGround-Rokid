@@ -186,8 +186,8 @@ replace_once(
 )
 replace_once(
     SERVICE,
-    '                val transcript = normalizeTranscript(text)\n                if (transcript.isEmpty()) return\n                finalDelivered = true\n',
-    '                val transcript = normalizeTranscript(text)\n                if (transcript.isEmpty()) return\n                diagnostics.mark("STT_FINAL", "chars=${transcript.length}")\n                finalDelivered = true\n',
+    '                val transcript = normalizeTranscript(text)\n                if (transcript.isEmpty()) return\n',
+    '                val transcript = normalizeTranscript(text)\n                if (transcript.isEmpty()) return\n                diagnostics.mark("STT_FINAL", "chars=${transcript.length}")\n',
     "speech final",
 )
 replace_once(
