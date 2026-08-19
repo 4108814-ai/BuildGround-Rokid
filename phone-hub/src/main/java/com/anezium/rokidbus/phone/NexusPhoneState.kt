@@ -433,10 +433,7 @@ internal object NexusPhoneState {
             installedGlassesVersionName == null
 
     fun glassesUpdateVersionLabel(): String? {
-        // A failed attempt must explain itself where the button lives; the onboarding
-        // step shows the same message, but most users only ever see this banner.
-        (glassesAppInstallState as? GlassesAppInstallState.Error)?.let { return it.message }
-        return when (val state = glassesAppUpdateState) {
+        val base = when (val state = glassesAppUpdateState) {
             is GlassesAppUpdateState.UpdateAvailable -> "Update glasses to v${state.latest}"
             GlassesAppUpdateState.Unknown -> if (
                 glassesAppInstallState == GlassesAppInstallState.Installed &&
@@ -448,6 +445,12 @@ internal object NexusPhoneState {
             }
             is GlassesAppUpdateState.UpToDate -> null
         }
+        // A failed attempt must explain itself where the button lives; the onboarding
+        // step shows the same message, but most users only ever see this banner. Only
+        // swap the subtitle while the banner is showing anyway — an Error must not
+        // resurrect a banner the update state has already dismissed.
+        val install = glassesAppInstallState
+        return if (base != null && install is GlassesAppInstallState.Error) install.message else base
     }
 
     fun glassesUpdateActionLabel(): String = when (val state = glassesAppInstallState) {
@@ -463,9 +466,11 @@ internal object NexusPhoneState {
     fun glassesUpdateActionEnabled(): Boolean =
         (glassesAppUpdateState is GlassesAppUpdateState.UpdateAvailable ||
             unknownVersionIsActionable()) &&
-            when (val state = glassesAppInstallState) {
+            when (glassesAppInstallState) {
             GlassesAppInstallState.Installed -> true
-            is GlassesAppInstallState.Error -> state.retry == GlassesAppRetry.INSTALL
+            // QUERY-retry errors stay actionable too: the service routes the press
+            // back through queryGlassesApp, which is exactly the recovery step.
+            is GlassesAppInstallState.Error -> true
             else -> false
         }
 
