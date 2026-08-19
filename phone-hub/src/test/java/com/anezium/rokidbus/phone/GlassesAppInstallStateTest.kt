@@ -91,4 +91,61 @@ class GlassesAppInstallStateTest {
         assertTrue(installed)
         assertFalse(GlassesAppPresencePolicy.reduce(installed, GlassesAppInstallState.NotInstalled))
     }
+
+    @Test
+    fun `failed install while the app is installed keeps a retryable error`() {
+        val state = GlassesAppInstallStateMachine.reduce(
+            GlassesAppInstallState.Installed,
+            GlassesAppInstallEvent.Failed(
+                "Glasses aren't connected — reconnect them first, then retry.",
+                GlassesAppRetry.INSTALL,
+            ),
+        )
+
+        assertTrue(state is GlassesAppInstallState.Error)
+        assertEquals(GlassesAppRetry.INSTALL, (state as GlassesAppInstallState.Error).retry)
+        assertEquals("Glasses aren't connected — reconnect them first, then retry.", state.message)
+    }
+
+    @Test
+    fun `failed query keeps a query-retry error`() {
+        val state = GlassesAppInstallStateMachine.reduce(
+            GlassesAppInstallState.Querying,
+            GlassesAppInstallEvent.Failed(
+                "Glasses aren't connected — reconnect them first, then retry.",
+                GlassesAppRetry.QUERY,
+            ),
+        )
+
+        assertTrue(state is GlassesAppInstallState.Error)
+        assertEquals(GlassesAppRetry.QUERY, (state as GlassesAppInstallState.Error).retry)
+        assertEquals("Glasses aren't connected — reconnect them first, then retry.", state.message)
+    }
+
+    @Test
+    fun `retrying the query clears either error back to querying`() {
+        val installError = GlassesAppInstallStateMachine.reduce(
+            GlassesAppInstallState.Installed,
+            GlassesAppInstallEvent.Failed(
+                "Glasses aren't connected — reconnect them first, then retry.",
+                GlassesAppRetry.INSTALL,
+            ),
+        )
+        val queryError = GlassesAppInstallStateMachine.reduce(
+            GlassesAppInstallState.Querying,
+            GlassesAppInstallEvent.Failed(
+                "Glasses aren't connected — reconnect them first, then retry.",
+                GlassesAppRetry.QUERY,
+            ),
+        )
+
+        assertEquals(
+            GlassesAppInstallState.Querying,
+            GlassesAppInstallStateMachine.reduce(installError, GlassesAppInstallEvent.QueryRequested),
+        )
+        assertEquals(
+            GlassesAppInstallState.Querying,
+            GlassesAppInstallStateMachine.reduce(queryError, GlassesAppInstallEvent.QueryRequested),
+        )
+    }
 }
