@@ -4485,7 +4485,12 @@ class BusHubService : Service() {
     private fun queryGlassesApp(installIfMissing: Boolean = false) {
         val link = cxrLink
         if (!isCxrUp() || link == null) {
-            broadcastGlassesAppState(glassesAppInstallState)
+            transitionGlassesAppState(
+                GlassesAppInstallEvent.Failed(
+                    "Glasses aren't connected — reconnect them first, then retry.",
+                    GlassesAppRetry.QUERY,
+                ),
+            )
             return
         }
         val operationId = beginGlassesAppOperation()
