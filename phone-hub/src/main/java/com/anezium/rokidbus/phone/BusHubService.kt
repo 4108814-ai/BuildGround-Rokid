@@ -4554,7 +4554,12 @@ class BusHubService : Service() {
             return
         }
         if (!isCxrUp() || cxrLink == null) {
-            broadcastGlassesAppState(state)
+            transitionGlassesAppState(
+                GlassesAppInstallEvent.Failed(
+                    "Glasses aren't connected — reconnect them first, then retry.",
+                    GlassesAppRetry.INSTALL,
+                ),
+            )
             return
         }
         val operationId = beginGlassesAppOperation()

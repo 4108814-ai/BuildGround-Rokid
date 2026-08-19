@@ -432,17 +432,22 @@ internal object NexusPhoneState {
         glassesAppUpdateState == GlassesAppUpdateState.Unknown &&
             installedGlassesVersionName == null
 
-    fun glassesUpdateVersionLabel(): String? = when (val state = glassesAppUpdateState) {
-        is GlassesAppUpdateState.UpdateAvailable -> "Update glasses to v${state.latest}"
-        GlassesAppUpdateState.Unknown -> if (
-            glassesAppInstallState == GlassesAppInstallState.Installed &&
-            unknownVersionIsActionable()
-        ) {
-            "Reinstall latest glasses app"
-        } else {
-            null
+    fun glassesUpdateVersionLabel(): String? {
+        // A failed attempt must explain itself where the button lives; the onboarding
+        // step shows the same message, but most users only ever see this banner.
+        (glassesAppInstallState as? GlassesAppInstallState.Error)?.let { return it.message }
+        return when (val state = glassesAppUpdateState) {
+            is GlassesAppUpdateState.UpdateAvailable -> "Update glasses to v${state.latest}"
+            GlassesAppUpdateState.Unknown -> if (
+                glassesAppInstallState == GlassesAppInstallState.Installed &&
+                unknownVersionIsActionable()
+            ) {
+                "Reinstall latest glasses app"
+            } else {
+                null
+            }
+            is GlassesAppUpdateState.UpToDate -> null
         }
-        is GlassesAppUpdateState.UpToDate -> null
     }
 
     fun glassesUpdateActionLabel(): String = when (val state = glassesAppInstallState) {

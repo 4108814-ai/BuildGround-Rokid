@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **The update button now says why it can't.** Pressing Install or Reinstall on
+  the glasses-app banner while the glasses were out of reach did nothing at
+  all — no progress, no error, just a button that ignored you. The press now
+  answers with the actual problem on the banner itself: the glasses aren't
+  connected, reconnect them first. Thanks to cep b for the report.
+
 ## 1.4.4
 
 - **Setup now asks for the one switch it cannot see.** The Hi Rokid app has an
