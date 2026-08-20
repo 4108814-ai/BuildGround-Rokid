@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.1
 
 - **The glasses can name who messaged without showing what.** Two new switches:
   *Hide message text on the glasses* keeps the band to the sender and a Show chip
