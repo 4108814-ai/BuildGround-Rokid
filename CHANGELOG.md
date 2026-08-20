@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.5
 
 - **The update button now says why it can't.** Pressing Install or Reinstall on
   the glasses-app banner while the glasses were out of reach did nothing at
