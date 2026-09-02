@@ -5,8 +5,8 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 internal class AssistantMeetingRecorder(
-    private val now: () -> ZonedDateTime = { ZonedDateTime.now() },
     private val persistence: AssistantMeetingPersistence = NoopAssistantMeetingPersistence,
+    private val now: () -> ZonedDateTime = { ZonedDateTime.now() },
 ) {
     private var meetingId: String? = null
     private var startedAt: ZonedDateTime? = null
