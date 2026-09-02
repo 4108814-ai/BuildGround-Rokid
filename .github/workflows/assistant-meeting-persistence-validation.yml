@@ -1,0 +1,99 @@
+name: Assistant meeting persistence validation
+
+on:
+  push:
+    branches:
+      - feature/assistant-conversation-mode
+    paths:
+      - '.github/workflows/assistant-meeting-persistence-validation.yml'
+      - '.github/scripts/apply-assistant-meeting-persistence.py'
+      - 'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingMode.kt'
+      - 'plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingStore.kt'
+      - 'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingModeTest.kt'
+      - 'plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingStoreTest.kt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RokidNexus
+
+    steps:
+      - name: Check out BuildGround-Rokid
+        uses: actions/checkout@v6
+        with:
+          path: RokidNexus
+          fetch-depth: 0
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: v0.2.3
+          path: CxrGlobal
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Apply tested Assistant bundle plus meeting persistence
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          conversation_patch='.github/patches/assistant-conversation-mode.patch'
+          conversation_expected='a3e3bd757480267fcdf4a51d7acf60651efb6ba76f2ee33af4677c28e168df5a'
+          test "$(sha256sum "$conversation_patch" | cut -d ' ' -f 1)" = "$conversation_expected"
+          git apply --check "$conversation_patch"
+          git apply "$conversation_patch"
+
+          timeout_patch='.github/patches/assistant-conversation-timeout-ui-fix.patch'
+          git apply --check "$timeout_patch"
+          git apply "$timeout_patch"
+
+          python .github/scripts/apply-assistant-phone-calls.py
+          python .github/scripts/fix-assistant-phone-contact-constants.py
+          python .github/scripts/normalize-assistant-phone-sms-input.py
+          python .github/scripts/extend-assistant-phone-sms.py
+          python .github/scripts/apply-assistant-mvp-integration.py
+          python .github/scripts/fix-assistant-mvp-generated-settings.py
+          python .github/scripts/fix-assistant-visual-policy.py
+          python .github/scripts/apply-assistant-151-diagnostics.py
+          python .github/scripts/apply-assistant-meeting-persistence.py
+
+          grep -q 'versionCode = 11' plugins/assistant/build.gradle.kts
+          grep -q 'versionName = "1.5.1"' plugins/assistant/build.gradle.kts
+          grep -q 'AssistantMeetingStore(applicationContext)' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
+          grep -q 'streamAssistantAnswer(meeting.summaryPrompt(), meeting.id)' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
+          grep -q 'meetingStore.saveProtocol' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
+          test -z "$(git diff --name-only | grep -i relay || true)"
+
+      - name: Run Assistant unit tests and build debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew \
+            :plugin-assistant:testDebugUnitTest \
+            :plugin-assistant:assembleDebug \
+            -PskipCxrGlobal=true
