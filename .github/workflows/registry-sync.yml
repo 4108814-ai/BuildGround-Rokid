@@ -1,0 +1,62 @@
+name: BuildGround plugin registry sync
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/registry-sync.yml'
+      - '.github/scripts/buildground_registry.py'
+      - 'registry/nexus-plugins.v1.json'
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: buildground-plugin-registry
+  cancel-in-progress: false
+
+jobs:
+  sync-registry:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out BuildGround-Rokid
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Fetch upstream catalogue
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            'https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/dist/nexus-plugins.v1.json' \
+            --output "$RUNNER_TEMP/upstream-registry.json"
+
+      - name: Merge upstream catalogue with BuildGround releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/buildground_registry.py sync \
+            --current registry/nexus-plugins.v1.json \
+            --upstream "$RUNNER_TEMP/upstream-registry.json" \
+            --output "$RUNNER_TEMP/nexus-plugins.v1.json"
+          python -m json.tool "$RUNNER_TEMP/nexus-plugins.v1.json" >/dev/null
+          cp "$RUNNER_TEMP/nexus-plugins.v1.json" registry/nexus-plugins.v1.json
+
+      - name: Commit registry changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- registry/nexus-plugins.v1.json; then
+            echo 'Registry is current.'
+            exit 0
+          fi
+          git config user.name 'BuildGround Release Bot'
+          git config user.email '4108814-ai@users.noreply.github.com'
+          git add registry/nexus-plugins.v1.json
+          git commit -m 'Refresh BuildGround plugin registry'
+          git push origin HEAD:main
