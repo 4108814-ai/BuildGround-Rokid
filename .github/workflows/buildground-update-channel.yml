@@ -1,0 +1,100 @@
+name: BuildGround update channel
+
+on:
+  push:
+    branches:
+      - feature/buildground-update-channel
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: buildground-update-channel
+  cancel-in-progress: true
+
+jobs:
+  validate-update-channel:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RokidNexus
+    steps:
+      - name: Check out BuildGround-Rokid
+        uses: actions/checkout@v6
+        with:
+          ref: feature/buildground-update-channel
+          path: RokidNexus
+          fetch-depth: 0
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: v0.2.3
+          path: CxrGlobal
+
+      - name: Apply BuildGround update channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/apply-buildground-update-channel.py
+          python .github/scripts/apply-buildground-update-channel.py
+
+      - name: Validate update sources and registry tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'https://api.github.com/repos/4108814-ai/BuildGround-Rokid/releases?per_page=100' \
+            phone-hub/src/main/java/com/anezium/rokidbus/phone/NexusUpdateChecker.kt
+          grep -F 'https://raw.githubusercontent.com/4108814-ai/BuildGround-Rokid/main/registry/nexus-plugins.v1.json' \
+            phone-hub/src/main/java/com/anezium/rokidbus/phone/RegistryClient.kt
+          grep -F 'versionCode = 10404' phone-hub/build.gradle.kts
+          grep -F 'versionName = "1.4.4"' phone-hub/build.gradle.kts
+          grep -F 'versionCode = 10404' glasses-hub/build.gradle.kts
+          grep -F 'versionName = "1.4.4"' glasses-hub/build.gradle.kts
+          python -m json.tool registry/nexus-plugins.v1.json >/dev/null
+          python .github/scripts/test_buildground_registry.py
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run phone updater tests and build both hubs
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew \
+            :phone-hub:testDebugUnitTest \
+            :phone-hub:assembleDebug \
+            :glasses-hub:assembleDebug
+
+      - name: Commit tested update-channel integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'Update-channel integration is already committed.'
+            exit 0
+          fi
+          git config user.name 'BuildGround Release Bot'
+          git config user.email '4108814-ai@users.noreply.github.com'
+          git add \
+            CHANGELOG.md \
+            phone-hub/build.gradle.kts \
+            glasses-hub/build.gradle.kts \
+            phone-hub/src/main/java/com/anezium/rokidbus/phone/NexusUpdateChecker.kt \
+            phone-hub/src/main/java/com/anezium/rokidbus/phone/RegistryClient.kt \
+            .github/workflows/app-release.yml \
+            .github/workflows/plugin-release.yml
+          git commit -m 'Route Nexus updates through BuildGround releases'
+          git push origin HEAD:feature/buildground-update-channel
