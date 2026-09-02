@@ -6,9 +6,19 @@ import java.util.Locale
 
 internal class AssistantMeetingRecorder(
     private val now: () -> ZonedDateTime = { ZonedDateTime.now() },
+    private val persistence: AssistantMeetingPersistence = NoopAssistantMeetingPersistence,
 ) {
+    private var meetingId: String? = null
     private var startedAt: ZonedDateTime? = null
     private val segments = mutableListOf<String>()
+
+    init {
+        persistence.loadActive()?.let { draft ->
+            meetingId = draft.id
+            startedAt = draft.startedAt
+            segments += draft.segments.takeLast(MAX_SEGMENTS)
+        }
+    }
 
     val active: Boolean
         get() = startedAt != null
@@ -18,7 +28,9 @@ internal class AssistantMeetingRecorder(
 
     fun start(): Boolean {
         if (active) return false
-        startedAt = now()
+        val started = now()
+        meetingId = persistence.start(started)
+        startedAt = started
         segments.clear()
         return true
     }
@@ -27,10 +39,12 @@ internal class AssistantMeetingRecorder(
         if (!active) return false
         val normalized = text.replace(Regex("\\s+"), " ").trim()
         if (normalized.isBlank()) return false
-        segments += normalized.take(MAX_SEGMENT_CHARS)
+        val capped = normalized.take(MAX_SEGMENT_CHARS)
+        segments += capped
         if (segments.size > MAX_SEGMENTS) {
             segments.removeAt(0)
         }
+        persistence.append(meetingId, capped)
         return true
     }
 
@@ -38,16 +52,21 @@ internal class AssistantMeetingRecorder(
         val started = startedAt ?: return null
         val finished = now()
         val snapshot = AssistantMeetingTranscript(
+            id = meetingId,
             startedAt = started,
             finishedAt = finished,
             segments = segments.toList(),
         )
+        val archivedId = persistence.complete(snapshot)
+        meetingId = null
         startedAt = null
         segments.clear()
-        return snapshot
+        return if (archivedId == snapshot.id) snapshot else snapshot.copy(id = archivedId ?: snapshot.id)
     }
 
     fun cancel() {
+        persistence.cancel(meetingId)
+        meetingId = null
         startedAt = null
         segments.clear()
     }
@@ -59,6 +78,7 @@ internal class AssistantMeetingRecorder(
 }
 
 internal data class AssistantMeetingTranscript(
+    val id: String? = null,
     val startedAt: ZonedDateTime,
     val finishedAt: ZonedDateTime,
     val segments: List<String>,
