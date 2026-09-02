@@ -9,12 +9,18 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: buildground-plugin-registry
+  cancel-in-progress: false
+
 jobs:
   release-plugin:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the tagged revision
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -29,7 +35,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           tag="$GITHUB_REF_NAME"
           if [[ "$tag" =~ ^([a-z0-9-]+)-v(.+)$ ]]; then
             plugin_id="${BASH_REMATCH[1]}"
@@ -38,7 +43,6 @@ jobs:
             echo "::error::Plugin release tag must have the form <id>-v<semver>; got '$tag'."
             exit 1
           fi
-
           if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Plugin release version must be SemVer; got '$version' from '$tag'."
             exit 1
@@ -46,68 +50,19 @@ jobs:
 
           module_name=""
           case "$plugin_id" in
-            feeds)
-              module_dir="plugin-feeds"
-              changelog_path="plugin-feeds/CHANGELOG.md"
-              release_name="Feeds"
-              ;;
-            transit)
-              module_dir="plugins/transit"
-              changelog_path="plugins/transit/CHANGELOG.md"
-              release_name="Transit"
-              ;;
-            lyrics)
-              module_dir="plugins/lyrics"
-              changelog_path="plugins/lyrics/CHANGELOG.md"
-              release_name="Lyrics"
-              ;;
-            lens)
-              module_dir="plugins/lens"
-              changelog_path="plugins/lens/CHANGELOG.md"
-              release_name="Lens"
-              ;;
-            media)
-              module_dir="plugins/media"
-              changelog_path="plugins/media/CHANGELOG.md"
-              release_name="Media Deck"
-              ;;
-            photosync)
-              module_dir="plugins/photosync"
-              changelog_path="plugins/photosync/CHANGELOG.md"
-              release_name="Photo Sync"
-              ;;
-            relay)
-              module_dir="plugins/relay"
-              changelog_path="plugins/relay/CHANGELOG.md"
-              release_name="Relay"
-              ;;
-            assistant)
-              module_dir="plugins/assistant"
-              changelog_path="plugins/assistant/CHANGELOG.md"
-              release_name="Assistant"
-              ;;
-            sample)
-              module_dir="plugins/sample"
-              changelog_path="plugins/sample/CHANGELOG.md"
-              release_name="Sample"
-              ;;
-            tasker)
-              module_dir="plugins/tasker"
-              changelog_path="plugins/tasker/CHANGELOG.md"
-              release_name="Tasker"
-              ;;
-            wirelessadb)
-              module_dir="plugins/wireless-adb"
-              module_name="plugin-wireless-adb"
-              changelog_path="plugins/wireless-adb/CHANGELOG.md"
-              release_name="Wireless ADB"
-              ;;
-            *)
-              echo "::error::Unknown Nexus plugin id '$plugin_id' in tag '$tag'."
-              exit 1
-              ;;
+            feeds) module_dir="plugin-feeds"; changelog_path="plugin-feeds/CHANGELOG.md"; release_name="Feeds" ;;
+            transit) module_dir="plugins/transit"; changelog_path="plugins/transit/CHANGELOG.md"; release_name="Transit" ;;
+            lyrics) module_dir="plugins/lyrics"; changelog_path="plugins/lyrics/CHANGELOG.md"; release_name="Lyrics" ;;
+            lens) module_dir="plugins/lens"; changelog_path="plugins/lens/CHANGELOG.md"; release_name="Lens" ;;
+            media) module_dir="plugins/media"; changelog_path="plugins/media/CHANGELOG.md"; release_name="Media Deck" ;;
+            photosync) module_dir="plugins/photosync"; changelog_path="plugins/photosync/CHANGELOG.md"; release_name="Photo Sync" ;;
+            relay) module_dir="plugins/relay"; changelog_path="plugins/relay/CHANGELOG.md"; release_name="Relay" ;;
+            assistant) module_dir="plugins/assistant"; changelog_path="plugins/assistant/CHANGELOG.md"; release_name="Assistant" ;;
+            sample) module_dir="plugins/sample"; changelog_path="plugins/sample/CHANGELOG.md"; release_name="Sample" ;;
+            tasker) module_dir="plugins/tasker"; changelog_path="plugins/tasker/CHANGELOG.md"; release_name="Tasker" ;;
+            wirelessadb) module_dir="plugins/wireless-adb"; module_name="plugin-wireless-adb"; changelog_path="plugins/wireless-adb/CHANGELOG.md"; release_name="Wireless ADB" ;;
+            *) echo "::error::Unknown Nexus plugin id '$plugin_id' in tag '$tag'."; exit 1 ;;
           esac
-
           {
             echo "PLUGIN_ID=$plugin_id"
             echo "PLUGIN_VERSION=$version"
@@ -121,17 +76,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           build_file="$MODULE_DIR/build.gradle.kts"
-          mapfile -t version_names < <(
-            sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$build_file"
-          )
-          if [[ "${#version_names[@]}" -ne 1 ]]; then
-            echo "::error::Expected exactly one literal versionName in '$build_file'; found ${#version_names[@]}."
-            exit 1
-          fi
-          if [[ "${version_names[0]}" != "$PLUGIN_VERSION" ]]; then
-            echo "::error::$PLUGIN_MODULE versionName is '${version_names[0]}', but tag '$GITHUB_REF_NAME' requests '$PLUGIN_VERSION'."
+          mapfile -t version_names < <(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$build_file")
+          if [[ "${#version_names[@]}" -ne 1 || "${version_names[0]}" != "$PLUGIN_VERSION" ]]; then
+            echo "::error::$PLUGIN_MODULE versionName does not match tag '$GITHUB_REF_NAME'."
             exit 1
           fi
 
@@ -139,70 +87,81 @@ jobs:
         shell: bash
         env:
           NEXUS_RELEASE_KEYSTORE_B64: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
         run: |
           set -euo pipefail
-          if [[ -z "$NEXUS_RELEASE_KEYSTORE_B64" ]]; then
-            echo "::error::NEXUS_RELEASE_KEYSTORE_B64 is not configured."
-            exit 1
-          fi
-
+          test -n "$NEXUS_RELEASE_KEYSTORE_B64"
+          test -n "$RELEASE_KEYSTORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
           keystore_path="$RUNNER_TEMP/nexus-release.keystore"
           umask 077
           printf '%s' "$NEXUS_RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore_path"
-          echo "NEXUS_RELEASE_KEYSTORE=$keystore_path" >> "$GITHUB_ENV"
+          {
+            echo "NEXUS_RELEASE_KEYSTORE=$keystore_path"
+            echo "NEXUS_RELEASE_KEYSTORE_PASSWORD=$RELEASE_KEYSTORE_PASSWORD"
+            echo "NEXUS_RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify permanent BuildGround signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='55:B2:21:85:39:2B:8C:1F:08:4C:3D:EC:58:BB:0F:34:2E:CE:71:02:28:95:56:AE:23:CA:DE:E6:CC:EC:20:97'
+          details="$(keytool -list -v -keystore "$NEXUS_RELEASE_KEYSTORE" -storepass "$NEXUS_RELEASE_KEYSTORE_PASSWORD" -alias "$NEXUS_RELEASE_KEY_ALIAS")"
+          actual="$(printf '%s\n' "$details" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1)"
+          test -n "$actual"
+          echo "certificate SHA256=$actual"
+          test "$actual" = "$expected"
+          normalized="$(printf '%s' "$actual" | tr -d ':' | tr 'A-F' 'a-f')"
+          echo "ARTIFACT_SIGNER_SHA256=$normalized" >> "$GITHUB_ENV"
 
       - name: Build signed release APK
         shell: bash
-        env:
-          NEXUS_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
-          NEXUS_RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
         run: |
           set -euo pipefail
           ./gradlew ":$PLUGIN_MODULE:assembleRelease" -PskipCxrGlobal=true
 
-      - name: Prepare artifact and release notes
+      - name: Prepare artifact and release metadata
         shell: bash
         run: |
           set -euo pipefail
-
           apk_dir="$MODULE_DIR/build/outputs/apk/release"
           mapfile -t apks < <(find "$apk_dir" -maxdepth 1 -type f -name '*.apk' -print)
           if [[ "${#apks[@]}" -ne 1 ]]; then
             echo "::error::Expected exactly one release APK in '$apk_dir'; found ${#apks[@]}."
             exit 1
           fi
-
           artifact_name="$PLUGIN_ID-phone-release.apk"
           artifact_path="$RUNNER_TEMP/$artifact_name"
           cp "${apks[0]}" "$artifact_path"
           sha256="$(sha256sum "$artifact_path" | cut -d ' ' -f 1)"
+          size_bytes="$(stat -c '%s' "$artifact_path")"
+          metadata_path="$apk_dir/output-metadata.json"
+          test -f "$metadata_path"
+          package_name="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["applicationId"])' "$metadata_path")"
+          version_code="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["elements"][0]["versionCode"])' "$metadata_path")"
+          built_version="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["elements"][0]["versionName"])' "$metadata_path")"
+          test "$built_version" = "$PLUGIN_VERSION"
 
           notes_path="$RUNNER_TEMP/$PLUGIN_ID-release-notes.md"
           if ! awk -v version="$PLUGIN_VERSION" '
-            $1 == "##" {
-              if (found) exit
-              if ($2 == version) {
-                found = 1
-                next
-              }
-            }
+            $1 == "##" { if (found) exit; if ($2 == version) { found = 1; next } }
             found { print }
             END { if (!found) exit 42 }
           ' "$CHANGELOG_PATH" > "$notes_path"; then
             echo "::error::CHANGELOG '$CHANGELOG_PATH' has no '## $PLUGIN_VERSION' section."
             exit 1
           fi
-          if ! grep -q '[^[:space:]]' "$notes_path"; then
-            echo "::error::CHANGELOG section '## $PLUGIN_VERSION' is empty."
-            exit 1
-          fi
-
-          printf '\n### Artifact\n\n- File: `%s`\n- SHA-256: `%s`\n' \
-            "$artifact_name" "$sha256" >> "$notes_path"
-
+          test -s "$notes_path"
+          printf '\n### Artifact\n\n- File: `%s`\n- SHA-256: `%s`\n' "$artifact_name" "$sha256" >> "$notes_path"
           {
             echo "ARTIFACT_NAME=$artifact_name"
             echo "ARTIFACT_PATH=$artifact_path"
+            echo "ARTIFACT_SHA256=$sha256"
+            echo "ARTIFACT_SIZE_BYTES=$size_bytes"
+            echo "ARTIFACT_PACKAGE_NAME=$package_name"
+            echo "ARTIFACT_VERSION_CODE=$version_code"
             echo "RELEASE_NOTES_PATH=$notes_path"
           } >> "$GITHUB_ENV"
 
@@ -217,6 +176,39 @@ jobs:
             --notes-file "$RELEASE_NOTES_PATH" \
             --verify-tag \
             --latest=false
+
+      - name: Publish release to BuildGround plugin registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          registry_worktree="$RUNNER_TEMP/buildground-registry"
+          rm -rf "$registry_worktree"
+          git worktree add "$registry_worktree" origin/main
+          current="$registry_worktree/registry/nexus-plugins.v1.json"
+          mkdir -p "$(dirname "$current")"
+          if [[ ! -f "$current" ]]; then printf '{"version":1,"plugins":[]}\n' > "$current"; fi
+          upstream="$RUNNER_TEMP/upstream-registry.json"
+          curl --fail --silent --show-error --location \
+            'https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/dist/nexus-plugins.v1.json' \
+            --output "$upstream"
+          artifact_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$ARTIFACT_NAME"
+          published_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          python "$GITHUB_WORKSPACE/.github/scripts/buildground_registry.py" publish \
+            --current "$current" --upstream "$upstream" --output "$current" \
+            --plugin-id "$PLUGIN_ID" --version-name "$PLUGIN_VERSION" \
+            --version-code "$ARTIFACT_VERSION_CODE" --package-name "$ARTIFACT_PACKAGE_NAME" \
+            --artifact-url "$artifact_url" --artifact-sha256 "$ARTIFACT_SHA256" \
+            --signer-sha256 "$ARTIFACT_SIGNER_SHA256" --size-bytes "$ARTIFACT_SIZE_BYTES" \
+            --published-at "$published_at" --release-notes-file "$RELEASE_NOTES_PATH"
+          python -m json.tool "$current" >/dev/null
+          cd "$registry_worktree"
+          if git diff --quiet -- registry/nexus-plugins.v1.json; then exit 0; fi
+          git config user.name 'BuildGround Release Bot'
+          git config user.email '4108814-ai@users.noreply.github.com'
+          git add registry/nexus-plugins.v1.json
+          git commit -m "Publish $PLUGIN_ID $PLUGIN_VERSION to BuildGround registry"
+          git push origin HEAD:main
 
       - name: Remove decoded keystore
         if: always()
