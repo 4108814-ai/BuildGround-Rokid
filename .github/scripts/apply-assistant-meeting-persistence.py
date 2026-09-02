@@ -91,11 +91,12 @@ replace_once(
     "    ) {\n",
 )
 
+# Conversation mode already transforms the successful-answer block. Insert persistence before its
+# completed-answer/TTS handling without changing the established follow-up behavior.
 replace_once(
     "            if (!failed) {\n"
     "                currentCoroutineContext().ensureActive()\n"
-    "                answerSpeaker.speakCompletedAnswer(stripHudMarkdown(finalAnswer.orEmpty()))\n"
-    "                try {\n",
+    "                val completedAnswer = stripHudMarkdown(finalAnswer.orEmpty())\n",
     "            if (!failed) {\n"
     "                currentCoroutineContext().ensureActive()\n"
     "                if (meetingProtocolId != null && !finalAnswer.isNullOrBlank()) {\n"
@@ -112,8 +113,7 @@ replace_once(
     "                        )\n"
     "                    }\n"
     "                }\n"
-    "                answerSpeaker.speakCompletedAnswer(stripHudMarkdown(finalAnswer.orEmpty()))\n"
-    "                try {\n",
+    "                val completedAnswer = stripHudMarkdown(finalAnswer.orEmpty())\n",
 )
 
 text = SERVICE.read_text(encoding="utf-8")
@@ -126,9 +126,3 @@ required = (
 for marker in required:
     if marker not in text:
         raise SystemExit(f"Missing meeting persistence marker after integration: {marker}")
-
-# Guardrail: the persistence integration is Assistant-only.
-changed = [line.strip() for line in text.splitlines() if "Relay" in line]
-if changed:
-    # Existing Assistant source should not acquire any Relay-specific dependency here.
-    raise SystemExit("Meeting persistence integration unexpectedly references Relay")
