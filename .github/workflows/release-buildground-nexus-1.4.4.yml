@@ -1,0 +1,182 @@
+name: Release BuildGround Nexus 1.4.4
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release-buildground-nexus-1.4.4.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-buildground-nexus-1.4.4
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RokidNexus
+    steps:
+      - name: Check out BuildGround-Rokid
+        uses: actions/checkout@v6
+        with:
+          path: RokidNexus
+          fetch-depth: 0
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: v0.2.3
+          path: CxrGlobal
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Verify Nexus 1.4.4 source version
+        shell: bash
+        run: |
+          set -euo pipefail
+          for module in phone-hub glasses-hub; do
+            grep -F 'versionCode = 10404' "$module/build.gradle.kts"
+            grep -F 'versionName = "1.4.4"' "$module/build.gradle.kts"
+          done
+          grep -F 'https://api.github.com/repos/4108814-ai/BuildGround-Rokid/releases?per_page=100' \
+            phone-hub/src/main/java/com/anezium/rokidbus/phone/NexusUpdateChecker.kt
+          grep -F 'https://raw.githubusercontent.com/4108814-ai/BuildGround-Rokid/main/registry/nexus-plugins.v1.json' \
+            phone-hub/src/main/java/com/anezium/rokidbus/phone/RegistryClient.kt
+
+      - name: Decode permanent BuildGround release key
+        shell: bash
+        env:
+          NEXUS_RELEASE_KEYSTORE_B64: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          test -n "$NEXUS_RELEASE_KEYSTORE_B64"
+          test -n "$RELEASE_KEYSTORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
+          keystore="$RUNNER_TEMP/nexus-release.keystore"
+          umask 077
+          printf '%s' "$NEXUS_RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore"
+          {
+            echo "NEXUS_RELEASE_KEYSTORE=$keystore"
+            echo "NEXUS_RELEASE_KEYSTORE_PASSWORD=$RELEASE_KEYSTORE_PASSWORD"
+            echo "NEXUS_RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify permanent BuildGround certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='55:B2:21:85:39:2B:8C:1F:08:4C:3D:EC:58:BB:0F:34:2E:CE:71:02:28:95:56:AE:23:CA:DE:E6:CC:EC:20:97'
+          details="$(keytool -list -v \
+            -keystore "$NEXUS_RELEASE_KEYSTORE" \
+            -storepass "$NEXUS_RELEASE_KEYSTORE_PASSWORD" \
+            -alias "$NEXUS_RELEASE_KEY_ALIAS")"
+          actual="$(printf '%s\n' "$details" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1)"
+          echo "certificate SHA256=$actual"
+          test "$actual" = "$expected"
+
+      - name: Build signed Nexus 1.4.4 APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :phone-hub:testDebugUnitTest :phone-hub:assembleRelease :glasses-hub:assembleRelease
+
+      - name: Prepare and verify release APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          prepare_apk() {
+            local module="$1"
+            local output="$2"
+            local dir="$module/build/outputs/apk/release"
+            mapfile -t files < <(find "$dir" -maxdepth 1 -type f -name '*.apk' -print)
+            if [[ "${#files[@]}" -ne 1 ]]; then
+              echo "::error::Expected exactly one APK in $dir; found ${#files[@]}."
+              exit 1
+            fi
+            cp "${files[0]}" "$output"
+          }
+
+          phone="$RUNNER_TEMP/nexus-phone-1.4.4.apk"
+          glasses="$RUNNER_TEMP/nexus-glasses-1.4.4.apk"
+          prepare_apk phone-hub "$phone"
+          prepare_apk glasses-hub "$glasses"
+
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
+          test -x "$apksigner"
+          expected='55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097'
+          for apk in "$phone" "$glasses"; do
+            output="$($apksigner verify --print-certs "$apk")"
+            digest="$(printf '%s\n' "$output" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr 'A-F' 'a-f')"
+            echo "$(basename "$apk") signer=$digest"
+            test "$digest" = "$expected"
+            sha256sum "$apk"
+          done
+
+          notes="$RUNNER_TEMP/nexus-1.4.4-notes.md"
+          cat > "$notes" <<'EOF'
+          BuildGround-owned Nexus update channel baseline.
+
+          - Phone and glasses: 1.4.4 / versionCode 10404.
+          - Nexus self-update source: BuildGround releases.
+          - Plugin catalogue: BuildGround registry with upstream sync.
+          - Release certificate: permanent BuildGround signer, verified before publish.
+          EOF
+          sed -i 's/^          //' "$notes"
+          {
+            echo "PHONE_APK=$phone"
+            echo "GLASSES_APK=$glasses"
+            echo "RELEASE_NOTES=$notes"
+          } >> "$GITHUB_ENV"
+
+      - name: Upload verified APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-1.4.4-signed-release
+          path: |
+            ${{ runner.temp }}/nexus-phone-1.4.4.apk
+            ${{ runner.temp }}/nexus-glasses-1.4.4.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub release v1.4.4
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.4.4 >/dev/null 2>&1; then
+            echo 'Release v1.4.4 already exists.'
+            exit 0
+          fi
+          gh release create v1.4.4 \
+            "$PHONE_APK" \
+            "$GLASSES_APK" \
+            --target "$GITHUB_SHA" \
+            --title 'Rokid Nexus 1.4.4' \
+            --notes-file "$RELEASE_NOTES" \
+            --latest
+
+      - name: Remove decoded keystore
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/nexus-release.keystore"
