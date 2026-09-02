@@ -102,6 +102,20 @@ jobs:
             echo "NEXUS_RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
           } >> "$GITHUB_ENV"
 
+      - name: Verify permanent BuildGround signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='55:B2:21:85:39:2B:8C:1F:08:4C:3D:EC:58:BB:0F:34:2E:CE:71:02:28:95:56:AE:23:CA:DE:E6:CC:EC:20:97'
+          details="$(keytool -list -v \
+            -keystore "$NEXUS_RELEASE_KEYSTORE" \
+            -storepass "$NEXUS_RELEASE_KEYSTORE_PASSWORD" \
+            -alias "$NEXUS_RELEASE_KEY_ALIAS")"
+          actual="$(printf '%s\n' "$details" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1)"
+          test -n "$actual"
+          echo "certificate SHA256=$actual"
+          test "$actual" = "$expected"
+
       - name: Build signed release APKs
         shell: bash
         run: |
