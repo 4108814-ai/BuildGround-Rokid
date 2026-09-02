@@ -173,7 +173,7 @@ class RegistryClient(
 
     companion object {
         const val FEED_URL =
-            "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/dist/nexus-plugins.v1.json"
+            "https://raw.githubusercontent.com/4108814-ai/BuildGround-Rokid/main/registry/nexus-plugins.v1.json"
         const val SUPPORTED_VERSION = 1
 
         private val DEFAULT_IO_EXECUTOR = Executors.newSingleThreadExecutor { runnable ->

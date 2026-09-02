@@ -197,7 +197,7 @@ class NexusUpdateChecker internal constructor(
 
     companion object {
         const val RELEASES_URL =
-            "https://api.github.com/repos/Anezium/Rokid-Nexus/releases?per_page=100"
+            "https://api.github.com/repos/4108814-ai/BuildGround-Rokid/releases?per_page=100"
 
         private val DEFAULT_IO_EXECUTOR = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "nexus-app-update-check").apply { isDaemon = true }

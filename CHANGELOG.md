@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.4.4
+
+- **BuildGround owns the Nexus update channel.** The phone app now checks signed app releases from the BuildGround repository instead of the upstream Anezium release stream, so a BuildGround-signed installation is never offered an incompatible upstream APK.
+- **Plugin updates use the BuildGround registry.** The registry mirrors the public RokidBrew catalogue while preserving BuildGround-managed plugin artifacts, hashes, signer certificates, and release history.
+- **Release signing is fail-closed.** App and plugin release jobs verify the permanent BuildGround certificate before publishing anything that Nexus can install.
+
 ## 1.4.3
 
 - **A document opens where reading begins.** A reader page always opened on its
