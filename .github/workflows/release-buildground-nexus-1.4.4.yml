@@ -125,9 +125,11 @@ jobs:
           test -x "$apksigner"
           expected='55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097'
           for apk in "$phone" "$glasses"; do
-            output="$($apksigner verify --print-certs "$apk")"
-            digest="$(printf '%s\n' "$output" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr 'A-F' 'a-f')"
+            output="$("$apksigner" verify --print-certs "$apk" 2>&1)"
+            printf '%s\n' "$output"
+            digest="$(printf '%s\n' "$output" | sed -nE 's/.*[Ss][Hh][Aa]-256 digest:[[:space:]]*([0-9A-Fa-f:]+).*/\1/p' | head -n 1 | tr -d ':' | tr 'A-F' 'a-f')"
             echo "$(basename "$apk") signer=$digest"
+            test -n "$digest"
             test "$digest" = "$expected"
             sha256sum "$apk"
           done
