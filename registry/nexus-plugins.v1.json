@@ -98,15 +98,20 @@
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/assistant-v1.5.2/assistant-phone-release.apk",
-        "sha256": "f10851f40b7661b1e68585a14a07bc85d37479df9974b88228d97d9444f559ea",
+        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/assistant-v1.5.3/assistant-phone-release.apk",
+        "sha256": "fef304ba42e8a17e2ab1194b1d98864e442fa052036a15814e9a95b3d598a32b",
         "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
-        "sizeBytes": 6244055,
+        "sizeBytes": 6260695,
         "packageName": "com.anezium.rokidbus.plugin.assistant",
-        "versionCode": 12,
-        "versionName": "1.5.2"
+        "versionCode": 13,
+        "versionName": "1.5.3"
       },
       "releases": [
+        {
+          "version": "1.5.3",
+          "date": "2026-09-02T19:36:03Z",
+          "notes": "BuildGround Assistant 1.5.3 — persistent Meeting Mode.\n\n- Active meeting transcript survives Assistant/Nexus service recreation.\n- Each recognized meeting fragment is durably appended to app-private storage.\n- Finished meetings archive `transcript.json` and `transcript.txt`.\n- Successful AI meeting summary is also archived as `protocol.md`.\n- Existing Assistant conversation, speech, HUD, diagnostics and phone tools are preserved.\n- No Relay changes.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `fef304ba42e8a17e2ab1194b1d98864e442fa052036a15814e9a95b3d598a32b`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
         {
           "version": "1.5.2",
           "date": "2026-09-02T16:54:54Z",
