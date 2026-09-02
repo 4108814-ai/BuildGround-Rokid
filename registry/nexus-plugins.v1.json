@@ -98,15 +98,20 @@
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/Anezium/Rokid-Nexus/releases/download/assistant-v1.4.3/assistant-phone-release.apk",
-        "sha256": "eda8b146e57a08dd997eb335fb72e44dd14da30189f470de91e35d741c4f092a",
-        "signerSha256": "f5e938e2e79b0526b31e40d36c8c19098450c1636b7e14a306681b4effddf81c",
-        "sizeBytes": 6146531,
+        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/assistant-v1.5.2/assistant-phone-release.apk",
+        "sha256": "f10851f40b7661b1e68585a14a07bc85d37479df9974b88228d97d9444f559ea",
+        "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
+        "sizeBytes": 6244055,
         "packageName": "com.anezium.rokidbus.plugin.assistant",
-        "versionCode": 10,
-        "versionName": "1.4.3"
+        "versionCode": 12,
+        "versionName": "1.5.2"
       },
       "releases": [
+        {
+          "version": "1.5.2",
+          "date": "2026-09-02T16:54:54Z",
+          "notes": "BuildGround update-channel validation release.\n\n- Functionally based on the tested Assistant 1.5.1 bundle.\n- No Relay changes.\n- Version bump to 1.5.2 / versionCode 12 is intentional so Nexus 1.4.4 can validate in-app plugin updating.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `f10851f40b7661b1e68585a14a07bc85d37479df9974b88228d97d9444f559ea`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
         {
           "version": "1.4.3",
           "date": "2026-08-17T20:58:30Z",
@@ -158,7 +163,9 @@
           "notes": "\n- First release: press the assist gesture, speak, and the answer streams onto the glasses. The stock Rokid assistant window is closed for you the moment it appears; your words transcribe live in a band on the HUD and the reply arrives in the same band, then is spoken aloud.\n- **Sign in with ChatGPT.** Answers come from your own ChatGPT plan — nothing to paste, no per-token bill. An OpenAI API key works as the alternative route.\n- **It can look.** Ask about what is in front of you and the model takes one photo through the glasses camera — one per question, only when the question needs eyes, and never saved to the glasses' own gallery.\n- **Conversations continue.** A follow-up question keeps its context instead of starting over; a thread ends on its own after a quiet delay you choose. The phone keeps the transcripts — with the photos, if you want them kept — and both can be deleted at any time.\n- **It starts out knowing you.** Memories and custom instructions from the ChatGPT account you signed in with are carried into the assistant, so you do not introduce yourself twice. Optional, synced automatically, and it can be turned off.\n- **Web search built in.** The model decides when a question needs the web, so the weather and the news are answerable from your face.\n- Pick the model (fastest to deepest) and how long it may think, in Settings.\n- Requires Rokid Nexus 1.1.6 or newer, with *Show on your glasses*, *Glasses microphone*, *Speech to text*, *Text to speech*, *Replace the glasses assistant* and *Glasses camera* approved in Nexus → Settings → Plugin access.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `571ab6f8a598f9146545cb4fdb80b1a24ac7408585cf8b9215c869450ec70443`"
         }
       ],
-      "iconUrl": "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/icons/assistant-icon.png"
+      "iconUrl": "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/icons/assistant-icon.png",
+      "xBuildGroundManaged": true,
+      "xBuildGroundSourceRepo": "4108814-ai/BuildGround-Rokid"
     },
     {
       "id": "feeds",
