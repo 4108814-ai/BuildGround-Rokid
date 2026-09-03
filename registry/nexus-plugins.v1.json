@@ -90,7 +90,7 @@
         ],
         "launchable": true,
         "settingsActivity": ".AssistantSettingsActivity",
-        "minHostVersionCode": 10200
+        "minHostVersionCode": 10405
       },
       "screenshotAssets": [],
       "listing": {
@@ -98,15 +98,20 @@
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/assistant-v1.5.5/assistant-phone-release.apk",
-        "sha256": "3e06111ca8f307fac0fc85a7379caea41767f8104eea07bf1da3922bfd065d14",
+        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/assistant-v1.5.6/assistant-phone-release.apk",
+        "sha256": "68661b529dd8e66693f2dd43a6103872ac54f5d767c90d4484855581d0cc7748",
         "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
-        "sizeBytes": 6287411,
+        "sizeBytes": 6323699,
         "packageName": "com.anezium.rokidbus.plugin.assistant",
-        "versionCode": 15,
-        "versionName": "1.5.5"
+        "versionCode": 16,
+        "versionName": "1.5.6"
       },
       "releases": [
+        {
+          "version": "1.5.6",
+          "date": "2026-09-03T17:44:26Z",
+          "notes": "BuildGround Assistant 1.5.6 — independent Audio + AI Meeting Mode.\n\n- One continuous NexusAudioSession owns the meeting microphone after the explicit start command.\n- Source audio is persisted first as app-private 16 kHz mono PCM and finalized as crash-safe WAV.\n- Local VAD creates independent STT copies; STT/provider/VPN failures do not stop or delete source audio.\n- Process/link recovery resumes the same meeting-id spool; completed orphan spools are recovered into the meeting archive.\n- Transcript and protocol remain separate from the audio lifecycle and use the same meetingId.\n- Silent Meeting Mode remains headless on the glasses; ordinary meeting speech is not rendered or answered.\n- Phone Meetings now provides audio duration/size, Play/Pause, Share, Save to Downloads/BuildGround and audio-only Delete.\n- Whole-meeting Delete removes audio + transcript + protocol; audio-only Delete leaves transcript/protocol intact.\n- Uses the existing Nexus Phone 1.4.5 raw audio API. Nexus Glasses and Relay are unchanged.\n\n### Artifact\n- File: `assistant-phone-release.apk`\n- SHA-256: `68661b529dd8e66693f2dd43a6103872ac54f5d767c90d4484855581d0cc7748`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
         {
           "version": "1.5.5",
           "date": "2026-09-03T07:04:33Z",
