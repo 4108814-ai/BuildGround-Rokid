@@ -98,15 +98,20 @@
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/assistant-v1.5.6/assistant-phone-release.apk",
-        "sha256": "68661b529dd8e66693f2dd43a6103872ac54f5d767c90d4484855581d0cc7748",
+        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/assistant-v1.5.7/assistant-phone-release.apk",
+        "sha256": "ac6ffd93e6c3812232074c644dfcee4dd504bddeded38ea8fadcab03a613031f",
         "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
-        "sizeBytes": 6323699,
+        "sizeBytes": 6325871,
         "packageName": "com.anezium.rokidbus.plugin.assistant",
-        "versionCode": 16,
-        "versionName": "1.5.6"
+        "versionCode": 17,
+        "versionName": "1.5.7"
       },
       "releases": [
+        {
+          "version": "1.5.7",
+          "date": "2026-09-03T18:56:04Z",
+          "notes": "BuildGround Assistant 1.5.7 — CXR audio-lease stability hotfix.\n\n- Fixes a 1.5.6 regression where a crash-restored active Meeting Session could silently reacquire the single physical CXR microphone lease.\n- Interrupted meetings are finalized from their app-private crash-safe spool on process recreation; they no longer auto-own the microphone.\n- A continuous Meeting AudioSession may be armed only by an explicit meeting-start command in the current process.\n- Meeting retry/rearm is blocked while ordinary SpeechSession or raw fallback owns the microphone, eliminating one-second BUSY lease contention.\n- Source-audio-first durability, transcript/protocol separation, Meeting UI and silent HUD behavior remain unchanged.\n- Nexus Phone 1.4.5, Nexus Glasses 1.4.4 and Relay are unchanged.\n\n### Artifact\n- File: `assistant-phone-release.apk`\n- SHA-256: `ac6ffd93e6c3812232074c644dfcee4dd504bddeded38ea8fadcab03a613031f`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
         {
           "version": "1.5.6",
           "date": "2026-09-03T17:44:26Z",
