@@ -519,21 +519,20 @@ replace_once(
     "    private lateinit var productivitySlot: LinearLayout\n",
 )
 
-replace_once(
-    SETTINGS,
-    "        renderConversationSettings()\n"
-    "        renderPersona()\n",
-    "        renderConversationSettings()\n"
-    "        renderMeetingsCard()\n"
-    "        renderPersona()\n",
-)
-
-# There are two render passes (onCreate and onResume). The first replacement above handles onResume;
-# handle the buildUi tail separately when needed.
+# Settings renders twice: once after building the screen and again on resume. Integrate both
+# passes deterministically so the meetings counter is current in either path.
 text = SETTINGS.read_text(encoding="utf-8")
-needle = "        renderConversationSettings()\n        renderPersona()\n"
-if needle in text:
-    SETTINGS.write_text(text.replace(needle, "        renderConversationSettings()\n        renderMeetingsCard()\n        renderPersona()\n", 1), encoding="utf-8")
+old_render = "        renderConversationSettings()\n        renderPersona()\n"
+new_render = "        renderConversationSettings()\n        renderMeetingsCard()\n        renderPersona()\n"
+if text.count(new_render) == 2:
+    pass
+elif text.count(old_render) == 2:
+    SETTINGS.write_text(text.replace(old_render, new_render), encoding="utf-8")
+else:
+    raise SystemExit(
+        f"Expected exactly two Assistant settings render passes; "
+        f"old={text.count(old_render)} new={text.count(new_render)}"
+    )
 
 replace_once(
     SETTINGS,
