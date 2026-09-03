@@ -88,3 +88,5 @@ jobs:
           set -euo pipefail
           chmod +x gradlew
           ./gradlew :plugin-assistant:testDebugUnitTest :plugin-assistant:assembleDebug -PskipCxrGlobal=true
+
+# Revalidation after deterministic two-pass settings integration.
