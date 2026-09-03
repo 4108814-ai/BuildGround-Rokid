@@ -1,0 +1,76 @@
+name: Fix Assistant 1.5.4 generator matching
+
+on:
+  push:
+    branches:
+      - feature/assistant-conversation-mode
+    paths:
+      - '.github/workflows/fix-assistant-154-generator.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fix duplicate render pass integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('.github/scripts/apply-assistant-154-meetings-ui.py')
+          text = p.read_text(encoding='utf-8')
+          old = '''replace_once(
+              SETTINGS,
+              "        renderConversationSettings()\\n"
+              "        renderPersona()\\n",
+              "        renderConversationSettings()\\n"
+              "        renderMeetingsCard()\\n"
+              "        renderPersona()\\n",
+          )
+
+          # There are two render passes (onCreate and onResume). The first replacement above handles onResume;
+          # handle the buildUi tail separately when needed.
+          text = SETTINGS.read_text(encoding="utf-8")
+          needle = "        renderConversationSettings()\\n        renderPersona()\\n"
+          if needle in text:
+              SETTINGS.write_text(text.replace(needle, "        renderConversationSettings()\\n        renderMeetingsCard()\\n        renderPersona()\\n", 1), encoding="utf-8")
+          '''
+          new = '''# Settings renders twice: once after building the screen and again on resume. Integrate both
+          # passes deterministically so the meetings counter is current in either path.
+          text = SETTINGS.read_text(encoding="utf-8")
+          old_render = "        renderConversationSettings()\\n        renderPersona()\\n"
+          new_render = "        renderConversationSettings()\\n        renderMeetingsCard()\\n        renderPersona()\\n"
+          if text.count(new_render) == 2:
+              pass
+          elif text.count(old_render) == 2:
+              SETTINGS.write_text(text.replace(old_render, new_render), encoding="utf-8")
+          else:
+              raise SystemExit(
+                  f"Expected exactly two Assistant settings render passes; "
+                  f"old={text.count(old_render)} new={text.count(new_render)}"
+              )
+          '''
+          if old not in text:
+              raise SystemExit('Expected broken 1.5.4 render integration block exactly once')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          python -m py_compile .github/scripts/apply-assistant-154-meetings-ui.py
+
+      - name: Commit generator fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'BuildGround Release Bot'
+          git config user.email '4108814-ai@users.noreply.github.com'
+          git add .github/scripts/apply-assistant-154-meetings-ui.py
+          git commit -m 'Fix Assistant meetings UI generator render matching'
+          git push origin HEAD:feature/assistant-conversation-mode
