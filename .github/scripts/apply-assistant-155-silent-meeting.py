@@ -34,7 +34,7 @@ replace_once(
 replace_count(
     '                uiController.showTransient("Listening…")\n',
     '                if (!meetingRecorder.active) uiController.showTransient("Listening…")\n',
-    expected=2,
+    expected=1,
 )
 replace_once(
     '                uiController.showTranscript(text)\n',
