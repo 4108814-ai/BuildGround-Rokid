@@ -31,6 +31,7 @@ dependencies {
     implementation(project(":bus-client"))
     implementation(project(":shared"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("androidx.core:core:1.13.1")
 
     testImplementation(project(":ink-engine"))
     testImplementation("junit:junit:4.13.2")
