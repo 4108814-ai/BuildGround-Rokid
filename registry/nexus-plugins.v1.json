@@ -98,15 +98,20 @@
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/assistant-v1.5.3/assistant-phone-release.apk",
-        "sha256": "fef304ba42e8a17e2ab1194b1d98864e442fa052036a15814e9a95b3d598a32b",
+        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/assistant-v1.5.4/assistant-phone-release.apk",
+        "sha256": "eb158bc493cd8da3b1196cf5ce3a9503524fb75518134ba64b3c26b2a0058fe1",
         "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
-        "sizeBytes": 6260695,
+        "sizeBytes": 6286359,
         "packageName": "com.anezium.rokidbus.plugin.assistant",
-        "versionCode": 13,
-        "versionName": "1.5.3"
+        "versionCode": 14,
+        "versionName": "1.5.4"
       },
       "releases": [
+        {
+          "version": "1.5.4",
+          "date": "2026-09-03T05:56:01Z",
+          "notes": "BuildGround Assistant 1.5.4 — phone meeting archive.\n\n- Adds a Meetings section to Assistant settings on the phone.\n- Lists completed meetings with date/time, duration, fragment count and brief availability.\n- Opens the saved AI brief and full transcript for each meeting.\n- Briefs can be copied or shared through the Android share sheet; transcript copy is available when no brief exists.\n- Individual meetings or the full meeting archive can be deleted with confirmation.\n- Reads the same app-private archive introduced in 1.5.3, so existing saved meetings are preserved across this in-place update.\n- Existing Assistant conversation, speech, HUD, diagnostics, meeting capture and phone tools are preserved.\n- No Relay changes.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `eb158bc493cd8da3b1196cf5ce3a9503524fb75518134ba64b3c26b2a0058fe1`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
         {
           "version": "1.5.3",
           "date": "2026-09-02T19:36:03Z",
