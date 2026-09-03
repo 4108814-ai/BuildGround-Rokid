@@ -55,15 +55,19 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Apply Assistant bundle with persistent meeting audio and bump to 1.5.6
+      - name: Apply Assistant bundle and unified Meeting Session
         shell: bash
         run: |
           set -euo pipefail
 
-          # Compile the plugin against the same STT PCM transport shipped in Nexus phone 1.4.6.
+          # Keep the compile-time speech callback extension used by the existing 1.5.6 prototype,
+          # but execute the patch from the repository so its ROOT calculation is correct.
+          # Runtime Meeting Mode does NOT depend on this tee: it owns one continuous NexusAudioSession.
           git fetch origin feature/meeting-audio-transport
-          git show origin/feature/meeting-audio-transport:.github/scripts/apply-meeting-audio-transport.py > "$RUNNER_TEMP/apply-meeting-audio-transport.py"
-          python "$RUNNER_TEMP/apply-meeting-audio-transport.py"
+          transport_patch='.github/scripts/_apply-meeting-audio-transport.py'
+          git show origin/feature/meeting-audio-transport:.github/scripts/apply-meeting-audio-transport.py > "$transport_patch"
+          python "$transport_patch"
+          rm -f "$transport_patch"
 
           conversation_patch='.github/patches/assistant-conversation-mode.patch'
           conversation_expected='a3e3bd757480267fcdf4a51d7acf60651efb6ba76f2ee33af4677c28e168df5a'
@@ -87,6 +91,9 @@ jobs:
           python .github/scripts/apply-assistant-154-meetings-ui.py
           python .github/scripts/apply-assistant-155-silent-meeting.py
           python .github/scripts/apply-assistant-156-meeting-audio.py
+          python .github/scripts/apply-assistant-156-raw-audio-core.py
+          python .github/scripts/apply-assistant-156-unified-meeting-session.py
+          python .github/scripts/apply-assistant-156-audio-ui-finish.py
 
           python - <<'PY'
           from pathlib import Path
@@ -101,11 +108,14 @@ jobs:
 
           grep -q 'versionCode = 16' plugins/assistant/build.gradle.kts
           grep -q 'versionName = "1.5.6"' plugins/assistant/build.gradle.kts
-          grep -q 'onSpeechAudioPcm' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
-          grep -q 'meetingAudioRecorder.finish(meeting.id)' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
-          grep -q 'saveMeetingAudioPcm' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingStore.kt
-          grep -q 'class AssistantMeetingAudioRecorder' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingAudioRecorder.kt
-          grep -q 'AUDIO' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingsActivity.kt
+          grep -q 'startMeetingAudioCapture' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
+          grep -q 'Source audio is persisted first' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
+          grep -q 'meetingTranscriptionQueue' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
+          grep -q 'assistant_meeting_audio_active' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingAudioRecorder.kt
+          grep -q 'class AssistantMeetingAudioSegmenter' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingAudioSegmenter.kt
+          grep -q 'deleteMeetingAudio' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingStore.kt
+          grep -q 'Delete audio' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingsActivity.kt
+          grep -q 'toggleAudio' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingsActivity.kt
           grep -q 'androidx.core.content.FileProvider' plugins/assistant/src/main/AndroidManifest.xml
           test -z "$(git diff --name-only | grep -i relay || true)"
 
@@ -175,16 +185,17 @@ jobs:
           test "$package_name" = 'com.anezium.rokidbus.plugin.assistant'
           notes="$RUNNER_TEMP/assistant-1.5.6-notes.md"
           cat > "$notes" <<EOF
-          BuildGround Assistant 1.5.6 — two-contour Meeting Mode.
+          BuildGround Assistant 1.5.6 — independent Audio + AI Meeting Mode.
 
-          - Meeting Mode now archives the glasses microphone audio independently from STT/AI output.
-          - The audio contour receives the same ordered 16 kHz mono PCM used by recognition, with no second microphone lease.
-          - Audio is crash-tolerant while a meeting is active and is finalized as WAV when the meeting ends.
-          - The existing transcript + AI protocol contour remains independent; VPN/AI failure cannot delete already captured audio.
-          - Meetings on the phone now show Audio + Transcript + Protocol in one meeting card.
-          - Audio can be played, saved to Downloads/BuildGround, shared, or removed by deleting the meeting.
-          - Requires Nexus Phone 1.4.6 for STT PCM transport. Glasses remain unchanged.
-          - No Relay changes.
+          - One continuous NexusAudioSession owns the meeting microphone after the explicit start command.
+          - Source audio is persisted first as app-private 16 kHz mono PCM and finalized as crash-safe WAV.
+          - Local VAD creates independent STT copies; STT/provider/VPN failures do not stop or delete source audio.
+          - Process/link recovery resumes the same meeting-id spool; completed orphan spools are recovered into the meeting archive.
+          - Transcript and protocol remain separate from the audio lifecycle and use the same meetingId.
+          - Silent Meeting Mode remains headless on the glasses; ordinary meeting speech is not rendered or answered.
+          - Phone Meetings now provides audio duration/size, Play/Pause, Share, Save to Downloads/BuildGround and audio-only Delete.
+          - Whole-meeting Delete removes audio + transcript + protocol; audio-only Delete leaves transcript/protocol intact.
+          - Uses the existing Nexus Phone 1.4.5 raw audio API. Nexus Glasses and Relay are unchanged.
 
           ### Artifact
           - File: \`$artifact_name\`
@@ -232,7 +243,7 @@ jobs:
           p=sys.argv[1]
           d=json.load(open(p, encoding='utf-8'))
           item=next(x for x in d['plugins'] if x['id']=='assistant')
-          item.setdefault('nexus', {})['minHostVersionCode']=10406
+          item.setdefault('nexus', {})['minHostVersionCode']=10405
           with open(p,'w',encoding='utf-8') as f: json.dump(d,f,ensure_ascii=False,indent=2); f.write('\n')
           PY
           python -m json.tool "$current" >/dev/null
