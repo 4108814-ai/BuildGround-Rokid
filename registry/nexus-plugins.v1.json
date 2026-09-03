@@ -98,15 +98,20 @@
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/assistant-v1.5.4/assistant-phone-release.apk",
-        "sha256": "eb158bc493cd8da3b1196cf5ce3a9503524fb75518134ba64b3c26b2a0058fe1",
+        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/assistant-v1.5.5/assistant-phone-release.apk",
+        "sha256": "3e06111ca8f307fac0fc85a7379caea41767f8104eea07bf1da3922bfd065d14",
         "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
-        "sizeBytes": 6286359,
+        "sizeBytes": 6287411,
         "packageName": "com.anezium.rokidbus.plugin.assistant",
-        "versionCode": 14,
-        "versionName": "1.5.4"
+        "versionCode": 15,
+        "versionName": "1.5.5"
       },
       "releases": [
+        {
+          "version": "1.5.5",
+          "date": "2026-09-03T07:04:33Z",
+          "notes": "BuildGround Assistant 1.5.5 — Silent Meeting Session.\n\n- “Начать совещание” starts a meeting and immediately retires the Assistant HUD.\n- Meeting speech continues to be recognized and archived while the glasses stay visually quiet.\n- Partial transcripts, “Listening” states and per-fragment counters are suppressed during an active meeting.\n- Raw-audio transcription fallback is now meeting-aware and continues the silent capture loop.\n- “Закончить совещание” wakes the Assistant once, generates the protocol, stores protocol plus full transcript on the phone, and does not stream/read the full protocol on the glasses.\n- The glasses show only a short completion confirmation after the protocol is saved.\n- Existing Meetings archive, conversation mode, diagnostics, phone tools and Relay behavior are preserved.\n- No Relay changes.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `3e06111ca8f307fac0fc85a7379caea41767f8104eea07bf1da3922bfd065d14`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
         {
           "version": "1.5.4",
           "date": "2026-09-03T05:56:01Z",
