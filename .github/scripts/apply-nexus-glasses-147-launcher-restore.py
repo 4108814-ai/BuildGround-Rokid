@@ -153,3 +153,5 @@ for marker in (
 ):
     if marker not in text:
         raise SystemExit(f"Missing Nexus Glasses 1.4.7 launcher-restore marker: {marker}")
+
+# Intentional no-op marker: workflow already exists on the branch; this push starts its first run.
