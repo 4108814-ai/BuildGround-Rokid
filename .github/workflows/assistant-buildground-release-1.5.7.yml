@@ -96,6 +96,7 @@ jobs:
           python .github/scripts/apply-assistant-156-unified-meeting-session.py
           python .github/scripts/apply-assistant-156-audio-ui-finish.py
           python .github/scripts/apply-assistant-157-audio-lease-stability.py
+          python .github/scripts/apply-assistant-157-nullable-recovery-fix.py
 
           python - <<'PY'
           from pathlib import Path
@@ -116,6 +117,7 @@ jobs:
           grep -q 'meetingAudioOwnedByCurrentProcess = false' "$service"
           grep -q 'AssistantMeetingCapturePolicy.canAcquire' "$service"
           grep -q 'val interruptedMeeting = meetingRecorder.finish()' "$service"
+          grep -q 'val interruptedMeetingId = interruptedMeeting?.id' "$service"
           grep -q 'Source audio is persisted first' "$service"
           grep -q 'assistant_meeting_audio_active' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingAudioRecorder.kt
           grep -q 'class AssistantMeetingCapturePolicyTest' plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantMeetingCapturePolicyTest.kt
