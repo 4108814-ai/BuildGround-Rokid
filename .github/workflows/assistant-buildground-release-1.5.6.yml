@@ -6,6 +6,8 @@ on:
       - feature/assistant-conversation-mode
     paths:
       - '.github/workflows/assistant-buildground-release-1.5.6.yml'
+      - '.github/scripts/apply-assistant-156-*.py'
+      - 'plugins/assistant/build.gradle.kts'
   workflow_dispatch:
 
 permissions:
@@ -108,6 +110,7 @@ jobs:
 
           grep -q 'versionCode = 16' plugins/assistant/build.gradle.kts
           grep -q 'versionName = "1.5.6"' plugins/assistant/build.gradle.kts
+          grep -q 'androidx.core:core:1.13.1' plugins/assistant/build.gradle.kts
           grep -q 'startMeetingAudioCapture' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
           grep -q 'Source audio is persisted first' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
           grep -q 'meetingTranscriptionQueue' plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt
