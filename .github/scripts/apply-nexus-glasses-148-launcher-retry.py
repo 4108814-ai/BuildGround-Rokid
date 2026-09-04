@@ -85,10 +85,12 @@ replace_once(
     "    override fun onAccessibilityEvent(event: AccessibilityEvent?) {\n",
 )
 
-# Add constants inside the existing companion object using a stable marker.
+# Add constants inside the existing companion object using the current stable source marker.
 replace_once(
-    "        private const val TAG = \"RokidBusAccessibility\"\n",
-    "        private const val TAG = \"RokidBusAccessibility\"\n"
+    "    companion object {\n"
+    "        private const val KEYCODE_PROG_BLUE = 186\n",
+    "    companion object {\n"
+    "        private const val KEYCODE_PROG_BLUE = 186\n"
     "        private const val LAUNCHER_AUTO_RESTORE_RETRY_MS = 1_000L\n"
     "        private const val LAUNCHER_AUTO_RESTORE_MAX_RETRIES = 12\n",
 )
