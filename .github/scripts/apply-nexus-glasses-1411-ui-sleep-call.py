@@ -121,9 +121,11 @@ replace_once(
 
 replace_once(
     SERVICE,
-    """        main.removeCallbacks(restoreLauncherAfterNativeCall)
+    """    private fun unregisterNativeCallModeObserver() {
+        main.removeCallbacks(restoreLauncherAfterNativeCall)
 """,
-    """        main.removeCallbacks(restoreLauncherAfterNativeCall)
+    """    private fun unregisterNativeCallModeObserver() {
+        main.removeCallbacks(restoreLauncherAfterNativeCall)
         main.removeCallbacks(nativeCallWindowExitCheck)
 """,
 )
