@@ -29,6 +29,12 @@ replace_once(
     'android:name="com.anezium.rokidbus.plugin.DISPLAY_NAME"\n                android:value="Assistant"',
     'android:name="com.anezium.rokidbus.plugin.DISPLAY_NAME"\n                android:value="Meetings"',
 )
+# Keep the explicit drawable resource but give the launcher icon key the new plugin identity too.
+replace_once(
+    MANIFEST,
+    'android:name="com.anezium.rokidbus.plugin.ICON"\n                android:value="assistant"',
+    'android:name="com.anezium.rokidbus.plugin.ICON"\n                android:value="meetings"',
+)
 replace_once(
     MANIFEST,
     'android:value="surfaces,microphone,stt,tts,camera,ink_surface"',
