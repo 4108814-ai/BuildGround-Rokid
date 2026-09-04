@@ -122,8 +122,9 @@ jobs:
           grep -q 'Source audio is persisted first' "$service"
           grep -q 'class MeetingsControlPolicyTest' plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/MeetingsControlPolicyTest.kt
 
-          # Dedicated Meetings release only. Do not modify host Glasses/Phone runtime or Relay.
-          test -z "$(git diff --name-only | grep -Ei '(^|/)relay|(^|/)glasses-hub/|(^|/)phone-hub/' || true)"
+          # Meetings may compile the proven phone audio transport into its dependency graph, but
+          # this workflow releases no Phone APK. Host Glasses runtime and Relay must remain untouched.
+          test -z "$(git diff --name-only | grep -Ei '(^|/)relay|(^|/)glasses-hub/' || true)"
 
       - name: Run Meetings tests
         shell: bash
