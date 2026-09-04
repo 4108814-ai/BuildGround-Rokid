@@ -1,0 +1,1 @@
+Glasses 1.4.11 scope: preserve Nexus-first wake ownership; restore native Rokid display timeout by removing launcher KEEP_SCREEN_ON; compact plugin launcher rows and guarantee scroll-to-selected; use Accessibility window events as primary native Rokid telephone UI signal because AudioManager mode was not observed on paired-phone calls. No Phone/Assistant/Relay changes.
