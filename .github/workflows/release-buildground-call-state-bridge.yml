@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/release-buildground-call-state-bridge.yml'
       - '.github/scripts/apply-phone-call-state-bridge.py'
+      - '.github/scripts/run-phone-call-state-bridge.py'
       - '.github/scripts/apply-meeting-audio-transport.py'
   workflow_dispatch:
 
@@ -60,7 +61,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python .github/scripts/apply-phone-call-state-bridge.py
+          python .github/scripts/run-phone-call-state-bridge.py
           python - <<'PY'
           from pathlib import Path
           phone = Path('phone-hub/build.gradle.kts')
@@ -198,17 +199,17 @@ jobs:
             echo "GLASSES_NOTES=$RUNNER_TEMP/glasses-notes.md"
           } >> "$GITHUB_ENV"
 
-      - name: Publish Phone v1.4.7
+      - name: Publish Phone phone-v1.4.7
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view v1.4.7 >/dev/null 2>&1; then
-            echo '::error::Release v1.4.7 already exists; refusing overwrite.'
+          if gh release view phone-v1.4.7 >/dev/null 2>&1; then
+            echo '::error::Release phone-v1.4.7 already exists; refusing overwrite.'
             exit 1
           fi
-          gh release create v1.4.7 "$PHONE_APK" --target "$GITHUB_SHA" --title 'Rokid Nexus Phone 1.4.7' --notes-file "$PHONE_NOTES" --latest=false
+          gh release create phone-v1.4.7 "$PHONE_APK" --target "$GITHUB_SHA" --title 'Rokid Nexus Phone 1.4.7' --notes-file "$PHONE_NOTES" --latest=false
 
       - name: Publish Glasses v1.4.12
         shell: bash
