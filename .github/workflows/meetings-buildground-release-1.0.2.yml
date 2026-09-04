@@ -1,0 +1,306 @@
+name: Meetings BuildGround release 1.0.2
+
+on:
+  push:
+    branches:
+      - feature/meetings-102
+    paths:
+      - '.github/workflows/meetings-buildground-release-1.0.2.yml'
+      - '.github/scripts/apply-meetings-102.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: meetings-buildground-release-1-0-2
+  cancel-in-progress: false
+
+jobs:
+  release-meetings:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RokidNexus
+
+    steps:
+      - name: Check out BuildGround-Rokid
+        uses: actions/checkout@v6
+        with:
+          path: RokidNexus
+          fetch-depth: 0
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: v0.2.3
+          path: CxrGlobal
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build Meetings runtime with RV101 tap fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch origin feature/meeting-audio-transport
+          transport_patch='.github/scripts/_apply-meeting-audio-transport.py'
+          git show origin/feature/meeting-audio-transport:.github/scripts/apply-meeting-audio-transport.py > "$transport_patch"
+          python "$transport_patch"
+          rm -f "$transport_patch"
+
+          conversation_patch='.github/patches/assistant-conversation-mode.patch'
+          conversation_expected='a3e3bd757480267fcdf4a51d7acf60651efb6ba76f2ee33af4677c28e168df5a'
+          test "$(sha256sum "$conversation_patch" | cut -d ' ' -f 1)" = "$conversation_expected"
+          git apply --check "$conversation_patch"
+          git apply "$conversation_patch"
+
+          timeout_patch='.github/patches/assistant-conversation-timeout-ui-fix.patch'
+          git apply --check "$timeout_patch"
+          git apply "$timeout_patch"
+
+          python .github/scripts/apply-assistant-phone-calls.py
+          python .github/scripts/fix-assistant-phone-contact-constants.py
+          python .github/scripts/normalize-assistant-phone-sms-input.py
+          python .github/scripts/extend-assistant-phone-sms.py
+          python .github/scripts/apply-assistant-mvp-integration.py
+          python .github/scripts/fix-assistant-mvp-generated-settings.py
+          python .github/scripts/fix-assistant-visual-policy.py
+          python .github/scripts/apply-assistant-151-diagnostics.py
+          python .github/scripts/apply-assistant-meeting-persistence.py
+          python .github/scripts/apply-assistant-154-meetings-ui.py
+          python .github/scripts/apply-assistant-155-silent-meeting.py
+          python .github/scripts/apply-assistant-156-meeting-audio.py
+          python .github/scripts/apply-assistant-156-raw-audio-core.py
+          python .github/scripts/apply-assistant-156-unified-meeting-session.py
+          python .github/scripts/apply-assistant-156-audio-ui-finish.py
+          python .github/scripts/apply-assistant-157-audio-lease-stability.py
+          python .github/scripts/apply-assistant-157-nullable-recovery-fix.py
+          python .github/scripts/apply-assistant-160-work-mode.py
+          python .github/scripts/apply-meetings-102.py
+
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('plugins/assistant/build.gradle.kts')
+          text = p.read_text(encoding='utf-8')
+          if text.count('versionCode = 11') != 1 or text.count('versionName = "1.5.1"') != 1:
+              raise SystemExit('Expected generated Assistant 1.5.1 version markers exactly once')
+          text = text.replace('versionCode = 11', 'versionCode = 21', 1)
+          text = text.replace('versionName = "1.5.1"', 'versionName = "1.0.2"', 1)
+          p.write_text(text, encoding='utf-8')
+          PY
+
+          manifest='plugins/assistant/src/main/AndroidManifest.xml'
+          service='plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt'
+          grep -q 'versionCode = 21' plugins/assistant/build.gradle.kts
+          grep -q 'versionName = "1.0.2"' plugins/assistant/build.gradle.kts
+          grep -q 'android:value="assistant"' "$manifest"
+          grep -q 'android:value="Meetings"' "$manifest"
+          grep -q 'android:value="surfaces,microphone"' "$manifest"
+          grep -q 'android:value="/plugin/assistant"' "$manifest"
+          ! grep -q 'surfaces,microphone,stt,tts,camera,ink_surface' "$manifest"
+          ! grep -q 'android:value="/plugin/meetings"' "$manifest"
+          grep -q 'KeyEvent.KEYCODE_ENTER' "$service"
+          grep -q 'KeyEvent.KEYCODE_DPAD_CENTER' "$service"
+          grep -q 'KeyEvent.KEYCODE_NOTIFICATION' "$service"
+          grep -q 'MeetingsControlPolicy.action(meetingRecorder.active)' "$service"
+          grep -q 'Нажмите: начать совещание' "$service"
+          grep -q 'Нажмите: завершить совещание' "$service"
+          grep -q 'Source audio is persisted first' "$service"
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt').read_text(encoding='utf-8')
+          if s.count('KeyEvent.KEYCODE_NOTIFICATION') != 1:
+              raise SystemExit('Expected exactly one RV101 fallback confirm marker')
+          PY
+          test -z "$(git diff --name-only | grep -Ei '(^|/)relay|(^|/)glasses-hub/' || true)"
+
+      - name: Run Meetings tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :plugin-assistant:testDebugUnitTest -PskipCxrGlobal=true
+
+      - name: Decode permanent BuildGround signing key
+        shell: bash
+        env:
+          NEXUS_RELEASE_KEYSTORE_B64: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          test -n "$NEXUS_RELEASE_KEYSTORE_B64"
+          test -n "$RELEASE_KEYSTORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
+          keystore_path="$RUNNER_TEMP/nexus-release.keystore"
+          umask 077
+          printf '%s' "$NEXUS_RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore_path"
+          {
+            echo "NEXUS_RELEASE_KEYSTORE=$keystore_path"
+            echo "NEXUS_RELEASE_KEYSTORE_PASSWORD=$RELEASE_KEYSTORE_PASSWORD"
+            echo "NEXUS_RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify permanent BuildGround signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='55:B2:21:85:39:2B:8C:1F:08:4C:3D:EC:58:BB:0F:34:2E:CE:71:02:28:95:56:AE:23:CA:DE:E6:CC:EC:20:97'
+          details="$(keytool -list -v -keystore "$NEXUS_RELEASE_KEYSTORE" -storepass "$NEXUS_RELEASE_KEYSTORE_PASSWORD" -alias "$NEXUS_RELEASE_KEY_ALIAS")"
+          actual="$(printf '%s\n' "$details" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1)"
+          test "$actual" = "$expected"
+          normalized="$(printf '%s' "$actual" | tr -d ':' | tr 'A-F' 'a-f')"
+          echo "ARTIFACT_SIGNER_SHA256=$normalized" >> "$GITHUB_ENV"
+
+      - name: Build signed Meetings 1.0.2 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :plugin-assistant:assembleRelease -PskipCxrGlobal=true
+
+      - name: Verify APK and prepare release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find plugins/assistant/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$apk"
+          actual_signer="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')"
+          test "$actual_signer" = "$ARTIFACT_SIGNER_SHA256"
+          artifact_name='meetings-phone-release.apk'
+          artifact_path="$RUNNER_TEMP/$artifact_name"
+          cp "$apk" "$artifact_path"
+          sha256="$(sha256sum "$artifact_path" | cut -d ' ' -f 1)"
+          size_bytes="$(stat -c '%s' "$artifact_path")"
+          metadata='plugins/assistant/build/outputs/apk/release/output-metadata.json'
+          package_name="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["applicationId"])' "$metadata")"
+          version_code="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["elements"][0]["versionCode"])' "$metadata")"
+          version_name="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["elements"][0]["versionName"])' "$metadata")"
+          test "$version_code" = '21'
+          test "$version_name" = '1.0.2'
+          test "$package_name" = 'com.anezium.rokidbus.plugin.assistant'
+          notes="$RUNNER_TEMP/meetings-1.0.2-notes.md"
+          cat > "$notes" <<EOF
+          BuildGround Meetings 1.0.2.
+
+          - Fixes the physical RV101 single-tap Start/Finish control on a Nexus surface.
+          - Clean Nexus Glasses 1.4.17 may forward an unclassified single temple tap as Android KEYCODE_NOTIFICATION (83) after the triple-tap window expires; Meetings now accepts that documented fallback in addition to ENTER and DPAD_CENTER.
+          - The fallback is handled only inside Meetings. Nexus Phone, Nexus Glasses and Relay are unchanged.
+          - Internal plugin id remains assistant for Store compatibility; user-facing identity remains Meetings.
+          - No assistant capability or Hey Rokid takeover. Source WAV, transcript, protocol and microphone-lease protections are unchanged.
+
+          ### Artifact
+          - File: \`$artifact_name\`
+          - SHA-256: \`$sha256\`
+          - Signer SHA-256: \`$actual_signer\`
+          EOF
+          {
+            echo "ARTIFACT_NAME=$artifact_name"
+            echo "ARTIFACT_PATH=$artifact_path"
+            echo "ARTIFACT_SHA256=$sha256"
+            echo "ARTIFACT_SIZE_BYTES=$size_bytes"
+            echo "ARTIFACT_PACKAGE_NAME=$package_name"
+            echo "ARTIFACT_VERSION_CODE=$version_code"
+            echo "RELEASE_NOTES_PATH=$notes"
+          } >> "$GITHUB_ENV"
+
+      - name: Create Meetings 1.0.2 release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view meetings-v1.0.2 >/dev/null 2>&1; then
+            echo '::error::meetings-v1.0.2 already exists; refusing overwrite.'
+            exit 1
+          fi
+          gh release create meetings-v1.0.2 "$ARTIFACT_PATH" --target "$GITHUB_SHA" --title 'Meetings 1.0.2' --notes-file "$RELEASE_NOTES_PATH" --latest=false
+
+      - name: Publish Meetings 1.0.2 to BuildGround registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          registry_worktree="$RUNNER_TEMP/buildground-registry"
+          rm -rf "$registry_worktree"
+          git worktree add "$registry_worktree" origin/main
+          current="$registry_worktree/registry/nexus-plugins.v1.json"
+          artifact_url="https://github.com/$GITHUB_REPOSITORY/releases/download/meetings-v1.0.2/$ARTIFACT_NAME"
+          published_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          python - "$current" "$artifact_url" "$ARTIFACT_SHA256" "$ARTIFACT_SIGNER_SHA256" "$ARTIFACT_SIZE_BYTES" "$RELEASE_NOTES_PATH" "$published_at" <<'PY'
+          import json, sys
+          p,url,sha,signer,size,notes_path,published=sys.argv[1:]
+          d=json.load(open(p, encoding='utf-8'))
+          d['plugins']=[x for x in d['plugins'] if x.get('id') != 'meetings']
+          item=next((x for x in d['plugins'] if x.get('id')=='assistant'), None)
+          if item is None:
+              raise SystemExit('BuildGround Meetings registry identity assistant is missing')
+          item['name']='Meetings'
+          item['summary']='BuildGround Meetings: source audio, transcript and protocol with explicit start/finish controls.'
+          item['description']='Dedicated meeting recorder for Nexus. It does not replace the Rokid voice assistant and requests only glasses surface and microphone access.'
+          item['xBuildGroundManaged']=True
+          item['xBuildGroundSourceRepo']='4108814-ai/BuildGround-Rokid'
+          nexus=item.setdefault('nexus', {})
+          nexus['pluginId']='assistant'
+          nexus['minHostVersionCode']=10405
+          nexus['capabilities']=['surfaces','microphone']
+          nexus['launchable']=True
+          art=item.setdefault('artifact', {})
+          art.update({
+              'target':'phone', 'url':url, 'sha256':sha, 'signerSha256':signer,
+              'sizeBytes':int(size), 'packageName':'com.anezium.rokidbus.plugin.assistant',
+              'versionCode':21, 'versionName':'1.0.2'
+          })
+          notes=open(notes_path, encoding='utf-8').read().strip()
+          releases=[x for x in item.get('releases', []) if x.get('version') != '1.0.2']
+          item['releases']=[{'version':'1.0.2','date':published,'notes':notes}] + releases
+          with open(p,'w',encoding='utf-8') as f:
+              json.dump(d,f,ensure_ascii=False,indent=2)
+              f.write('\n')
+          PY
+
+          python - "$current" <<'PY'
+          import json, sys
+          d=json.load(open(sys.argv[1], encoding='utf-8'))
+          items=[x for x in d['plugins'] if x.get('id')=='assistant']
+          if len(items) != 1: raise SystemExit('Expected one assistant identity')
+          x=items[0]
+          if x.get('name') != 'Meetings': raise SystemExit('Display name mismatch')
+          if x.get('nexus',{}).get('pluginId') != 'assistant': raise SystemExit('pluginId mismatch')
+          if x.get('nexus',{}).get('capabilities') != ['surfaces','microphone']: raise SystemExit('capability mismatch')
+          if x.get('artifact',{}).get('versionCode') != 21: raise SystemExit('versionCode mismatch')
+          if x.get('artifact',{}).get('versionName') != '1.0.2': raise SystemExit('versionName mismatch')
+          if any(y.get('id')=='meetings' for y in d['plugins']): raise SystemExit('broken meetings identity remains')
+          PY
+
+          git -C "$registry_worktree" config user.name 'github-actions[bot]'
+          git -C "$registry_worktree" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "$registry_worktree" add registry/nexus-plugins.v1.json
+          git -C "$registry_worktree" commit -m 'Publish Meetings 1.0.2'
+          git -C "$registry_worktree" push origin HEAD:main
+
+      - name: Upload signed APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: meetings-1.0.2-signed
+          path: ${{ env.ARTIFACT_PATH }}
+          if-no-files-found: error
