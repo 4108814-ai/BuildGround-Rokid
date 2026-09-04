@@ -67,6 +67,133 @@
       ]
     },
     {
+      "id": "assistant",
+      "kind": "nexus-plugin",
+      "name": "Meetings",
+      "category": "Assistant",
+      "summary": "BuildGround Meetings: source audio, transcript and protocol with explicit start/finish controls.",
+      "description": "Dedicated meeting recorder for Nexus. It does not replace the Rokid voice assistant and requests only glasses surface and microphone access.",
+      "author": "Anezium",
+      "sourceUrl": "https://github.com/Anezium/Rokid-Nexus",
+      "publishedAt": "2026-08-11T22:06:05Z",
+      "iconAsset": "assistant-icon.png",
+      "nexus": {
+        "pluginId": "assistant",
+        "apiVersion": 3,
+        "capabilities": [
+          "surfaces",
+          "microphone"
+        ],
+        "launchable": true,
+        "settingsActivity": ".AssistantSettingsActivity",
+        "minHostVersionCode": 10405
+      },
+      "screenshotAssets": [],
+      "listing": {
+        "descriptionMarkdown": "## BuildGround Meetings\n\nA dedicated work plugin for meetings. The stock Rokid assistant remains untouched.\n\n- Open **Meetings** from the Nexus launcher.\n- Press **Start meeting** to begin source-audio recording and transcription.\n- Open **Meetings** again and press **Finish meeting** to stop and generate the protocol.\n- Source WAV, transcript and protocol remain in the phone meeting archive.\n- Uses the existing ChatGPT/provider sign-in only for protocol generation.\n"
+      },
+      "artifact": {
+        "target": "phone",
+        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v1.0.1/meetings-phone-release.apk",
+        "sha256": "cb488735183c37c13ec82e3ede6b28694c43acb10105ef727e80762619129376",
+        "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
+        "sizeBytes": 6328739,
+        "packageName": "com.anezium.rokidbus.plugin.assistant",
+        "versionCode": 20,
+        "versionName": "1.0.1"
+      },
+      "releases": [
+        {
+          "version": "1.0.1",
+          "date": "2026-09-04T19:31:44Z",
+          "notes": "BuildGround Meetings 1.0.1.\n\n- Fixes Nexus Store identity matching: the internal Nexus plugin id remains `assistant`, matching the already-installed Assistant package.\n- User-facing name remains **Meetings** and the general Assistant role remains retired.\n- Same Android package and permanent BuildGround signer preserve ChatGPT/provider authorization and the private meeting archive.\n- Only `surfaces` and `microphone` capabilities are requested; there is no `assistant` capability and no Hey Rokid takeover.\n- Explicit Start/Finish meeting controls, source WAV, transcript, protocol and the proven 1.5.7 microphone-lease protections are unchanged.\n- Nexus Phone/Glasses 1.4.17 and Relay are unchanged.\n\n### Artifact\n- File: `meetings-phone-release.apk`\n- SHA-256: `cb488735183c37c13ec82e3ede6b28694c43acb10105ef727e80762619129376`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
+        {
+          "version": "1.0.0",
+          "date": "2026-09-04T18:40:38Z",
+          "notes": "BuildGround Meetings 1.0.0.\n\n- Dedicated Nexus work plugin for meetings; the general Assistant role is retired.\n- Same Android package and permanent BuildGround signer as Assistant so the update preserves existing ChatGPT/provider authorization and private meeting archive.\n- Nexus launcher entry is now **Meetings**. Opening it shows an explicit **Start meeting** control; while active the same control becomes **Finish meeting**.\n- No  takeover and no Nexus  capability. Only  and  are requested from Nexus.\n- Source audio is persisted first, with crash-safe WAV recovery, transcript archive and protocol generation retained from the proven 1.5.7 meeting stack.\n- Back never silently cancels an active meeting; finishing is explicit.\n- Nexus Phone/Glasses 1.4.17 and Relay are unchanged.\n\n### Artifact\n- File: `meetings-phone-release.apk`\n- SHA-256: `b07b474c3c98d42e23fc46b2ee128321f4fbda2363794f2aab8f0b5f67e967b6`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
+        {
+          "version": "1.6.0",
+          "date": "2026-09-04T18:01:31Z",
+          "notes": "BuildGround Assistant 1.6.0 — Work Mode.\n\n- The stock Rokid assistant remains the sole system voice assistant. Assistant no longer requests the Nexus  capability and ignores legacy AI-wake callbacks.\n- No  takeover, no native-assistant close burst, and no assistant-routing changes to Nexus Phone or Glasses.\n- Opening Assistant explicitly from the Nexus launcher starts Silent Meeting Mode; opening it again in the same process stops the meeting and generates the saved protocol.\n- Meeting source audio, crash-safe WAV persistence, transcript, archive, protocol generation, and 1.5.7 single-microphone lease protections are preserved.\n- A crash-restored meeting is archived before a new explicit Work Mode session starts.\n- Nexus Phone/Glasses 1.4.17 and Relay are unchanged.\n\n### Artifact\n- File: `assistant-phone-release.apk`\n- SHA-256: `43c429bef460cfb8871686937bb7e36a26cd17fddf1f4f5f2a650061b406d24a`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
+        {
+          "version": "1.5.7",
+          "date": "2026-09-03T18:56:04Z",
+          "notes": "BuildGround Assistant 1.5.7 — CXR audio-lease stability hotfix.\n\n- Fixes a 1.5.6 regression where a crash-restored active Meeting Session could silently reacquire the single physical CXR microphone lease.\n- Interrupted meetings are finalized from their app-private crash-safe spool on process recreation; they no longer auto-own the microphone.\n- A continuous Meeting AudioSession may be armed only by an explicit meeting-start command in the current process.\n- Meeting retry/rearm is blocked while ordinary SpeechSession or raw fallback owns the microphone, eliminating one-second BUSY lease contention.\n- Source-audio-first durability, transcript/protocol separation, Meeting UI and silent HUD behavior remain unchanged.\n- Nexus Phone 1.4.5, Nexus Glasses 1.4.4 and Relay are unchanged.\n\n### Artifact\n- File: `assistant-phone-release.apk`\n- SHA-256: `ac6ffd93e6c3812232074c644dfcee4dd504bddeded38ea8fadcab03a613031f`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
+        {
+          "version": "1.5.6",
+          "date": "2026-09-03T17:44:26Z",
+          "notes": "BuildGround Assistant 1.5.6 — independent Audio + AI Meeting Mode.\n\n- One continuous NexusAudioSession owns the meeting microphone after the explicit start command.\n- Source audio is persisted first as app-private 16 kHz mono PCM and finalized as crash-safe WAV.\n- Local VAD creates independent STT copies; STT/provider/VPN failures do not stop or delete source audio.\n- Process/link recovery resumes the same meeting-id spool; completed orphan spools are recovered into the meeting archive.\n- Transcript and protocol remain separate from the audio lifecycle and use the same meetingId.\n- Silent Meeting Mode remains headless on the glasses; ordinary meeting speech is not rendered or answered.\n- Phone Meetings now provides audio duration/size, Play/Pause, Share, Save to Downloads/BuildGround and audio-only Delete.\n- Whole-meeting Delete removes audio + transcript + protocol; audio-only Delete leaves transcript/protocol intact.\n- Uses the existing Nexus Phone 1.4.5 raw audio API. Nexus Glasses and Relay are unchanged.\n\n### Artifact\n- File: `assistant-phone-release.apk`\n- SHA-256: `68661b529dd8e66693f2dd43a6103872ac54f5d767c90d4484855581d0cc7748`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
+        {
+          "version": "1.5.5",
+          "date": "2026-09-03T07:04:33Z",
+          "notes": "BuildGround Assistant 1.5.5 — Silent Meeting Session.\n\n- “Начать совещание” starts a meeting and immediately retires the Assistant HUD.\n- Meeting speech continues to be recognized and archived while the glasses stay visually quiet.\n- Partial transcripts, “Listening” states and per-fragment counters are suppressed during an active meeting.\n- Raw-audio transcription fallback is now meeting-aware and continues the silent capture loop.\n- “Закончить совещание” wakes the Assistant once, generates the protocol, stores protocol plus full transcript on the phone, and does not stream/read the full protocol on the glasses.\n- The glasses show only a short completion confirmation after the protocol is saved.\n- Existing Meetings archive, conversation mode, diagnostics, phone tools and Relay behavior are preserved.\n- No Relay changes.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `3e06111ca8f307fac0fc85a7379caea41767f8104eea07bf1da3922bfd065d14`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
+        {
+          "version": "1.5.4",
+          "date": "2026-09-03T05:56:01Z",
+          "notes": "BuildGround Assistant 1.5.4 — phone meeting archive.\n\n- Adds a Meetings section to Assistant settings on the phone.\n- Lists completed meetings with date/time, duration, fragment count and brief availability.\n- Opens the saved AI brief and full transcript for each meeting.\n- Briefs can be copied or shared through the Android share sheet; transcript copy is available when no brief exists.\n- Individual meetings or the full meeting archive can be deleted with confirmation.\n- Reads the same app-private archive introduced in 1.5.3, so existing saved meetings are preserved across this in-place update.\n- Existing Assistant conversation, speech, HUD, diagnostics, meeting capture and phone tools are preserved.\n- No Relay changes.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `eb158bc493cd8da3b1196cf5ce3a9503524fb75518134ba64b3c26b2a0058fe1`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
+        {
+          "version": "1.5.3",
+          "date": "2026-09-02T19:36:03Z",
+          "notes": "BuildGround Assistant 1.5.3 — persistent Meeting Mode.\n\n- Active meeting transcript survives Assistant/Nexus service recreation.\n- Each recognized meeting fragment is durably appended to app-private storage.\n- Finished meetings archive `transcript.json` and `transcript.txt`.\n- Successful AI meeting summary is also archived as `protocol.md`.\n- Existing Assistant conversation, speech, HUD, diagnostics and phone tools are preserved.\n- No Relay changes.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `fef304ba42e8a17e2ab1194b1d98864e442fa052036a15814e9a95b3d598a32b`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
+        {
+          "version": "1.5.2",
+          "date": "2026-09-02T16:54:54Z",
+          "notes": "BuildGround update-channel validation release.\n\n- Functionally based on the tested Assistant 1.5.1 bundle.\n- No Relay changes.\n- Version bump to 1.5.2 / versionCode 12 is intentional so Nexus 1.4.4 can validate in-app plugin updating.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `f10851f40b7661b1e68585a14a07bc85d37479df9974b88228d97d9444f559ea`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
+        {
+          "version": "1.4.3",
+          "date": "2026-08-17T20:58:30Z",
+          "notes": "\n- **Hermes draws the cards now.** A weather question through a Hermes backend came back as plain text while the same model on any other provider drew the card. The seven bounded templates — weather, charts, metrics, rankings, comparisons, schedules and steps — now travel the same plain-text bridge as the other phone tools. Freeform Ink pages remain out of it.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `eda8b146e57a08dd997eb335fb72e44dd14da30189f470de91e35d741c4f092a`"
+        },
+        {
+          "version": "1.4.2",
+          "date": "2026-08-11T22:06:05Z",
+          "notes": "\n- **Reminders, notes, timers and the calendar now work on Hermes too.** A server that runs its own tools never hands one back to the phone, so the assistant asks for a Nexus phone tool in plain text and Nexus runs it — the same tools every other provider gets, Ink pages aside.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `83b2a4083a0c85c5c02e75f2752c26ba35ba638c7cc0ac1a2f3d611916e67a1a`"
+        },
+        {
+          "version": "1.4.1",
+          "date": "2026-08-11T21:02:15Z",
+          "notes": "\n- **Hermes is a provider of its own.** Give Settings the `/v1` root of your Hermes API server and its key, and the assistant answers from it — camera included: a server that runs its own tools still gets to look through the glasses.\n- One conversation is now one Hermes session, from the first question to the last, instead of a fresh session for every sentence.\n- An existing **Custom** connection recognises itself as Hermes when the server says so; a plain OpenAI-compatible server is left exactly as it was.\n- Conversations can now stay open for seven days before starting fresh.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `bf927164812152b7c636afdf5d2eac51da4c39694edf055b3e68833faf5fb63b`"
+        },
+        {
+          "version": "1.4.0",
+          "date": "2026-08-11T12:06:49Z",
+          "notes": "\n- **Your phone calendar is a real tool too.** Ask the assistant to add an appointment, read what is coming up, or delete one by its exact title and start time. Ambiguous matches and recurring series are refused instead of guessed.\n- **Answers can become native interactive pages.** The assistant can author a strict Ink page, or pick one of seven bounded templates, for results that benefit from layout, charts, progress, or an action. The same phone compiler, native glasses renderer, typed limits and `ink_surface` grant used by public plugins apply; plain text and card answers remain the fallback.\n- **The answer no longer goes dark during handover.** Listening, processing, and the final card or Ink page now share one display episode, whose scoped wake lock survives the band-to-surface morph and is released when that episode actually ends.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `b92e13a52e1a87a0baf1b3f4929bc7d20bf65e32dba323e011c57aac830593cc`"
+        },
+        {
+          "version": "1.3.0",
+          "date": "2026-08-07T16:20:00Z",
+          "notes": "\n- **Ask it to remember, and it will.** Say \"remind me in twenty minutes to check the oven\", \"set a timer for ten minutes\", or \"take a note that the spare key is under the pot\" — the assistant schedules it, and at the moment it comes due your phone notifies you and the glasses raise the reminder, waking the display if it went dark. If the glasses are away, the phone still tells you and the reminder waits on the HUD for your return.\n- It can also list what is pending, cancel a reminder by name, and search your notes back — all out loud, mid-conversation.\n- **Notes & reminders**, a new section in settings, is where all of it lands: read a note in full, delete one, cancel a reminder before it rings. Nothing leaves the phone.\n- Android guards precise alarms and notifications behind explicit consent, so the screen offers both — and only while something is actually missing. Without them a reminder still arrives, just later or only on the glasses; the assistant says so rather than pretending.\n- Reminders survive a reboot, and one that came due while the phone was off is delivered once you turn it back on.\n- **Every provider gets the new abilities**, not just ChatGPT: notes, reminders and timers are text, so a model that cannot see photos is no longer cut off from tools it could use perfectly well.\n- Answers no longer show their formatting: models like to bold the time they just scheduled, and the glasses were rendering the asterisks.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `f8ecee3a016634318a402210a7f62259a8ff68e43d682a141a64c9da56b79500`"
+        },
+        {
+          "version": "1.2.0",
+          "date": "2026-08-06T19:19:08Z",
+          "notes": "\n- **Every provider can look now.** Photo questions were a ChatGPT-only power; API providers were told they could look and could only pretend. Now a vision-capable model on MiniMax, OpenRouter, GLM, DeepSeek, or your own server takes a real photo through the glasses camera — same one-photo-per-question rule, same privacy: never saved to the glasses' gallery.\n- A model that cannot see images is now told so and answers honestly, instead of inventing tool-call syntax in the middle of its reply. Set the \"can see photos\" switch for your model in the provider's settings to enable the camera.\n- A server that does not understand tools is retried once without them, so plain custom endpoints keep answering as before.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `fd7889a7e0996ebc058c4e2ccf80afb90460ab48c6638d22f4f08cae583e1aa0`"
+        },
+        {
+          "version": "1.1.1",
+          "date": "2026-08-06T10:50:15Z",
+          "notes": "\n- **No more thinking out loud.** Models that reason inline — MiniMax, GLM, DeepSeek and anything similar behind OpenRouter or a custom server — were showing their raw `<think>` traces in every answer. Those blocks are now stripped from the stream before the glasses display them, the voice reads them, or the conversation keeps them: only the answer itself gets through.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `cd512d4265e25306be26867bc2f5423bde47dec7f941bb7c8f03def4aecfef04`"
+        },
+        {
+          "version": "1.1.0",
+          "date": "2026-08-05T13:06:58Z",
+          "notes": "\n- **Choose who answers.** Settings now opens on a provider list: your ChatGPT plan, an OpenAI key, OpenRouter, MiniMax (a Coding Plan key works as-is), DeepSeek, GLM (Z.ai), or any OpenAI-compatible server of your own. Each provider keeps its own key — encrypted on the phone — its own model choice, and its own endpoint, so switching is one tap, not a re-setup.\n- **Any model id.** Pick from the suggestions or type the exact model your provider serves. For a model the app does not know, say whether it can see photos; photo questions are handled gracefully either way.\n- **Give it a personality.** A new Personality box holds standing instructions — a persona, a tone, house rules — layered under the HUD formatting rules.\n- Your notes and synced ChatGPT memories keep riding along with every question, whichever provider answers; the Memory toggle remains the single off switch.\n- Signing out of ChatGPT no longer forgets the keys you saved for other providers.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `d0dfa744e92d4f9b3d25cee0e5d4e927bfdd908fb8208b7d8d1c931cdf088572`"
+        }
+      ],
+      "iconUrl": "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/icons/assistant-icon.png",
+      "xBuildGroundManaged": true,
+      "xBuildGroundSourceRepo": "4108814-ai/BuildGround-Rokid"
+    },
+    {
       "id": "feeds",
       "kind": "nexus-plugin",
       "name": "Feeds",
@@ -1123,133 +1250,6 @@
         }
       ],
       "iconUrl": "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/icons/wirelessadb-icon.png"
-    },
-    {
-      "id": "meetings",
-      "kind": "nexus-plugin",
-      "name": "Meetings",
-      "category": "Assistant",
-      "summary": "BuildGround Meetings: source audio, transcript and protocol with explicit start/finish controls.",
-      "description": "Dedicated meeting recorder for Nexus. It does not replace the Rokid voice assistant and requests only glasses surface and microphone access.",
-      "author": "Anezium",
-      "sourceUrl": "https://github.com/Anezium/Rokid-Nexus",
-      "publishedAt": "2026-08-11T22:06:05Z",
-      "iconAsset": "assistant-icon.png",
-      "nexus": {
-        "pluginId": "meetings",
-        "apiVersion": 3,
-        "capabilities": [
-          "surfaces",
-          "microphone"
-        ],
-        "launchable": true,
-        "settingsActivity": ".AssistantSettingsActivity",
-        "minHostVersionCode": 10405
-      },
-      "screenshotAssets": [],
-      "listing": {
-        "descriptionMarkdown": "## BuildGround Meetings\n\nA dedicated work plugin for meetings. The stock Rokid assistant remains untouched.\n\n- Open **Meetings** from the Nexus launcher.\n- Press **Start meeting** to begin source-audio recording and transcription.\n- Open **Meetings** again and press **Finish meeting** to stop and generate the protocol.\n- Source WAV, transcript and protocol remain in the phone meeting archive.\n- Uses the existing ChatGPT/provider sign-in only for protocol generation.\n"
-      },
-      "artifact": {
-        "target": "phone",
-        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v1.0.0/meetings-phone-release.apk",
-        "sha256": "b07b474c3c98d42e23fc46b2ee128321f4fbda2363794f2aab8f0b5f67e967b6",
-        "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
-        "sizeBytes": 6328743,
-        "packageName": "com.anezium.rokidbus.plugin.assistant",
-        "versionCode": 19,
-        "versionName": "1.0.0"
-      },
-      "releases": [
-        {
-          "version": "1.0.0",
-          "date": "2026-09-04T18:40:38Z",
-          "notes": "BuildGround Meetings 1.0.0.\n\n- Dedicated Nexus work plugin for meetings; the general Assistant role is retired.\n- Same Android package and permanent BuildGround signer as Assistant so the update preserves existing ChatGPT/provider authorization and private meeting archive.\n- Nexus launcher entry is now **Meetings**. Opening it shows an explicit **Start meeting** control; while active the same control becomes **Finish meeting**.\n- No  takeover and no Nexus  capability. Only  and  are requested from Nexus.\n- Source audio is persisted first, with crash-safe WAV recovery, transcript archive and protocol generation retained from the proven 1.5.7 meeting stack.\n- Back never silently cancels an active meeting; finishing is explicit.\n- Nexus Phone/Glasses 1.4.17 and Relay are unchanged.\n\n### Artifact\n- File: `meetings-phone-release.apk`\n- SHA-256: `b07b474c3c98d42e23fc46b2ee128321f4fbda2363794f2aab8f0b5f67e967b6`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
-        },
-        {
-          "version": "1.6.0",
-          "date": "2026-09-04T18:01:31Z",
-          "notes": "BuildGround Assistant 1.6.0 — Work Mode.\n\n- The stock Rokid assistant remains the sole system voice assistant. Assistant no longer requests the Nexus  capability and ignores legacy AI-wake callbacks.\n- No  takeover, no native-assistant close burst, and no assistant-routing changes to Nexus Phone or Glasses.\n- Opening Assistant explicitly from the Nexus launcher starts Silent Meeting Mode; opening it again in the same process stops the meeting and generates the saved protocol.\n- Meeting source audio, crash-safe WAV persistence, transcript, archive, protocol generation, and 1.5.7 single-microphone lease protections are preserved.\n- A crash-restored meeting is archived before a new explicit Work Mode session starts.\n- Nexus Phone/Glasses 1.4.17 and Relay are unchanged.\n\n### Artifact\n- File: `assistant-phone-release.apk`\n- SHA-256: `43c429bef460cfb8871686937bb7e36a26cd17fddf1f4f5f2a650061b406d24a`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
-        },
-        {
-          "version": "1.5.7",
-          "date": "2026-09-03T18:56:04Z",
-          "notes": "BuildGround Assistant 1.5.7 — CXR audio-lease stability hotfix.\n\n- Fixes a 1.5.6 regression where a crash-restored active Meeting Session could silently reacquire the single physical CXR microphone lease.\n- Interrupted meetings are finalized from their app-private crash-safe spool on process recreation; they no longer auto-own the microphone.\n- A continuous Meeting AudioSession may be armed only by an explicit meeting-start command in the current process.\n- Meeting retry/rearm is blocked while ordinary SpeechSession or raw fallback owns the microphone, eliminating one-second BUSY lease contention.\n- Source-audio-first durability, transcript/protocol separation, Meeting UI and silent HUD behavior remain unchanged.\n- Nexus Phone 1.4.5, Nexus Glasses 1.4.4 and Relay are unchanged.\n\n### Artifact\n- File: `assistant-phone-release.apk`\n- SHA-256: `ac6ffd93e6c3812232074c644dfcee4dd504bddeded38ea8fadcab03a613031f`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
-        },
-        {
-          "version": "1.5.6",
-          "date": "2026-09-03T17:44:26Z",
-          "notes": "BuildGround Assistant 1.5.6 — independent Audio + AI Meeting Mode.\n\n- One continuous NexusAudioSession owns the meeting microphone after the explicit start command.\n- Source audio is persisted first as app-private 16 kHz mono PCM and finalized as crash-safe WAV.\n- Local VAD creates independent STT copies; STT/provider/VPN failures do not stop or delete source audio.\n- Process/link recovery resumes the same meeting-id spool; completed orphan spools are recovered into the meeting archive.\n- Transcript and protocol remain separate from the audio lifecycle and use the same meetingId.\n- Silent Meeting Mode remains headless on the glasses; ordinary meeting speech is not rendered or answered.\n- Phone Meetings now provides audio duration/size, Play/Pause, Share, Save to Downloads/BuildGround and audio-only Delete.\n- Whole-meeting Delete removes audio + transcript + protocol; audio-only Delete leaves transcript/protocol intact.\n- Uses the existing Nexus Phone 1.4.5 raw audio API. Nexus Glasses and Relay are unchanged.\n\n### Artifact\n- File: `assistant-phone-release.apk`\n- SHA-256: `68661b529dd8e66693f2dd43a6103872ac54f5d767c90d4484855581d0cc7748`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
-        },
-        {
-          "version": "1.5.5",
-          "date": "2026-09-03T07:04:33Z",
-          "notes": "BuildGround Assistant 1.5.5 — Silent Meeting Session.\n\n- “Начать совещание” starts a meeting and immediately retires the Assistant HUD.\n- Meeting speech continues to be recognized and archived while the glasses stay visually quiet.\n- Partial transcripts, “Listening” states and per-fragment counters are suppressed during an active meeting.\n- Raw-audio transcription fallback is now meeting-aware and continues the silent capture loop.\n- “Закончить совещание” wakes the Assistant once, generates the protocol, stores protocol plus full transcript on the phone, and does not stream/read the full protocol on the glasses.\n- The glasses show only a short completion confirmation after the protocol is saved.\n- Existing Meetings archive, conversation mode, diagnostics, phone tools and Relay behavior are preserved.\n- No Relay changes.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `3e06111ca8f307fac0fc85a7379caea41767f8104eea07bf1da3922bfd065d14`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
-        },
-        {
-          "version": "1.5.4",
-          "date": "2026-09-03T05:56:01Z",
-          "notes": "BuildGround Assistant 1.5.4 — phone meeting archive.\n\n- Adds a Meetings section to Assistant settings on the phone.\n- Lists completed meetings with date/time, duration, fragment count and brief availability.\n- Opens the saved AI brief and full transcript for each meeting.\n- Briefs can be copied or shared through the Android share sheet; transcript copy is available when no brief exists.\n- Individual meetings or the full meeting archive can be deleted with confirmation.\n- Reads the same app-private archive introduced in 1.5.3, so existing saved meetings are preserved across this in-place update.\n- Existing Assistant conversation, speech, HUD, diagnostics, meeting capture and phone tools are preserved.\n- No Relay changes.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `eb158bc493cd8da3b1196cf5ce3a9503524fb75518134ba64b3c26b2a0058fe1`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
-        },
-        {
-          "version": "1.5.3",
-          "date": "2026-09-02T19:36:03Z",
-          "notes": "BuildGround Assistant 1.5.3 — persistent Meeting Mode.\n\n- Active meeting transcript survives Assistant/Nexus service recreation.\n- Each recognized meeting fragment is durably appended to app-private storage.\n- Finished meetings archive `transcript.json` and `transcript.txt`.\n- Successful AI meeting summary is also archived as `protocol.md`.\n- Existing Assistant conversation, speech, HUD, diagnostics and phone tools are preserved.\n- No Relay changes.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `fef304ba42e8a17e2ab1194b1d98864e442fa052036a15814e9a95b3d598a32b`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
-        },
-        {
-          "version": "1.5.2",
-          "date": "2026-09-02T16:54:54Z",
-          "notes": "BuildGround update-channel validation release.\n\n- Functionally based on the tested Assistant 1.5.1 bundle.\n- No Relay changes.\n- Version bump to 1.5.2 / versionCode 12 is intentional so Nexus 1.4.4 can validate in-app plugin updating.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `f10851f40b7661b1e68585a14a07bc85d37479df9974b88228d97d9444f559ea`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
-        },
-        {
-          "version": "1.4.3",
-          "date": "2026-08-17T20:58:30Z",
-          "notes": "\n- **Hermes draws the cards now.** A weather question through a Hermes backend came back as plain text while the same model on any other provider drew the card. The seven bounded templates — weather, charts, metrics, rankings, comparisons, schedules and steps — now travel the same plain-text bridge as the other phone tools. Freeform Ink pages remain out of it.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `eda8b146e57a08dd997eb335fb72e44dd14da30189f470de91e35d741c4f092a`"
-        },
-        {
-          "version": "1.4.2",
-          "date": "2026-08-11T22:06:05Z",
-          "notes": "\n- **Reminders, notes, timers and the calendar now work on Hermes too.** A server that runs its own tools never hands one back to the phone, so the assistant asks for a Nexus phone tool in plain text and Nexus runs it — the same tools every other provider gets, Ink pages aside.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `83b2a4083a0c85c5c02e75f2752c26ba35ba638c7cc0ac1a2f3d611916e67a1a`"
-        },
-        {
-          "version": "1.4.1",
-          "date": "2026-08-11T21:02:15Z",
-          "notes": "\n- **Hermes is a provider of its own.** Give Settings the `/v1` root of your Hermes API server and its key, and the assistant answers from it — camera included: a server that runs its own tools still gets to look through the glasses.\n- One conversation is now one Hermes session, from the first question to the last, instead of a fresh session for every sentence.\n- An existing **Custom** connection recognises itself as Hermes when the server says so; a plain OpenAI-compatible server is left exactly as it was.\n- Conversations can now stay open for seven days before starting fresh.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `bf927164812152b7c636afdf5d2eac51da4c39694edf055b3e68833faf5fb63b`"
-        },
-        {
-          "version": "1.4.0",
-          "date": "2026-08-11T12:06:49Z",
-          "notes": "\n- **Your phone calendar is a real tool too.** Ask the assistant to add an appointment, read what is coming up, or delete one by its exact title and start time. Ambiguous matches and recurring series are refused instead of guessed.\n- **Answers can become native interactive pages.** The assistant can author a strict Ink page, or pick one of seven bounded templates, for results that benefit from layout, charts, progress, or an action. The same phone compiler, native glasses renderer, typed limits and `ink_surface` grant used by public plugins apply; plain text and card answers remain the fallback.\n- **The answer no longer goes dark during handover.** Listening, processing, and the final card or Ink page now share one display episode, whose scoped wake lock survives the band-to-surface morph and is released when that episode actually ends.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `b92e13a52e1a87a0baf1b3f4929bc7d20bf65e32dba323e011c57aac830593cc`"
-        },
-        {
-          "version": "1.3.0",
-          "date": "2026-08-07T16:20:00Z",
-          "notes": "\n- **Ask it to remember, and it will.** Say \"remind me in twenty minutes to check the oven\", \"set a timer for ten minutes\", or \"take a note that the spare key is under the pot\" — the assistant schedules it, and at the moment it comes due your phone notifies you and the glasses raise the reminder, waking the display if it went dark. If the glasses are away, the phone still tells you and the reminder waits on the HUD for your return.\n- It can also list what is pending, cancel a reminder by name, and search your notes back — all out loud, mid-conversation.\n- **Notes & reminders**, a new section in settings, is where all of it lands: read a note in full, delete one, cancel a reminder before it rings. Nothing leaves the phone.\n- Android guards precise alarms and notifications behind explicit consent, so the screen offers both — and only while something is actually missing. Without them a reminder still arrives, just later or only on the glasses; the assistant says so rather than pretending.\n- Reminders survive a reboot, and one that came due while the phone was off is delivered once you turn it back on.\n- **Every provider gets the new abilities**, not just ChatGPT: notes, reminders and timers are text, so a model that cannot see photos is no longer cut off from tools it could use perfectly well.\n- Answers no longer show their formatting: models like to bold the time they just scheduled, and the glasses were rendering the asterisks.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `f8ecee3a016634318a402210a7f62259a8ff68e43d682a141a64c9da56b79500`"
-        },
-        {
-          "version": "1.2.0",
-          "date": "2026-08-06T19:19:08Z",
-          "notes": "\n- **Every provider can look now.** Photo questions were a ChatGPT-only power; API providers were told they could look and could only pretend. Now a vision-capable model on MiniMax, OpenRouter, GLM, DeepSeek, or your own server takes a real photo through the glasses camera — same one-photo-per-question rule, same privacy: never saved to the glasses' gallery.\n- A model that cannot see images is now told so and answers honestly, instead of inventing tool-call syntax in the middle of its reply. Set the \"can see photos\" switch for your model in the provider's settings to enable the camera.\n- A server that does not understand tools is retried once without them, so plain custom endpoints keep answering as before.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `fd7889a7e0996ebc058c4e2ccf80afb90460ab48c6638d22f4f08cae583e1aa0`"
-        },
-        {
-          "version": "1.1.1",
-          "date": "2026-08-06T10:50:15Z",
-          "notes": "\n- **No more thinking out loud.** Models that reason inline — MiniMax, GLM, DeepSeek and anything similar behind OpenRouter or a custom server — were showing their raw `<think>` traces in every answer. Those blocks are now stripped from the stream before the glasses display them, the voice reads them, or the conversation keeps them: only the answer itself gets through.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `cd512d4265e25306be26867bc2f5423bde47dec7f941bb7c8f03def4aecfef04`"
-        },
-        {
-          "version": "1.1.0",
-          "date": "2026-08-05T13:06:58Z",
-          "notes": "\n- **Choose who answers.** Settings now opens on a provider list: your ChatGPT plan, an OpenAI key, OpenRouter, MiniMax (a Coding Plan key works as-is), DeepSeek, GLM (Z.ai), or any OpenAI-compatible server of your own. Each provider keeps its own key — encrypted on the phone — its own model choice, and its own endpoint, so switching is one tap, not a re-setup.\n- **Any model id.** Pick from the suggestions or type the exact model your provider serves. For a model the app does not know, say whether it can see photos; photo questions are handled gracefully either way.\n- **Give it a personality.** A new Personality box holds standing instructions — a persona, a tone, house rules — layered under the HUD formatting rules.\n- Your notes and synced ChatGPT memories keep riding along with every question, whichever provider answers; the Memory toggle remains the single off switch.\n- Signing out of ChatGPT no longer forgets the keys you saved for other providers.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `d0dfa744e92d4f9b3d25cee0e5d4e927bfdd908fb8208b7d8d1c931cdf088572`"
-        },
-        {
-          "version": "1.0.1",
-          "date": "2026-08-04T16:16:15Z",
-          "notes": "\n- **Answers at full length.** The model is no longer told to stay under two short sentences: ask for detail and it answers as fully as the question deserves, in real paragraphs that the glasses render with hard line breaks instead of one flattened run of text. The notice band on the glasses grows and paginates to hold it.\n- While you dictate, the band keeps showing the tail of what it heard rather than paginating your own words away mid-sentence.\n- Requires Rokid Nexus 1.2.0 or newer on both the phone and the glasses.\n\n### Artifact\n\n- File: `assistant-phone-release.apk`\n- SHA-256: `b1306ddc08ac37e89a1247320217ef4e2f35e5d3527331e7103486a086d67578`"
-        }
-      ],
-      "iconUrl": "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/icons/assistant-icon.png",
-      "xBuildGroundManaged": true,
-      "xBuildGroundSourceRepo": "4108814-ai/BuildGround-Rokid"
     }
   ]
 }
