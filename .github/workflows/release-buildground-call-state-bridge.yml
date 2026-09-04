@@ -1,0 +1,238 @@
+name: Release BuildGround Nexus call-state bridge
+
+on:
+  push:
+    branches:
+      - feature/nexus-call-state-bridge
+    paths:
+      - '.github/workflows/release-buildground-call-state-bridge.yml'
+      - '.github/scripts/apply-phone-call-state-bridge.py'
+      - '.github/scripts/apply-meeting-audio-transport.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-buildground-call-state-bridge
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RokidNexus
+    steps:
+      - name: Check out BuildGround-Rokid
+        uses: actions/checkout@v6
+        with:
+          path: RokidNexus
+          fetch-depth: 0
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: v0.2.3
+          path: CxrGlobal
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Apply exact released baselines and call-state bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/apply-phone-call-state-bridge.py
+          python - <<'PY'
+          from pathlib import Path
+          phone = Path('phone-hub/build.gradle.kts')
+          text = phone.read_text(encoding='utf-8')
+          if text.count('versionCode = 10405') != 1 or text.count('versionName = "1.4.5"') != 1:
+              raise SystemExit('Expected phone 1.4.5 source baseline exactly once')
+          text = text.replace('versionCode = 10405', 'versionCode = 10407', 1)
+          text = text.replace('versionName = "1.4.5"', 'versionName = "1.4.7"', 1)
+          phone.write_text(text, encoding='utf-8')
+
+          glasses = Path('glasses-hub/build.gradle.kts')
+          text = glasses.read_text(encoding='utf-8')
+          if text.count('versionCode = 10404') != 1 or text.count('versionName = "1.4.4"') != 1:
+              raise SystemExit('Expected glasses 1.4.4 source baseline exactly once')
+          text = text.replace('versionCode = 10404', 'versionCode = 10412', 1)
+          text = text.replace('versionName = "1.4.4"', 'versionName = "1.4.12"', 1)
+          glasses.write_text(text, encoding='utf-8')
+          PY
+          grep -F 'versionCode = 10407' phone-hub/build.gradle.kts
+          grep -F 'versionName = "1.4.7"' phone-hub/build.gradle.kts
+          grep -F 'versionCode = 10412' glasses-hub/build.gradle.kts
+          grep -F 'versionName = "1.4.12"' glasses-hub/build.gradle.kts
+          grep -F 'android.permission.READ_PHONE_STATE' phone-hub/src/main/AndroidManifest.xml
+          grep -F 'PHONE_CALL_STATE = "/phone/call/state"' shared/src/main/java/com/anezium/rokidbus/shared/BusConstants.kt
+          grep -F '!remotePhoneCallActive && !nativeCallActive' glasses-hub/src/main/java/com/anezium/rokidbus/glasses/RokidBusAccessibilityService.kt
+          grep -F 'minimumHeight = dp(38)' glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherOverlayRenderer.kt
+          ! grep -F 'FLAG_KEEP_SCREEN_ON' glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherOverlayRenderer.kt
+
+          unexpected="$(git status --porcelain | awk '{print $2}' | grep -Ev '^(phone-hub/|glasses-hub/|shared/|bus-client/)' || true)"
+          if [[ -n "$unexpected" ]]; then
+            echo '::error::Unexpected generated changes outside approved modules:'
+            printf '%s\n' "$unexpected"
+            exit 1
+          fi
+
+      - name: Run coordinated unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :shared:testDebugUnitTest :phone-hub:testDebugUnitTest :glasses-hub:testDebugUnitTest :bus-client:testDebugUnitTest
+
+      - name: Decode permanent BuildGround release key
+        shell: bash
+        env:
+          NEXUS_RELEASE_KEYSTORE_B64: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          test -n "$NEXUS_RELEASE_KEYSTORE_B64"
+          test -n "$RELEASE_KEYSTORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
+          keystore="$RUNNER_TEMP/nexus-release.keystore"
+          umask 077
+          printf '%s' "$NEXUS_RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore"
+          {
+            echo "NEXUS_RELEASE_KEYSTORE=$keystore"
+            echo "NEXUS_RELEASE_KEYSTORE_PASSWORD=$RELEASE_KEYSTORE_PASSWORD"
+            echo "NEXUS_RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify permanent BuildGround certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='55:B2:21:85:39:2B:8C:1F:08:4C:3D:EC:58:BB:0F:34:2E:CE:71:02:28:95:56:AE:23:CA:DE:E6:CC:EC:20:97'
+          details="$(keytool -list -v -keystore "$NEXUS_RELEASE_KEYSTORE" -storepass "$NEXUS_RELEASE_KEYSTORE_PASSWORD" -alias "$NEXUS_RELEASE_KEY_ALIAS")"
+          actual="$(printf '%s\n' "$details" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1)"
+          echo "certificate SHA256=$actual"
+          test "$actual" = "$expected"
+
+      - name: Build signed Phone 1.4.7 and Glasses 1.4.12
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :phone-hub:assembleRelease :glasses-hub:assembleRelease
+
+      - name: Verify APKs and prepare release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          aapt="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          expected='55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097'
+
+          verify_apk() {
+            srcdir="$1"; out="$2"; package="$3"; code="$4"; version="$5"
+            mapfile -t files < <(find "$srcdir" -maxdepth 1 -type f -name '*.apk' -print)
+            test "${#files[@]}" -eq 1
+            cp "${files[0]}" "$out"
+            output="$("$apksigner" verify --print-certs "$out" 2>&1)"
+            digest="$(printf '%s\n' "$output" | sed -nE 's/.*[Ss][Hh][Aa]-256 digest:[[:space:]]*([0-9A-Fa-f:]+).*/\1/p' | head -n 1 | tr -d ':' | tr 'A-F' 'a-f')"
+            test "$digest" = "$expected"
+            badging="$("$aapt" dump badging "$out" | head -n 1)"
+            printf '%s\n' "$badging" | grep -F "name='$package'"
+            printf '%s\n' "$badging" | grep -F "versionCode='$code'"
+            printf '%s\n' "$badging" | grep -F "versionName='$version'"
+          }
+
+          phone="$RUNNER_TEMP/nexus-phone-1.4.7.apk"
+          glasses="$RUNNER_TEMP/nexus-glasses-1.4.12.apk"
+          verify_apk 'phone-hub/build/outputs/apk/release' "$phone" 'com.anezium.rokidbus.phone' '10407' '1.4.7'
+          verify_apk 'glasses-hub/build/outputs/apk/release' "$glasses" 'com.anezium.rokidbus.glasses' '10412' '1.4.12'
+
+          phone_sha="$(sha256sum "$phone" | cut -d ' ' -f 1)"
+          glasses_sha="$(sha256sum "$glasses" | cut -d ' ' -f 1)"
+          cat > "$RUNNER_TEMP/phone-notes.md" <<EOF
+          BuildGround Nexus Phone 1.4.7 — authoritative phone-call state bridge.
+
+          - Preserves Phone 1.4.6 Meeting Audio Transport.
+          - Adds a one-time Android READ_PHONE_STATE permission request; Nexus reads only ringing/off-hook/idle state, never phone numbers or caller identity.
+          - Sends the current call state to Glasses over the existing private hub-to-hub transport and re-publishes it on transport reconnection.
+          - Assistant, Relay and plugin routing are otherwise unchanged.
+          - Permanent BuildGround signer verified before publish.
+
+          Artifact SHA-256: $phone_sha
+          EOF
+          cat > "$RUNNER_TEMP/glasses-notes.md" <<EOF
+          BuildGround Nexus Glasses 1.4.12 — authoritative call-state gate.
+
+          - Preserves 1.4.11 compact plugin launcher, scroll-to-selection and native Rokid display timeout.
+          - While Phone reports RINGING or OFFHOOK, every Nexus launcher auto-restore path is blocked and native Rokid call UI keeps display priority.
+          - IDLE is the only authoritative release signal; Nexus returns only when the call displaced an active Nexus launcher.
+          - Existing AudioManager/window heuristics cannot restore Nexus over an active remote call.
+          - Permanent BuildGround signer verified before publish.
+
+          Artifact SHA-256: $glasses_sha
+          EOF
+          sed -i 's/^          //' "$RUNNER_TEMP/phone-notes.md" "$RUNNER_TEMP/glasses-notes.md"
+          {
+            echo "PHONE_APK=$phone"
+            echo "GLASSES_APK=$glasses"
+            echo "PHONE_NOTES=$RUNNER_TEMP/phone-notes.md"
+            echo "GLASSES_NOTES=$RUNNER_TEMP/glasses-notes.md"
+          } >> "$GITHUB_ENV"
+
+      - name: Publish Phone v1.4.7
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.4.7 >/dev/null 2>&1; then
+            echo '::error::Release v1.4.7 already exists; refusing overwrite.'
+            exit 1
+          fi
+          gh release create v1.4.7 "$PHONE_APK" --target "$GITHUB_SHA" --title 'Rokid Nexus Phone 1.4.7' --notes-file "$PHONE_NOTES" --latest=false
+
+      - name: Publish Glasses v1.4.12
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.4.12 >/dev/null 2>&1; then
+            echo '::error::Release v1.4.12 already exists; refusing overwrite.'
+            exit 1
+          fi
+          gh release create v1.4.12 "$GLASSES_APK" --target "$GITHUB_SHA" --title 'Rokid Nexus Glasses 1.4.12' --notes-file "$GLASSES_NOTES" --latest=false
+
+      - name: Upload verified APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-call-state-bridge-signed-release
+          path: |
+            ${{ runner.temp }}/nexus-phone-1.4.7.apk
+            ${{ runner.temp }}/nexus-glasses-1.4.12.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove decoded keystore
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/nexus-release.keystore"
