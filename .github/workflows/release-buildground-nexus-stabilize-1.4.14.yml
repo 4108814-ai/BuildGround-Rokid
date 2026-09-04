@@ -1,0 +1,239 @@
+name: Release BuildGround Nexus stabilization 1.4.14
+
+on:
+  push:
+    branches:
+      - feature/nexus-stabilize-1414
+    paths:
+      - '.github/workflows/release-buildground-nexus-stabilize-1.4.14.yml'
+      - '.github/scripts/apply-nexus-stabilize-1414.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-buildground-nexus-stabilize-1-4-14
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RokidNexus
+
+    steps:
+      - name: Check out BuildGround-Rokid
+        uses: actions/checkout@v6
+        with:
+          path: RokidNexus
+          fetch-depth: 0
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: v0.2.3
+          path: CxrGlobal
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Apply stabilization baseline and bump both apps to 1.4.14
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/apply-nexus-stabilize-1414.py
+          python - <<'PY'
+          from pathlib import Path
+
+          phone = Path('phone-hub/build.gradle.kts')
+          text = phone.read_text(encoding='utf-8')
+          if text.count('versionCode = 10405') != 1 or text.count('versionName = "1.4.5"') != 1:
+              raise SystemExit('Expected Phone 1.4.5 source baseline exactly once')
+          text = text.replace('versionCode = 10405', 'versionCode = 10414', 1)
+          text = text.replace('versionName = "1.4.5"', 'versionName = "1.4.14"', 1)
+          phone.write_text(text, encoding='utf-8')
+
+          glasses = Path('glasses-hub/build.gradle.kts')
+          text = glasses.read_text(encoding='utf-8')
+          if text.count('versionCode = 10404') != 1 or text.count('versionName = "1.4.4"') != 1:
+              raise SystemExit('Expected Glasses 1.4.4 source baseline exactly once')
+          text = text.replace('versionCode = 10404', 'versionCode = 10414', 1)
+          text = text.replace('versionName = "1.4.4"', 'versionName = "1.4.14"', 1)
+          glasses.write_text(text, encoding='utf-8')
+          PY
+
+          grep -F 'versionCode = 10414' phone-hub/build.gradle.kts
+          grep -F 'versionName = "1.4.14"' phone-hub/build.gradle.kts
+          grep -F 'versionCode = 10414' glasses-hub/build.gradle.kts
+          grep -F 'versionName = "1.4.14"' glasses-hub/build.gradle.kts
+          grep -F 'minimumHeight = dp(38)' glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherOverlayRenderer.kt
+          grep -F 'scroll.smoothScrollTo' glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherOverlayRenderer.kt
+          ! grep -F 'android.permission.READ_PHONE_STATE' phone-hub/src/main/AndroidManifest.xml
+          ! grep -R -F 'PHONE_CALL_STATE' shared/src/main phone-hub/src/main glasses-hub/src/main
+          ! grep -R -F 'NativeRokidCallWindowPolicy' glasses-hub/src/main
+          ! grep -R -F 'onScreenOff =' glasses-hub/src/main
+          ! grep -R -F 'onScreenOn =' glasses-hub/src/main
+
+          unexpected="$(git status --porcelain | awk '{print $2}' | grep -Ev '^(phone-hub/|glasses-hub/|shared/|bus-client/)' || true)"
+          if [[ -n "$unexpected" ]]; then
+            echo '::error::Unexpected generated changes outside approved runtime modules:'
+            printf '%s\n' "$unexpected"
+            exit 1
+          fi
+
+      - name: Run coordinated stabilization tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :shared:testDebugUnitTest :phone-hub:testDebugUnitTest :glasses-hub:testDebugUnitTest :bus-client:testDebugUnitTest
+
+      - name: Decode permanent BuildGround release key
+        shell: bash
+        env:
+          NEXUS_RELEASE_KEYSTORE_B64: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          test -n "$NEXUS_RELEASE_KEYSTORE_B64"
+          test -n "$RELEASE_KEYSTORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
+          keystore="$RUNNER_TEMP/nexus-release.keystore"
+          umask 077
+          printf '%s' "$NEXUS_RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore"
+          {
+            echo "NEXUS_RELEASE_KEYSTORE=$keystore"
+            echo "NEXUS_RELEASE_KEYSTORE_PASSWORD=$RELEASE_KEYSTORE_PASSWORD"
+            echo "NEXUS_RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify permanent BuildGround certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='55:B2:21:85:39:2B:8C:1F:08:4C:3D:EC:58:BB:0F:34:2E:CE:71:02:28:95:56:AE:23:CA:DE:E6:CC:EC:20:97'
+          details="$(keytool -list -v -keystore "$NEXUS_RELEASE_KEYSTORE" -storepass "$NEXUS_RELEASE_KEYSTORE_PASSWORD" -alias "$NEXUS_RELEASE_KEY_ALIAS")"
+          actual="$(printf '%s\n' "$details" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1)"
+          echo "certificate SHA256=$actual"
+          test "$actual" = "$expected"
+
+      - name: Build signed Phone and Glasses 1.4.14
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :phone-hub:assembleRelease :glasses-hub:assembleRelease
+
+      - name: Verify both APKs and prepare release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          aapt="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          expected='55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097'
+
+          mapfile -t phone_files < <(find 'phone-hub/build/outputs/apk/release' -maxdepth 1 -type f -name '*.apk' -print)
+          mapfile -t glasses_files < <(find 'glasses-hub/build/outputs/apk/release' -maxdepth 1 -type f -name '*.apk' -print)
+          test "${#phone_files[@]}" -eq 1
+          test "${#glasses_files[@]}" -eq 1
+
+          phone="$RUNNER_TEMP/nexus-phone-1.4.14.apk"
+          glasses="$RUNNER_TEMP/nexus-glasses-1.4.14.apk"
+          cp "${phone_files[0]}" "$phone"
+          cp "${glasses_files[0]}" "$glasses"
+
+          verify_apk() {
+            local apk="$1" package="$2"
+            local output digest badging
+            output="$("$apksigner" verify --print-certs "$apk" 2>&1)"
+            digest="$(printf '%s\n' "$output" | sed -nE 's/.*[Ss][Hh][Aa]-256 digest:[[:space:]]*([0-9A-Fa-f:]+).*/\1/p' | head -n 1 | tr -d ':' | tr 'A-F' 'a-f')"
+            test "$digest" = "$expected"
+            badging="$("$aapt" dump badging "$apk" | head -n 1)"
+            printf '%s\n' "$badging" | grep -F "name='$package'"
+            printf '%s\n' "$badging" | grep -F "versionCode='10414'"
+            printf '%s\n' "$badging" | grep -F "versionName='1.4.14'"
+          }
+
+          verify_apk "$phone" 'com.anezium.rokidbus.phone'
+          verify_apk "$glasses" 'com.anezium.rokidbus.glasses'
+
+          phone_sha="$(sha256sum "$phone" | cut -d ' ' -f 1)"
+          glasses_sha="$(sha256sum "$glasses" | cut -d ' ' -f 1)"
+          notes="$RUNNER_TEMP/nexus-1.4.14-notes.md"
+          cat > "$notes" <<EOF
+          BuildGround Nexus 1.4.14 — stabilization rollback release.
+
+          Phone:
+          - Restores the proven 1.4.6 runtime architecture and Meeting Audio Transport.
+          - Removes the experimental READ_PHONE_STATE / RINGING-OFFHOOK-IDLE call-state bridge introduced after 1.4.6.
+          - Existing plugin, Relay, Assistant, CXR/Bluetooth and audio-routing behavior is otherwise unchanged from that stable line.
+
+          Glasses:
+          - Restores the proven 1.4.8 Nexus-first-on-service-start behavior and removes later per-screen-wake ownership and call-yield experiments.
+          - Keeps the field-validated compact plugin launcher and selected-item scrolling.
+          - Keeps removal of FLAG_KEEP_SCREEN_ON so the native Rokid 5/10/... second display timeout works normally.
+          - Native Rokid telephony is left completely unmodified and unobstructed by Nexus call-state logic.
+
+          This release intentionally prioritizes restoration of the pre-regression phone/glasses architecture over wake-episode Nexus ownership.
+          Permanent BuildGround signer verified before publish.
+
+          Phone SHA-256: $phone_sha
+          Glasses SHA-256: $glasses_sha
+          EOF
+          sed -i 's/^          //' "$notes"
+          {
+            echo "PHONE_APK=$phone"
+            echo "GLASSES_APK=$glasses"
+            echo "PHONE_SHA256=$phone_sha"
+            echo "GLASSES_SHA256=$glasses_sha"
+            echo "RELEASE_NOTES=$notes"
+          } >> "$GITHUB_ENV"
+
+      - name: Publish combined GitHub release v1.4.14
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.4.14 >/dev/null 2>&1; then
+            echo '::error::Release v1.4.14 already exists; refusing overwrite.'
+            exit 1
+          fi
+          gh release create v1.4.14 "$PHONE_APK" "$GLASSES_APK" --target "$GITHUB_SHA" --title 'Rokid Nexus 1.4.14 Stabilization' --notes-file "$RELEASE_NOTES" --latest=false
+          gh release view v1.4.14 --json tagName,assets --jq '.tagName, .assets[].name' | grep -Fx 'v1.4.14'
+          gh release view v1.4.14 --json assets --jq '.assets[].name' | grep -Fx 'nexus-phone-1.4.14.apk'
+          gh release view v1.4.14 --json assets --jq '.assets[].name' | grep -Fx 'nexus-glasses-1.4.14.apk'
+
+      - name: Upload verified APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-1.4.14-stabilization-signed-release
+          path: |
+            ${{ runner.temp }}/nexus-phone-1.4.14.apk
+            ${{ runner.temp }}/nexus-glasses-1.4.14.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove decoded keystore
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/nexus-release.keystore"
