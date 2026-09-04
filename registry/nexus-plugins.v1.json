@@ -94,15 +94,20 @@
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v1.0.1/meetings-phone-release.apk",
-        "sha256": "cb488735183c37c13ec82e3ede6b28694c43acb10105ef727e80762619129376",
+        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v1.0.2/meetings-phone-release.apk",
+        "sha256": "d5530a9108182829172337ed41033c9d781b07e0119f7c35a28f0b5adaee723f",
         "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
-        "sizeBytes": 6328739,
+        "sizeBytes": 6328743,
         "packageName": "com.anezium.rokidbus.plugin.assistant",
-        "versionCode": 20,
-        "versionName": "1.0.1"
+        "versionCode": 21,
+        "versionName": "1.0.2"
       },
       "releases": [
+        {
+          "version": "1.0.2",
+          "date": "2026-09-04T20:03:01Z",
+          "notes": "BuildGround Meetings 1.0.2.\n\n- Fixes the physical RV101 single-tap Start/Finish control on a Nexus surface.\n- Clean Nexus Glasses 1.4.17 may forward an unclassified single temple tap as Android KEYCODE_NOTIFICATION (83) after the triple-tap window expires; Meetings now accepts that documented fallback in addition to ENTER and DPAD_CENTER.\n- The fallback is handled only inside Meetings. Nexus Phone, Nexus Glasses and Relay are unchanged.\n- Internal plugin id remains assistant for Store compatibility; user-facing identity remains Meetings.\n- No assistant capability or Hey Rokid takeover. Source WAV, transcript, protocol and microphone-lease protections are unchanged.\n\n### Artifact\n- File: `meetings-phone-release.apk`\n- SHA-256: `d5530a9108182829172337ed41033c9d781b07e0119f7c35a28f0b5adaee723f`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
         {
           "version": "1.0.1",
           "date": "2026-09-04T19:31:44Z",
