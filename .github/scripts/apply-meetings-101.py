@@ -207,5 +207,5 @@ for item in required_service:
 
 if 'surfaces,microphone,stt,tts,camera,ink_surface' in manifest:
     raise SystemExit('Legacy Assistant capability bundle remains')
-if 'android:value="meetings"' in manifest and 'com.anezium.rokidbus.plugin.ICON' not in manifest:
-    raise SystemExit('Unexpected Meetings plugin id marker')
+if 'android:name="com.anezium.rokidbus.plugin.ID"\n                android:value="meetings"' in manifest:
+    raise SystemExit('Broken Meetings Nexus plugin id remains')
