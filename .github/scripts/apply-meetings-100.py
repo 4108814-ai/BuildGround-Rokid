@@ -97,7 +97,7 @@ input_pattern = re.compile(
     re.DOTALL,
 )
 input_replacement = r'''    override fun onNexusInput(event: NexusInputEvent) {
-        if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount != 0) return
+        if (event.action != KeyEvent.ACTION_DOWN) return
         when (event.keyCode) {
             KeyEvent.KEYCODE_ENTER,
             KeyEvent.KEYCODE_DPAD_CENTER,
