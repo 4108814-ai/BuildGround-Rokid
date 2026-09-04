@@ -1,0 +1,70 @@
+name: Promote BuildGround Relay 1.2.2
+
+on:
+  push:
+    branches:
+      - feature/relay-122-fifo
+    paths:
+      - '.github/scripts/promote-relay-122-registry.py'
+      - '.github/workflows/promote-buildground-relay-1.2.2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: promote-buildground-relay-1-2-2
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify published Relay artifact metadata
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release="$(gh api repos/4108814-ai/BuildGround-Rokid/releases/tags/relay-v1.2.2-bg)"
+          printf '%s' "$release" | jq -e '.draft == false and .prerelease == false' >/dev/null
+          printf '%s' "$release" | jq -e '.assets | length == 1' >/dev/null
+          printf '%s' "$release" | jq -e '.assets[0].name == "relay-phone-1.2.2-bg.apk"' >/dev/null
+          printf '%s' "$release" | jq -e '.assets[0].size == 5645156' >/dev/null
+          printf '%s' "$release" | jq -e '.assets[0].digest == "sha256:af1a3d6b6bdef35ee88ecad8aade9595601a74343a1c1e5d4e73a2d9d8be3a91"' >/dev/null
+
+      - name: Promote Registry entry
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/promote-relay-122-registry.py
+          python -m json.tool registry/nexus-plugins.v1.json >/dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('registry/nexus-plugins.v1.json').read_text(encoding='utf-8'))
+          relay = next(p for p in data['plugins'] if p['id'] == 'relay')
+          a = relay['artifact']
+          assert a['versionName'] == '1.2.2'
+          assert a['versionCode'] == 11
+          assert a['sha256'] == 'af1a3d6b6bdef35ee88ecad8aade9595601a74343a1c1e5d4e73a2d9d8be3a91'
+          assert a['signerSha256'] == '55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097'
+          assert relay['releases'][0]['version'] == '1.2.2'
+          PY
+          changed="$(git status --porcelain | awk '{print $2}')"
+          test "$changed" = 'registry/nexus-plugins.v1.json'
+
+      - name: Commit promoted Registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add registry/nexus-plugins.v1.json
+          git commit -m 'Promote BuildGround Relay 1.2.2 in registry'
+          git push origin HEAD:feature/relay-122-fifo
