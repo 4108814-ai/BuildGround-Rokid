@@ -2,7 +2,24 @@ from pathlib import Path
 import runpy
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# The historical bridge patch was authored against a transient Phone field name.
+# Recreate that one marker only long enough to apply the already-tested bridge,
+# then remove it again so the generated source matches the current 1.4.6 baseline.
+hub = ROOT / "phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt"
+hub_text = hub.read_text(encoding="utf-8")
+current_marker = "    @Volatile private var lastAnnouncedPhoneCapabilities: PhoneHubCapabilities? = null\n"
+compat_marker = "    private var remotePhoneCapabilities = PhoneHubCapabilities(0, null)\n"
+if hub_text.count(current_marker) != 1 or compat_marker in hub_text:
+    raise SystemExit("Unexpected Phone 1.4.6 capability-field baseline")
+hub.write_text(hub_text.replace(current_marker, compat_marker + current_marker, 1), encoding="utf-8")
+
 runpy.run_path(str(ROOT / ".github/scripts/apply-phone-call-state-bridge.py"), run_name="__main__")
+
+hub_text = hub.read_text(encoding="utf-8")
+if hub_text.count(compat_marker) != 1:
+    raise SystemExit("Call-state bridge compatibility marker was not preserved exactly once")
+hub.write_text(hub_text.replace(compat_marker, "", 1), encoding="utf-8")
 
 bridge = ROOT / "phone-hub/src/main/java/com/anezium/rokidbus/phone/PhoneCallStateBridge.kt"
 bridge.write_text(
