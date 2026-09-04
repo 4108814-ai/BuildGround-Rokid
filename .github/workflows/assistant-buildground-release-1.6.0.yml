@@ -1,0 +1,281 @@
+name: Assistant BuildGround release 1.6.0
+
+on:
+  push:
+    branches:
+      - feature/assistant-work-mode-160
+    paths:
+      - '.github/workflows/assistant-buildground-release-1.6.0.yml'
+      - '.github/scripts/apply-assistant-160-work-mode.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: assistant-buildground-release-1-6-0
+  cancel-in-progress: false
+
+jobs:
+  release-assistant:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RokidNexus
+
+    steps:
+      - name: Check out BuildGround-Rokid
+        uses: actions/checkout@v6
+        with:
+          path: RokidNexus
+          fetch-depth: 0
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: v0.2.3
+          path: CxrGlobal
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Apply Assistant 1.6.0 Work Mode bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Rebuild the known-good Assistant 1.5.7 runtime first. Host transport sources are used only
+          # as compile-time API surface; Nexus Phone/Glasses are not built or released here.
+          git fetch origin feature/meeting-audio-transport
+          transport_patch='.github/scripts/_apply-meeting-audio-transport.py'
+          git show origin/feature/meeting-audio-transport:.github/scripts/apply-meeting-audio-transport.py > "$transport_patch"
+          python "$transport_patch"
+          rm -f "$transport_patch"
+
+          conversation_patch='.github/patches/assistant-conversation-mode.patch'
+          conversation_expected='a3e3bd757480267fcdf4a51d7acf60651efb6ba76f2ee33af4677c28e168df5a'
+          test "$(sha256sum "$conversation_patch" | cut -d ' ' -f 1)" = "$conversation_expected"
+          git apply --check "$conversation_patch"
+          git apply "$conversation_patch"
+
+          timeout_patch='.github/patches/assistant-conversation-timeout-ui-fix.patch'
+          git apply --check "$timeout_patch"
+          git apply "$timeout_patch"
+
+          python .github/scripts/apply-assistant-phone-calls.py
+          python .github/scripts/fix-assistant-phone-contact-constants.py
+          python .github/scripts/normalize-assistant-phone-sms-input.py
+          python .github/scripts/extend-assistant-phone-sms.py
+          python .github/scripts/apply-assistant-mvp-integration.py
+          python .github/scripts/fix-assistant-mvp-generated-settings.py
+          python .github/scripts/fix-assistant-visual-policy.py
+          python .github/scripts/apply-assistant-151-diagnostics.py
+          python .github/scripts/apply-assistant-meeting-persistence.py
+          python .github/scripts/apply-assistant-154-meetings-ui.py
+          python .github/scripts/apply-assistant-155-silent-meeting.py
+          python .github/scripts/apply-assistant-156-meeting-audio.py
+          python .github/scripts/apply-assistant-156-raw-audio-core.py
+          python .github/scripts/apply-assistant-156-unified-meeting-session.py
+          python .github/scripts/apply-assistant-156-audio-ui-finish.py
+          python .github/scripts/apply-assistant-157-audio-lease-stability.py
+          python .github/scripts/apply-assistant-157-nullable-recovery-fix.py
+          python .github/scripts/apply-assistant-160-work-mode.py
+
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('plugins/assistant/build.gradle.kts')
+          text = p.read_text(encoding='utf-8')
+          if text.count('versionCode = 11') != 1 or text.count('versionName = "1.5.1"') != 1:
+              raise SystemExit('Expected generated Assistant 1.5.1 version markers exactly once')
+          text = text.replace('versionCode = 11', 'versionCode = 18', 1)
+          text = text.replace('versionName = "1.5.1"', 'versionName = "1.6.0"', 1)
+          p.write_text(text, encoding='utf-8')
+          PY
+
+          grep -q 'versionCode = 18' plugins/assistant/build.gradle.kts
+          grep -q 'versionName = "1.6.0"' plugins/assistant/build.gradle.kts
+          grep -q 'androidx.core:core:1.13.1' plugins/assistant/build.gradle.kts
+
+          manifest='plugins/assistant/src/main/AndroidManifest.xml'
+          service='plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt'
+          grep -q 'surfaces,microphone,stt,tts,camera,ink_surface' "$manifest"
+          ! grep -q 'surfaces,microphone,stt,tts,assistant,camera,ink_surface' "$manifest"
+          grep -q 'AssistantWorkModePolicy.openAction' "$service"
+          grep -q 'handleMeetingTranscript("начать совещание")' "$service"
+          grep -q 'onNexusGlassesAiButton(active: Boolean) = Unit' "$service"
+          grep -q 'onNexusMessage(path: String, id: String, payload: JSONObject) = Unit' "$service"
+          grep -q 'class AssistantWorkModePolicyTest' plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant/AssistantWorkModePolicyTest.kt
+          grep -q 'AssistantMeetingCapturePolicy.canAcquire' "$service"
+          grep -q 'Source audio is persisted first' "$service"
+
+          # Runtime scope invariant: Assistant only. Do not ship host, Glasses or Relay changes.
+          test -z "$(git diff --name-only | grep -Ei '(^|/)relay|(^|/)glasses-hub/' || true)"
+
+      - name: Run Assistant tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :plugin-assistant:testDebugUnitTest -PskipCxrGlobal=true
+
+      - name: Decode permanent BuildGround signing key
+        shell: bash
+        env:
+          NEXUS_RELEASE_KEYSTORE_B64: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          test -n "$NEXUS_RELEASE_KEYSTORE_B64"
+          test -n "$RELEASE_KEYSTORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
+          keystore_path="$RUNNER_TEMP/nexus-release.keystore"
+          umask 077
+          printf '%s' "$NEXUS_RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore_path"
+          {
+            echo "NEXUS_RELEASE_KEYSTORE=$keystore_path"
+            echo "NEXUS_RELEASE_KEYSTORE_PASSWORD=$RELEASE_KEYSTORE_PASSWORD"
+            echo "NEXUS_RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify permanent BuildGround signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='55:B2:21:85:39:2B:8C:1F:08:4C:3D:EC:58:BB:0F:34:2E:CE:71:02:28:95:56:AE:23:CA:DE:E6:CC:EC:20:97'
+          details="$(keytool -list -v -keystore "$NEXUS_RELEASE_KEYSTORE" -storepass "$NEXUS_RELEASE_KEYSTORE_PASSWORD" -alias "$NEXUS_RELEASE_KEY_ALIAS")"
+          actual="$(printf '%s\n' "$details" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1)"
+          test "$actual" = "$expected"
+          normalized="$(printf '%s' "$actual" | tr -d ':' | tr 'A-F' 'a-f')"
+          echo "ARTIFACT_SIGNER_SHA256=$normalized" >> "$GITHUB_ENV"
+
+      - name: Build signed Assistant 1.6.0 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :plugin-assistant:assembleRelease -PskipCxrGlobal=true
+
+      - name: Verify APK and prepare release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find plugins/assistant/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$apk"
+          actual_signer="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')"
+          test "$actual_signer" = "$ARTIFACT_SIGNER_SHA256"
+          artifact_name='assistant-phone-release.apk'
+          artifact_path="$RUNNER_TEMP/$artifact_name"
+          cp "$apk" "$artifact_path"
+          sha256="$(sha256sum "$artifact_path" | cut -d ' ' -f 1)"
+          size_bytes="$(stat -c '%s' "$artifact_path")"
+          metadata='plugins/assistant/build/outputs/apk/release/output-metadata.json'
+          package_name="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["applicationId"])' "$metadata")"
+          version_code="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["elements"][0]["versionCode"])' "$metadata")"
+          version_name="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["elements"][0]["versionName"])' "$metadata")"
+          test "$version_code" = '18'
+          test "$version_name" = '1.6.0'
+          test "$package_name" = 'com.anezium.rokidbus.plugin.assistant'
+          notes="$RUNNER_TEMP/assistant-1.6.0-notes.md"
+          cat > "$notes" <<EOF
+          BuildGround Assistant 1.6.0 — Work Mode.
+
+          - The stock Rokid assistant remains the sole system voice assistant. Assistant no longer requests the Nexus `assistant` capability and ignores legacy AI-wake callbacks.
+          - No `Hey Rokid` takeover, no native-assistant close burst, and no assistant-routing changes to Nexus Phone or Glasses.
+          - Opening Assistant explicitly from the Nexus launcher starts Silent Meeting Mode; opening it again in the same process stops the meeting and generates the saved protocol.
+          - Meeting source audio, crash-safe WAV persistence, transcript, archive, protocol generation, and 1.5.7 single-microphone lease protections are preserved.
+          - A crash-restored meeting is archived before a new explicit Work Mode session starts.
+          - Nexus Phone/Glasses 1.4.17 and Relay are unchanged.
+
+          ### Artifact
+          - File: \`$artifact_name\`
+          - SHA-256: \`$sha256\`
+          - Signer SHA-256: \`$actual_signer\`
+          EOF
+          {
+            echo "ARTIFACT_NAME=$artifact_name"
+            echo "ARTIFACT_PATH=$artifact_path"
+            echo "ARTIFACT_SHA256=$sha256"
+            echo "ARTIFACT_SIZE_BYTES=$size_bytes"
+            echo "ARTIFACT_PACKAGE_NAME=$package_name"
+            echo "ARTIFACT_VERSION_CODE=$version_code"
+            echo "RELEASE_NOTES_PATH=$notes"
+          } >> "$GITHUB_ENV"
+
+      - name: Create Assistant 1.6.0 release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view assistant-v1.6.0 >/dev/null 2>&1; then
+            echo '::error::assistant-v1.6.0 already exists; refusing overwrite.'
+            exit 1
+          fi
+          gh release create assistant-v1.6.0 "$ARTIFACT_PATH" --target "$GITHUB_SHA" --title 'Assistant 1.6.0 — Work Mode' --notes-file "$RELEASE_NOTES_PATH" --latest=false
+
+      - name: Publish Assistant 1.6.0 to BuildGround registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          registry_worktree="$RUNNER_TEMP/buildground-registry"
+          rm -rf "$registry_worktree"
+          git worktree add "$registry_worktree" origin/main
+          current="$registry_worktree/registry/nexus-plugins.v1.json"
+          upstream="$RUNNER_TEMP/upstream-registry.json"
+          curl --fail --silent --show-error --location 'https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/dist/nexus-plugins.v1.json' --output "$upstream"
+          artifact_url="https://github.com/$GITHUB_REPOSITORY/releases/download/assistant-v1.6.0/$ARTIFACT_NAME"
+          published_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          python "$registry_worktree/.github/scripts/buildground_registry.py" publish --current "$current" --upstream "$upstream" --output "$current" --plugin-id assistant --version-name 1.6.0 --version-code "$ARTIFACT_VERSION_CODE" --package-name "$ARTIFACT_PACKAGE_NAME" --artifact-url "$artifact_url" --artifact-sha256 "$ARTIFACT_SHA256" --signer-sha256 "$ARTIFACT_SIGNER_SHA256" --size-bytes "$ARTIFACT_SIZE_BYTES" --published-at "$published_at" --release-notes-file "$RELEASE_NOTES_PATH"
+          python - "$current" <<'PY'
+          import json, sys
+          p=sys.argv[1]
+          d=json.load(open(p, encoding='utf-8'))
+          item=next(x for x in d['plugins'] if x['id']=='assistant')
+          nexus=item.setdefault('nexus', {})
+          nexus['minHostVersionCode']=10405
+          nexus['capabilities']=[c for c in nexus.get('capabilities', []) if c != 'assistant']
+          item['summary']='BuildGround Work Mode: silent meeting recording, transcript and protocol without replacing the Rokid assistant.'
+          item['description']='Work-focused Assistant build for meetings. The stock Rokid assistant remains untouched; Nexus Assistant is opened explicitly for Silent Meeting Mode, audio capture, transcript archive and protocol generation.'
+          listing=item.setdefault('listing', {})
+          listing['descriptionMarkdown']='## BuildGround Work Mode\n\nThe stock Rokid assistant remains the system voice assistant. This build does not claim the Nexus assistant capability.\n\n- Open **Assistant** explicitly from the Nexus launcher to start Silent Meeting Mode.\n- Open it again to stop and generate the protocol.\n- Source audio is stored first, with crash-safe WAV recovery.\n- Transcript, audio and protocol stay in the phone meeting archive.\n- ChatGPT/provider sign-in is used for protocol generation, not for replacing **Hey Rokid**.\n'
+          with open(p,'w',encoding='utf-8') as f:
+              json.dump(d,f,ensure_ascii=False,indent=2)
+              f.write('\n')
+          PY
+          python -m json.tool "$current" >/dev/null
+          cd "$registry_worktree"
+          git config user.name 'BuildGround Release Bot'
+          git config user.email '4108814-ai@users.noreply.github.com'
+          git add registry/nexus-plugins.v1.json
+          git commit -m 'Publish assistant 1.6.0 Work Mode to BuildGround registry'
+          git push origin HEAD:main
+
+      - name: Upload signed APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildground-assistant-1.6.0-release
+          path: ${{ runner.temp }}/assistant-phone-release.apk
+          if-no-files-found: error
+
+      - name: Remove decoded keystore
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/nexus-release.keystore"
