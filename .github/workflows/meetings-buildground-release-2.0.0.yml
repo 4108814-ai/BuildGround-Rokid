@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/meetings-buildground-release-2.0.0.yml'
       - '.github/scripts/apply-meetings-200-native-control.py'
+      - '.github/scripts/neutralize-meetings-200-legacy.py'
   workflow_dispatch:
 
 permissions:
@@ -107,9 +108,11 @@ jobs:
           python .github/scripts/apply-meetings-106-direct-downloads.py
           python .github/scripts/apply-meetings-107-capture-lifecycle.py
           python .github/scripts/apply-meetings-200-native-control.py
+          python .github/scripts/neutralize-meetings-200-legacy.py
 
           manifest='plugins/assistant/src/main/AndroidManifest.xml'
           service='plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantPluginService.kt'
+          debug_receiver='plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant/AssistantDebugAskReceiver.kt'
           grep -q 'versionCode = 27' plugins/assistant/build.gradle.kts
           grep -q 'versionName = "2.0.0"' plugins/assistant/build.gradle.kts
           grep -q 'android:value="assistant"' "$manifest"
@@ -126,6 +129,7 @@ jobs:
           ! grep -q 'NexusAudioSession' "$service"
           ! grep -q 'meetingRecorder' "$service"
           ! grep -q 'transcriber' "$service"
+          ! grep -q 'AssistantPluginService.debugAsk' "$debug_receiver"
 
       - name: Run Meetings tests
         shell: bash
