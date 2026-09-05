@@ -132,7 +132,20 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.USER_UNLOCKED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Rokid emits these system broadcasts for wear and temple state. The receiver is
+             intentionally headless: unfolding or wearing the glasses only restores Nexus core;
+             it never opens the Nexus launcher or steals the display from Hi Rokid. -->
+        <receiver
+            android:name=".GlassesLifecycleReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.rokid.sprite.ACTION_TAKE_STATUS_CHANGED" />
+                <action android:name="com.rokid.sprite.ACTION_LEG_STATUS_CHANGED" />
             </intent-filter>
         </receiver>
 
