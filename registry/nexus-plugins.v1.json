@@ -71,8 +71,8 @@
       "kind": "nexus-plugin",
       "name": "Meetings",
       "category": "Assistant",
-      "summary": "BuildGround Meetings: persistent source audio saved directly to Downloads.",
-      "description": "Dedicated meeting recorder for Nexus. Completed WAV/transcript/protocol files are saved directly into Downloads; native Rokid assistant remains untouched.",
+      "summary": "BuildGround Meetings: stable continuous source-audio capture with direct Downloads WAV.",
+      "description": "Dedicated meeting recorder for Nexus. Start owns the raw meeting microphone before the HUD can close; Stop and WAV survive transient UI lifecycle changes.",
       "author": "Anezium",
       "sourceUrl": "https://github.com/Anezium/Rokid-Nexus",
       "publishedAt": "2026-08-11T22:06:05Z",
@@ -94,15 +94,20 @@
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v1.0.6/meetings-phone-release.apk",
-        "sha256": "3597d3d1a08e3c15abc5e9d24e058a96110b67a5f3b0aa95a34c1944eb635715",
+        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v1.0.7/meetings-phone-release.apk",
+        "sha256": "e57a7f3d6584ed3cc7bec3df02e11322f3deb70c17622aa927f5aba2ddbad0db",
         "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
-        "sizeBytes": 6349019,
+        "sizeBytes": 6349203,
         "packageName": "com.anezium.rokidbus.plugin.assistant",
-        "versionCode": 25,
-        "versionName": "1.0.6"
+        "versionCode": 26,
+        "versionName": "1.0.7"
       },
       "releases": [
+        {
+          "version": "1.0.7",
+          "date": "2026-09-05T14:07:47Z",
+          "notes": "BuildGround Meetings 1.0.7 — Capture Lifecycle.\n\n- Fixes the physical RV101 failure where Start created a meeting shell but the delayed raw-audio rearm lost the one-shot plugin session before acquiring the microphone.\n- Start now arms the continuous raw Nexus audio lease before returning from the Start action.\n- A transient Notice/plugin close no longer calls suspendMeetingAudioCapture while an explicitly-started meeting is active.\n- Reopening Meetings reuses a healthy raw lease and restores Stop; it only reacquires when the raw session is genuinely missing.\n- Completed WAV remains exported directly to the phone Downloads root as BuildGround_Meeting_<meeting-id>.wav.\n- Nexus core, Relay and native Hi Rokid are unchanged.\n\n### Artifact\n- File: `meetings-phone-release.apk`\n- SHA-256: `e57a7f3d6584ed3cc7bec3df02e11322f3deb70c17622aa927f5aba2ddbad0db`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
         {
           "version": "1.0.6",
           "date": "2026-09-05T13:36:15Z",
