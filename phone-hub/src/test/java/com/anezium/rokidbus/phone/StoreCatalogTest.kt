@@ -46,6 +46,19 @@ class StoreCatalogTest {
     }
 
     @Test
+    fun `installed entry displays package version name when registry snapshot is stale`() {
+        val catalog = build(
+            remote = listOf(plugin(versionCode = 7, versionName = "1.0.7")),
+            local = listOf(local()),
+            versions = mapOf(PACKAGE to 28L),
+            versionNames = mapOf(PACKAGE to "2.0.1"),
+        )
+
+        assertEquals(StoreEntryState.INSTALLED, catalog.entry("feeds")?.state)
+        assertEquals("2.0.1", catalog.entry("feeds")?.registryPlugin?.artifact?.versionName)
+    }
+
+    @Test
     fun `equal or older registry version is installed and carries every grant state`() {
         val grantStates = listOf(
             PluginCatalogState.ENABLED,
@@ -151,12 +164,14 @@ class StoreCatalogTest {
         remote: List<RegistryPlugin> = emptyList(),
         local: List<PluginCatalogEntry> = emptyList(),
         versions: Map<String, Long> = emptyMap(),
+        versionNames: Map<String, String> = emptyMap(),
         hostVersionCode: Long = 6,
         logger: (String) -> Unit = {},
     ) = StoreCatalog.build(
         feed = RegistryFeed(1, remote),
         localCatalog = PluginCatalog(local),
         installedVersionCodes = versions,
+        installedVersionNames = versionNames,
         hostVersionCode = hostVersionCode,
         logger = logger,
     )
