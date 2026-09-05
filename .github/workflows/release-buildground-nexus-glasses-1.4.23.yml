@@ -1,0 +1,180 @@
+name: Release BuildGround Nexus Glasses 1.4.23 notice viewport fix
+
+on:
+  push:
+    branches:
+      - buildground/nexus-glasses-1.4.23-notice-viewport
+    paths:
+      - '.github/scripts/apply-buildground-notice-viewport-1423.py'
+      - '.github/workflows/release-buildground-nexus-glasses-1.4.23.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-buildground-nexus-glasses-1-4-23
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RokidNexus
+
+    steps:
+      - name: Check out BuildGround fork
+        uses: actions/checkout@v6
+        with:
+          path: RokidNexus
+          fetch-depth: 0
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: v0.2.3
+          path: CxrGlobal
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Apply BuildGround 1.4.22 chain and 1.4.23 notice viewport fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/apply-buildground-lifecycle-1418.py
+          python .github/scripts/apply-buildground-native-recording-1420.py
+          python .github/scripts/apply-buildground-native-recording-1421.py
+          python .github/scripts/apply-buildground-native-recording-1422.py
+          python .github/scripts/apply-buildground-notice-viewport-1423.py
+
+          renderer='glasses-hub/src/main/java/com/anezium/rokidbus/glasses/NoticeOverlayRenderer.kt'
+          controller='glasses-hub/src/main/java/com/anezium/rokidbus/glasses/RokidNativeRecordingController.kt'
+          grep -F 'versionCode = 10423' glasses-hub/build.gradle.kts
+          grep -F 'versionName = "1.4.23"' glasses-hub/build.gradle.kts
+          grep -F 'topMarginPx: Int' "$renderer"
+          grep -F 'remainingViewport' "$renderer"
+          grep -F 'HudBandGeometry.topPx(context, hudTopInsetDp)' "$renderer"
+          ! grep -F 'topInsetPx = hudTopInsetPx' "$renderer"
+          grep -F 'action != "start" && action != "stop" && action != "status"' "$controller"
+          grep -F 'PREFS = "nexus_rokid_native_recorder"' "$controller"
+
+      - name: Run glasses tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :glasses-hub:testDebugUnitTest
+
+      - name: Decode permanent BuildGround release key
+        shell: bash
+        env:
+          NEXUS_RELEASE_KEYSTORE_B64: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          test -n "$NEXUS_RELEASE_KEYSTORE_B64"
+          test -n "$RELEASE_KEYSTORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
+          keystore="$RUNNER_TEMP/nexus-release.keystore"
+          umask 077
+          printf '%s' "$NEXUS_RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore"
+          {
+            echo "NEXUS_RELEASE_KEYSTORE=$keystore"
+            echo "NEXUS_RELEASE_KEYSTORE_PASSWORD=$RELEASE_KEYSTORE_PASSWORD"
+            echo "NEXUS_RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+          } >> "$GITHUB_ENV"
+
+      - name: Build signed glasses APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :glasses-hub:assembleRelease
+
+      - name: Verify and prepare APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find glasses-hub/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$apk"
+          artifact="$RUNNER_TEMP/nexus-glasses-1.4.23.apk"
+          cp "$apk" "$artifact"
+
+          expected='55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097'
+          signer="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$artifact" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')"
+          test "$signer" = "$expected"
+
+          badging="$("$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$artifact" | head -n 1)"
+          printf '%s\n' "$badging" | grep -F "name='com.anezium.rokidbus.glasses'"
+          printf '%s\n' "$badging" | grep -F "versionCode='10423'"
+          printf '%s\n' "$badging" | grep -F "versionName='1.4.23'"
+
+          sha="$(sha256sum "$artifact" | cut -d ' ' -f 1)"
+          notes="$RUNNER_TEMP/nexus-glasses-1.4.23-notes.md"
+          cat > "$notes" <<EOF
+          BuildGround Nexus Glasses 1.4.23 — Relay Notice Viewport Fix.
+
+          Physical Rokid testing isolated a glasses-side notice rendering defect: Relay notifications arrived immediately, played their sound, entered active notice state and were present in Relay Inbox, but the HUD band disappeared at low configured HUD positions. Moving the HUD to the top made the same notification render immediately.
+
+          - Fixes NoticeOverlayRenderer height calculation for low HUD positions.
+          - The notice keeps its design height cap while there is room, and is constrained only by the actual remaining viewport below its real top margin.
+          - Removes the previous geometry that subtracted the HUD inset directly from the design height cap and could collapse the Relay band.
+          - Keeps the configured HUD position itself unchanged; users no longer need to move HUD to the top for Relay notices to render.
+          - Adds unit coverage for normal and low-position viewport limits.
+          - Relay transport, notification capture, phone SPP/CXR logic, Meetings and native recorder behaviour are unchanged.
+          - All 1.4.22 native-recorder state-authority behaviour is retained.
+
+          ### Artifact
+          - File: nexus-glasses-1.4.23.apk
+          - SHA-256: $sha
+          - Signer SHA-256: $signer
+          EOF
+          {
+            echo "ARTIFACT=$artifact"
+            echo "ARTIFACT_SHA=$sha"
+            echo "NOTES=$notes"
+          } >> "$GITHUB_ENV"
+
+      - name: Create Nexus Glasses 1.4.23 release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='nexus-glasses-v1.4.23'
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::$tag already exists; refusing overwrite."
+            exit 1
+          fi
+          gh release create "$tag" "$ARTIFACT" --target "$GITHUB_SHA" --title 'Nexus Glasses 1.4.23 — Relay Notice Viewport Fix' --notes-file "$NOTES" --latest=false
+
+      - name: Upload signed APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-glasses-1.4.23-signed
+          path: ${{ env.ARTIFACT }}
+          if-no-files-found: error
+
+      - name: Remove decoded keystore
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/nexus-release.keystore"
