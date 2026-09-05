@@ -71,8 +71,8 @@
       "kind": "nexus-plugin",
       "name": "Meetings",
       "category": "Assistant",
-      "summary": "BuildGround Meetings: source audio, transcript and protocol with explicit start/finish controls.",
-      "description": "Dedicated meeting recorder for Nexus. It does not replace the Rokid voice assistant and requests only glasses surface and microphone access.",
+      "summary": "BuildGround Meetings: persistent source audio, transcript and protocol with explicit start/finish controls.",
+      "description": "Dedicated meeting recorder for Nexus. Live recording survives transient HUD close and does not replace the Rokid voice assistant.",
       "author": "Anezium",
       "sourceUrl": "https://github.com/Anezium/Rokid-Nexus",
       "publishedAt": "2026-08-11T22:06:05Z",
@@ -94,15 +94,20 @@
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v1.0.3/meetings-phone-release.apk",
-        "sha256": "0d61384d4bfa45ed5a09ece1ab9ed583e385e2296edea35c2733eb86b71a03f0",
+        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v1.0.4/meetings-phone-release.apk",
+        "sha256": "5d9706b97815f6b87aa4234195525d8763a57872ee9707ee26cf0d4578b03a95",
         "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
-        "sizeBytes": 6336183,
+        "sizeBytes": 6336627,
         "packageName": "com.anezium.rokidbus.plugin.assistant",
-        "versionCode": 22,
-        "versionName": "1.0.3"
+        "versionCode": 23,
+        "versionName": "1.0.4"
       },
       "releases": [
+        {
+          "version": "1.0.4",
+          "date": "2026-09-05T12:42:36Z",
+          "notes": "BuildGround Meetings 1.0.4.\n\n- Fixes the live-meeting lifecycle defect found on glasses: a transient HUD/plugin close no longer releases the active raw microphone session.\n- Meeting audio ownership is now independent from Notice visibility. Reopening Meetings must reattach to the same active session and show Stop.\n- The Android foreground-service anchor stays alive while a meeting or final audio drain is active and is released after explicit completion.\n- Process death still uses the existing crash-safe source-WAV recovery path; this patch does not silently reacquire a dead microphone session.\n- Source WAV remains authoritative; queued STT drains before transcript/protocol finalization.\n- Nexus Phone/Glasses 1.4.18 and Relay are unchanged. Hi Rokid remains the native voice assistant.\n\n### Artifact\n- File: `meetings-phone-release.apk`\n- SHA-256: `5d9706b97815f6b87aa4234195525d8763a57872ee9707ee26cf0d4578b03a95`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
         {
           "version": "1.0.3",
           "date": "2026-09-05T09:14:13Z",
