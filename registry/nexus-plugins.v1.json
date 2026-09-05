@@ -71,8 +71,8 @@
       "kind": "nexus-plugin",
       "name": "Meetings",
       "category": "Assistant",
-      "summary": "BuildGround Meetings Vault: persistent source audio with independent transcript and protocol layers.",
-      "description": "Dedicated meeting recorder for Nexus. Every meeting gets a durable vault entry and a user-visible Downloads mirror; native Rokid assistant remains untouched.",
+      "summary": "BuildGround Meetings: persistent source audio saved directly to Downloads.",
+      "description": "Dedicated meeting recorder for Nexus. Completed WAV/transcript/protocol files are saved directly into Downloads; native Rokid assistant remains untouched.",
       "author": "Anezium",
       "sourceUrl": "https://github.com/Anezium/Rokid-Nexus",
       "publishedAt": "2026-08-11T22:06:05Z",
@@ -94,15 +94,20 @@
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v1.0.5/meetings-phone-release.apk",
-        "sha256": "61e242ceabebdcc306081458dcd9c7b5cb945fa0a97ce0f9b8bd38a34d538b51",
+        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v1.0.6/meetings-phone-release.apk",
+        "sha256": "3597d3d1a08e3c15abc5e9d24e058a96110b67a5f3b0aa95a34c1944eb635715",
         "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
-        "sizeBytes": 6348487,
+        "sizeBytes": 6349019,
         "packageName": "com.anezium.rokidbus.plugin.assistant",
-        "versionCode": 24,
-        "versionName": "1.0.5"
+        "versionCode": 25,
+        "versionName": "1.0.6"
       },
       "releases": [
+        {
+          "version": "1.0.6",
+          "date": "2026-09-05T13:36:15Z",
+          "notes": "BuildGround Meetings 1.0.6 — Direct Downloads.\n\n- Saves completed meeting files directly into the phone Downloads root; no nested BuildGround/Meetings folder is required.\n- Audio file name: BuildGround_Meeting_<meeting-id>.wav.\n- Transcript, protocol and session metadata use the same stable prefix in Downloads.\n- Existing Meetings Vault remains the crash-safe private source and older 1.0.5 meetings are re-exported when the archive is opened.\n- Direct Downloads export failures are logged instead of being silently swallowed.\n- Start/Stop lifecycle, Nexus core, Relay and native Hi Rokid are unchanged.\n\n### Artifact\n- File: `meetings-phone-release.apk`\n- SHA-256: `3597d3d1a08e3c15abc5e9d24e058a96110b67a5f3b0aa95a34c1944eb635715`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
         {
           "version": "1.0.5",
           "date": "2026-09-05T13:08:37Z",
