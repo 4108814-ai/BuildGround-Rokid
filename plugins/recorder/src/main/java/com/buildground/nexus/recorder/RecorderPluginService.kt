@@ -48,6 +48,13 @@ class RecorderPluginService : NexusPluginService() {
         val output: FileOutputStream,
     )
 
+    private data class FinalizeSnapshot(
+        val sink: Sink?,
+        val format: NexusAudioFormat?,
+        val dataBytes: Long,
+        val interrupted: Boolean,
+    )
+
     private val lock = Any()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var surface: NexusSurfaceSession? = null
@@ -70,11 +77,15 @@ class RecorderPluginService : NexusPluginService() {
     }
 
     private val startTimeout = Runnable {
-        val timedOut = synchronized(lock) { state == RecorderState.STARTING }
-        if (!timedOut) return@Runnable
+        val pending = synchronized(lock) {
+            if (state != RecorderState.STARTING) return@Runnable
+            statusLine = "Микрофон очков не ответил"
+            audioSession
+        }
         Log.w(TAG, "Recorder audio acquire timed out")
-        statusLine = "Микрофон очков не ответил"
-        nexusClient?.releaseAudioSession()
+        // stop() is intentionally harmless while the SDK lease is still PENDING. We close the sink
+        // now; if a stale grant arrives later its callback sees IDLE and releases that lease at once.
+        pending?.stop()
         finalizeRecording(interrupted = true)
     }
 
@@ -158,7 +169,10 @@ class RecorderPluginService : NexusPluginService() {
         val callbacks = object : NexusAudioCallbacks {
             override fun onAudioStarted(format: NexusAudioFormat) {
                 if (!isSupported(format)) {
-                    Log.w(TAG, "Unsupported glasses audio format: ${format.sampleRate}/${format.channels}/${format.encoding}")
+                    Log.w(
+                        TAG,
+                        "Unsupported glasses audio format: ${format.sampleRate}/${format.channels}/${format.encoding}",
+                    )
                     synchronized(lock) { statusLine = "Неподдерживаемый формат аудио" }
                     createdSession?.stop()
                     return
@@ -286,13 +300,6 @@ class RecorderPluginService : NexusPluginService() {
             stopNexusSessionForeground()
         }
     }
-
-    private data class FinalizeSnapshot(
-        val sink: Sink?,
-        val format: NexusAudioFormat?,
-        val dataBytes: Long,
-        val interrupted: Boolean,
-    )
 
     private fun finalizeSink(snapshot: FinalizeSnapshot): Boolean {
         val currentSink = snapshot.sink ?: return false
