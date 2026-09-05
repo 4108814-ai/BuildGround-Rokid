@@ -71,8 +71,8 @@
       "kind": "nexus-plugin",
       "name": "Meetings",
       "category": "Assistant",
-      "summary": "BuildGround Meetings: persistent source audio, transcript and protocol with explicit start/finish controls.",
-      "description": "Dedicated meeting recorder for Nexus. Live recording survives transient HUD close and does not replace the Rokid voice assistant.",
+      "summary": "BuildGround Meetings Vault: persistent source audio with independent transcript and protocol layers.",
+      "description": "Dedicated meeting recorder for Nexus. Every meeting gets a durable vault entry and a user-visible Downloads mirror; native Rokid assistant remains untouched.",
       "author": "Anezium",
       "sourceUrl": "https://github.com/Anezium/Rokid-Nexus",
       "publishedAt": "2026-08-11T22:06:05Z",
@@ -94,15 +94,20 @@
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v1.0.4/meetings-phone-release.apk",
-        "sha256": "5d9706b97815f6b87aa4234195525d8763a57872ee9707ee26cf0d4578b03a95",
+        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v1.0.5/meetings-phone-release.apk",
+        "sha256": "61e242ceabebdcc306081458dcd9c7b5cb945fa0a97ce0f9b8bd38a34d538b51",
         "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
-        "sizeBytes": 6336627,
+        "sizeBytes": 6348487,
         "packageName": "com.anezium.rokidbus.plugin.assistant",
-        "versionCode": 23,
-        "versionName": "1.0.4"
+        "versionCode": 24,
+        "versionName": "1.0.5"
       },
       "releases": [
+        {
+          "version": "1.0.5",
+          "date": "2026-09-05T13:08:37Z",
+          "notes": "BuildGround Meetings 1.0.5 — Meetings Vault.\n\n- Replaces transcript-gated archive indexing with a durable per-meeting session manifest created at Start.\n- Audio-only meetings stay visible even when STT or protocol generation fails.\n- Repairs orphan WAV directories and raw PCM spools left by 1.0.4 where possible, so the previous test recording may be recoverable after update.\n- Canonical private vault: assistant_meetings/<meeting-id>/session.json, audio.wav, transcript.json/txt, protocol.md.\n- Completed artifacts are mirrored automatically to Downloads/BuildGround/Meetings/<meeting-id>/ for direct user access.\n- Source audio remains authoritative; transcript and protocol are independent optional layers.\n- Start/Stop lifecycle fix from 1.0.4 remains unchanged. Nexus core, Relay and native Hi Rokid are unchanged.\n\n### Artifact\n- File: `meetings-phone-release.apk`\n- SHA-256: `61e242ceabebdcc306081458dcd9c7b5cb945fa0a97ce0f9b8bd38a34d538b51`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
         {
           "version": "1.0.4",
           "date": "2026-09-05T12:42:36Z",
