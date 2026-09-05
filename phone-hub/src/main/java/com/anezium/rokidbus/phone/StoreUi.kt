@@ -32,19 +32,21 @@ internal object StoreScreens {
                 it.principal?.packageName ?: it.settingsComponent?.packageName
             }
         }
+        val installedVersions = installedVersions(context.packageManager, packageNames)
         return StoreCatalog.build(
             feed = feed,
             localCatalog = local,
-            installedVersionCodes = installedVersionCodes(context.packageManager, packageNames),
+            installedVersionCodes = installedVersions.mapValues { it.value.versionCode },
+            installedVersionNames = installedVersions.mapValues { it.value.versionName },
             hostVersionCode = hostVersionCode,
             logger = logger,
         )
     }
 
-    fun installedVersionCodes(
+    fun installedVersions(
         packageManager: PackageManager,
         packageNames: Set<String>,
-    ): Map<String, Long> = buildMap {
+    ): Map<String, InstalledPluginVersion> = buildMap {
         packageNames.forEach { packageName ->
             val info = runCatching {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -54,9 +56,22 @@ internal object StoreScreens {
                     packageManager.getPackageInfo(packageName, 0)
                 }
             }.getOrNull() ?: return@forEach
-            put(packageName, info.longVersionCode)
+            put(
+                packageName,
+                InstalledPluginVersion(
+                    versionCode = info.longVersionCode,
+                    versionName = info.versionName?.takeIf(String::isNotBlank)
+                        ?: info.longVersionCode.toString(),
+                ),
+            )
         }
     }
+
+    fun installedVersionCodes(
+        packageManager: PackageManager,
+        packageNames: Set<String>,
+    ): Map<String, Long> = installedVersions(packageManager, packageNames)
+        .mapValues { it.value.versionCode }
 
     fun iconView(activity: Activity, iconLoader: StoreIconLoader, entry: StoreEntry, sizeDp: Int): ImageView {
         val imageView = NexusUi.iconTileDrawable(activity, fallbackIcon(activity, entry), sizeDp)

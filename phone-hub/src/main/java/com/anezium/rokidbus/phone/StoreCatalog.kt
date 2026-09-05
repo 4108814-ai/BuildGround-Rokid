@@ -58,6 +58,7 @@ data class StoreCatalog(val entries: List<StoreEntry>) {
             feed: RegistryFeed,
             localCatalog: PluginCatalog,
             installedVersionCodes: Map<String, Long>,
+            installedVersionNames: Map<String, String> = emptyMap(),
             hostVersionCode: Long,
             logger: (String) -> Unit = {},
         ): StoreCatalog {
@@ -66,6 +67,7 @@ data class StoreCatalog(val entries: List<StoreEntry>) {
                 val plugin = match.plugin
                 val local = match.localEntry
                 val installedVersion = installedVersionCodes[plugin.artifact.packageName]
+                val installedVersionName = installedVersionNames[plugin.artifact.packageName]
                 val requiresNewerHost = plugin.nexus.minHostVersionCode > hostVersionCode
                 val hasNewerRelease = installedVersion != null && plugin.artifact.versionCode > installedVersion
                 val state = when {
@@ -75,13 +77,18 @@ data class StoreCatalog(val entries: List<StoreEntry>) {
                         StoreEntryState.UPDATE_AVAILABLE
                     else -> StoreEntryState.INSTALLED
                 }
+                val displayPlugin = if (state == StoreEntryState.INSTALLED && installedVersionName != null) {
+                    plugin.copy(artifact = plugin.artifact.copy(versionName = installedVersionName))
+                } else {
+                    plugin
+                }
                 StoreEntry(
                     id = plugin.nexus.pluginId,
                     displayName = plugin.name,
                     category = plugin.category,
                     summary = plugin.summary,
                     state = state,
-                    registryPlugin = plugin,
+                    registryPlugin = displayPlugin,
                     localEntry = local,
                     installedVersionCode = installedVersion,
                     updateBlockedByHost = local != null && hasNewerRelease && requiresNewerHost,
