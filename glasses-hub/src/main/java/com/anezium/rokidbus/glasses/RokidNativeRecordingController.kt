@@ -59,7 +59,7 @@ object RokidNativeRecordingController {
             val message = runCatching { JSONObject(raw) }.getOrNull()
             val type = message?.optString("type").orEmpty()
             if (type != NATIVE_RESULT_AUDIO) {
-                // Never consume unrelated Rokid events; the stock OS keeps its normal behaviour.
+                // Do not consume unrelated Rokid events: native OS behaviour remains untouched.
                 return false
             }
 
@@ -71,6 +71,10 @@ object RokidNativeRecordingController {
                 }
                 cancelTimeoutLocked()
                 inFlight = null
+
+                // result_audio_record is the stock service's acknowledgement for both native
+                // start/stop recorder commands. We deliberately do not infer file paths or audio
+                // ownership from its payload: Rokid keeps that entire workflow.
                 confirmedRecording = request.action == "start"
                 request.reply(
                     JSONObject()
@@ -202,7 +206,8 @@ object RokidNativeRecordingController {
             if (!registered) return
         }
         val context = applicationContext ?: return
-        val request = queued.removeFirstOrNull() ?: return
+        if (queued.isEmpty()) return
+        val request = queued.removeFirst()
         val command = if (request.action == "start") CMD_START else CMD_STOP
         val json = JSONObject()
             .put("type", command)
@@ -212,10 +217,27 @@ object RokidNativeRecordingController {
             )
             .toString()
 
+        // Arm correlation before the Binder call. Some firmware builds may emit the result from
+        // inside controlMsgJson(), so setting inFlight afterwards would lose a synchronous ack.
+        inFlight = request
+        request.reply(
+            JSONObject()
+                .put("action", request.action)
+                .put("accepted", true)
+                .put("confirmed", false)
+                .put("phase", "dispatched")
+                .put("owner", "rokid"),
+        )
+        scheduleTimeoutLocked(request)
+
         val sent = runCatching {
             current.controlMsgJson(context.packageName, json)
         }
         if (sent.isFailure) {
+            // If a synchronous native callback already completed this request, do not overwrite it.
+            if (inFlight !== request) return
+            cancelTimeoutLocked()
+            inFlight = null
             val error = sent.exceptionOrNull()
             Log.w(TAG, "native command failed action=${request.action}", error)
             request.reply(
@@ -228,19 +250,7 @@ object RokidNativeRecordingController {
                     .put("detail", error?.javaClass?.simpleName ?: "unknown"),
             )
             dispatchNextLocked()
-            return
         }
-
-        inFlight = request
-        request.reply(
-            JSONObject()
-                .put("action", request.action)
-                .put("accepted", true)
-                .put("confirmed", false)
-                .put("phase", "dispatched")
-                .put("owner", "rokid"),
-        )
-        scheduleTimeoutLocked(request)
     }
 
     private fun scheduleTimeoutLocked(request: Request) {
