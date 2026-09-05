@@ -1,0 +1,182 @@
+name: Release BuildGround Nexus Glasses 1.4.21 native recording state/display
+
+on:
+  push:
+    branches:
+      - buildground/nexus-core-1.4.21-native-recording-state-screen
+    paths:
+      - '.github/scripts/apply-buildground-native-recording-1421.py'
+      - '.github/workflows/release-buildground-nexus-glasses-1.4.21.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-buildground-nexus-glasses-1-4-21
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RokidNexus
+
+    steps:
+      - name: Check out BuildGround fork
+        uses: actions/checkout@v6
+        with:
+          path: RokidNexus
+          fetch-depth: 0
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: v0.2.3
+          path: CxrGlobal
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Apply 1.4.18 lifecycle, 1.4.20 native bridge and 1.4.21 state/display fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/apply-buildground-lifecycle-1418.py
+          python .github/scripts/apply-buildground-native-recording-1420.py
+          python .github/scripts/apply-buildground-native-recording-1421.py
+
+          controller='glasses-hub/src/main/java/com/anezium/rokidbus/glasses/RokidNativeRecordingController.kt'
+          accessibility='glasses-hub/src/main/java/com/anezium/rokidbus/glasses/RokidBusAccessibilityService.kt'
+          grep -F 'versionCode = 10421' glasses-hub/build.gradle.kts
+          grep -F 'versionName = "1.4.21"' glasses-hub/build.gradle.kts
+          grep -F '.put("phase", "binder_dispatch")' "$controller"
+          grep -F 'if (request.action == "start") scheduleDisplaySleep()' "$controller"
+          grep -F 'DISPLAY_SLEEP_DELAY_MS = 1_200L' "$controller"
+          grep -F 'RokidBusAccessibilityService.requestDisplaySleep()' "$controller"
+          grep -F 'internal fun requestDisplaySleep(): Boolean' "$accessibility"
+          grep -F 'AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN' "$accessibility"
+          if sed -n '/private fun dispatchNextLocked()/,/private fun scheduleDisplaySleep()/p' "$controller" | grep -F 'scheduleTimeoutLocked(request)'; then
+            echo '::error::Recorder state is still gated by the 10-second native callback timeout.'
+            exit 1
+          fi
+
+      - name: Run glasses tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :glasses-hub:testDebugUnitTest
+
+      - name: Decode permanent BuildGround release key
+        shell: bash
+        env:
+          NEXUS_RELEASE_KEYSTORE_B64: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          test -n "$NEXUS_RELEASE_KEYSTORE_B64"
+          test -n "$RELEASE_KEYSTORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
+          keystore="$RUNNER_TEMP/nexus-release.keystore"
+          umask 077
+          printf '%s' "$NEXUS_RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore"
+          {
+            echo "NEXUS_RELEASE_KEYSTORE=$keystore"
+            echo "NEXUS_RELEASE_KEYSTORE_PASSWORD=$RELEASE_KEYSTORE_PASSWORD"
+            echo "NEXUS_RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+          } >> "$GITHUB_ENV"
+
+      - name: Build signed glasses APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :glasses-hub:assembleRelease
+
+      - name: Verify and prepare APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find glasses-hub/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$apk"
+          artifact="$RUNNER_TEMP/nexus-glasses-1.4.21.apk"
+          cp "$apk" "$artifact"
+
+          expected='55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097'
+          signer="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$artifact" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')"
+          test "$signer" = "$expected"
+
+          badging="$("$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$artifact" | head -n 1)"
+          printf '%s\n' "$badging" | grep -F "name='com.anezium.rokidbus.glasses'"
+          printf '%s\n' "$badging" | grep -F "versionCode='10421'"
+          printf '%s\n' "$badging" | grep -F "versionName='1.4.21'"
+
+          sha="$(sha256sum "$artifact" | cut -d ' ' -f 1)"
+          notes="$RUNNER_TEMP/nexus-glasses-1.4.21-notes.md"
+          cat > "$notes" <<EOF
+          BuildGround Nexus Glasses 1.4.21 — Native Recording State + Display Fix.
+
+          Physical RV101 acceptance of 1.4.20 proved that the stock Rokid recorder starts and saves recordings correctly. Two control defects remained; this release fixes only those defects.
+
+          - Successful MasterAssistService controlMsgJson dispatch now confirms Start/Stop for Meetings immediately. Recorder state no longer depends on a result_audio_record callback that the physical firmware did not deliver to the NEXUS client.
+          - Removes the observed ~10 second state drop where Meetings forgot the still-running native recorder and offered Start again.
+          - Stop becomes reachable again because Meetings keeps the persisted active state after Start.
+          - After a successful native Start, NEXUS requests one display lock after 1.2 seconds so the waveguide returns to standby instead of leaving the stock recorder timer/wave visible.
+          - A rapid Stop cancels that effective lock via the current recording-state guard.
+          - Audio capture, recording finalisation, file delivery and storage remain entirely owned by Rokid. Meetings 2.0.0 remains unchanged.
+          - Hi Rokid, Relay and the proven 1.4.18 lifecycle recovery remain unchanged.
+
+          ### Artifact
+          - File: nexus-glasses-1.4.21.apk
+          - SHA-256: $sha
+          - Signer SHA-256: $signer
+          EOF
+          {
+            echo "ARTIFACT=$artifact"
+            echo "ARTIFACT_SHA=$sha"
+            echo "NOTES=$notes"
+          } >> "$GITHUB_ENV"
+
+      - name: Create Nexus Glasses 1.4.21 release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='nexus-glasses-v1.4.21'
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::$tag already exists; refusing overwrite."
+            exit 1
+          fi
+          gh release create "$tag" "$ARTIFACT" --target "$GITHUB_SHA" --title 'Nexus Glasses 1.4.21 — Native Recording State + Display Fix' --notes-file "$NOTES" --latest=false
+
+      - name: Upload signed APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-glasses-1.4.21-signed
+          path: ${{ env.ARTIFACT }}
+          if-no-files-found: error
+
+      - name: Remove decoded keystore
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/nexus-release.keystore"
