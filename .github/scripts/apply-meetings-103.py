@@ -543,9 +543,19 @@ new_protocol = '''                if (meetingProtocolId != null) {
                     }
                 } else {
 '''
-if text.count(old_protocol) != 1:
-    raise SystemExit(f"protocol completion branch: expected one match, found {text.count(old_protocol)}")
-text = text.replace(old_protocol, new_protocol, 1)
+if text.count(old_protocol) == 1:
+    text = text.replace(old_protocol, new_protocol, 1)
+else:
+    protocol_pattern = re.compile(
+        r"                if \(meetingProtocolId != null\) \{\n.*?"
+        r"                \} else \{\n",
+        re.DOTALL,
+    )
+    text, count = protocol_pattern.subn(new_protocol, text, count=1)
+    if count != 1:
+        raise SystemExit(
+            f"protocol completion branch: exact={text.count(old_protocol)} regex={count}"
+        )
 SERVICE.write_text(text, encoding="utf-8")
 
 replace_once(
