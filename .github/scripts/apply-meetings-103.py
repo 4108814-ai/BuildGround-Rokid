@@ -5,7 +5,6 @@ import runpy
 ROOT = Path(__file__).resolve().parents[2]
 BASE = ROOT / ".github/scripts/apply-meetings-102.py"
 SRC = ROOT / "plugins/assistant/src/main/java/com/anezium/rokidbus/plugin/assistant"
-TEST = ROOT / "plugins/assistant/src/test/java/com/anezium/rokidbus/plugin/assistant"
 SERVICE = SRC / "AssistantPluginService.kt"
 MEETINGS_ACTIVITY = SRC / "AssistantMeetingsActivity.kt"
 
@@ -16,33 +15,39 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
     text = path.read_text(encoding="utf-8")
     count = text.count(old)
     if count != 1:
-        raise SystemExit(f"{label}: expected one match, found {count}: {old[:160]!r}")
+        raise SystemExit(f"{label}: expected one match, found {count}: {old[:180]!r}")
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
-# Activity surfaces are the correct platform primitive for a background meeting:
-# unlike a regular Nexus Surface they do not set FLAG_KEEP_SCREEN_ON, they collapse
-# automatically, and quiet updates do not wake a dark display.
+# Meetings 1.0.3 uses the transient Notice tier, not a regular Surface or Activity.
+# Notice expires independently from the plugin session, so the HUD can disappear while the
+# continuous raw meeting audio lease remains alive.
 replace_once(
     SERVICE,
-    "import com.anezium.rokidbus.client.plugin.NexusAudioStopReason\n",
-    "import com.anezium.rokidbus.client.plugin.NexusAudioStopReason\n"
-    "import com.anezium.rokidbus.client.plugin.NexusActivity\n"
-    "import com.anezium.rokidbus.client.plugin.NexusActivityAction\n"
-    "import com.anezium.rokidbus.client.plugin.NexusActivityProgress\n",
-    "activity imports",
+    "import com.anezium.rokidbus.client.plugin.NexusNotice\n",
+    "import com.anezium.rokidbus.client.plugin.NexusNotice\n"
+    "import com.anezium.rokidbus.client.plugin.NexusNoticeAction\n",
+    "notice action import",
 )
 
 replace_once(
     SERVICE,
     "    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)\n",
     "    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)\n"
-    "    private var meetingsActivityStarted = false\n"
     "    private var meetingsStopping = false\n"
     "    private var meetingsCompletion: String? = null\n"
+    "    private var meetingsNoticeVisible = false\n"
     "    private var meetingsStartedElapsedRealtimeMs: Long? = null\n"
-    "    private var meetingsTimerJob: Job? = null\n",
-    "meeting activity state",
+    "    private var meetingsNoticeTickerJob: Job? = null\n",
+    "meeting notice state",
+)
+
+replace_once(
+    SERVICE,
+    "    private var meetingTranscriptionJob: Job? = null\n",
+    "    private var meetingTranscriptionJob: Job? = null\n"
+    "    private var meetingFinalizeTimeoutJob: Job? = null\n",
+    "meeting STT drain state",
 )
 
 service = SERVICE.read_text(encoding="utf-8")
@@ -52,8 +57,8 @@ open_pattern = re.compile(
     re.DOTALL,
 )
 open_replacement = r'''    override fun onNexusOpen() {
-        // Meetings deliberately does not mount a regular Surface. A regular Surface keeps the
-        // glasses display awake and owns foreground input. Canonical Activity is background-safe.
+        // No regular Surface: hiding a Surface is a plugin self-close. Meetings keeps the
+        // plugin session alive and presents only a short-lived Notice.
         surface = null
         inkSurface = null
         uiController.onOpen()
@@ -61,6 +66,7 @@ open_replacement = r'''    override fun onNexusOpen() {
         scheduleAccountContextSyncIfStale()
 
         if (meetingRecorder.active && !meetingAudioOwnedByCurrentProcess) {
+            // A process-restored meeting is archival state. Never silently reacquire the mic.
             val restoredMeetingId = meetingRecorder.id
             serviceScope.launch(Dispatchers.IO) {
                 meetingAudioRecorder.recoverCompleted(restoredMeetingId)
@@ -72,6 +78,9 @@ open_replacement = r'''    override fun onNexusOpen() {
             meetingRearmPending = false
             meetingAudioRetryJob?.cancel()
             meetingAudioRetryJob = null
+            meetingFinalizeTimeoutJob?.cancel()
+            meetingFinalizeTimeoutJob = null
+            meetingsStartedElapsedRealtimeMs = null
             if (interruptedMeetingId != null) {
                 serviceScope.launch(Dispatchers.IO) {
                     if (meetingAudioRecorder.finish(interruptedMeetingId) != null) {
@@ -79,147 +88,193 @@ open_replacement = r'''    override fun onNexusOpen() {
                     }
                 }
             }
+        } else if (meetingRecorder.active && meetingAudioOwnedByCurrentProcess) {
+            // Duplicate launcher opens and temporary foreground switches re-present the control.
+            // If the raw lease was suspended by a plugin close, explicitly re-arm it.
+            meetingAudioSuspended = false
+            if (meetingsStartedElapsedRealtimeMs == null) {
+                meetingsStartedElapsedRealtimeMs = SystemClock.elapsedRealtime()
+            }
+            scheduleMeetingRearm()
         }
 
-        meetingsStopping = false
-        meetingsCompletion = null
-        meetingsActivityStarted = false
-        if (meetingRecorder.active) startMeetingsTimer(resetBaseline = false)
-        renderMeetingsActivity(significant = true)
+        meetingsStopping = meetingStopPending
+        showMeetingsNotice()
+        if (meetingRecorder.active && !meetingsStopping) startMeetingsNoticeTicker()
     }
 
     override fun onNexusClose() {'''
 service, count = open_pattern.subn(open_replacement, service, count=1)
 if count != 1:
     raise SystemExit(f"onNexusOpen: expected one block, replaced {count}")
+SERVICE.write_text(service, encoding="utf-8")
 
+text = SERVICE.read_text(encoding="utf-8")
+close_marker = "    override fun onNexusClose() {\n"
+if text.count(close_marker) != 1:
+    raise SystemExit("Could not locate onNexusClose marker")
+text = text.replace(
+    close_marker,
+    close_marker
+    + "        meetingsNoticeTickerJob?.cancel()\n"
+    + "        meetingsNoticeTickerJob = null\n"
+    + "        meetingsNoticeVisible = false\n",
+    1,
+)
+SERVICE.write_text(text, encoding="utf-8")
+
+service = SERVICE.read_text(encoding="utf-8")
 input_pattern = re.compile(
-    r"    override fun onNexusInput\(event: NexusInputEvent\) \{.*?\n    \}\n\n    private fun renderMeetingsControl\(\) \{.*?\n    \}\n\n    override fun onNexusLinkState",
+    r"    override fun onNexusInput\(event: NexusInputEvent\) \{.*?\n    \}\n\n"
+    r"    private fun renderMeetingsControl\(\) \{.*?\n    \}\n\n"
+    r"    override fun onNexusLinkState",
     re.DOTALL,
 )
 input_replacement = r'''    override fun onNexusInput(event: NexusInputEvent) = Unit
 
-    override fun onNexusActivityAction(id: String) {
+    override fun onNexusNoticeAction(id: String) {
         when (id) {
-            MEETINGS_ACTION_START -> startMeetingFromActivity()
-            MEETINGS_ACTION_STOP -> stopMeetingFromActivity()
+            MEETINGS_ACTION_START -> startMeetingFromNotice()
+            MEETINGS_ACTION_STOP -> stopMeetingFromNotice()
         }
     }
 
-    override fun onNexusActivityClosed(reason: String) {
-        // Closing only the presentation must never cancel a live recording.
-        meetingsActivityStarted = false
-    }
-
-    private fun startMeetingFromActivity() {
-        if (meetingRecorder.active || meetingsStopping) return
+    private fun startMeetingFromNotice() {
+        if (meetingRecorder.active || meetingsStopping || meetingStopPending) return
         meetingsCompletion = null
-        handleMeetingTranscript("начать совещание")
-        if (!meetingRecorder.active) {
+        if (!handleMeetingTranscript("начать совещание") || !meetingRecorder.active) {
             meetingsCompletion = "Не удалось начать"
-            renderMeetingsActivity(significant = true)
+            showMeetingsNotice()
             return
         }
 
-        // Button/action start has no SpeechSession callback. Explicitly arm the proven continuous
-        // raw meeting session here; this is the missing bridge in 1.0.1/1.0.2.
+        // Button/Notice start has no start-command SpeechSession callback. This explicit rearm is
+        // the missing bridge in 1.0.1/1.0.2: it starts the proven continuous raw NexusAudioSession.
         meetingsStartedElapsedRealtimeMs = SystemClock.elapsedRealtime()
+        meetingAudioSuspended = false
         scheduleMeetingRearm()
-        startMeetingsTimer(resetBaseline = false)
-        renderMeetingsActivity(significant = true)
+        showMeetingsNotice()
+        startMeetingsNoticeTicker()
     }
 
-    private fun stopMeetingFromActivity() {
+    private fun stopMeetingFromNotice() {
         if (!meetingRecorder.active || meetingsStopping || meetingStopPending) return
         meetingsStopping = true
-        meetingsCompletion = null
-        meetingsTimerJob?.cancel()
-        meetingsTimerJob = null
-        renderMeetingsActivity(significant = true)
+        meetingsNoticeTickerJob?.cancel()
+        meetingsNoticeTickerJob = null
+        showMeetingsNotice()
         requestMeetingFinish()
     }
 
-    private fun startMeetingsTimer(resetBaseline: Boolean) {
-        if (resetBaseline || meetingsStartedElapsedRealtimeMs == null) {
-            meetingsStartedElapsedRealtimeMs = SystemClock.elapsedRealtime()
-        }
-        meetingsTimerJob?.cancel()
-        meetingsTimerJob = serviceScope.launch {
-            while (meetingRecorder.active && !meetingsStopping) {
-                renderMeetingsActivity(significant = false)
-                delay(MEETINGS_TIMER_TICK_MS)
-            }
-        }
-    }
-
-    private fun renderMeetingsActivity(significant: Boolean) {
+    private fun showMeetingsNotice() {
         val client = nexusClient ?: return
-        val activity = when {
-            meetingsStopping -> NexusActivity(
-                glyph = "stop",
-                primary = "СТОП",
-                secondary = "Сохраняю совещание",
-                progress = NexusActivityProgress.Indeterminate,
-                detail = listOf("Аудио + текст + протокол"),
-                actions = emptyList(),
-                wakeDisplay = false,
-            )
-            meetingRecorder.active -> NexusActivity(
-                glyph = "record",
-                primary = meetingElapsedLabel(),
-                secondary = "Совещание идёт",
-                detail = listOf("Запись + расшифровка"),
+        val title: String
+        val lines: List<String>
+        val actions: List<NexusNoticeAction>
+        val ttlMs: Long
+
+        when {
+            meetingsStopping -> {
+                title = "Meetings"
+                lines = listOf("Сохраняю совещание", "Аудио → текст → протокол")
+                actions = emptyList()
+                ttlMs = MEETINGS_STOPPING_NOTICE_TTL_MS
+            }
+            meetingRecorder.active -> {
+                title = "Meetings · ${meetingElapsedLabel()}"
+                lines = listOf("● Совещание идёт", "Запись + расшифровка")
                 actions = listOf(
-                    NexusActivityAction(
+                    NexusNoticeAction(
                         id = MEETINGS_ACTION_STOP,
                         glyph = "stop",
                         label = "Остановить",
                     ),
-                ),
-                wakeDisplay = false,
-            )
-            meetingsCompletion != null -> NexusActivity(
-                glyph = "check",
-                primary = "ГОТОВО",
-                secondary = meetingsCompletion!!.take(28),
-                detail = listOf("Архив на телефоне"),
+                )
+                ttlMs = MEETINGS_ACTIVE_NOTICE_TTL_MS
+            }
+            meetingsCompletion != null -> {
+                title = "Meetings · ГОТОВО"
+                lines = listOf(meetingsCompletion!!.take(120))
                 actions = listOf(
-                    NexusActivityAction(
+                    NexusNoticeAction(
                         id = MEETINGS_ACTION_START,
                         glyph = "record",
                         label = "Новое",
                     ),
-                ),
-                wakeDisplay = false,
-            )
-            else -> NexusActivity(
-                glyph = "record",
-                primary = "ГОТОВО",
-                secondary = "Режим совещания",
-                detail = listOf("Запись + текст + протокол"),
+                )
+                ttlMs = MEETINGS_COMPLETE_NOTICE_TTL_MS
+            }
+            else -> {
+                title = "Meetings"
+                lines = listOf("Режим совещания", "Запись + текст + протокол")
                 actions = listOf(
-                    NexusActivityAction(
+                    NexusNoticeAction(
                         id = MEETINGS_ACTION_START,
                         glyph = "record",
                         label = "Начать",
                     ),
+                )
+                ttlMs = MEETINGS_IDLE_NOTICE_TTL_MS
+            }
+        }
+
+        val result = if (meetingsNoticeVisible) {
+            client.updateNotice(
+                NexusNoticeUpdate(
+                    title = title,
+                    lines = lines,
+                    actions = actions,
+                    ttlMs = ttlMs,
                 ),
-                wakeDisplay = false,
+            )
+        } else {
+            client.showNotice(
+                NexusNotice(
+                    title = title,
+                    lines = lines,
+                    actions = actions,
+                    ttlMs = ttlMs,
+                    wakeDisplay = false,
+                ),
             )
         }
-        val result = if (meetingsActivityStarted) {
-            client.updateActivity(activity, significant = significant)
-        } else {
-            client.startActivity(activity)
+        meetingsNoticeVisible = result == NexusSdkResult.SENT
+    }
+
+    private fun startMeetingsNoticeTicker() {
+        meetingsNoticeTickerJob?.cancel()
+        meetingsNoticeTickerJob = serviceScope.launch {
+            repeat(MEETINGS_NOTICE_COUNTER_UPDATES) {
+                delay(MEETINGS_NOTICE_COUNTER_INTERVAL_MS)
+                if (!meetingRecorder.active || meetingsStopping || !meetingsNoticeVisible) {
+                    return@launch
+                }
+                val client = nexusClient ?: return@launch
+                // Do not resend actions here. A text-only update preserves the Stop row without
+                // reopening a one-shot action after every timer tick.
+                val result = client.updateNotice(
+                    NexusNoticeUpdate(
+                        title = "Meetings · ${meetingElapsedLabel()}",
+                        lines = listOf("● Совещание идёт", "Запись + расшифровка"),
+                        ttlMs = MEETINGS_ACTIVE_NOTICE_TTL_MS,
+                    ),
+                )
+                if (result != NexusSdkResult.SENT) {
+                    meetingsNoticeVisible = false
+                    return@launch
+                }
+            }
+            // No hide call: the Notice TTL now expires naturally. That closure does not close
+            // the plugin session or release the meeting audio lease.
         }
-        if (result == NexusSdkResult.SENT) meetingsActivityStarted = true
     }
 
     private fun meetingElapsedLabel(): String {
         val started = meetingsStartedElapsedRealtimeMs ?: return "00:00"
-        val totalSeconds = ((SystemClock.elapsedRealtime() - started).coerceAtLeast(0L) / 1000L)
-        val hours = totalSeconds / 3600L
-        val minutes = (totalSeconds % 3600L) / 60L
+        val totalSeconds =
+            ((SystemClock.elapsedRealtime() - started).coerceAtLeast(0L) / 1_000L)
+        val hours = totalSeconds / 3_600L
+        val minutes = (totalSeconds % 3_600L) / 60L
         val seconds = totalSeconds % 60L
         return if (hours > 0L) {
             "%d:%02d:%02d".format(hours, minutes, seconds)
@@ -228,35 +283,188 @@ input_replacement = r'''    override fun onNexusInput(event: NexusInputEvent) = 
         }
     }
 
-    private fun completeMeetingsActivity(message: String) {
+    private fun completeMeetingsNotice(message: String) {
         meetingsStopping = false
-        meetingsTimerJob?.cancel()
-        meetingsTimerJob = null
+        meetingsNoticeTickerJob?.cancel()
+        meetingsNoticeTickerJob = null
         meetingsStartedElapsedRealtimeMs = null
         meetingsCompletion = message
-        renderMeetingsActivity(significant = true)
+        showMeetingsNotice()
     }
 
     override fun onNexusLinkState'''
 service, count = input_pattern.subn(input_replacement, service, count=1)
 if count != 1:
     raise SystemExit(f"Meetings Surface/input block: expected one replacement, got {count}")
-
 SERVICE.write_text(service, encoding="utf-8")
 
-# Do not throw an Assistant transient over Rokid while the Activity already says "stopping".
+replace_once(
+    SERVICE,
+    '''    override fun onNexusNoticeClosed(reason: NexusNoticeCloseReason) {
+        if (reason == NexusNoticeCloseReason.USER) stopAnswerSpeech()
+        uiController.onNoticeClosed(reason)
+    }
+''',
+    '''    override fun onNexusNoticeClosed(reason: NexusNoticeCloseReason) {
+        if (meetingsNoticeVisible) {
+            meetingsNoticeVisible = false
+            meetingsNoticeTickerJob?.cancel()
+            meetingsNoticeTickerJob = null
+            return
+        }
+        if (reason == NexusNoticeCloseReason.USER) stopAnswerSpeech()
+        uiController.onNoticeClosed(reason)
+    }
+''',
+    "meeting notice close isolation",
+)
+
+replace_once(
+    SERVICE,
+    '''                if (meetingStopPending) {
+                    finalizeMeetingSession()
+                    return
+                }
+''',
+    '''                if (meetingStopPending) {
+                    maybeFinalizeMeetingAfterTranscription()
+                    return
+                }
+''',
+    "audio-stop STT drain",
+)
+
 text = SERVICE.read_text(encoding="utf-8")
-request_pattern = re.compile(
-    r"(    private fun requestMeetingFinish\(\) \{.*?meetingTranscriptionQueue\.clear\(\)\n)"
-    r"        uiController\.showTransient\(\"Готовлю протокол…\"\)\n",
+transcription_pattern = re.compile(
+    r"    private fun enqueueMeetingTranscription\(pcm: ByteArray, format: NexusAudioFormat\) \{.*?\n"
+    r"    \}\n\n"
+    r"    private fun requestMeetingFinish\(\) \{",
     re.DOTALL,
 )
-text, count = request_pattern.subn(r"\1        renderMeetingsActivity(significant = true)\n", text, count=1)
+transcription_replacement = r'''    private fun enqueueMeetingTranscription(pcm: ByteArray, format: NexusAudioFormat) {
+        if (pcm.isEmpty() || !meetingRecorder.active) return
+        if (meetingTranscriptionQueue.size >= MAX_MEETING_STT_QUEUE) {
+            Log.w(TAG, "Meeting STT queue full; source audio remains preserved")
+            return
+        }
+        meetingTranscriptionQueue.addLast(AssistantMeetingPcmChunk(pcm, format))
+        ensureMeetingTranscriptionWorker()
+    }
+
+    private fun ensureMeetingTranscriptionWorker() {
+        if (!meetingRecorder.active || meetingTranscriptionQueue.isEmpty()) {
+            maybeFinalizeMeetingAfterTranscription()
+            return
+        }
+        if (meetingTranscriptionJob?.isActive == true) return
+
+        meetingTranscriptionJob = serviceScope.launch {
+            try {
+                while (meetingTranscriptionQueue.isNotEmpty() && meetingRecorder.active) {
+                    val pending = meetingTranscriptionQueue.removeFirst()
+                    val transcript = try {
+                        transcriber.transcribe(pending.pcm, pending.format).trim()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Throwable) {
+                        Log.w(TAG, "Meeting STT failed: ${error.javaClass.simpleName}")
+                        continue
+                    }
+                    val normalized = normalizeTranscript(transcript)
+                    if (normalized.isBlank()) continue
+
+                    // Meetings 1.0.3 is explicitly button-controlled. Spoken phrases such as
+                    // "завершить совещание" are transcript content, never hidden control commands.
+                    meetingRecorder.append(normalized)
+                }
+            } finally {
+                meetingTranscriptionJob = null
+                if (meetingTranscriptionQueue.isNotEmpty() && meetingRecorder.active) {
+                    ensureMeetingTranscriptionWorker()
+                } else {
+                    maybeFinalizeMeetingAfterTranscription()
+                }
+            }
+        }
+    }
+
+    private fun maybeFinalizeMeetingAfterTranscription() {
+        if (!meetingStopPending || meetingAudioSession != null) return
+        if (meetingTranscriptionJob?.isActive == true || meetingTranscriptionQueue.isNotEmpty()) {
+            return
+        }
+        finalizeMeetingSession()
+    }
+
+    private fun scheduleMeetingFinalizeTimeout() {
+        meetingFinalizeTimeoutJob?.cancel()
+        meetingFinalizeTimeoutJob = serviceScope.launch {
+            delay(MEETING_STT_DRAIN_TIMEOUT_MS)
+            meetingFinalizeTimeoutJob = null
+            if (!meetingStopPending) return@launch
+            Log.w(TAG, "Meeting STT drain timed out; finalizing preserved source audio")
+            meetingTranscriptionJob?.cancel()
+            meetingTranscriptionJob = null
+            meetingTranscriptionQueue.clear()
+            finalizeMeetingSession()
+        }
+    }
+
+    private fun requestMeetingFinish() {'''
+text, count = transcription_pattern.subn(transcription_replacement, text, count=1)
 if count != 1:
-    raise SystemExit(f"requestMeetingFinish transient: expected one replacement, got {count}")
+    raise SystemExit(f"meeting transcription worker: expected one replacement, got {count}")
 SERVICE.write_text(text, encoding="utf-8")
 
-# Finalization must report what really made it into phone storage.
+replace_once(
+    SERVICE,
+    "        meetingStopPending = true\n"
+    "        meetingAudioOwnedByCurrentProcess = false\n",
+    "        meetingStopPending = true\n"
+    "        meetingsStopping = true\n"
+    "        meetingAudioOwnedByCurrentProcess = false\n",
+    "meeting stopping state",
+)
+replace_once(
+    SERVICE,
+    "        meetingTranscriptionQueue.clear()\n"
+    "        uiController.showTransient(\"Готовлю протокол…\")\n",
+    "        scheduleMeetingFinalizeTimeout()\n"
+    "        showMeetingsNotice()\n",
+    "stop drain queue preservation",
+)
+replace_once(
+    SERVICE,
+    '''        val activeAudio = meetingAudioSession
+        if (activeAudio != null) {
+            activeAudio.stop()
+        } else {
+            finalizeMeetingSession()
+        }
+''',
+    '''        val activeAudio = meetingAudioSession
+        if (activeAudio != null) {
+            activeAudio.stop()
+        } else {
+            maybeFinalizeMeetingAfterTranscription()
+        }
+''',
+    "stop waits for STT",
+)
+
+replace_once(
+    SERVICE,
+    "    private fun finalizeMeetingSession() {\n"
+    "        if (!meetingStopPending) return\n"
+    "        val meeting = meetingRecorder.finish()\n",
+    "    private fun finalizeMeetingSession() {\n"
+    "        if (!meetingStopPending) return\n"
+    "        meetingFinalizeTimeoutJob?.cancel()\n"
+    "        meetingFinalizeTimeoutJob = null\n"
+    "        val meeting = meetingRecorder.finish()\n",
+    "finalize timeout cleanup",
+)
+
 text = SERVICE.read_text(encoding="utf-8")
 old_finalize = '''            if (meeting == null) {
                 uiController.showTransient("Совещание завершено")
@@ -276,29 +484,27 @@ old_finalize = '''            if (meeting == null) {
             }
 '''
 new_finalize = '''            if (meeting == null) {
-                completeMeetingsActivity("Совещание завершено")
+                completeMeetingsNotice("Совещание завершено")
                 return@launch
             }
             if (meeting.segments.isEmpty()) {
-                completeMeetingsActivity(
+                completeMeetingsNotice(
                     if (audio != null) "Аудио сохранено · нет текста" else "Нет аудио и текста",
                 )
                 return@launch
             }
-            renderMeetingsActivity(significant = true)
+            showMeetingsNotice()
             launchPipeline {
                 streamAssistantAnswer(meeting.summaryPrompt(), meeting.id)
             }
 '''
 if text.count(old_finalize) != 1:
-    raise SystemExit(f"finalizeMeetingSession: expected one match, found {text.count(old_finalize)}")
+    raise SystemExit(f"finalizeMeetingSession result UI: expected one match, found {text.count(old_finalize)}")
 text = text.replace(old_finalize, new_finalize, 1)
 SERVICE.write_text(text, encoding="utf-8")
 
-# The protocol path already persists protocol.md before this branch. Confirm actual archive state
-# before showing success; do not emit an Assistant notice/HUD.
 text = SERVICE.read_text(encoding="utf-8")
-old = '''                if (meetingProtocolId != null) {
+old_protocol = '''                if (meetingProtocolId != null) {
                     followUpController.cancel()
                     automaticFollowUpCapture = false
                     uiController.showTransient("Протокол готов • сохранён на телефоне")
@@ -308,33 +514,40 @@ old = '''                if (meetingProtocolId != null) {
                     }
                 } else {
 '''
-new = '''                if (meetingProtocolId != null) {
+new_protocol = '''                if (meetingProtocolId != null) {
                     followUpController.cancel()
                     automaticFollowUpCapture = false
-                    val stored = withContext(Dispatchers.IO) {
-                        val archive = meetingStore.meeting(meetingProtocolId)
-                        val protocolSaved = !archive?.protocol.isNullOrBlank()
-                        val transcriptSaved = !archive?.segments.isNullOrEmpty()
-                        val audioSaved = meetingStore.meetingAudioFile(meetingProtocolId) != null
-                        Triple(audioSaved, transcriptSaved, protocolSaved)
+                    serviceScope.launch {
+                        val stored = withContext(Dispatchers.IO) {
+                            val archive = meetingStore.meeting(meetingProtocolId)
+                            val protocolSaved = !archive?.protocol.isNullOrBlank()
+                            val transcriptSaved = !archive?.segments.isNullOrEmpty()
+                            val audioSaved = meetingStore.meetingAudioFile(meetingProtocolId) != null
+                            Triple(audioSaved, transcriptSaved, protocolSaved)
+                        }
+                        val completion = when {
+                            stored.first && stored.second && stored.third ->
+                                "Аудио + текст + протокол"
+                            stored.first && stored.second ->
+                                "Аудио + текст сохранены"
+                            stored.first ->
+                                "Сохранено только аудио"
+                            stored.second && stored.third ->
+                                "Текст + протокол сохранены"
+                            stored.second ->
+                                "Сохранён только текст"
+                            else ->
+                                "Ошибка сохранения"
+                        }
+                        completeMeetingsNotice(completion)
                     }
-                    val completion = when {
-                        stored.first && stored.second && stored.third -> "Аудио + текст + протокол"
-                        stored.first && stored.second -> "Аудио + текст сохранены"
-                        stored.first -> "Сохранено только аудио"
-                        stored.second && stored.third -> "Текст + протокол сохранены"
-                        stored.second -> "Сохранён только текст"
-                        else -> "Ошибка сохранения"
-                    }
-                    completeMeetingsActivity(completion)
                 } else {
 '''
-if text.count(old) != 1:
-    raise SystemExit(f"protocol completion branch: expected one match, found {text.count(old)}")
-text = text.replace(old, new, 1)
+if text.count(old_protocol) != 1:
+    raise SystemExit(f"protocol completion branch: expected one match, found {text.count(old_protocol)}")
+text = text.replace(old_protocol, new_protocol, 1)
 SERVICE.write_text(text, encoding="utf-8")
 
-# Phone archive language should match the button-driven Meetings product.
 replace_once(
     MEETINGS_ACTIVITY,
     '"No meetings yet. Say “начать совещание” on the glasses.",',
@@ -342,7 +555,6 @@ replace_once(
     "phone archive empty state",
 )
 
-# Constants for the canonical Activity UI.
 text = SERVICE.read_text(encoding="utf-8")
 constant_marker = "        private const val MEETING_RESULT_CONFIRMATION_MS = 2_500L\n"
 if text.count(constant_marker) != 1:
@@ -350,80 +562,42 @@ if text.count(constant_marker) != 1:
 text = text.replace(
     constant_marker,
     constant_marker
-    + '        private const val MEETINGS_TIMER_TICK_MS = 1_000L\n'
+    + "        private const val MEETINGS_NOTICE_COUNTER_INTERVAL_MS = 1_000L\n"
+    + "        private const val MEETINGS_NOTICE_COUNTER_UPDATES = 7\n"
+    + "        private const val MEETINGS_ACTIVE_NOTICE_TTL_MS = 2_500L\n"
+    + "        private const val MEETINGS_IDLE_NOTICE_TTL_MS = 15_000L\n"
+    + "        private const val MEETINGS_STOPPING_NOTICE_TTL_MS = 15_000L\n"
+    + "        private const val MEETINGS_COMPLETE_NOTICE_TTL_MS = 8_000L\n"
+    + "        private const val MEETING_STT_DRAIN_TIMEOUT_MS = 20_000L\n"
     + '        private const val MEETINGS_ACTION_START = "meetings-start"\n'
     + '        private const val MEETINGS_ACTION_STOP = "meetings-stop"\n',
     1,
 )
 SERVICE.write_text(text, encoding="utf-8")
 
-# Pure UI-state contract to keep Start/Stop deterministic.
-(SRC / "MeetingsActivityPolicy.kt").write_text(
-    r'''package com.anezium.rokidbus.plugin.assistant
-
-internal enum class MeetingsActivityMode { IDLE, ACTIVE, STOPPING, COMPLETE }
-
-internal object MeetingsActivityPolicy {
-    fun mode(
-        active: Boolean,
-        stopping: Boolean,
-        hasCompletion: Boolean,
-    ): MeetingsActivityMode = when {
-        stopping -> MeetingsActivityMode.STOPPING
-        active -> MeetingsActivityMode.ACTIVE
-        hasCompletion -> MeetingsActivityMode.COMPLETE
-        else -> MeetingsActivityMode.IDLE
-    }
-}
-''',
-    encoding="utf-8",
-)
-
-TEST.mkdir(parents=True, exist_ok=True)
-(TEST / "MeetingsActivityPolicyTest.kt").write_text(
-    r'''package com.anezium.rokidbus.plugin.assistant
-
-import org.junit.Assert.assertEquals
-import org.junit.Test
-
-class MeetingsActivityPolicyTest {
-    @Test fun idle() =
-        assertEquals(MeetingsActivityMode.IDLE, MeetingsActivityPolicy.mode(false, false, false))
-
-    @Test fun active() =
-        assertEquals(MeetingsActivityMode.ACTIVE, MeetingsActivityPolicy.mode(true, false, false))
-
-    @Test fun stoppingWinsOverActive() =
-        assertEquals(MeetingsActivityMode.STOPPING, MeetingsActivityPolicy.mode(true, true, false))
-
-    @Test fun complete() =
-        assertEquals(MeetingsActivityMode.COMPLETE, MeetingsActivityPolicy.mode(false, false, true))
-}
-''',
-    encoding="utf-8",
-)
-
-# Guard the exact 1.0.3 intent.
 service = SERVICE.read_text(encoding="utf-8")
 for marker in (
-    "NexusActivityAction(",
+    "NexusNoticeAction(",
     'MEETINGS_ACTION_START = "meetings-start"',
     'MEETINGS_ACTION_STOP = "meetings-stop"',
     "scheduleMeetingRearm()",
-    "startMeetingsTimer(resetBaseline = false)",
-    "meetingStore.meetingAudioFile(meetingProtocolId)",
-    "completeMeetingsActivity(completion)",
-    "override fun onNexusActivityAction(id: String)",
+    "maybeFinalizeMeetingAfterTranscription()",
+    "scheduleMeetingFinalizeTimeout()",
+    "meetingRecorder.append(normalized)",
+    "MEETING_STT_DRAIN_TIMEOUT_MS = 20_000L",
+    "wakeDisplay = false",
 ):
     if marker not in service:
         raise SystemExit(f"Missing Meetings 1.0.3 marker: {marker}")
 
 for forbidden in (
     "renderMeetingsControl()",
+    "NexusActivity(",
+    "NexusActivityAction(",
     'uiController.showTransient("Протокол готов • сохранён на телефоне")',
 ):
     if forbidden in service:
         raise SystemExit(f"Legacy Meetings UI remains: {forbidden}")
 
-# No Glasses/Relay changes are made by this patch. Activity updates are quiet and never wake the
-# display; physical screen-off timing remains native Rokid behavior and is device-verified separately.
+if "surface = nexusSurfaceSession(SURFACE_ID)" in service:
+    raise SystemExit("Meetings 1.0.3 still mounts a regular Surface")
