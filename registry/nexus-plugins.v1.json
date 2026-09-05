@@ -94,15 +94,20 @@
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v1.0.2/meetings-phone-release.apk",
-        "sha256": "d5530a9108182829172337ed41033c9d781b07e0119f7c35a28f0b5adaee723f",
+        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v1.0.3/meetings-phone-release.apk",
+        "sha256": "0d61384d4bfa45ed5a09ece1ab9ed583e385e2296edea35c2733eb86b71a03f0",
         "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
-        "sizeBytes": 6328743,
+        "sizeBytes": 6336183,
         "packageName": "com.anezium.rokidbus.plugin.assistant",
-        "versionCode": 21,
-        "versionName": "1.0.2"
+        "versionCode": 22,
+        "versionName": "1.0.3"
       },
       "releases": [
+        {
+          "version": "1.0.3",
+          "date": "2026-09-05T09:14:13Z",
+          "notes": "BuildGround Meetings 1.0.3.\n\n- Replaces the regular Meeting Surface / rejected Activity draft with a transient Nexus Notice control.\n- Start now explicitly arms the proven continuous raw NexusAudioSession; this closes the 1.0.2 gap where Meeting state could start without PCM capture.\n- The elapsed counter updates briefly, then the Notice expires naturally while the plugin session and source-audio recording remain active.\n- Reopening Meetings re-presents the current elapsed time and Stop control.\n- Stop preserves queued/final STT work and waits for a bounded drain before transcript archival and protocol generation. Source WAV remains authoritative if STT times out.\n- Spoken meeting content is appended as transcript text and no longer acts as a hidden voice Stop command.\n- Completion status is derived from the actual phone archive: audio, transcript and protocol.\n- Nexus Phone/Glasses core and Relay are not modified by this Meetings patch.\n- Internal plugin id remains assistant for Store compatibility; user-facing identity remains Meetings.\n- No assistant capability or Hey Rokid takeover.\n\n### Artifact\n- File: `meetings-phone-release.apk`\n- SHA-256: `0d61384d4bfa45ed5a09ece1ab9ed583e385e2296edea35c2733eb86b71a03f0`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        },
         {
           "version": "1.0.2",
           "date": "2026-09-04T20:03:01Z",
