@@ -70,9 +70,9 @@
       "id": "assistant",
       "kind": "nexus-plugin",
       "name": "Meetings",
-      "category": "Assistant",
-      "summary": "BuildGround Meetings: stable continuous source-audio capture with direct Downloads WAV.",
-      "description": "Dedicated meeting recorder for Nexus. Start owns the raw meeting microphone before the HUD can close; Stop and WAV survive transient UI lifecycle changes.",
+      "category": "Productivity",
+      "summary": "Meetings: Start/Stop control for the stock Rokid audio recorder.",
+      "description": "Thin BuildGround interface. Rokid owns microphones, recording, phone sync and storage; Meetings only sends Start/Stop and waits for native confirmation.",
       "author": "Anezium",
       "sourceUrl": "https://github.com/Anezium/Rokid-Nexus",
       "publishedAt": "2026-08-11T22:06:05Z",
@@ -81,28 +81,31 @@
         "pluginId": "assistant",
         "apiVersion": 3,
         "capabilities": [
-          "surfaces",
-          "microphone"
+          "surfaces"
         ],
         "launchable": true,
-        "settingsActivity": ".AssistantSettingsActivity",
         "minHostVersionCode": 10405
       },
       "screenshotAssets": [],
       "listing": {
-        "descriptionMarkdown": "## BuildGround Meetings\n\nA dedicated work plugin for meetings. The stock Rokid assistant remains untouched.\n\n- Open **Meetings** from the Nexus launcher.\n- Press **Start meeting** to begin source-audio recording and transcription.\n- Open **Meetings** again and press **Finish meeting** to stop and generate the protocol.\n- Source WAV, transcript and protocol remain in the phone meeting archive.\n- Uses the existing ChatGPT/provider sign-in only for protocol generation.\n"
+        "descriptionMarkdown": "## BuildGround Meetings\n\nThin Start/Stop control for the stock Rokid audio recorder. Rokid handles microphones, recording, finalisation, phone delivery and storage. Meetings does not capture or transcribe audio. Requires Nexus Glasses 1.4.20."
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v1.0.7/meetings-phone-release.apk",
-        "sha256": "e57a7f3d6584ed3cc7bec3df02e11322f3deb70c17622aa927f5aba2ddbad0db",
+        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v2.0.0/meetings-phone-release.apk",
+        "sha256": "f745dfa91b6e3cfcf231cde3636d5ddcc87b06b20cb039a506e990cf2ba0dc80",
         "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
-        "sizeBytes": 6349203,
+        "sizeBytes": 6246991,
         "packageName": "com.anezium.rokidbus.plugin.assistant",
-        "versionCode": 26,
-        "versionName": "1.0.7"
+        "versionCode": 27,
+        "versionName": "2.0.0"
       },
       "releases": [
+        {
+          "version": "2.0.0",
+          "date": "2026-09-05T16:16:48Z",
+          "notes": "BuildGround Meetings 2.0.0 — Rokid Native Recording Control.\n\n- Meetings is only a Start/Stop interface for Rokid's stock audio recorder.\n- The UI waits for Rokid's native result_audio_record confirmation before changing recording state.\n- No custom microphone lease, PCM/WAV capture, STT, transcript, protocol, Vault or Downloads export remains in the active Meetings runtime.\n- Rokid owns microphones, recording finalisation, its existing phone delivery and storage flow.\n- Requires corrected Nexus Glasses 1.4.20 native-recording bridge; 1.4.19 is superseded and must not be used for this test.\n- Hi Rokid remains the native assistant and Relay is unchanged.\n\n### Artifact\n- File: meetings-phone-release.apk\n- SHA-256: f745dfa91b6e3cfcf231cde3636d5ddcc87b06b20cb039a506e990cf2ba0dc80\n- Signer SHA-256: 55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097"
+        },
         {
           "version": "1.0.7",
           "date": "2026-09-05T14:07:47Z",
