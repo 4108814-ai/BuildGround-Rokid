@@ -36,17 +36,21 @@ class AssistantPluginService : NexusPluginService() {
     private var noticeVisible = false
     private var pendingId: String? = null
     private var pendingAction: String? = null
+    private var pendingTimeout: Runnable? = null
+    private var timerTick: Runnable? = null
     private var transientMessage: String? = null
 
     override fun onNexusOpen() {
         noticeVisible = false
         transientMessage = null
         showControl()
+        scheduleTimerIfNeeded()
     }
 
     override fun onNexusClose() {
         // Closing the HUD never changes Rokid's recording state.
         noticeVisible = false
+        cancelTimer()
     }
 
     override fun onNexusInput(event: NexusInputEvent) = Unit
@@ -60,24 +64,32 @@ class AssistantPluginService : NexusPluginService() {
 
     override fun onNexusNoticeClosed(reason: NexusNoticeCloseReason) {
         noticeVisible = false
+        cancelTimer()
     }
 
     override fun onNexusMessage(path: String, id: String, payload: JSONObject) {
         if (path != RESULT_PATH || id != pendingId) return
         val action = pendingAction ?: return
-        pendingId = null
-        pendingAction = null
 
-        if (!payload.optBoolean("accepted", false)) {
+        // Nexus Glasses reports two phases: dispatch means only that the command reached the
+        // stock service. The UI must NOT claim recording until Rokid itself returns
+        // result_audio_record and the bridge marks the command confirmed.
+        if (payload.optBoolean("accepted", false) && !payload.optBoolean("confirmed", false)) {
+            return
+        }
+
+        clearPending()
+        if (!payload.optBoolean("accepted", false) || !payload.optBoolean("confirmed", false)) {
             transientMessage = when (action) {
-                "start" -> "Rokid не принял команду запуска"
-                else -> "Rokid не принял команду остановки"
+                "start" -> "Rokid не подтвердил запуск записи"
+                else -> "Rokid не подтвердил остановку записи"
             }
             showControl()
             return
         }
 
-        if (action == "start") {
+        val recording = payload.optBoolean("recording", action == "start")
+        if (recording) {
             prefs.edit()
                 .putBoolean(KEY_ACTIVE, true)
                 .putLong(KEY_STARTED_AT, System.currentTimeMillis())
@@ -91,6 +103,13 @@ class AssistantPluginService : NexusPluginService() {
             transientMessage = "Запись остановлена — дальше работает Rokid"
         }
         showControl()
+        scheduleTimerIfNeeded()
+    }
+
+    override fun onDestroy() {
+        clearPending()
+        cancelTimer()
+        super.onDestroy()
     }
 
     private fun requestNativeRecording(action: String) {
@@ -108,7 +127,12 @@ class AssistantPluginService : NexusPluginService() {
         val id = UUID.randomUUID().toString()
         pendingId = id
         pendingAction = action
-        transientMessage = if (action == "start") "Запускаю штатную запись Rokid…" else "Останавливаю запись Rokid…"
+        transientMessage = if (action == "start") {
+            "Запускаю штатную запись Rokid…"
+        } else {
+            "Останавливаю запись Rokid…"
+        }
+        cancelTimer()
         showControl()
 
         val sent = nexusClient?.send(
@@ -117,20 +141,27 @@ class AssistantPluginService : NexusPluginService() {
             JSONObject().put("action", action),
         ) == true
         if (!sent) {
-            pendingId = null
-            pendingAction = null
+            clearPending()
             transientMessage = "Нет связи с NEXUS Glasses"
             showControl()
             return
         }
 
-        handler.postDelayed({
-            if (pendingId != id) return@postDelayed
-            pendingId = null
-            pendingAction = null
-            transientMessage = "Нет ответа от NEXUS Glasses 1.4.19"
+        val timeout = Runnable {
+            if (pendingId != id) return@Runnable
+            clearPending()
+            transientMessage = "Нет подтверждения от Rokid / NEXUS Glasses 1.4.20"
             showControl()
-        }, REQUEST_TIMEOUT_MS)
+        }
+        pendingTimeout = timeout
+        handler.postDelayed(timeout, REQUEST_TIMEOUT_MS)
+    }
+
+    private fun clearPending() {
+        pendingTimeout?.let(handler::removeCallbacks)
+        pendingTimeout = null
+        pendingId = null
+        pendingAction = null
     }
 
     private fun showControl() {
@@ -203,6 +234,28 @@ class AssistantPluginService : NexusPluginService() {
         transientMessage = null
     }
 
+    private fun scheduleTimerIfNeeded() {
+        cancelTimer()
+        if (!noticeVisible || pendingId != null || !prefs.getBoolean(KEY_ACTIVE, false)) return
+        val tick = object : Runnable {
+            override fun run() {
+                if (!noticeVisible || pendingId != null || !prefs.getBoolean(KEY_ACTIVE, false)) {
+                    timerTick = null
+                    return
+                }
+                showControl()
+                handler.postDelayed(this, TIMER_INTERVAL_MS)
+            }
+        }
+        timerTick = tick
+        handler.postDelayed(tick, TIMER_INTERVAL_MS)
+    }
+
+    private fun cancelTimer() {
+        timerTick?.let(handler::removeCallbacks)
+        timerTick = null
+    }
+
     private fun elapsedLabel(): String? {
         val startedAt = prefs.getLong(KEY_STARTED_AT, 0L)
         if (startedAt <= 0L) return null
@@ -225,7 +278,8 @@ class AssistantPluginService : NexusPluginService() {
         private const val PREFS = "meetings_native_rokid"
         private const val KEY_ACTIVE = "active"
         private const val KEY_STARTED_AT = "started_at"
-        private const val REQUEST_TIMEOUT_MS = 5_000L
+        private const val REQUEST_TIMEOUT_MS = 15_000L
+        private const val TIMER_INTERVAL_MS = 1_000L
         private const val NOTICE_TTL_MS = 30_000L
     }
 }
@@ -286,7 +340,7 @@ manifest = r'''<?xml version="1.0" encoding="utf-8"?>
                 android:value="surfaces" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.RECEIVE_PREFIXES"
-                android:value="/plugin/assistant" />
+                android:value="/plugin/assistant/rokid-recording" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.LAUNCHABLE"
                 android:value="true" />
@@ -308,9 +362,11 @@ manifest_check = MANIFEST.read_text(encoding="utf-8")
 for required in (
     'REQUEST_PATH = "/plugin/assistant/rokid-recording/request"',
     'RESULT_PATH = "/plugin/assistant/rokid-recording/result"',
+    'payload.optBoolean("confirmed", false)',
+    'REQUEST_TIMEOUT_MS = 15_000L',
     'JSONObject().put("action", action)',
     'android:value="surfaces"',
-    'android:value="/plugin/assistant"',
+    'android:value="/plugin/assistant/rokid-recording"',
 ):
     if required not in service_check and required not in manifest_check:
         raise SystemExit(f"Missing Meetings 2.0 marker: {required}")
