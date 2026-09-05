@@ -1280,6 +1280,49 @@
         }
       ],
       "iconUrl": "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/icons/wirelessadb-icon.png"
+    },
+    {
+      "id": "recorder",
+      "kind": "nexus-plugin",
+      "name": "Recorder",
+      "category": "Productivity",
+      "summary": "Dedicated Nexus source-audio recorder with direct WAV files in Downloads.",
+      "description": "Recorder owns the glasses microphone independently from HUD and Meetings lifecycle. Source WAV is the primary durable artifact.",
+      "author": "BuildGround",
+      "sourceUrl": "https://github.com/4108814-ai/BuildGround-Rokid",
+      "publishedAt": "2026-09-05T14:39:29Z",
+      "xBuildGroundManaged": true,
+      "screenshotAssets": [],
+      "listing": {
+        "descriptionMarkdown": "## Nexus Recorder\n\nDedicated source-audio layer for BuildGround on Rokid glasses.\n\n- Start and stop from the Nexus launcher.\n- Recording continues when the HUD closes or the display sleeps.\n- Reopen Recorder to see the active recording and Stop control.\n- WAV is written directly to the phone Downloads folder.\n- No transcription or AI dependency: audio is preserved first.\n"
+      },
+      "nexus": {
+        "pluginId": "recorder",
+        "apiVersion": 3,
+        "capabilities": [
+          "surfaces",
+          "microphone"
+        ],
+        "launchable": true,
+        "minHostVersionCode": 10405
+      },
+      "artifact": {
+        "target": "phone",
+        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/recorder-v1.0.0/recorder-phone-release.apk",
+        "sha256": "673d48445b4ee5ac21e8430fe93743125028dc99261f8cf504f02ad8a1caee5c",
+        "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
+        "sizeBytes": 5378296,
+        "packageName": "com.buildground.nexus.recorder",
+        "versionCode": 1,
+        "versionName": "1.0.0"
+      },
+      "releases": [
+        {
+          "version": "1.0.0",
+          "date": "2026-09-05T14:39:29Z",
+          "notes": "BuildGround Nexus Recorder 1.0.0.\n\n- Dedicated raw glasses-audio recorder independent from Meetings UI lifecycle.\n- Start/Stop from the Nexus launcher; reopening Recorder restores the live Stop control.\n- WAV is created directly in the phone Downloads root as BuildGround_Recording_<date>_<time>.wav.\n- The WAV header is checkpointed every two seconds so an interrupted service leaves a recoverable user-visible recording.\n- No STT, protocol generation or Hi Rokid assistant interception in this layer.\n- This release is the standalone recorder foundation; Meetings integration follows after physical-device WAV validation.\n\n### Artifact\n- File: `recorder-phone-release.apk`\n- SHA-256: `673d48445b4ee5ac21e8430fe93743125028dc99261f8cf504f02ad8a1caee5c`\n- Signer SHA-256: `55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097`"
+        }
+      ]
     }
   ]
 }
