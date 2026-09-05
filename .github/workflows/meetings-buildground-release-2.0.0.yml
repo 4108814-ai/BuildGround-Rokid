@@ -30,6 +30,14 @@ jobs:
           path: RokidNexus
           fetch-depth: 0
 
+      - name: Require corrected Nexus Glasses 1.4.20 bridge
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view nexus-glasses-v1.4.20 --repo "$GITHUB_REPOSITORY" >/dev/null
+
       - name: Check out CxrGlobal 0.2.3
         uses: actions/checkout@v6
         with:
@@ -107,11 +115,14 @@ jobs:
           grep -q 'android:value="assistant"' "$manifest"
           grep -q 'android:value="Meetings"' "$manifest"
           grep -q 'android:value="surfaces"' "$manifest"
+          grep -q 'android:value="/plugin/assistant/rokid-recording"' "$manifest"
           ! grep -q 'microphone' "$manifest"
           ! grep -q 'stt' "$manifest"
           ! grep -q 'tts' "$manifest"
           grep -q '/plugin/assistant/rokid-recording/request' "$service"
           grep -q '/plugin/assistant/rokid-recording/result' "$service"
+          grep -q 'payload.optBoolean("confirmed", false)' "$service"
+          grep -q 'REQUEST_TIMEOUT_MS = 15_000L' "$service"
           ! grep -q 'NexusAudioSession' "$service"
           ! grep -q 'meetingRecorder' "$service"
           ! grep -q 'transcriber' "$service"
@@ -173,10 +184,11 @@ jobs:
           cat > "$notes" <<EOF
           BuildGround Meetings 2.0.0 — Rokid Native Recording Control.
 
-          - Meetings is now only a Start/Stop interface for Rokid's stock audio recorder.
+          - Meetings is only a Start/Stop interface for Rokid's stock audio recorder.
+          - The UI waits for Rokid's native result_audio_record confirmation before changing recording state.
           - No custom microphone lease, PCM/WAV capture, STT, transcript, protocol, Vault or Downloads export remains in the active Meetings runtime.
           - Rokid owns microphones, recording finalisation, its existing phone delivery and storage flow.
-          - Requires Nexus Glasses 1.4.19 native-recording bridge.
+          - Requires corrected Nexus Glasses 1.4.20 native-recording bridge; 1.4.19 is superseded and must not be used for this test.
           - Hi Rokid remains the native assistant and Relay is unchanged.
 
           ### Artifact
@@ -224,7 +236,7 @@ jobs:
           item['name']='Meetings'
           item['category']='Productivity'
           item['summary']='Meetings: Start/Stop control for the stock Rokid audio recorder.'
-          item['description']='Thin BuildGround interface. Rokid owns microphones, recording, phone sync and storage; Meetings only sends Start/Stop.'
+          item['description']='Thin BuildGround interface. Rokid owns microphones, recording, phone sync and storage; Meetings only sends Start/Stop and waits for native confirmation.'
           item['xBuildGroundManaged']=True
           nexus=item.setdefault('nexus', {})
           nexus['pluginId']='assistant'
@@ -233,7 +245,7 @@ jobs:
           nexus['launchable']=True
           nexus.pop('settingsActivity', None)
           listing=item.setdefault('listing', {})
-          listing['descriptionMarkdown']='## BuildGround Meetings\n\nThin Start/Stop control for the stock Rokid audio recorder. Rokid handles microphones, recording, finalisation, phone delivery and storage. Meetings does not capture or transcribe audio. Requires Nexus Glasses 1.4.19.'
+          listing['descriptionMarkdown']='## BuildGround Meetings\n\nThin Start/Stop control for the stock Rokid audio recorder. Rokid handles microphones, recording, finalisation, phone delivery and storage. Meetings does not capture or transcribe audio. Requires Nexus Glasses 1.4.20.'
           art=item.setdefault('artifact', {})
           art.update({'target':'phone','url':url,'sha256':sha,'signerSha256':signer,'sizeBytes':int(size),'packageName':'com.anezium.rokidbus.plugin.assistant','versionCode':27,'versionName':'2.0.0'})
           notes=open(notes_path, encoding='utf-8').read().strip()
