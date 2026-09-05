@@ -33,6 +33,12 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
 
     protected open val hubTarget: HubTarget = HubTarget.PHONE
 
+    /** Dedicated long-running features may keep their raw audio lease after their HUD closes. */
+    protected open fun retainNexusAudioOnClose(): Boolean = false
+
+    /** Keep the plugin foreground anchor while retained work is still active. */
+    protected open fun retainNexusForegroundOnClose(): Boolean = false
+
     protected val isNexusSessionOpen: Boolean
         get() = sessionOpen
 
@@ -91,7 +97,8 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
     }
 
     final override fun onClose() {
-        client?.releaseAudioSession()
+        val retainAudio = retainNexusAudioOnClose()
+        if (!retainAudio) client?.releaseAudioSession()
         client?.releaseSpeechSession()
         client?.releaseTtsSession()
         client?.releaseSnapshotSession()
@@ -99,7 +106,7 @@ abstract class NexusPluginService : Service(), NexusPluginCallbacks {
             onNexusClose()
         } finally {
             sessionOpen = false
-            stopNexusSessionForeground()
+            if (!retainNexusForegroundOnClose()) stopNexusSessionForeground()
         }
     }
 
