@@ -10,22 +10,22 @@ LOGFILE="$BASE/$NAME.log"
 HEARTBEAT="$BASE/$NAME.heartbeat"
 VERSIONFILE="$BASE/$NAME.version"
 RECOVERYFILE="$BASE/$NAME.recovery"
-VERSION="2026-07-17.1"
-HEALTHY_INTERVAL="${INTERVAL:-180}"
-RECOVERY_INTERVAL="${RECOVERY_INTERVAL:-30}"
+VERSION="2026-09-05.1"
+HEALTHY_INTERVAL="${INTERVAL:-30}"
+RECOVERY_INTERVAL="${RECOVERY_INTERVAL:-5}"
 RECOVERY_CYCLES="${RECOVERY_CYCLES:-3}"
 
 case "$HEALTHY_INTERVAL" in
-  ""|*[!0-9]*) HEALTHY_INTERVAL=180 ;;
+  ""|*[!0-9]*) HEALTHY_INTERVAL=30 ;;
 esac
-if [ "$HEALTHY_INTERVAL" -lt 180 ]; then
-  HEALTHY_INTERVAL=180
+if [ "$HEALTHY_INTERVAL" -lt 30 ]; then
+  HEALTHY_INTERVAL=30
 fi
 case "$RECOVERY_INTERVAL" in
-  ""|*[!0-9]*) RECOVERY_INTERVAL=30 ;;
+  ""|*[!0-9]*) RECOVERY_INTERVAL=5 ;;
 esac
-if [ "$RECOVERY_INTERVAL" -lt 30 ]; then
-  RECOVERY_INTERVAL=30
+if [ "$RECOVERY_INTERVAL" -lt 5 ]; then
+  RECOVERY_INTERVAL=5
 fi
 case "$RECOVERY_CYCLES" in
   ""|*[!0-9]*) RECOVERY_CYCLES=3 ;;
@@ -168,7 +168,11 @@ repair_once() {
     settings put secure accessibility_enabled 1 2>>"$LOGFILE"
   fi
 
-  if [ -z "$pid_before" ] && [ "$service_was_missing" = "1" ]; then
+  # Android can keep the accessibility component in secure settings while the actual Nexus
+  # process is gone after the temples are folded. In that state settings alone look healthy and
+  # the old watchdog never requested a rebind. Toggle only our component off and back on to make
+  # AccessibilityManager recreate the process without opening an Activity or touching Hi Rokid.
+  if [ -z "$pid_before" ]; then
     without_nexus="$(services_without_nexus "$next_services")"
     rotate_log_if_needed
     settings put secure enabled_accessibility_services "$without_nexus" 2>>"$LOGFILE"
@@ -196,7 +200,8 @@ loop_forever() {
   while true; do
     accessibility_enabled="$(settings get secure accessibility_enabled 2>/dev/null)"
     enabled_services="$(settings get secure enabled_accessibility_services 2>/dev/null)"
-    if [ "$accessibility_enabled" != "1" ] || ! service_present "$enabled_services"; then
+    nexus_pid="$(app_pid)"
+    if [ "$accessibility_enabled" != "1" ] || ! service_present "$enabled_services" || [ -z "$nexus_pid" ]; then
       repair_once
     else
       echo "$(date '+%s')" > "$HEARTBEAT"
