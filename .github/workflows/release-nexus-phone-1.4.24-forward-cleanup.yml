@@ -1,0 +1,242 @@
+name: Release Nexus Phone 1.4.24 forward cleanup
+
+on:
+  push:
+    branches:
+      - feature/nexus-phone-1424-forward-cleanup
+    paths:
+      - '.github/scripts/apply-nexus-phone-1420-relay-link.py'
+      - '.github/workflows/release-nexus-phone-1.4.24-forward-cleanup.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-nexus-phone-1-4-24-forward-cleanup
+  cancel-in-progress: false
+
+jobs:
+  release-phone:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RokidNexus
+
+    steps:
+      - name: Check out BuildGround-Rokid
+        uses: actions/checkout@v6
+        with:
+          path: RokidNexus
+          fetch-depth: 0
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: v0.2.3
+          path: CxrGlobal
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Rebuild clean 1.4.20 transport baseline and forward-version to 1.4.24
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          python RokidNexus/.github/scripts/apply-nexus-phone-1420-relay-link.py RokidNexus
+
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('RokidNexus/phone-hub/build.gradle.kts')
+          text = p.read_text(encoding='utf-8')
+          if text.count('versionCode = 10420') != 1 or text.count('versionName = "1.4.20"') != 1:
+              raise SystemExit('Expected exact Phone 1.4.20 generated baseline once')
+          text = text.replace('versionCode = 10420', 'versionCode = 10424', 1)
+          text = text.replace('versionName = "1.4.20"', 'versionName = "1.4.24"', 1)
+          p.write_text(text, encoding='utf-8')
+          PY
+
+          gradle='RokidNexus/phone-hub/build.gradle.kts'
+          hub='RokidNexus/phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt'
+          manifest='RokidNexus/phone-hub/src/main/AndroidManifest.xml'
+
+          grep -F 'versionCode = 10424' "$gradle"
+          grep -F 'versionName = "1.4.24"' "$gradle"
+
+          # Preserve the proven 1.4.20 SPP recovery behavior.
+          grep -F 'private val sppRetryWake = java.util.concurrent.Semaphore(0)' "$hub"
+          grep -F 'sppRetryWake.tryAcquire(delayMs, TimeUnit.MILLISECONDS)' "$hub"
+          grep -F 'if (glassBtConnected) 2_000L else 30_000L' "$hub"
+          grep -F 'wakeSppRetry("glass_bt_up")' "$hub"
+
+          # Preserve the already-released installed-version authority behavior.
+          grep -F 'installedVersionNames' RokidNexus/phone-hub/src/main/java/com/anezium/rokidbus/phone/StoreCatalog.kt
+          grep -F 'installedVersions(context.packageManager, packageNames)' RokidNexus/phone-hub/src/main/java/com/anezium/rokidbus/phone/StoreUi.kt
+
+          # Forward cleanup: none of the diagnostic 1.4.21-1.4.23 experiments may survive.
+          if grep -F 'android.permission.WAKE_LOCK' "$manifest"; then
+            echo '::error::WAKE_LOCK permission survived forward cleanup'
+            exit 1
+          fi
+          for forbidden in \
+            'PowerManager.PARTIAL_WAKE_LOCK' \
+            'connectedGlassesCpuWakeLock' \
+            'hubCpuWakeLock' \
+            'SPP_NOTICE' \
+            'if (isNoticePath(envelope.path) && output != null)'; do
+            if grep -F "$forbidden" "$hub"; then
+              echo "::error::Diagnostic Phone marker survived cleanup: $forbidden"
+              exit 1
+            fi
+          done
+
+          changed="$(git -C RokidNexus status --porcelain | awk '{print $2}')"
+          unexpected="$(printf '%s\n' "$changed" | grep -Ev '^phone-hub/' || true)"
+          if [[ -n "$unexpected" ]]; then
+            echo '::error::Unexpected generated source changes outside phone-hub:'
+            printf '%s\n' "$unexpected"
+            exit 1
+          fi
+
+      - name: Test Nexus phone
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :phone-hub:testDebugUnitTest
+
+      - name: Build debug smoke APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :phone-hub:assembleDebug
+
+      - name: Decode permanent BuildGround signing key
+        shell: bash
+        env:
+          NEXUS_RELEASE_KEYSTORE_B64: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          test -n "$NEXUS_RELEASE_KEYSTORE_B64"
+          test -n "$RELEASE_KEYSTORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
+          keystore="$RUNNER_TEMP/nexus-release.keystore"
+          umask 077
+          printf '%s' "$NEXUS_RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore"
+          {
+            echo "NEXUS_RELEASE_KEYSTORE=$keystore"
+            echo "NEXUS_RELEASE_KEYSTORE_PASSWORD=$RELEASE_KEYSTORE_PASSWORD"
+            echo "NEXUS_RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify permanent BuildGround signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='55:B2:21:85:39:2B:8C:1F:08:4C:3D:EC:58:BB:0F:34:2E:CE:71:02:28:95:56:AE:23:CA:DE:E6:CC:EC:20:97'
+          details="$(keytool -list -v -keystore "$NEXUS_RELEASE_KEYSTORE" -storepass "$NEXUS_RELEASE_KEYSTORE_PASSWORD" -alias "$NEXUS_RELEASE_KEY_ALIAS")"
+          actual="$(printf '%s\n' "$details" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1)"
+          test "$actual" = "$expected"
+          echo "ARTIFACT_SIGNER_SHA256=$(printf '%s' "$actual" | tr -d ':' | tr 'A-F' 'a-f')" >> "$GITHUB_ENV"
+
+      - name: Build signed Nexus Phone 1.4.24 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :phone-hub:assembleRelease
+
+      - name: Verify APK and prepare release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find phone-hub/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$apk"
+          artifact="$RUNNER_TEMP/nexus-phone-1.4.24.apk"
+          cp "$apk" "$artifact"
+
+          signer="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$artifact" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')"
+          test "$signer" = "$ARTIFACT_SIGNER_SHA256"
+
+          badging="$("$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$artifact" | head -n 1)"
+          printf '%s\n' "$badging" | grep -F "name='com.anezium.rokidbus.phone'"
+          printf '%s\n' "$badging" | grep -F "versionCode='10424'"
+          printf '%s\n' "$badging" | grep -F "versionName='1.4.24'"
+
+          sha="$(sha256sum "$artifact" | cut -d ' ' -f 1)"
+          size="$(stat -c %s "$artifact")"
+          notes="$RUNNER_TEMP/nexus-phone-1.4.24-notes.md"
+          cat > "$notes" <<EOF
+          BuildGround NEXUS Phone 1.4.24 — Forward Cleanup.
+
+          - Root cause of the delayed Relay visuals was confirmed outside NEXUS: Android had lock-screen wake-on-notification disabled. Enabling that system setting restored immediate phone-screen wake and immediate Relay visuals on the glasses.
+          - Removes the diagnostic Phone experiments from 1.4.21, 1.4.22 and 1.4.23 by rebuilding from the clean 1.4.20 transport baseline instead of applying those patches.
+          - No WAKE_LOCK permission and no PARTIAL_WAKE_LOCK remains in this Phone release.
+          - Removes the experimental notice SPP-first/SPP_NOTICE route from 1.4.21; notice routing returns to the clean pre-1.4.21 hub behavior.
+          - Preserves the proven 1.4.20 fast SPP recovery and the installed-version authority behavior already present in the source baseline.
+          - Forward-only versioning: installs normally over Phone 1.4.23; no uninstall or data reset required.
+          - Phone-only cleanup: NEXUS Glasses, Relay, Meetings, recorder, STT and audio behavior are not modified.
+
+          ### Required Android setting for immediate visual Relay delivery
+          - Wake the lock screen/display when notifications arrive: ON.
+
+          ### Artifact
+          - File: nexus-phone-1.4.24.apk
+          - SHA-256: $sha
+          - Size: $size bytes
+          - Signer SHA-256: $signer
+          EOF
+          {
+            echo "ARTIFACT=$artifact"
+            echo "ARTIFACT_SHA=$sha"
+            echo "ARTIFACT_SIZE=$size"
+            echo "RELEASE_NOTES=$notes"
+          } >> "$GITHUB_ENV"
+
+      - name: Create Nexus Phone 1.4.24 release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='v1.4.24'
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::$tag already exists; refusing overwrite."
+            exit 1
+          fi
+          gh release create "$tag" "$ARTIFACT" \
+            --target "$GITHUB_SHA" \
+            --title 'NEXUS Phone 1.4.24 — Forward Cleanup' \
+            --notes-file "$RELEASE_NOTES" \
+            --latest
+
+      - name: Upload signed APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-phone-1.4.24-signed
+          path: ${{ env.ARTIFACT }}
+          if-no-files-found: error
+
+      - name: Remove decoded keystore
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/nexus-release.keystore"
