@@ -71,8 +71,8 @@
       "kind": "nexus-plugin",
       "name": "Meetings",
       "category": "Productivity",
-      "summary": "Meetings: Start/Stop control for the stock Rokid recorder, with state owned by NEXUS Glasses.",
-      "description": "Thin BuildGround interface. Every open queries NEXUS Glasses for recorder state; Rokid owns microphones, recording, phone sync and storage.",
+      "summary": "Meetings: stock Rokid recorder control plus finalised-file visibility probe.",
+      "description": "Thin BuildGround interface. Rokid owns microphones and recording; after Stop, Meetings asks NEXUS Glasses whether the finalised stock file is visible.",
       "author": "Anezium",
       "sourceUrl": "https://github.com/Anezium/Rokid-Nexus",
       "publishedAt": "2026-08-11T22:06:05Z",
@@ -88,19 +88,24 @@
       },
       "screenshotAssets": [],
       "listing": {
-        "descriptionMarkdown": "## BuildGround Meetings\n\nThin Start/Stop control for the stock Rokid recorder. Recorder command state is owned by NEXUS Glasses 1.4.22; Meetings queries it on every open and never guesses. Rokid handles microphones, recording, finalisation, phone delivery and storage."
+        "descriptionMarkdown": "## BuildGround Meetings\n\nStock Rokid recorder Start/Stop control with a read-only finalised-file visibility probe after Stop. No second microphone or parallel audio capture."
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v2.0.1/meetings-phone-release.apk",
-        "sha256": "00ce85237aeeda75c28d44c5973345336b22a2e7692b0885524309e9070b090f",
+        "url": "https://github.com/4108814-ai/BuildGround-Rokid/releases/download/meetings-v2.0.2/meetings-phone-release.apk",
+        "sha256": "e05da8143ae0cc3bb037602cc46365bee88187677d530e0001ac98b8e0ac826d",
         "signerSha256": "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097",
-        "sizeBytes": 6245115,
+        "sizeBytes": 6246923,
         "packageName": "com.anezium.rokidbus.plugin.assistant",
-        "versionCode": 28,
-        "versionName": "2.0.1"
+        "versionCode": 29,
+        "versionName": "2.0.2"
       },
       "releases": [
+        {
+          "version": "2.0.2",
+          "date": "2026-09-06T17:03:46Z",
+          "notes": "BuildGround Meetings 2.0.2 — Rokid Recorder File Probe.\n\nDiagnostic step only: prove whether the finalised stock Rokid audio file is readable by NEXUS after Stop before adding any file transport.\n\n- Keeps Meetings 2.0.1 glasses-authoritative Start/Stop/status behavior.\n- After a confirmed Stop, waits 2 seconds for Rokid finalisation then sends one read-only  request to Nexus Glasses 1.4.25.\n- The UI reports one of three physical outcomes: file found, Recordings directory readable but current file absent, or Recordings directory unreadable.\n- No microphone, audio capture, file copy/upload, STT, transcript, protocol or archive logic is active.\n- Requires Nexus Glasses 1.4.25.\n\n### Artifact\n- File: meetings-phone-release.apk\n- SHA-256: e05da8143ae0cc3bb037602cc46365bee88187677d530e0001ac98b8e0ac826d\n- Signer SHA-256: 55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097"
+        },
         {
           "version": "2.0.1",
           "date": "2026-09-05T17:39:05Z",
