@@ -1,0 +1,246 @@
+name: Release BuildGround Relay 1.2.5 forward cleanup v2
+
+on:
+  push:
+    branches:
+      - feature/relay-125-forward-cleanup
+    paths:
+      - '.github/workflows/release-buildground-relay-1.2.5-forward-cleanup-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-buildground-relay-1-2-5-forward-cleanup-v2
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out BuildGround release controls
+        uses: actions/checkout@v6
+        with:
+          path: BuildGround
+          fetch-depth: 0
+
+      - name: Check out exact upstream Relay 1.2.1 baseline
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/Rokid-Nexus
+          ref: relay-v1.2.1
+          path: RokidNexus
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Rebuild clean Relay 1.2.3 behavior and forward-version to 1.2.5
+        shell: bash
+        run: |
+          set -euo pipefail
+          upstream="$(git -C RokidNexus rev-parse HEAD)"
+          echo "UPSTREAM_RELAY_COMMIT=$upstream" >> "$GITHUB_ENV"
+
+          python BuildGround/.github/scripts/apply-relay-122-fifo.py RokidNexus
+          python BuildGround/.github/scripts/apply-relay-123-instant-path.py RokidNexus
+
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('RokidNexus/plugins/relay/build.gradle.kts')
+          text = p.read_text(encoding='utf-8')
+          if text.count('versionCode = 10') != 1 or text.count('versionName = "1.2.1"') != 1:
+              raise SystemExit('Expected exact Relay 1.2.1 version baseline once')
+          text = text.replace('versionCode = 10', 'versionCode = 14', 1)
+          text = text.replace('versionName = "1.2.1"', 'versionName = "1.2.5"', 1)
+          p.write_text(text, encoding='utf-8')
+          PY
+
+          runtime='RokidNexus/plugins/relay/src/main/java/com/anezium/rokidbus/plugin/relay/RelayNoticeRuntime.kt'
+          listener='RokidNexus/plugins/relay/src/main/java/com/anezium/rokidbus/plugin/relay/RelayNotificationListener.kt'
+          control='RokidNexus/plugins/relay/src/main/java/com/anezium/rokidbus/plugin/relay/NotificationControl.kt'
+          test='RokidNexus/bus-client/src/test/java/com/anezium/rokidbus/client/plugin/NexusPluginClientTest.kt'
+
+          grep -F 'versionCode = 14' RokidNexus/plugins/relay/build.gradle.kts
+          grep -F 'versionName = "1.2.5"' RokidNexus/plugins/relay/build.gradle.kts
+
+          grep -F 'RelayCoalescingQueue' "$runtime"
+          grep -F 'fun prewarm() = onMain' "$runtime"
+          grep -F 'private fun ensureClient()' "$runtime"
+          grep -F 'resetExchangeState()' "$runtime"
+          grep -F 'runtime.prewarm()' "$listener"
+          grep -F 'listener?.resumeBand()' "$control"
+          test -f RokidNexus/plugins/relay/src/test/java/com/anezium/rokidbus/plugin/relay/RelayCoalescingQueueTest.kt
+
+          # Verify only the Notice Surface property. CXR|SPP legitimately remains for TTS.
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('RokidNexus/bus-client/src/main/java/com/anezium/rokidbus/client/plugin/NexusPluginClient.kt')
+          text = p.read_text(encoding='utf-8')
+          clean = '''val supportsNoticeSurface: Boolean
+                  get() = currentLinkState and LinkStateBits.SPP_DATA_UP != 0 &&
+                      hubCapabilities and BusCapabilityBits.NOTICE_SURFACE != 0'''
+          experimental = '''val supportsNoticeSurface: Boolean
+                  get() = currentLinkState and (LinkStateBits.CXR_CONTROL_UP or LinkStateBits.SPP_DATA_UP) != 0 &&
+                      hubCapabilities and BusCapabilityBits.NOTICE_SURFACE != 0'''
+          if clean not in text:
+              raise SystemExit('Clean SPP-only supportsNoticeSurface block missing')
+          if experimental in text:
+              raise SystemExit('Relay 1.2.4 supportsNoticeSurface experiment survived cleanup')
+          PY
+
+          if grep -F 'text notice is available on CXR control even when SPP is asleep' "$test"; then
+            echo '::error::Relay 1.2.4 notice regression test survived cleanup'
+            exit 1
+          fi
+
+          unexpected="$(git -C RokidNexus status --porcelain | awk '{print $2}' | grep -Ev '^plugins/relay/' || true)"
+          if [[ -n "$unexpected" ]]; then
+            echo '::error::Unexpected generated changes outside plugins/relay:'
+            printf '%s\n' "$unexpected"
+            exit 1
+          fi
+
+      - name: Run bus-client and Relay unit tests
+        shell: bash
+        working-directory: RokidNexus
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :bus-client:testDebugUnitTest :plugin-relay:testDebugUnitTest -PskipCxrGlobal=true
+
+      - name: Build unsigned debug smoke APK
+        shell: bash
+        working-directory: RokidNexus
+        run: |
+          set -euo pipefail
+          ./gradlew :plugin-relay:assembleDebug -PskipCxrGlobal=true
+
+      - name: Decode permanent BuildGround release key
+        shell: bash
+        env:
+          NEXUS_RELEASE_KEYSTORE_B64: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          test -n "$NEXUS_RELEASE_KEYSTORE_B64"
+          test -n "$RELEASE_KEYSTORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
+          keystore="$RUNNER_TEMP/nexus-release.keystore"
+          umask 077
+          printf '%s' "$NEXUS_RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore"
+          {
+            echo "NEXUS_RELEASE_KEYSTORE=$keystore"
+            echo "NEXUS_RELEASE_KEYSTORE_PASSWORD=$RELEASE_KEYSTORE_PASSWORD"
+            echo "NEXUS_RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify permanent BuildGround certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='55:B2:21:85:39:2B:8C:1F:08:4C:3D:EC:58:BB:0F:34:2E:CE:71:02:28:95:56:AE:23:CA:DE:E6:CC:EC:20:97'
+          details="$(keytool -list -v -keystore "$NEXUS_RELEASE_KEYSTORE" -storepass "$NEXUS_RELEASE_KEYSTORE_PASSWORD" -alias "$NEXUS_RELEASE_KEY_ALIAS")"
+          actual="$(printf '%s\n' "$details" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1)"
+          test "$actual" = "$expected"
+
+      - name: Build signed Relay 1.2.5 APK
+        shell: bash
+        working-directory: RokidNexus
+        run: |
+          set -euo pipefail
+          ./gradlew :plugin-relay:assembleRelease -PskipCxrGlobal=true
+
+      - name: Verify APK and prepare release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir='RokidNexus/plugins/relay/build/outputs/apk/release'
+          mapfile -t files < <(find "$dir" -maxdepth 1 -type f -name '*.apk' -print)
+          test "${#files[@]}" -eq 1
+          apk="$RUNNER_TEMP/relay-phone-1.2.5-bg.apk"
+          cp "${files[0]}" "$apk"
+
+          apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          expected='55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097'
+          output="$("$apksigner" verify --print-certs "$apk" 2>&1)"
+          digest="$(printf '%s\n' "$output" | sed -nE 's/.*[Ss][Hh][Aa]-256 digest:[[:space:]]*([0-9A-Fa-f:]+).*/\1/p' | head -n 1 | tr -d ':' | tr 'A-F' 'a-f')"
+          test -n "$digest"
+          test "$digest" = "$expected"
+
+          aapt="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          badging="$("$aapt" dump badging "$apk" | head -n 1)"
+          printf '%s\n' "$badging" | grep -F "name='com.anezium.rokidbus.plugin.relay'"
+          printf '%s\n' "$badging" | grep -F "versionCode='14'"
+          printf '%s\n' "$badging" | grep -F "versionName='1.2.5'"
+
+          sha256="$(sha256sum "$apk" | cut -d ' ' -f 1)"
+          size="$(stat -c %s "$apk")"
+          notes="$RUNNER_TEMP/relay-1.2.5-notes.md"
+          cat > "$notes" <<EOF
+          BuildGround Relay 1.2.5 — Forward Cleanup.
+
+          - Root cause of delayed visual notifications was confirmed outside Relay: Android lock-screen wake-on-notification was disabled. Enabling that system setting restored immediate phone-screen wake and immediate Relay visuals on the glasses.
+          - Rebuilds Relay from the exact upstream relay-v1.2.1 baseline plus only the proven BuildGround 1.2.2 FIFO/coalescing and 1.2.3 prewarmed-client patches.
+          - Removes the Relay 1.2.4 control-link notice experiment by not applying that patch; Notice Surface preflight returns to the clean SPP_DATA_UP rule.
+          - Keeps Relay 1.2.3 hot registration, FIFO ordering and same-key coalescing.
+          - Forward-only versioning: installs normally over Relay 1.2.4; no uninstall or data reset required.
+          - NEXUS Glasses, NEXUS Phone, Meetings, recorder, STT and audio behavior are not modified by this APK.
+          - Same permanent BuildGround signer: $digest.
+
+          Required Android setting for immediate visual Relay delivery: wake the lock screen/display when notifications arrive = ON.
+
+          Artifact SHA-256: $sha256
+          Artifact size: $size bytes
+          EOF
+          sed -i 's/^          //' "$notes"
+          {
+            echo "RELAY_APK=$apk"
+            echo "RELAY_SHA256=$sha256"
+            echo "RELAY_SIZE=$size"
+            echo "RELEASE_NOTES=$notes"
+          } >> "$GITHUB_ENV"
+
+      - name: Publish BuildGround Relay release
+        shell: bash
+        working-directory: BuildGround
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view relay-v1.2.5-bg >/dev/null 2>&1; then
+            echo '::error::Release relay-v1.2.5-bg already exists; refusing overwrite.'
+            exit 1
+          fi
+          gh release create relay-v1.2.5-bg "$RELAY_APK" --target "$GITHUB_SHA" --title 'BuildGround Relay 1.2.5 — Forward Cleanup' --notes-file "$RELEASE_NOTES" --latest=false
+
+      - name: Upload verified Relay APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildground-relay-1.2.5-signed-release
+          path: ${{ runner.temp }}/relay-phone-1.2.5-bg.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove decoded keystore
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/nexus-release.keystore"
