@@ -3,6 +3,7 @@
 
     <application
         android:allowBackup="false"
+        android:icon="@drawable/ic_bridge_probe"
         android:label="NEXUS Bridge Probe"
         android:supportsRtl="true"
         android:theme="@style/Theme.RokidBus.ClientProbe">
