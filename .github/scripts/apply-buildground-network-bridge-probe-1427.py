@@ -43,7 +43,7 @@ import com.anezium.rokidbus.shared.LinkStateBits
 import org.json.JSONObject
 import java.util.UUID
 
-private const val TAG = "NEXUS-BRIDGE-INTEGRATED"
+private const val BRIDGE_TAG = "NEXUS-BRIDGE-INTEGRATED"
 private const val PATH_HTTP_REQUEST = "/http/request"
 private const val PATH_HTTP_REPLY = "/http/request/reply"
 private const val OPENAI_PROBE_URL = "https://api.openai.com/v1/models"
@@ -107,7 +107,7 @@ class NetworkBridgeProbeActivity : Activity() {
         client = next
         next.connect()
         main.postDelayed(linkTimeout, LINK_TIMEOUT_MS)
-        Log.i(TAG, "Integrated bridge probe started")
+        Log.i(BRIDGE_TAG, "Integrated bridge probe started")
     }
 
     override fun onDestroy() {
@@ -129,7 +129,7 @@ class NetworkBridgeProbeActivity : Activity() {
 
     private fun handleLinkState(state: Int) {
         val sppUp = state and LinkStateBits.SPP_DATA_UP != 0
-        Log.i(TAG, "linkState=$state sppUp=$sppUp")
+        Log.i(BRIDGE_TAG, "linkState=$state sppUp=$sppUp")
         if (!sppUp || sent || finished) return
         main.removeCallbacks(linkTimeout)
         sendProbe()
@@ -146,7 +146,7 @@ class NetworkBridgeProbeActivity : Activity() {
                 "REQUESTING OPENAI VIA PHONE...\n\n" +
                 "Expected: HTTP 401 (no API key)",
         )
-        Log.i(TAG, "sending OpenAI bridge probe id=$id url=$OPENAI_PROBE_URL")
+        Log.i(BRIDGE_TAG, "sending OpenAI bridge probe id=$id url=$OPENAI_PROBE_URL")
         val accepted = client?.trySend(
             PATH_HTTP_REQUEST,
             id,
@@ -169,7 +169,7 @@ class NetworkBridgeProbeActivity : Activity() {
         finished = true
         val status = event.meta.optInt("status", 0)
         val reportedTotal = event.meta.optLong("totalBytes", totalBytes)
-        Log.i(TAG, "bridge reply done id=${event.id} status=$status totalBytes=$reportedTotal")
+        Log.i(BRIDGE_TAG, "bridge reply done id=${event.id} status=$status totalBytes=$reportedTotal")
         if (status > 0) {
             show(
                 "BRIDGE OK\n\n" +
@@ -197,7 +197,7 @@ class NetworkBridgeProbeActivity : Activity() {
         main.removeCallbacks(linkTimeout)
         main.removeCallbacks(requestTimeout)
         finished = true
-        Log.w(TAG, "$title: $detail")
+        Log.w(BRIDGE_TAG, "$title: $detail")
         show("BRIDGE FAIL\n\n$title\n$detail\n\nPress BACK to return to NEXUS.")
     }
 
@@ -249,6 +249,7 @@ checks = {
         'BRIDGE OK',
         'BRIDGE TIMEOUT',
         'PHONE LINK DOWN',
+        'BRIDGE_TAG',
     ),
     MAIN: ('startActivity(Intent(this, NetworkBridgeProbeActivity::class.java))',),
     MANIFEST: ('android:name=".NetworkBridgeProbeActivity"',),
