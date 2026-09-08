@@ -3,7 +3,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="@string/app_name"
+        android:label="NEXUS Bridge Probe"
         android:supportsRtl="true"
         android:theme="@style/Theme.RokidBus.ClientProbe">
 
@@ -21,7 +21,12 @@
         <activity
             android:name=".ProbeActivity"
             android:exported="true"
+            android:label="NEXUS Bridge Probe"
             android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
             <intent-filter>
                 <action android:name="com.anezium.rokidbus.clientprobe.OPEN" />
                 <category android:name="android.intent.category.DEFAULT" />
