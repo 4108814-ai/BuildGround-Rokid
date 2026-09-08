@@ -10,8 +10,8 @@ android {
         applicationId = "com.anezium.rokidbus.clientprobe"
         minSdk = 31
         targetSdk = 32
-        versionCode = 1
-        versionName = "0.1.0-round-a"
+        versionCode = 10
+        versionName = "0.1.0-bg-bridge"
     }
 
     buildTypes {
