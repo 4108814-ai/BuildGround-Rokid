@@ -2,6 +2,7 @@
 """Add direct-boot-safe boot ownership for BuildGround Nexus Glasses 1.4.27."""
 
 from pathlib import Path
+import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 GRADLE = ROOT / "glasses-hub/build.gradle.kts"
@@ -62,6 +63,19 @@ replace_once(
 SERVICE.write_text(
     '''package com.anezium.rokidbus.glasses\n\nimport android.app.Notification\nimport android.app.NotificationChannel\nimport android.app.NotificationManager\nimport android.app.Service\nimport android.content.Context\nimport android.content.Intent\nimport android.os.Handler\nimport android.os.IBinder\nimport android.os.Looper\nimport android.os.UserManager\n\nclass BusHubService : Service() {\n    companion object {\n        private const val CHANNEL_ID = "nexus_core"\n        private const val NOTIFICATION_ID = 410825\n        private const val UNLOCK_RETRY_MS = 5_000L\n\n        fun ensureRunning(context: Context) {\n            val appContext = context.applicationContext\n            appContext.startForegroundService(Intent(appContext, BusHubService::class.java))\n        }\n    }\n\n    private val mainHandler = Handler(Looper.getMainLooper())\n    private val unlockRetry = object : Runnable {\n        override fun run() {\n            if (isUserUnlocked()) {\n                startCore("unlock_retry")\n            } else {\n                mainHandler.postDelayed(this, UNLOCK_RETRY_MS)\n            }\n        }\n    }\n\n    override fun onCreate() {\n        super.onCreate()\n        ensureForeground()\n        startWhenUnlocked("service_create")\n    }\n\n    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {\n        startWhenUnlocked("service_start")\n        return START_STICKY\n    }\n\n    override fun onBind(intent: Intent?): IBinder {\n        if (isUserUnlocked()) {\n            GlassesHub.start(applicationContext)\n        }\n        return GlassesHub.binder(applicationContext)\n    }\n\n    override fun onDestroy() {\n        mainHandler.removeCallbacks(unlockRetry)\n        super.onDestroy()\n    }\n\n    private fun startWhenUnlocked(reason: String) {\n        mainHandler.removeCallbacks(unlockRetry)\n        if (isUserUnlocked()) {\n            startCore(reason)\n        } else {\n            log("BusHubService waiting for Android user unlock reason=$reason")\n            mainHandler.postDelayed(unlockRetry, UNLOCK_RETRY_MS)\n        }\n    }\n\n    private fun startCore(reason: String) {\n        mainHandler.removeCallbacks(unlockRetry)\n        log("BusHubService starting glasses core reason=$reason")\n        GlassesHub.start(applicationContext)\n        AccessibilityRearmWatcher.start(applicationContext, "bus_hub_$reason")\n    }\n\n    private fun isUserUnlocked(): Boolean {\n        val userManager = getSystemService(UserManager::class.java)\n        return userManager?.isUserUnlocked != false\n    }\n\n    private fun ensureForeground() {\n        val manager = getSystemService(NotificationManager::class.java)\n        manager.createNotificationChannel(\n            NotificationChannel(\n                CHANNEL_ID,\n                "NEXUS core",\n                NotificationManager.IMPORTANCE_MIN,\n            ).apply {\n                description = "Keeps the NEXUS glasses transport available after reboot"\n                setShowBadge(false)\n            },\n        )\n        val notification = Notification.Builder(this, CHANNEL_ID)\n            .setSmallIcon(applicationInfo.icon)\n            .setContentTitle("NEXUS")\n            .setContentText("Glasses core active")\n            .setOngoing(true)\n            .setShowWhen(false)\n            .build()\n        startForeground(NOTIFICATION_ID, notification)\n    }\n}\n''',
     encoding="utf-8",
+)
+
+# The historical 1.4.18-1.4.24 generator chain also rewrites three Phone source files even though
+# this release builds only the Glasses APK. Restore those exact known paths so this release remains
+# source-clean and cannot accidentally carry Phone work forward.
+subprocess.run(
+    [
+        "git", "-C", str(ROOT), "checkout", "--",
+        "phone-hub/build.gradle.kts",
+        "phone-hub/src/main/java/com/anezium/rokidbus/phone/NexusUpdateChecker.kt",
+        "phone-hub/src/main/java/com/anezium/rokidbus/phone/RegistryClient.kt",
+    ],
+    check=True,
 )
 
 # Guard the generated build.
