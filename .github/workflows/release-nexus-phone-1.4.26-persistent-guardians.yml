@@ -1,0 +1,271 @@
+name: Release NEXUS Phone 1.4.26 Persistent Plugin Guardians
+
+on:
+  push:
+    branches:
+      - feature/nexus-phone-1426-persistent-guardians
+    paths:
+      - '.github/scripts/apply-nexus-phone-1420-relay-link.py'
+      - '.github/scripts/apply-nexus-phone-1425-network-bridge.py'
+      - '.github/scripts/apply-nexus-phone-1426-persistent-guardians.py'
+      - '.github/workflows/release-nexus-phone-1.4.26-persistent-guardians.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-nexus-phone-1-4-26-persistent-guardians
+  cancel-in-progress: false
+
+jobs:
+  release-phone:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RokidNexus
+
+    steps:
+      - name: Check out BuildGround-Rokid
+        uses: actions/checkout@v6
+        with:
+          path: RokidNexus
+          fetch-depth: 0
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: v0.2.3
+          path: CxrGlobal
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Rebuild clean Phone line and apply persistent guardians
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+
+          # Preserve the same clean Phone transport line used by 1.4.25.
+          python RokidNexus/.github/scripts/apply-nexus-phone-1420-relay-link.py RokidNexus
+          python RokidNexus/.github/scripts/apply-nexus-phone-1425-network-bridge.py RokidNexus
+
+          # Change one layer only: plugin guardian lifetime on NEXUS Phone.
+          python RokidNexus/.github/scripts/apply-nexus-phone-1426-persistent-guardians.py RokidNexus
+
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('RokidNexus/phone-hub/build.gradle.kts')
+          text = p.read_text(encoding='utf-8')
+          if text.count('versionCode = 10420') != 1 or text.count('versionName = "1.4.20"') != 1:
+              raise SystemExit('Expected exact Phone 1.4.20 generated baseline once')
+          text = text.replace('versionCode = 10420', 'versionCode = 10426', 1)
+          text = text.replace('versionName = "1.4.20"', 'versionName = "1.4.26"', 1)
+          p.write_text(text, encoding='utf-8')
+          PY
+
+          gradle='RokidNexus/phone-hub/build.gradle.kts'
+          hub='RokidNexus/phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt'
+          http_policy='RokidNexus/phone-hub/src/main/java/com/anezium/rokidbus/phone/HttpProxyPolicy.kt'
+          guardian_policy='RokidNexus/phone-hub/src/main/java/com/anezium/rokidbus/phone/PluginGuardianPolicy.kt'
+          guardian_coord='RokidNexus/phone-hub/src/main/java/com/anezium/rokidbus/phone/PluginGuardianCoordinator.kt'
+          guardian_policy_test='RokidNexus/phone-hub/src/test/java/com/anezium/rokidbus/phone/PluginGuardianPolicyTest.kt'
+          guardian_coord_test='RokidNexus/phone-hub/src/test/java/com/anezium/rokidbus/phone/PluginGuardianCoordinatorTest.kt'
+          manifest='RokidNexus/phone-hub/src/main/AndroidManifest.xml'
+
+          grep -F 'versionCode = 10426' "$gradle"
+          grep -F 'versionName = "1.4.26"' "$gradle"
+
+          # Preserve 1.4.20/1.4.24 SPP recovery behavior exactly.
+          grep -F 'private val sppRetryWake = java.util.concurrent.Semaphore(0)' "$hub"
+          grep -F 'sppRetryWake.tryAcquire(delayMs, TimeUnit.MILLISECONDS)' "$hub"
+          grep -F 'if (glassBtConnected) 2_000L else 30_000L' "$hub"
+          grep -F 'wakeSppRetry("glass_bt_up")' "$hub"
+
+          # Preserve 1.4.25 Network Bridge policy exactly.
+          grep -F '"api.transitous.org"' "$http_policy"
+          grep -F '"api.openai.com"' "$http_policy"
+          grep -F '"authorization" to "Authorization"' "$http_policy"
+          grep -F 'normalizedHost !in allowedHosts' "$http_policy"
+
+          # New invariant: approved guardians are Phone-Hub-owned, not glasses-link-owned.
+          grep -F 'Approved guardians are owned by the Phone Hub' "$guardian_policy"
+          grep -F 'get() = true' "$guardian_policy"
+          grep -F 'GuardianLinkDecision.EnsureBound' "$guardian_policy"
+          grep -F 'fun onReleaseTimer(nowMillis: Long): GuardianLinkDecision = GuardianLinkDecision.None' "$guardian_policy"
+          if grep -F 'releaseAtMillis = nowMillis + lingerMillis' "$guardian_policy"; then
+            echo '::error::Old 30-second guardian release behavior survived'
+            exit 1
+          fi
+          grep -F 'Context.BIND_AUTO_CREATE or Context.BIND_IMPORTANT' "$guardian_coord"
+          grep -F 'glasses link loss never schedules or performs guardian release' "$guardian_policy_test"
+          grep -F 'guardian stays bound through long glasses link loss and releases only when coordinator closes' "$guardian_coord_test"
+
+          # Keep the Phone forward-cleanup baseline free of old wake/routing experiments.
+          if grep -F 'android.permission.WAKE_LOCK' "$manifest"; then
+            echo '::error::WAKE_LOCK permission survived 1.4.26 build'
+            exit 1
+          fi
+          for forbidden in \
+            'PowerManager.PARTIAL_WAKE_LOCK' \
+            'connectedGlassesCpuWakeLock' \
+            'hubCpuWakeLock' \
+            'SPP_NOTICE' \
+            'if (isNoticePath(envelope.path) && output != null)'; do
+            if grep -F "$forbidden" "$hub"; then
+              echo "::error::Legacy diagnostic Phone marker survived: $forbidden"
+              exit 1
+            fi
+          done
+
+          changed="$(git -C RokidNexus status --porcelain | awk '{print $2}')"
+          unexpected="$(printf '%s\n' "$changed" | grep -Ev '^phone-hub/' || true)"
+          if [[ -n "$unexpected" ]]; then
+            echo '::error::Unexpected generated source changes outside phone-hub:'
+            printf '%s\n' "$unexpected"
+            exit 1
+          fi
+
+      - name: Test NEXUS Phone 1.4.26
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :phone-hub:testDebugUnitTest
+
+      - name: Build debug smoke APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :phone-hub:assembleDebug
+
+      - name: Decode permanent BuildGround signing key
+        shell: bash
+        env:
+          NEXUS_RELEASE_KEYSTORE_B64: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          test -n "$NEXUS_RELEASE_KEYSTORE_B64"
+          test -n "$RELEASE_KEYSTORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
+          keystore="$RUNNER_TEMP/nexus-release.keystore"
+          umask 077
+          printf '%s' "$NEXUS_RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore"
+          {
+            echo "NEXUS_RELEASE_KEYSTORE=$keystore"
+            echo "NEXUS_RELEASE_KEYSTORE_PASSWORD=$RELEASE_KEYSTORE_PASSWORD"
+            echo "NEXUS_RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify permanent BuildGround signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='55:B2:21:85:39:2B:8C:1F:08:4C:3D:EC:58:BB:0F:34:2E:CE:71:02:28:95:56:AE:23:CA:DE:E6:CC:EC:20:97'
+          details="$(keytool -list -v -keystore "$NEXUS_RELEASE_KEYSTORE" -storepass "$NEXUS_RELEASE_KEYSTORE_PASSWORD" -alias "$NEXUS_RELEASE_KEY_ALIAS")"
+          actual="$(printf '%s\n' "$details" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1)"
+          test "$actual" = "$expected"
+          echo "ARTIFACT_SIGNER_SHA256=$(printf '%s' "$actual" | tr -d ':' | tr 'A-F' 'a-f')" >> "$GITHUB_ENV"
+
+      - name: Build signed NEXUS Phone 1.4.26 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :phone-hub:assembleRelease
+
+      - name: Verify APK and prepare release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find phone-hub/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$apk"
+          artifact="$RUNNER_TEMP/nexus-phone-1.4.26.apk"
+          cp "$apk" "$artifact"
+
+          signer="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$artifact" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')"
+          test "$signer" = "$ARTIFACT_SIGNER_SHA256"
+
+          badging="$("$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$artifact" | head -n 1)"
+          printf '%s\n' "$badging" | grep -F "name='com.anezium.rokidbus.phone'"
+          printf '%s\n' "$badging" | grep -F "versionCode='10426'"
+          printf '%s\n' "$badging" | grep -F "versionName='1.4.26'"
+
+          sha="$(sha256sum "$artifact" | cut -d ' ' -f 1)"
+          size="$(stat -c %s "$artifact")"
+          notes="$RUNNER_TEMP/nexus-phone-1.4.26-notes.md"
+          cat > "$notes" <<EOF
+          BuildGround NEXUS Phone 1.4.26 — Persistent Plugin Guardians.
+
+          - Physical trigger: Relay stopped delivering after the glasses reboot/link-loss episode.
+          - Source-level failure path found in NEXUS Phone: approved plugin guardian bindings were scoped to the glasses link and explicitly released after 30 seconds of link-down.
+          - RelayGuardianService owns NotificationListener repair; losing its Phone-side binding during a long Rokid reboot can leave Relay without a process owner to recover delivery.
+          - 1.4.26 keeps approved plugin guardians bound for the full NEXUS Phone Hub lifetime, including while glasses are rebooting, disconnected or temporarily out of range.
+          - Explicit Phone Hub shutdown still releases guardian bindings normally.
+          - Preserves the clean 1.4.20/1.4.24 SPP recovery behavior and the 1.4.25 Network Bridge policy.
+          - Phone-only update: Relay 1.2.8 and NEXUS Glasses 1.4.28 are unchanged.
+          - Assistant, Meetings and VPN routing are unchanged.
+          - Installs normally over NEXUS Phone 1.4.25 without uninstall/data reset.
+
+          Package: com.anezium.rokidbus.phone
+          versionCode: 10426
+          versionName: 1.4.26
+          SHA-256: $sha
+          Size: $size bytes
+          Signer SHA-256: $signer
+          EOF
+          sed -i 's/^          //' "$notes"
+          {
+            echo "ARTIFACT=$artifact"
+            echo "ARTIFACT_SHA=$sha"
+            echo "ARTIFACT_SIZE=$size"
+            echo "RELEASE_NOTES=$notes"
+          } >> "$GITHUB_ENV"
+
+      - name: Create NEXUS Phone 1.4.26 release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='v1.4.26'
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::$tag already exists; refusing overwrite."
+            exit 1
+          fi
+          gh release create "$tag" "$ARTIFACT" \
+            --target "$GITHUB_SHA" \
+            --title 'NEXUS Phone 1.4.26 — Persistent Plugin Guardians' \
+            --notes-file "$RELEASE_NOTES" \
+            --latest
+
+      - name: Upload signed APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-phone-1.4.26-persistent-guardians-signed
+          path: ${{ env.ARTIFACT }}
+          if-no-files-found: error
+
+      - name: Remove decoded keystore
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/nexus-release.keystore"
