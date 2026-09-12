@@ -1,0 +1,221 @@
+name: Release BuildGround Nexus Glasses 1.4.30 recorder wave 3s
+
+on:
+  push:
+    branches:
+      - buildground/nexus-glasses-1.4.30-recorder-wave-3s
+    paths:
+      - '.github/scripts/apply-buildground-recorder-wave-1430.py'
+      - '.github/workflows/release-buildground-nexus-glasses-1.4.30.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-buildground-nexus-glasses-1-4-30
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RokidNexus
+
+    steps:
+      - name: Check out BuildGround fork
+        uses: actions/checkout@v6
+        with:
+          path: RokidNexus
+          fetch-depth: 0
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: v0.2.3
+          path: CxrGlobal
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Apply stable Glasses chain and 1.4.30 recorder wave timeout
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/apply-buildground-lifecycle-1418.py
+          python .github/scripts/apply-buildground-native-recording-1420.py
+          python .github/scripts/apply-buildground-native-recording-1421.py
+          python .github/scripts/apply-buildground-native-recording-1422.py
+          python .github/scripts/apply-buildground-notice-viewport-1423.py
+          python .github/scripts/apply-buildground-notice-wake-1424.py
+          python .github/scripts/apply-buildground-autostart-1425.py
+          python .github/scripts/apply-buildground-autostart-1426.py
+          python .github/scripts/apply-buildground-bootkeeper-1427.py
+          python .github/scripts/apply-buildground-bootkeeper-1428.py
+          python .github/scripts/apply-buildground-spp-keeper-1429.py
+          python .github/scripts/apply-buildground-recorder-wave-1430.py
+
+          controller='glasses-hub/src/main/java/com/anezium/rokidbus/glasses/RokidNativeRecordingController.kt'
+          manifest='glasses-hub/src/main/AndroidManifest.xml'
+          transport='glasses-hub/src/main/java/com/anezium/rokidbus/glasses/TransportWakeReceiver.kt'
+
+          grep -F 'versionCode = 10430' glasses-hub/build.gradle.kts
+          grep -F 'versionName = "1.4.30"' glasses-hub/build.gradle.kts
+          grep -F 'private const val DISPLAY_SLEEP_DELAY_MS = 3_000L' "$controller"
+          grep -F 'private const val CMD_START = "cmd_start_audio_record"' "$controller"
+          grep -F 'private const val CMD_STOP = "cmd_stop_audio_record"' "$controller"
+          grep -F 'if (after) scheduleDisplaySleep()' "$controller"
+          grep -F 'if (confirmedRecording != true) return@postDelayed' "$controller"
+          grep -F 'RokidBusAccessibilityService.requestDisplaySleep()' "$controller"
+
+          # Preserve 1.4.28/1.4.29 boot and transport recovery unchanged.
+          grep -F 'android.intent.action.LOCKED_BOOT_COMPLETED' "$manifest"
+          grep -F 'android:name=".TransportWakeReceiver"' "$manifest"
+          grep -F 'BluetoothDevice.ACTION_ACL_CONNECTED' "$transport"
+
+          # Glasses-only generated source.
+          changed="$(git status --porcelain | awk '{print $2}')"
+          unexpected="$(printf '%s\n' "$changed" | grep -Ev '^(glasses-hub/|\.github/)' || true)"
+          if [[ -n "$unexpected" ]]; then
+            echo '::error::Unexpected generated changes outside glasses-hub/.github:'
+            printf '%s\n' "$unexpected"
+            exit 1
+          fi
+
+      - name: Run glasses tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :glasses-hub:testDebugUnitTest
+
+      - name: Build debug smoke APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :glasses-hub:assembleDebug
+
+      - name: Decode permanent BuildGround release key
+        shell: bash
+        env:
+          NEXUS_RELEASE_KEYSTORE_B64: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          test -n "$NEXUS_RELEASE_KEYSTORE_B64"
+          test -n "$RELEASE_KEYSTORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
+          keystore="$RUNNER_TEMP/nexus-release.keystore"
+          umask 077
+          printf '%s' "$NEXUS_RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore"
+          {
+            echo "NEXUS_RELEASE_KEYSTORE=$keystore"
+            echo "NEXUS_RELEASE_KEYSTORE_PASSWORD=$RELEASE_KEYSTORE_PASSWORD"
+            echo "NEXUS_RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify permanent BuildGround certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='55:B2:21:85:39:2B:8C:1F:08:4C:3D:EC:58:BB:0F:34:2E:CE:71:02:28:95:56:AE:23:CA:DE:E6:CC:EC:20:97'
+          details="$(keytool -list -v -keystore "$NEXUS_RELEASE_KEYSTORE" -storepass "$NEXUS_RELEASE_KEYSTORE_PASSWORD" -alias "$NEXUS_RELEASE_KEY_ALIAS")"
+          actual="$(printf '%s\n' "$details" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1)"
+          test "$actual" = "$expected"
+
+      - name: Build signed glasses APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :glasses-hub:assembleRelease
+
+      - name: Verify and prepare APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find glasses-hub/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$apk"
+          artifact="$RUNNER_TEMP/nexus-glasses-1.4.30.apk"
+          cp "$apk" "$artifact"
+
+          expected='55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097'
+          signer="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$artifact" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')"
+          test "$signer" = "$expected"
+
+          badging="$("$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$artifact" | head -n 1)"
+          printf '%s\n' "$badging" | grep -F "name='com.anezium.rokidbus.glasses'"
+          printf '%s\n' "$badging" | grep -F "versionCode='10430'"
+          printf '%s\n' "$badging" | grep -F "versionName='1.4.30'"
+
+          sha="$(sha256sum "$artifact" | cut -d ' ' -f 1)"
+          size="$(stat -c %s "$artifact")"
+          notes="$RUNNER_TEMP/nexus-glasses-1.4.30-notes.md"
+          cat > "$notes" <<EOF
+          BuildGround Nexus Glasses 1.4.30 — Recorder Wave 3s.
+
+          - Keeps Rokid's native recorder, microphone ownership, file finalisation and Hi Rokid transfer unchanged.
+          - Keeps the native Start and Stop commands unchanged.
+          - After a successful recording Start, the stock recording waves remain visible for approximately 3 seconds, then the existing display-standby action runs while recording continues.
+          - If Stop occurs before the delayed standby callback, the callback exits because recording state is already false.
+          - Preserves 1.4.29 SPP Wake Keeper, 1.4.28 Direct Boot Keeper, 1.4.24 notice wake and 1.4.23 notice viewport behavior.
+          - Glasses-only release: NEXUS Phone, Relay, VPN, Android Auto, Hi Rokid transfer and native Rokid Assistant routing are not modified.
+
+          Package: com.anezium.rokidbus.glasses
+          versionCode: 10430
+          versionName: 1.4.30
+          SHA-256: $sha
+          Size: $size bytes
+          Signer SHA-256: $signer
+          EOF
+          sed -i 's/^          //' "$notes"
+          {
+            echo "ARTIFACT=$artifact"
+            echo "ARTIFACT_SHA=$sha"
+            echo "ARTIFACT_SIZE=$size"
+            echo "NOTES=$notes"
+          } >> "$GITHUB_ENV"
+
+      - name: Create Nexus Glasses 1.4.30 release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='nexus-glasses-v1.4.30'
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::$tag already exists; refusing overwrite."
+            exit 1
+          fi
+          gh release create "$tag" "$ARTIFACT" --target "$GITHUB_SHA" --title 'Nexus Glasses 1.4.30 — Recorder Wave 3s' --notes-file "$NOTES" --latest=false
+
+      - name: Upload signed APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-glasses-1.4.30-signed
+          path: ${{ env.ARTIFACT }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove decoded keystore
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/nexus-release.keystore"
