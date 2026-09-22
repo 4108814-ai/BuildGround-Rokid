@@ -199,6 +199,7 @@ object GlassesHub {
         }
         if (started.compareAndSet(false, true)) {
             log("Glasses hub starting")
+            GlassesPackageDiagnostics.logCurrent(applicationContext)
             wirelessAdbExecutor.execute {
                 WirelessAdbController.restorePairingExpiry(applicationContext)
             }
