@@ -304,13 +304,18 @@
       "description": "An unofficial community plugin that renders configurable Home Assistant pages on Rokid Nexus and runs the action assigned to the selected widget.",
       "author": "Zhilin",
       "sourceUrl": "https://github.com/azhilin246/rokid-nexus-home-assistant",
-      "publishedAt": "2026-08-17T22:04:58Z",
+      "publishedAt": "2026-08-18T14:04:20Z",
       "iconAsset": "home-assistant.png",
       "screenshotAssets": [],
       "listing": {
         "descriptionMarkdown": "## About\n\nBuild pages from live Home Assistant values, buttons, toggles, status rows, and progress widgets, then browse and control them from the glasses. Priority-based context rules can select the most relevant page automatically.\n\nThe Home Assistant URL and long-lived access token are configured on the phone. The token is protected by Android Keystore and never enters a Nexus surface or glasses payload. The connection is active only while settings or a Nexus HUD session needs it.\n\n## Unofficial integration\n\nThis is an unofficial community plugin. It is not affiliated with or endorsed by the Home Assistant project, Nabu Casa, or Rokid."
       },
       "releases": [
+        {
+          "version": "0.2.3",
+          "date": "2026-08-18T14:04:20Z",
+          "notes": "- Preserve dashboards and context rules inherited from older releases when their internal IDs use the legacy starter prefix.\n- Prevent the setup-guide migration from replacing an existing legacy dashboard before settings export."
+        },
         {
           "version": "0.2.2",
           "date": "2026-08-17T22:04:58Z",
@@ -334,12 +339,12 @@
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/azhilin246/rokid-nexus-home-assistant/releases/download/home-assistant-v0.2.2/home-assistant-phone-release.apk",
+        "url": "https://github.com/azhilin246/rokid-nexus-home-assistant/releases/download/home-assistant-v0.2.3/home-assistant-phone-release.apk",
         "packageName": "dev.havoc.rokidhome.phone",
-        "sha256": "434993ba8856b998613a3b44bbe586b026605b00b2f01deef20e94ec87233775",
-        "sizeBytes": 9228492,
-        "versionCode": 4,
-        "versionName": "0.2.2",
+        "sha256": "7bef8198b7531b7d9888ceec8388420f2d53cd88d235c9e62f9a11568ff7545d",
+        "sizeBytes": 9227168,
+        "versionCode": 5,
+        "versionName": "0.2.3",
         "signerSha256": "7bd9efa45669281ff4e310388343c028cc44632a9f381c605041f7b83c1b2937"
       },
       "iconUrl": "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/icons/home-assistant.png"
@@ -582,19 +587,24 @@
       "kind": "nexus-plugin",
       "name": "Media Deck",
       "category": "Music",
-      "summary": "Now playing and transport controls on the HUD.",
-      "description": "Whatever plays on your phone shows on the glasses: title, artist, artwork, and progress. Tap to play or pause, swipe to skip. Audio never passes through Nexus.",
+      "summary": "Now playing and transport controls, with approved Assistant Skills.",
+      "description": "Show compatible phone media sessions on the glasses and use transport controls. With both Nexus hubs 1.7.0, notification access and explicit operation approvals, Assistant can read now-playing information and control the observed session. Stale session references are rejected. Device Skills tests used an Android test player; real music-player compatibility remains unverified.",
       "author": "Anezium",
       "sourceUrl": "https://github.com/Anezium/Rokid-Nexus",
-      "publishedAt": "2026-07-23T21:44:01Z",
+      "publishedAt": "2026-10-10T13:14:21Z",
       "iconAsset": "media-icon.png",
       "screenshotAssets": [
         "media-1-nowplaying.png"
       ],
       "listing": {
-        "descriptionMarkdown": "## About\n\nWhatever plays on your phone shows on the glasses: title, artist, artwork, and progress. Tap to play or pause, swipe to skip. Audio never passes through Nexus."
+        "descriptionMarkdown": "## Assistant Skills in 1.0.3\n\nRequires **both Nexus hubs 1.7.0**, **Assistant 1.5.0**, notification access and explicit operation approvals. Read now-playing information or control the observed phone session, without opening the Media Deck HUD for a headless call. Tests used an Android test player; real music-player compatibility remains unverified.\n\n## About\n\nWhatever plays on your phone shows on the glasses: title, artist, artwork, and progress. Tap to play or pause, swipe to skip. Audio never passes through Nexus."
       },
       "releases": [
+        {
+          "version": "1.0.3",
+          "date": "2026-10-10T13:14:21Z",
+          "notes": "\n- Expose approved now-playing and playback operations to Assistant through\n  Nexus Skills. Requires Nexus hubs 1.7.0, notification access, and operation\n  approvals; a call does not open the plugin's HUD.\n- Keep media references tied to the observed session and reject stale targets.\n- Device tests covered now-playing and pause with an Android test player.\n  Compatibility with real music players remains unverified.\n\n\n### Artifact\n\n- File: `media-phone-release.apk`\n- SHA-256: `c702f3e924552b1ac63fc30a2ea72d0defccda40e3fc74677585c9feed28b378`\n"
+        },
         {
           "version": "1.0.2",
           "date": "2026-07-23T21:44:01Z",
@@ -619,17 +629,17 @@
         ],
         "launchable": true,
         "settingsActivity": "com.anezium.rokidbus.plugin.media.MediaDeckSettingsActivity",
-        "minHostVersionCode": 6
+        "minHostVersionCode": 10700
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/Anezium/Rokid-Nexus/releases/download/media-v1.0.2/media-phone-release.apk",
-        "sha256": "504e629ccb59f483c36345a13606edc6f3ce77807e90140af979b88b0bfd61ab",
+        "url": "https://github.com/Anezium/Rokid-Nexus/releases/download/media-v1.0.3/media-phone-release.apk",
+        "sha256": "c702f3e924552b1ac63fc30a2ea72d0defccda40e3fc74677585c9feed28b378",
         "signerSha256": "f5e938e2e79b0526b31e40d36c8c19098450c1636b7e14a306681b4effddf81c",
-        "sizeBytes": 4753768,
+        "sizeBytes": 5706561,
         "packageName": "com.anezium.rokidbus.plugin.media",
-        "versionCode": 3,
-        "versionName": "1.0.2"
+        "versionCode": 4,
+        "versionName": "1.0.3"
       },
       "iconUrl": "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/icons/media-icon.png",
       "screenshotUrls": [
@@ -801,6 +811,67 @@
         "signerSha256": "4c6e4d3eb60204794f0c8e5823cebc3112ab2511bae11f7773febf9a0a48f62e"
       },
       "iconUrl": "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/icons/otps.png"
+    },
+    {
+      "id": "patcher",
+      "kind": "nexus-plugin",
+      "name": "Patcher",
+      "category": "Utility",
+      "summary": "Patch YouTube and Reddit Preview on your phone for the Rokid glasses.",
+      "description": "Open Patcher to follow the complete YouTube or Reddit setup guide. Choose the matching official stock APK or complete split bundle, review the patches and patch locally on your phone. Nexus checks the signed result and installs it on the glasses. Reddit remains Preview; physical R08 and real posting are unverified.",
+      "author": "Anezium",
+      "sourceUrl": "https://github.com/Anezium/Rokid-Nexus",
+      "publishedAt": "2026-10-10T18:48:13Z",
+      "iconAsset": "patcher-icon.png",
+      "screenshotAssets": [
+        "patcher-phone.png",
+        "patcher-youtube-feed.png",
+        "patcher-youtube-player.png"
+      ],
+      "listing": {
+        "descriptionMarkdown": "## YouTube and Reddit on the glasses\n\nPatcher prepares a signed glasses APK locally on your phone. YouTube uses the existing Rokid/Morphe controls; Reddit Preview adds a green monochrome feed with media previews, paged post reading, nested comments and phone-keyboard drafts. Reddit uses its native account and media services and does not need MicroG.\n\n## Set up either app\n\nUpdate **both Nexus hubs to 1.7.0**, install **Patcher 1.1.1** from the Nexus Store and approve it in Plugin access. Open **Patcher**, then choose **Set up YouTube** or **Set up Reddit**. These complete guides now live in Patcher; the old App management setup cards have been removed.\n\nThe YouTube guide covers MicroG, official stock **YouTube 21.04.223**, patching, installation and native Google sign-in. Reddit uses the official complete **Reddit 2026.14.0 APKM**; a base-only download is not sufficient. Download the stock package separately, review the selected patches and keep the glasses connected for installation. Nexus never reads your account passwords or tokens.\n\nEnable the per-app automatic phone keyboard in the guide's Advanced options if you want search and editors to open **Keyboard & remote**. Sending a Reddit reply always requires an explicit Send.\n\nPatching continues when you leave the screen. For YouTube, measured work takes about **6–7 minutes** with the patch screen or floating window visible; locking the phone or closing the window can make it slower. No equivalent Reddit duration is claimed. The notification reopens the job or cancels it, and a saved result remains available when you return.\n\n## Preserve your signing key\n\nPatcher creates a private signing key on the phone. Export a password-protected backup before removing the plugin. Future patched APK updates must use that same key. If another tool signed the installed app, import a compatible backup or explicitly remove and reinstall the app yourself. Nexus never removes it to bypass a signer check.\n\n## Reddit Preview limits\n\nThe implementation has device evidence for feeds, Popular, post/comment navigation, media and unsent drafts across preview builds. The new R08 transport is implemented and tested in code, but **physical R08 is not yet validated**. Real sends/posts, votes/save and optical comfort are also unverified. This release does not promise those integrations are certified.\n\nPatcher requires Android 11 or newer and runs on the phone through Nexus. It has no glasses launcher entry. Source is GPL-3.0-only. Stock Reddit/YouTube APKs and private signing keys are not included in the public patch-code release.\n"
+      },
+      "releases": [
+        {
+          "version": "1.1.1",
+          "date": "2026-10-10T18:48:13Z",
+          "notes": "\n- Show the installed version in the Patcher header, which still said v1.0.0 in 1.1.0.\n\n\n### Artifact\n\n- File: `patcher-phone-release.apk`\n- SHA-256: `ae6357319d23f27929889123035580b8b9036316b1fc37d96884f09e2a45b28d`\n"
+        },
+        {
+          "version": "1.1.0",
+          "date": "2026-10-10T12:22:11Z",
+          "notes": "\n- Add Reddit preview alongside YouTube, using the official complete Reddit 2026.14.0 APKM and the existing local validation, patching and signing engine.\n- Keep both guided setups in Patcher: YouTube includes MicroG and its full tutorial; Reddit uses its own tutorial without MicroG. Update both Nexus hubs for the integrated guides.\n- Show the real app icons in Nexus green and retain the existing Nexus settings design, key backup/import and job state.\n- Add the green monochrome Reddit HUD with compact media previews, text paging, nested comments, exact reply context and the Nexus phone keyboard. Popular now loads directly after a cold launch, refreshes and paginates through native Reddit services.\n- Include app-side R08 input integration using the same ring-focus contract as YouTube. Physical ring behavior and real Reddit writes remain unverified; Reddit stays labeled Preview.\n- Fetch the published Reddit source bundle during builds and verify its SHA-256 before D8 preparation. Keep the YouTube source pin and updater unchanged.\n- Preserve stored files, job state and signing keys during the Patcher update. No app is uninstalled to bypass a certificate mismatch.\n\n\n### Artifact\n\n- File: `patcher-phone-release.apk`\n- SHA-256: `ecebb23ec45357d9fb14a23ed0e17a982f798feeeb7348c001fe312a5d3eef66`\n"
+        },
+        {
+          "version": "1.0.0",
+          "date": "2026-10-07T15:47:45Z",
+          "notes": "\n- Deliver ready-notification job identity to the existing hub-attached window and\n  preserve it across recreation. Nexus setup offers Open Patcher while waiting.\n- Ship the Rokid patches 1.39.1-rokid.3 bundle: the first-launch \"Restart required\"\n  dialog and other Morphe dialogs now work with the glasses touchpad and the R08 ring.\n- Enter picture-in-picture while a patch runs and design that window: a label with a\n  breathing dot, a large elapsed clock, the live line and a thin phosphor bar, closing\n  in the outcome's colour at the end, with a Cancel action.\n- Say honestly that a patch takes about 6–7 minutes with the screen or the floating\n  window visible and much longer hidden or locked; drop the \"a few minutes\" and\n  \"turn the display off\" claims everywhere.\n- Name substeps in plain words with grouped class counts and decimal megabytes, show a\n  notification bar only for measured movement, and put the substep and elapsed time in\n  the notification text. The ready notification asks to keep the glasses connected.\n- Show how old a saved result is above a plain \"Use this result\" action when Nexus asks\n  again, and phrase every fallback message as what happened, then what to do.\n- Rename the unpublished plugin to Patcher (`:plugin-patcher`, package\n  `com.anezium.rokidbus.plugin.patcher`, id `patcher`). The new package generates a\n  new private signing key; import a portable backup or manually reinstall YouTube\n  on the glasses. Nexus still refuses signer changes and never uninstalls for you.\n- Run explicit file preparation and patch jobs in a `dataSync` foreground service\n  in `:patcher`, with notifications, explicit cancellation and a timed wake lock.\n  App switches, screen-off and activity recreation preserve the job; interrupted\n  work is reported with retry and completed results remain available on return.\n- Add typed observable phases, byte/patch fractions, completed patch counts and\n  monotonic elapsed time. Keep remaining time unknown until it can be estimated.\n- Show the patch as a live screen: a ticking elapsed clock, a phosphor bar that fills\n  when the amount is known and sweeps when it is not (static when animations are\n  off), the current sub-phase, the last applied patch with its count, and five stages\n  marked done, current or upcoming. Success, failure, cancelled and interrupted each\n  explain themselves and offer the next step; nothing resets silently.\n- Name the target and the phase in notifications, with elapsed time and Cancel while\n  running and a result channel for ready, failed, cancelled and interrupted. Tapping\n  one returns to the live screen even when it sits in the hub's task.\n- Ask for notification permission once, at the first patch, with the reason shown\n  beforehand; patching runs the same when it is denied.\n- Log each measured phase under `Patcher`; atomically move the verified result,\n  avoid the activity's redundant result hash/manifest read and retain stock for retries.\n- Make stock signer/version/API-range checks, bundle pin/source, defaults and output\n  identity target data. YouTube is the first target. Require a target id in the\n  activity hand-off and keep signer-bound hub approval and byte validation intact.\n\n- Add phone-only YouTube patching with real Morphe Patcher 1.7.0 and build-time\n  Android preparation of the pinned genuine Rokid patch bundle.\n- Validate stock identity and every split signature, merge splits for the glasses,\n  expose compatible editable patch defaults and persist choices by version.\n- Add visible progress, dedicated-process cancellation, persistent signing,\n  authenticated password-protected key backups and content-URI/share/save output.\n- Add JVM tests; complete phone-to-glasses patching and installation passed on real devices.\n- Target the glasses: fixed `arm64-v8a` ABI, every density split kept for a\n  density-universal merge, 32-bit-only input refused, and the merged manifest\n  verified to carry no split requirement.\n- Keep patching across rotation and other configuration changes; only explicit Cancel\n  stops the patch job. Back and closing the screen leave it running.\n- Bound result retention: 24 hours at most, results older than the newest one after\n  10 minutes, never the result being handed to the hub.\n- Remember an online bundle update rejected for its content (no Android DEX, wrong\n  patcher API, or no compatible patches) so it is not downloaded again until its\n  version or URL changes or the plugin is reinstalled or updated; load the bundle\n  once per screen opening.\n- Switch to a different prepared bundle shipped in a plugin update on the next\n  opening, after validation, forgetting earlier update rejections.\n- Add tests for the GmsCore package default and bundle updates.\n- Release CI: `patcher-v<semver>` tags (requiring a dedicated\n  `read:packages` secret), unit tests in the Tests workflow, and GitHub Packages\n  credentials passed only to this plugin's Gradle steps.\n- Build on Windows: platform classpath separator and a configurable Python\n  interpreter (`-PpythonExecutable`); the D8 and platform paths follow the SDK\n  components AGP uses and name any missing one.\n- Reproducible `bundled.mpp`: fixed ZIP metadata for the added DEX, so its recorded\n  SHA-256 is stable across builds.\n- Keep dependency licence and notice files in the APK and list every runtime\n  dependency with its licence in `NOTICE`.\n\n### Artifact\n\n- File: `patcher-phone-release.apk`\n- SHA-256: `fb2625c8d6fe4b26b6e5585c58571d7a1b74600cc0a3d89a177f84887d629f48`\n"
+        }
+      ],
+      "nexus": {
+        "pluginId": "patcher",
+        "apiVersion": 3,
+        "capabilities": [],
+        "launchable": false,
+        "settingsActivity": ".PatcherHomeActivity",
+        "minHostVersionCode": 10700
+      },
+      "artifact": {
+        "target": "phone",
+        "url": "https://github.com/Anezium/Rokid-Nexus/releases/download/patcher-v1.1.1/patcher-phone-release.apk",
+        "sha256": "ae6357319d23f27929889123035580b8b9036316b1fc37d96884f09e2a45b28d",
+        "sizeBytes": 44816173,
+        "packageName": "com.anezium.rokidbus.plugin.patcher",
+        "versionCode": 3,
+        "versionName": "1.1.1",
+        "signerSha256": "f5e938e2e79b0526b31e40d36c8c19098450c1636b7e14a306681b4effddf81c"
+      },
+      "iconUrl": "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/icons/patcher-icon.png",
+      "screenshotUrls": [
+        "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/screenshots/patcher-phone.png",
+        "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/screenshots/patcher-youtube-feed.png",
+        "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/screenshots/patcher-youtube-player.png"
+      ]
     },
     {
       "id": "photosync",
@@ -1248,19 +1319,24 @@
       "kind": "nexus-plugin",
       "name": "Transit",
       "category": "Navigation",
-      "summary": "Nearby departures and saved stops on the HUD.",
-      "description": "Live public-transport departures for the stops you care about. Save favourites, search for a stop, and glance at the next departures without reaching for your phone.",
+      "summary": "Public transport on the HUD, with approved Assistant Skills.",
+      "description": "Save stops and view public-transport departures on the HUD. Assistant can use approved Skills for favorite stops, stop search, departures and journey guidance. Update both Nexus hubs to 1.7.0 and approve each operation; changed operation contracts require renewed approval. Stationary favorite/departure reads were device-tested. Guidance during a real journey remains unverified.",
       "author": "Anezium",
       "sourceUrl": "https://github.com/Anezium/Rokid-Nexus",
-      "publishedAt": "2026-07-23T21:44:01Z",
+      "publishedAt": "2026-10-10T13:15:03Z",
       "iconAsset": "transit-icon.png",
       "screenshotAssets": [
         "transit-1-departures.png"
       ],
       "listing": {
-        "descriptionMarkdown": "## About\n\nLive public-transport departures for the stops you care about. Save favourites, search for a stop, and glance at the next departures without reaching for your phone."
+        "descriptionMarkdown": "## Assistant Skills in 1.0.5\n\nRequires **both Nexus hubs 1.7.0** and an enabled Skills client such as **Assistant 1.5.0**. Approve only the operations you want in Nexus Plugin access. Favorites, stop search and departures are read operations; journey guidance can use location and show a live activity. If a contract changed, approve that operation again. Stationary favorite/departure reads were tested; guidance during a real journey remains unverified.\n\n## About\n\nLive public-transport departures for the stops you care about. Save favourites, search for a stop, and glance at the next departures without reaching for your phone."
       },
       "releases": [
+        {
+          "version": "1.0.5",
+          "date": "2026-10-10T13:15:03Z",
+          "notes": "\n- Skills require Nexus hubs 1.7.0 and explicit approval for each operation.\n  Favorite-stop and departure reads were exercised on devices while stationary;\n  journey guidance during a real trip remains unverified.\n\n- Explicit bus, metro, tram, and RER selectors now constrain the transport mode.\n  An ambiguous board no longer supplies a departure anchor for a follow-up.\n  Without a named line, destinations such as Orly list all matching directions.\n- After this skill catalog update, re-approve \"Departures at a stop\" for Assistant\n  in Nexus plugin access. Contract fingerprints include descriptions and schemas;\n  existing approvals are intentionally invalidated when those change.\n\n- Skills for an approved assistant: favorite stops, stop search, and\n  departures with their observation time and realtime quality, including \"the\n  one after that\" by trip identity rather than row position.\n- **Lines and directions as you say them.** Asking for departures accepts\n  \"ligne 14\", \"M14\", or \"RER C\" for a line and \"vers Orly\" or \"aÃ©roport\" for\n  AÃ©roport d'Orly, matching whole words only. When a name fits several lines\n  or directions the answer lists them, and when nothing fits it lists the\n  lines and directions the stop actually has instead of reporting no\n  departure.\n- **Journey guidance.** \"Take me home\" plans a public transport journey to a\n  saved home and guides it step by step in Transit's own activity on the\n  glasses: walk, board, ride with the stops left, get off at the next stop,\n  transfer, arrive. A missed departure replans once, and boarding a later\n  vehicle is still noticed. The journey survives a restart, and opening\n  Transit during it shows every leg.\n- Home setting, chosen from the geocoder. Only its name ever reaches an\n  assistant; its location and yours stay in Transit.\n- Requests identify Transit with its version and a contact.\n\n\n### Artifact\n\n- File: `transit-phone-release.apk`\n- SHA-256: `b228af34a9c49848f1cafd03addd04d582b368128b4e682f075817c56b7ad7d9`\n"
+        },
         {
           "version": "1.0.4",
           "date": "2026-08-05T11:48:16Z",
@@ -1295,17 +1371,17 @@
         ],
         "launchable": true,
         "settingsActivity": ".TransitSettingsActivity",
-        "minHostVersionCode": 6
+        "minHostVersionCode": 10700
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/Anezium/Rokid-Nexus/releases/download/transit-v1.0.4/transit-phone-release.apk",
-        "sha256": "3f7237c454f983264d9dfadaa8d75559491f359e359d6459c321787af7120a74",
+        "url": "https://github.com/Anezium/Rokid-Nexus/releases/download/transit-v1.0.5/transit-phone-release.apk",
+        "sha256": "b228af34a9c49848f1cafd03addd04d582b368128b4e682f075817c56b7ad7d9",
         "signerSha256": "f5e938e2e79b0526b31e40d36c8c19098450c1636b7e14a306681b4effddf81c",
-        "sizeBytes": 5241668,
+        "sizeBytes": 6013981,
         "packageName": "com.anezium.rokidbus.plugin.transit",
-        "versionCode": 5,
-        "versionName": "1.0.4"
+        "versionCode": 6,
+        "versionName": "1.0.5"
       },
       "iconUrl": "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/icons/transit-icon.png",
       "screenshotUrls": [
