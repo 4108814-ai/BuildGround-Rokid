@@ -64,42 +64,6 @@
              notifyLinkState()
              if (!connected) failActiveGlassesAppOperation("Connection to the glasses was lost.")
              if (!isCxrUp()) {
-@@ -1344,7 +1351,7 @@
-                     detail = listOfNotNull(
-                         note.stage.takeIf { it.isNotBlank() },
-                         note.detail.takeIf { it.isNotBlank() },
--                    ).joinToString(" · "),
-+                    ).joinToString(" Р вЂ™Р’В· "),
-                 )
-             }
-             return
-@@ -2515,7 +2522,7 @@
-      * Photo-sync status, delivered one registration at a time.
-      *
-      * The plugin SDK drops any message whose payload lacks its own pluginId, so a single broadcast
--     * copy was swallowed before it ever reached the settings screen — the screen sat on
-+     * copy was swallowed before it ever reached the settings screen Р Р†Р вЂљРІР‚Сњ the screen sat on
-      * "Connecting to Rokid Nexus" forever while the hub synced perfectly. Stamping each recipient's
-      * id in is what makes status visible; [registrationMatches] still decides who may receive it.
-      */
-@@ -2787,7 +2794,7 @@
-         }
-         // A registration going away is normal: the hub unbinds dormant plugins, and a
-         // background plugin is expected to push its pin and disconnect. The pin outlives
--        // the connection — only losing the grant, a TTL, a replacement, or an explicit
-+        // the connection Р Р†Р вЂљРІР‚Сњ only losing the grant, a TTL, a replacement, or an explicit
-         // hide clears it. See clearPinForRevokedOwner. Activities intentionally differ:
-         // the final live registration disappearing cleared that owner's activity above.
-         if (reason in setOf("binderDied", "dead callback", "unregister")) {
-@@ -3902,7 +3909,7 @@
-      *
-      * Speech and dictation share one pair of ears: left running, the glasses
-      * record the phone voice into what the wearer is saying. Every path that
--     * grants the microphone calls this — the plugin-facing lease and the hub's
-+     * grants the microphone calls this Р Р†Р вЂљРІР‚Сњ the plugin-facing lease and the hub's
-      * own internal one, which is the one dictation actually uses. Cancelled
-      * speech never resumes; a plugin that still wants it said, says it again.
-      */
 @@ -4311,6 +4318,21 @@
       * assigns or retires the SPP socket. A parallel connect attempt against a
       * live RFCOMM link kills it at the stack level, so there must be exactly one.
@@ -145,15 +109,6 @@
          val state = glassesAppInstallState
          val canInstall = state == GlassesAppInstallState.NotInstalled ||
              (state == GlassesAppInstallState.Installed &&
-@@ -4547,7 +4574,7 @@
-         if (!isPhoneWifiEnabled()) {
-             transitionGlassesAppState(
-                 GlassesAppInstallEvent.Failed(
--                    "Turn on Wi-Fi first — the update travels to the glasses over Wi-Fi.",
-+                    "Turn on Wi-Fi first Р Р†Р вЂљРІР‚Сњ the update travels to the glasses over Wi-Fi.",
-                     GlassesAppRetry.INSTALL,
-                 ),
-             )
 @@ -4816,6 +4843,89 @@
          runCatching {
              getSystemService(WifiManager::class.java)?.isWifiEnabled == true
@@ -254,20 +209,6 @@
              activeGlassesAppOperationId = null
              if (glassesAppInstallState == GlassesAppInstallState.Querying) {
                  GlassesAppRetry.QUERY
-@@ -5548,11 +5661,11 @@
-             // for the same reason as the setup state below: support is a property of the
-             // glasses, not of the link, and both tiers have canonical state plus reconnect
-             // resends. The next announce overwrites them, so swapping in older glasses
--            // corrects itself. Image support is not kept — an image has no canonical state
-+            // corrects itself. Image support is not kept Р Р†Р вЂљРІР‚Сњ an image has no canonical state
-             // to resend, so it must refuse while the link is down.
-             // Keep the last-known setup state across link drops: powered-off glasses must
-             // not re-open the setup step. Only a live announcement may report false.
--            // The installed version is kept for the same reason — glasses that went quiet
-+            // The installed version is kept for the same reason Р Р†Р вЂљРІР‚Сњ glasses that went quiet
-             // did not uninstall their app, and forgetting the version turns the update
-             // check into "Reinstall" for something we know is current. The next announce
-             // overwrites it, so swapping in another unit still corrects itself.
 @@ -6015,6 +6128,30 @@
              }
          }
@@ -731,79 +672,6 @@
              addView(glassesRepairToggleRow(), NexusUi.block())
              addView(BusTheme.gap(this@SettingsActivity, 10))
              addView(glassesRepairNowRow(), NexusUi.block())
-@@ -434,7 +438,7 @@
-                 plainActionRow(
-                     title = "What's new",
-                     danger = false,
--                    valueView = NexusUi.metaLabel(this@SettingsActivity, "›", NexusUi.INK3),
-+                    valueView = NexusUi.metaLabel(this@SettingsActivity, "вЂє", NexusUi.INK3),
-                     onClick = { startActivity(WhatsNewActivity.intent(this@SettingsActivity)) },
-                 ),
-                 NexusUi.block(),
-@@ -594,7 +598,7 @@
-     private fun renderDisplayRow() {
-         val value = displayValue ?: return
-         val auto = PhoneHudPositionStore(this).hudPositionAuto()
--        value.text = if (auto) "AUTO ›" else "MANUAL ›"
-+        value.text = if (auto) "AUTO вЂє" else "MANUAL вЂє"
-     }
- 
-     private fun glassesRepairToggleRow(): LinearLayout =
-@@ -635,7 +639,7 @@
-         }
- 
-     private fun glassesRepairNowRow(): LinearLayout {
--        val value = NexusUi.metaLabel(this, "Repair ›", NexusUi.GREEN)
-+        val value = NexusUi.metaLabel(this, "Repair вЂє", NexusUi.GREEN)
-         repairValue = value
-         val status = NexusUi.rowSub(this, "").apply {
-             visibility = View.GONE
-@@ -679,8 +683,8 @@
-             return
-         }
-         repairInFlight = true
--        repairValue?.text = "Working…"
--        showRepairStatus("Asking the glasses to check their helper…", autoClear = false)
-+        repairValue?.text = "WorkingвЂ¦"
-+        showRepairStatus("Asking the glasses to check their helperвЂ¦", autoClear = false)
-         client.request(
-             BusPaths.GLASSES_REPAIR_REQUEST,
-             GlassesRepairContract.requestToJson(),
-@@ -688,7 +692,7 @@
-         ) { result ->
-             if (isDestroyed || isFinishing) return@request
-             repairInFlight = false
--            repairValue?.text = "Repair ›"
-+            repairValue?.text = "Repair вЂє"
-             val message = result.fold(
-                 onSuccess = { payload ->
-                     repairStatusMessage(GlassesRepairContract.resultFromReply(payload))
-@@ -703,7 +707,7 @@
-         GlassesRepairContract.RESULT_REPAIRED ->
-             "Repaired. The glasses have their helper back."
-         GlassesRepairContract.RESULT_ALREADY_HEALTHY ->
--            "Nothing to repair — the helper is already in place."
-+            "Nothing to repair вЂ” the helper is already in place."
-         GlassesRepairContract.RESULT_WIFI_UNAVAILABLE ->
-             "Could not turn on the glasses' Wi-Fi. Wake the glasses and try again."
-         GlassesRepairContract.RESULT_ARM_FAILED ->
-@@ -776,14 +780,14 @@
-         val value = voiceValue ?: return
-         val rate = PhoneTtsSettingsStore(this).speechRate()
-         val label = if (rate == rate.toInt().toFloat()) "${rate.toInt()}x" else "${rate}x"
--        value.text = "$label ›"
-+        value.text = "$label вЂє"
-         value.setTextColor(NexusUi.GREEN)
-     }
- 
-     private fun renderSpeechRow() {
-         val value = speechValue ?: return
-         val ready = SpeechSettingsStore(this).readiness(HubSecretStore(this)) == SpeechReadiness.READY
--        value.text = if (ready) "READY ›" else "SET UP ›"
-+        value.text = if (ready) "READY вЂє" else "SET UP вЂє"
-         // Every other row here opens in the same bright green, so dimming this one made a
-         // working screen look disabled. Amber is what the rest of the app uses to mean
-         // "this still wants you".
 --- a/phone-hub/src/test/java/com/anezium/rokidbus/phone/HttpProxyPolicyTest.kt
 +++ b/phone-hub/src/test/java/com/anezium/rokidbus/phone/HttpProxyPolicyTest.kt
 @@ -17,6 +17,23 @@
