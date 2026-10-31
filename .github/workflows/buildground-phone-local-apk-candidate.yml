@@ -6,7 +6,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: buildground-phone-local-apk-candidate
+  group: buildground-phone-spp-session-candidate
   cancel-in-progress: false
 
 jobs:
@@ -29,10 +29,13 @@ jobs:
       - name: Check out reviewed patch only
         uses: actions/checkout@v6
         with:
-          ref: 29bb1873cbe137b88cea3ebae7625ede94b93bfc
+          ref: e36cbe773d4bd94c2c7845605fa1cba22316fead
           path: CandidatePatch
           persist-credentials: false
-          sparse-checkout: .github/candidates/nexus-phone-local-apk.patch
+          sparse-checkout: |
+            .github/candidates/nexus-phone-local-apk.patch
+            .github/candidates/nexus-phone-spp-session-owner.patch
+            .github/candidates/SppPhoneRegression.kt
           sparse-checkout-cone-mode: false
 
       - name: Check out CxrGlobal 0.2.3
@@ -79,6 +82,25 @@ jobs:
           assert [x.attrib for x in before.findall('uses-permission')] == [x.attrib for x in after.findall('uses-permission')]
           print('Exact 14-file generated Phone candidate verified; permissions unchanged.')
           PY
+          python - <<'PY'
+          import hashlib, pathlib
+          patch = pathlib.Path('../CandidatePatch/.github/candidates/nexus-phone-spp-session-owner.patch')
+          assert hashlib.sha256(patch.read_bytes()).hexdigest() == 'b6135691227de68fb420e4352c746439cc36023042533deeb5294ee7dc884cc5'
+          PY
+          git apply --check ../CandidatePatch/.github/candidates/nexus-phone-spp-session-owner.patch
+          git apply ../CandidatePatch/.github/candidates/nexus-phone-spp-session-owner.patch
+          python - <<'PY'
+          import hashlib, pathlib, json
+          expected = {"phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt":"513d2e079dab0427f32c857ef4682594a7c357116398d44f17d0aadf438e66fd","phone-hub/src/main/java/com/anezium/rokidbus/phone/SppClientSessionOwner.kt":"87b88ccc4bf052f18db9cc6fc2418c47b7bc46e401f0be8bb436999b24a9b61d"}
+          for name, digest in expected.items():
+              assert hashlib.sha256(pathlib.Path(name).read_bytes().replace(b'\r\n',b'\n')).hexdigest() == digest, name
+          regression = pathlib.Path('../CandidatePatch/.github/candidates/SppPhoneRegression.kt')
+          assert hashlib.sha256(regression.read_bytes()).hexdigest() == 'e659d329a169c54f56f09d31462f049390798388a8ff6bffdd9c3ed2dedf7e35'
+          p = pathlib.Path('phone-hub/src/main/assets/buildground-spp-phone-candidate.json')
+          p.parent.mkdir(parents=True,exist_ok=True)
+          p.write_text(json.dumps({'build_label':'SPP-PHONE-20261031-01','source_commit':'e36cbe773d4bd94c2c7845605fa1cba22316fead','patch_sha256':'b6135691227de68fb420e4352c746439cc36023042533deeb5294ee7dc884cc5','call':'UNSUPPORTED'})+'\n',encoding='utf-8')
+          print('Exact Phone SPP ownership source verified; original candidate and permissions preserved.')
+          PY
           grep -F 'applicationId = "com.anezium.rokidbus.phone"' phone-hub/build.gradle.kts
           grep -F 'versionCode = 10426' phone-hub/build.gradle.kts
           grep -F 'versionName = "1.4.26"' phone-hub/build.gradle.kts
@@ -104,6 +126,14 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x gradlew
+          destination=phone-hub/src/test/java/com/anezium/rokidbus/phone
+          cp ../CandidatePatch/.github/candidates/SppPhoneRegression.kt "$destination/SppPhoneRegression.kt"
+          cat > "$destination/SppPhoneOwnershipRegressionTest.kt" <<'KOTLIN'
+          package com.anezium.rokidbus.phone
+          class SppPhoneOwnershipRegressionTest {
+              @org.junit.Test fun sevenChecks() { main() }
+          }
+          KOTLIN
           cat > "$RUNNER_TEMP/candidate-repositories.init.gradle" <<'GRADLE'
           gradle.settingsEvaluated { settings ->
               def allowed = ['dl.google.com', 'maven.google.com', 'repo.maven.apache.org', 'repo1.maven.org', 'plugins.gradle.org', 'maven.rokid.com']
@@ -116,7 +146,7 @@ jobs:
               }
           }
           GRADLE
-          ./gradlew --no-daemon --max-workers=2 --init-script "$RUNNER_TEMP/candidate-repositories.init.gradle" :phone-hub:testDebugUnitTest --tests '*LocalGlassesApkPolicyTest' --tests '*LocalGlassesTransferBoundaryTest'
+          ./gradlew --no-daemon --max-workers=2 --init-script "$RUNNER_TEMP/candidate-repositories.init.gradle" :phone-hub:testDebugUnitTest --tests '*LocalGlassesApkPolicyTest' --tests '*LocalGlassesTransferBoundaryTest' --tests '*SppPhoneOwnershipRegressionTest'
           python - <<'PY'
           import pathlib, xml.etree.ElementTree as ET
           reports = list(pathlib.Path('phone-hub/build/test-results/testDebugUnitTest').glob('TEST-*LocalGlasses*.xml'))
@@ -124,7 +154,10 @@ jobs:
           roots = [ET.parse(p).getroot() for p in reports]
           assert sum(int(x.get('tests')) for x in roots) == 12
           assert all(int(x.get('failures')) == int(x.get('errors')) == int(x.get('skipped')) == 0 for x in roots)
-          print('All 12 targeted policy/boundary tests passed.')
+          spp = ET.parse('phone-hub/build/test-results/testDebugUnitTest/TEST-com.anezium.rokidbus.phone.SppPhoneOwnershipRegressionTest.xml').getroot()
+          assert spp.get('failures') == '0' and spp.get('errors') == '0'
+          assert (spp.findtext('system-out') or '').count('PASS ') == 7
+          print('All 12 policy/boundary tests and 7 SPP ownership checks passed.')
           PY
 
       - name: Build and verify candidate using existing release key
@@ -149,25 +182,30 @@ jobs:
           ./gradlew --no-daemon --max-workers=2 --init-script "$RUNNER_TEMP/candidate-repositories.init.gradle" :phone-hub:assembleRelease
           mapfile -t apks < <(find phone-hub/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk')
           test "${#apks[@]}" -eq 1
-          mkdir -p "$RUNNER_TEMP/phone-local-apk-candidate"
-          artifact="$RUNNER_TEMP/phone-local-apk-candidate/nexus-phone-1.4.26-local-apk-candidate.apk"
+          mkdir -p "$RUNNER_TEMP/phone-spp-session-candidate"
+          artifact="$RUNNER_TEMP/phone-spp-session-candidate/nexus-phone-1.4.26-spp-session-20261031-candidate.apk"
           cp "${apks[0]}" "$artifact"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$artifact" > "$RUNNER_TEMP/phone-local-apk-candidate/signature.txt"
-          signer="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/phone-local-apk-candidate/signature.txt" | tr 'A-F' 'a-f' | tr -d ':[:space:]')"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$artifact" > "$RUNNER_TEMP/phone-spp-session-candidate/signature.txt"
+          signer="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/phone-spp-session-candidate/signature.txt" | tr 'A-F' 'a-f' | tr -d ':[:space:]')"
           test "$signer" = "$expected"
-          test "$(grep -c 'certificate SHA-256 digest:' "$RUNNER_TEMP/phone-local-apk-candidate/signature.txt")" -eq 1
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$artifact" > "$RUNNER_TEMP/phone-local-apk-candidate/badging.txt"
-          head -n 1 "$RUNNER_TEMP/phone-local-apk-candidate/badging.txt" | grep -F "name='com.anezium.rokidbus.phone'" | grep -F "versionCode='10426'" | grep -F "versionName='1.4.26'"
-          if grep -q '^application-debuggable' "$RUNNER_TEMP/phone-local-apk-candidate/badging.txt"; then exit 1; fi
+          test "$(grep -c 'certificate SHA-256 digest:' "$RUNNER_TEMP/phone-spp-session-candidate/signature.txt")" -eq 1
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$artifact" > "$RUNNER_TEMP/phone-spp-session-candidate/badging.txt"
+          head -n 1 "$RUNNER_TEMP/phone-spp-session-candidate/badging.txt" | grep -F "name='com.anezium.rokidbus.phone'" | grep -F "versionCode='10426'" | grep -F "versionName='1.4.26'"
+          if grep -q '^application-debuggable' "$RUNNER_TEMP/phone-spp-session-candidate/badging.txt"; then exit 1; fi
           "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c 4 "$artifact"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump permissions "$artifact" > "$RUNNER_TEMP/phone-local-apk-candidate/permissions.txt"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump permissions "$artifact" > "$RUNNER_TEMP/phone-spp-session-candidate/permissions.txt"
+          cp phone-hub/build/test-results/testDebugUnitTest/TEST-com.anezium.rokidbus.phone.SppPhoneOwnershipRegressionTest.xml "$RUNNER_TEMP/phone-spp-session-candidate/spp-regression.xml"
+          cp phone-hub/build/test-results/testDebugUnitTest/TEST-*LocalGlasses*.xml "$RUNNER_TEMP/phone-spp-session-candidate/"
           python - "$artifact" <<'PY'
           import pathlib, sys, zipfile
           with zipfile.ZipFile(sys.argv[1]) as apk:
               assert apk.testzip() is None
               assert not any(pathlib.PurePosixPath(n).suffix.lower() in ('.jks','.keystore','.p12','.pfx','.key') for n in apk.namelist())
-              import re
+              import re, json
+              label = json.loads(apk.read('assets/buildground-spp-phone-candidate.json'))
+              assert label['build_label'] == 'SPP-PHONE-20261031-01' and label['call'] == 'UNSUPPORTED'
               dex = b''.join(apk.read(n) for n in apk.namelist() if re.fullmatch(r'classes\d*\.dex', n))
+              assert b'Lcom/anezium/rokidbus/phone/SppClientSessionOwner;' in dex
               expected_text = [" \u00b7 ", " \u203a", "AUTO \u203a", "Asking the glasses to check their helper\u2026", "MANUAL \u203a", "Nothing to repair \u2014 the helper is already in place.", "READY \u203a", "Repair \u203a", "SET UP \u203a", "Turn on Wi-Fi first \u2014 the update travels to the glasses over Wi-Fi.", "Working\u2026", "\u203a"]
               corrupt_text = [" \u0420\u00a0\u0432\u0402\u2122\u0420\u2019\u0412\u00b7 ", " \u0432\u0402\u0454", "AUTO \u0432\u0402\u0454", "Asking the glasses to check their helper\u0432\u0402\u00a6", "MANUAL \u0432\u0402\u0454", "Nothing to repair \u0432\u0402\u201d the helper is already in place.", "READY \u0432\u0402\u0454", "Repair \u0432\u0402\u0454", "SET UP \u0432\u0402\u0454", "Turn on Wi-Fi first \u0420\u00a0\u0420\u2020\u0420\u00a0\u0432\u0402\u0459\u0420\u0406\u0420\u201a\u0421\u045a the update travels to the glasses over Wi-Fi.", "Working\u0432\u0402\u00a6", "\u0432\u0402\u0454"]
               assert all(value.encode('utf-8') in dex for value in expected_text), 'Restored UI text absent from APK'
@@ -175,11 +213,11 @@ jobs:
               print('All 12 restored UI literals verified in signed APK; corrupt variants absent.')
           PY
           (
-            cd "$RUNNER_TEMP/phone-local-apk-candidate"
-            sha256sum nexus-phone-1.4.26-local-apk-candidate.apk > SHA256SUMS
+            cd "$RUNNER_TEMP/phone-spp-session-candidate"
+            sha256sum nexus-phone-1.4.26-spp-session-20261031-candidate.apk > SHA256SUMS
             cat SHA256SUMS
           )
-          printf '%s\n' 'Review candidate only. No device install or Bluetooth validation. Existing-dot Call UNSUPPORTED.' > "$RUNNER_TEMP/phone-local-apk-candidate/README.txt"
+          printf '%s\n' 'SPP-PHONE-20261031-01: Phone session-ownership race fix, Android version 1.4.26/10426 unchanged. No device install or Bluetooth validation. Existing-dot Call UNSUPPORTED.' > "$RUNNER_TEMP/phone-spp-session-candidate/README.txt"
 
       - name: Remove temporary release key
         if: always()
@@ -188,7 +226,7 @@ jobs:
       - name: Upload signed candidate and verification records only
         uses: actions/upload-artifact@v4
         with:
-          name: nexus-phone-1.4.26-local-apk-candidate
-          path: ${{ runner.temp }}/phone-local-apk-candidate/
+          name: nexus-phone-1.4.26-spp-session-candidate
+          path: ${{ runner.temp }}/phone-spp-session-candidate/
           if-no-files-found: error
           retention-days: 14
