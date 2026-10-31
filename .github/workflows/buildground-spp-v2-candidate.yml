@@ -6,7 +6,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: buildground-spp-v2-candidate
+  group: buildground-spp-v2-nav-candidate
   cancel-in-progress: false
 
 jobs:
@@ -29,10 +29,13 @@ jobs:
       - name: Check out reviewed patch only
         uses: actions/checkout@v6
         with:
-          ref: 72da2c3e4a16dcacfb07aea1d21cca5c3025c87b
+          ref: 6f84ccdec3d20ee8e3444666c54e64eaedd50960
           path: CandidatePatch
           persist-credentials: false
-          sparse-checkout: .github/candidates/nexus-spp-v2.patch
+          sparse-checkout: |
+            .github/candidates/nexus-spp-v2.patch
+            .github/candidates/nexus-launcher-navigation.patch
+            .github/candidates/LauncherRegression.kt
           sparse-checkout-cone-mode: false
 
       - name: Check out CxrGlobal 0.2.3
@@ -94,6 +97,25 @@ jobs:
           printf '%s\n' \
             '868d474f3d3c72abca5768971ef7b7f76b80be52cde6add0f1f8fed55420f32f  glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppServerManager.kt' \
             '48272f77504162a8d00f6ea4f25d184100606dc8e7b1fb6b8ecfb84d11367686  glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppSessionOwner.kt' | sha256sum --check
+          python - <<'PY'
+          import hashlib, pathlib
+          patch = pathlib.Path('../CandidatePatch/.github/candidates/nexus-launcher-navigation.patch')
+          assert hashlib.sha256(patch.read_bytes()).hexdigest() == '2a25030ecaa5ef977de738f02ce2d82c3e7a59b748a431ff77c9e3e739841a0f'
+          PY
+          git apply --check ../CandidatePatch/.github/candidates/nexus-launcher-navigation.patch
+          git apply ../CandidatePatch/.github/candidates/nexus-launcher-navigation.patch
+          python - <<'PY'
+          import hashlib, pathlib, json
+          expected = {"glasses-hub/src/main/java/com/anezium/rokidbus/glasses/MainActivity.kt":"5831e21ed52c7df7e590bbbbc8eeb10cff61dd45b1b4954e22cb5aa4ed5e56a3","glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherOverlayRenderer.kt":"88abce8704abf9f6fa3a0d3017822e49fd9fe0c21f756c561678bfddb21ffd50","glasses-hub/src/main/java/com/anezium/rokidbus/glasses/RokidBusAccessibilityService.kt":"a576723cdeb52d534d873c5296666bb31e144a1c3711bf8cbe6880b2d6706213","glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherListDelivery.kt":"0d41c01a8f4d08f36b4224143728b39b05eb76a851c738f61d782d81ac1872ce","glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherNavigationTrace.kt":"7076e5440d3755a6b2f11a02ba03f231fe07b882875c4e1e316f8b1a47d29e33","glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherNavigationDiagnostics.kt":"9e5fa84658d11b0eb4cbfd93f87dab8d09ed5cf3242170a218fe9c8889e6a05c"}
+          for name, digest in expected.items():
+              assert hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest() == digest, name
+          regression = pathlib.Path('../CandidatePatch/.github/candidates/LauncherRegression.kt')
+          assert hashlib.sha256(regression.read_bytes()).hexdigest() == '308aed340c0991d11d65ec6ef35002628ada0b0b6361d26ef741e9b06bdfb2d7'
+          out = pathlib.Path('glasses-hub/src/main/assets/buildground-candidate.json')
+          out.parent.mkdir(parents=True, exist_ok=True)
+          out.write_text(json.dumps({'build_label':'NAV-20261031-01','source_commit':'6f84ccdec3d20ee8e3444666c54e64eaedd50960','navigation_patch_sha256':'2a25030ecaa5ef977de738f02ce2d82c3e7a59b748a431ff77c9e3e739841a0f','call':'UNSUPPORTED'}) + '\n', encoding='utf-8')
+          print('SPP v2 and generated runtime preserved; six navigation source hashes verified.')
+          PY
           grep -F 'applicationId = "com.anezium.rokidbus.glasses"' glasses-hub/build.gradle.kts
           grep -F 'versionCode = 10430' glasses-hub/build.gradle.kts
           grep -F 'versionName = "1.4.30"' glasses-hub/build.gradle.kts
@@ -114,6 +136,28 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+
+      - name: Verify ten navigation regression checks before signing
+        run: |
+          set -euo pipefail
+          destination=glasses-hub/src/test/java/com/anezium/rokidbus/glasses
+          cp ../CandidatePatch/.github/candidates/LauncherRegression.kt "$destination/LauncherRegression.kt"
+          cat > "$destination/LauncherNavigationRegressionTest.kt" <<'KOTLIN'
+          package com.anezium.rokidbus.glasses
+          class LauncherNavigationRegressionTest {
+              @org.junit.Test fun tenChecks() { main() }
+          }
+          KOTLIN
+          chmod +x gradlew
+          ./gradlew --no-daemon --max-workers=2 :glasses-hub:testDebugUnitTest --tests com.anezium.rokidbus.glasses.LauncherNavigationRegressionTest
+          python - <<'PY'
+          import pathlib, xml.etree.ElementTree as ET
+          file = pathlib.Path('glasses-hub/build/test-results/testDebugUnitTest/TEST-com.anezium.rokidbus.glasses.LauncherNavigationRegressionTest.xml')
+          root = ET.parse(file).getroot()
+          assert root.get('failures') == '0' and root.get('errors') == '0'
+          assert (root.findtext('system-out') or '').count('PASS ') == 10
+          print('10 navigation regression checks PASS')
+          PY
 
       - name: Build and verify candidate using existing release key
         env:
@@ -137,23 +181,35 @@ jobs:
           ./gradlew --no-daemon --max-workers=2 :glasses-hub:assembleRelease
           mapfile -t apks < <(find glasses-hub/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk')
           test "${#apks[@]}" -eq 1
-          mkdir -p "$RUNNER_TEMP/spp-v2-candidate"
-          artifact="$RUNNER_TEMP/spp-v2-candidate/nexus-glasses-1.4.30-spp-v2-candidate.apk"
+          mkdir -p "$RUNNER_TEMP/spp-v2-nav-candidate"
+          artifact="$RUNNER_TEMP/spp-v2-nav-candidate/nexus-glasses-1.4.30-spp-v2-nav-20261031-candidate.apk"
           cp "${apks[0]}" "$artifact"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$artifact" > "$RUNNER_TEMP/spp-v2-candidate/signature.txt"
-          signer="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/spp-v2-candidate/signature.txt" | tr 'A-F' 'a-f' | tr -d ':[:space:]')"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$artifact" > "$RUNNER_TEMP/spp-v2-nav-candidate/signature.txt"
+          signer="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/spp-v2-nav-candidate/signature.txt" | tr 'A-F' 'a-f' | tr -d ':[:space:]')"
           test "$signer" = "$expected"
-          test "$(grep -c 'certificate SHA-256 digest:' "$RUNNER_TEMP/spp-v2-candidate/signature.txt")" -eq 1
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$artifact" > "$RUNNER_TEMP/spp-v2-candidate/badging.txt"
-          head -n 1 "$RUNNER_TEMP/spp-v2-candidate/badging.txt" | grep -F "name='com.anezium.rokidbus.glasses'" | grep -F "versionCode='10430'" | grep -F "versionName='1.4.30'"
-          if grep -q '^application-debuggable' "$RUNNER_TEMP/spp-v2-candidate/badging.txt"; then exit 1; fi
+          test "$(grep -c 'certificate SHA-256 digest:' "$RUNNER_TEMP/spp-v2-nav-candidate/signature.txt")" -eq 1
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$artifact" > "$RUNNER_TEMP/spp-v2-nav-candidate/badging.txt"
+          head -n 1 "$RUNNER_TEMP/spp-v2-nav-candidate/badging.txt" | grep -F "name='com.anezium.rokidbus.glasses'" | grep -F "versionCode='10430'" | grep -F "versionName='1.4.30'"
+          if grep -q '^application-debuggable' "$RUNNER_TEMP/spp-v2-nav-candidate/badging.txt"; then exit 1; fi
           "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c 4 "$artifact"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump permissions "$artifact" > "$RUNNER_TEMP/spp-v2-nav-candidate/permissions.txt"
+          cp glasses-hub/build/test-results/testDebugUnitTest/TEST-com.anezium.rokidbus.glasses.LauncherNavigationRegressionTest.xml "$RUNNER_TEMP/spp-v2-nav-candidate/navigation-regression.xml"
+          python - "$artifact" <<'PY'
+          import sys, zipfile, json
+          with zipfile.ZipFile(sys.argv[1]) as apk:
+              label = json.loads(apk.read('assets/buildground-candidate.json'))
+              assert label['build_label'] == 'NAV-20261031-01' and label['call'] == 'UNSUPPORTED'
+              dex = b''.join(apk.read(n) for n in apk.namelist() if n.endswith('.dex'))
+              for literal in [b'ROKID NEXUS', b'Launcher', b'PLUGINS', b'No phone plugins synced', b'Waiting for phone', b'NAV t=']:
+                  assert literal in dex, literal
+          print('APK build label and launcher UI strings verified')
+          PY
           (
-            cd "$RUNNER_TEMP/spp-v2-candidate"
-            sha256sum nexus-glasses-1.4.30-spp-v2-candidate.apk > SHA256SUMS
+            cd "$RUNNER_TEMP/spp-v2-nav-candidate"
+            sha256sum nexus-glasses-1.4.30-spp-v2-nav-20261031-candidate.apk > SHA256SUMS
             cat SHA256SUMS
           )
-          printf '%s\n' 'Review candidate only. No device install or Bluetooth validation. Existing-dot Call UNSUPPORTED.' > "$RUNNER_TEMP/spp-v2-candidate/README.txt"
+          printf '%s\n' 'NAV-20261031-01: SPP v2 plus launcher UI-thread fix and bounded diagnostics. Android 1.4.30/10430 unchanged. No device validation or install. Existing-dot Call UNSUPPORTED.' > "$RUNNER_TEMP/spp-v2-nav-candidate/README.txt"
 
       - name: Remove temporary release key
         if: always()
@@ -162,7 +218,7 @@ jobs:
       - name: Upload signed candidate and verification records only
         uses: actions/upload-artifact@v4
         with:
-          name: nexus-glasses-1.4.30-spp-v2-candidate
-          path: ${{ runner.temp }}/spp-v2-candidate/
+          name: nexus-glasses-1.4.30-spp-v2-nav-candidate
+          path: ${{ runner.temp }}/spp-v2-nav-candidate/
           if-no-files-found: error
           retention-days: 14
