@@ -1,0 +1,1116 @@
+--- a/phone-hub/build.gradle.kts
++++ b/phone-hub/build.gradle.kts
+@@ -12,8 +12,8 @@
+         applicationId = "com.anezium.rokidbus.phone"
+         minSdk = 30
+         targetSdk = 36
+-        versionCode = 10405
+-        versionName = "1.4.5"
++        versionCode = 10426
++        versionName = "1.4.26"
+     }
+ 
+     buildTypes {
+--- a/phone-hub/src/main/AndroidManifest.xml
++++ b/phone-hub/src/main/AndroidManifest.xml
+@@ -89,6 +89,10 @@
+             android:parentActivityName=".StorePluginDetailActivity" />
+ 
+         <activity
++            android:name=".LocalGlassesApkActivity"
++            android:exported="false" />
++
++        <activity
+             android:name=".SettingsActivity"
+             android:exported="false"
+             android:parentActivityName=".MainActivity" />
+--- a/phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt
++++ b/phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt
+@@ -258,6 +258,7 @@
+     private lateinit var phoneTtsDispatcher: PhoneTtsDispatcher
+     private val pluginBusJournal = busJournal
+     private val sppLoopStarted = AtomicBoolean(false)
++    private val sppRetryWake = java.util.concurrent.Semaphore(0)
+     private val audioLeaseArbitrator = SingleAudioLeaseArbitrator<AudioLease>()
+     private val speechBusLock = Any()
+     private var activeSpeechBusSession: SpeechBusSession? = null
+@@ -301,6 +302,9 @@
+     @Volatile private var glassesAppInstallState: GlassesAppInstallState = GlassesAppInstallState.Unknown
+     private var glassesAppOperationSequence = 0L
+     private var activeGlassesAppOperationId: Long? = null
++    private var activeLocalGlassesOperationId: Long? = null
++    private val localGlassesGeneration = java.util.concurrent.atomic.AtomicLong(0)
++
+     @Volatile private var lastAnnouncedPhoneCapabilities: PhoneHubCapabilities? = null
+     private var phoneBatteryReporter: PhoneBatteryReporter? = null
+     private var phoneBatteryBadgeSubscription: PhoneBatteryBadgeStore.Subscription? = null
+@@ -505,6 +509,7 @@
+ 
+     private val linkCallback = object : ICXRLinkCbk {
+         override fun onCXRLConnected(connected: Boolean) {
++            localGlassesGeneration.incrementAndGet()
+             cxrConnected = connected
+             if (!connected) glassesWorn = false
+             log("CXR-L connected=$connected")
+@@ -517,9 +522,11 @@
+         }
+ 
+         override fun onGlassBtConnected(connected: Boolean) {
++            localGlassesGeneration.incrementAndGet()
+             glassBtConnected = connected
+             if (!connected) glassesWorn = false
+             log("Hi Rokid glass BT connected=$connected")
++            if (connected) wakeSppRetry("glass_bt_up")
+             notifyLinkState()
+             if (!connected) failActiveGlassesAppOperation("Connection to the glasses was lost.")
+             if (!isCxrUp()) {
+@@ -1344,7 +1351,7 @@
+                     detail = listOfNotNull(
+                         note.stage.takeIf { it.isNotBlank() },
+                         note.detail.takeIf { it.isNotBlank() },
+-                    ).joinToString(" · "),
++                    ).joinToString(" Р вЂ™Р’В· "),
+                 )
+             }
+             return
+@@ -2515,7 +2522,7 @@
+      * Photo-sync status, delivered one registration at a time.
+      *
+      * The plugin SDK drops any message whose payload lacks its own pluginId, so a single broadcast
+-     * copy was swallowed before it ever reached the settings screen — the screen sat on
++     * copy was swallowed before it ever reached the settings screen Р Р†Р вЂљРІР‚Сњ the screen sat on
+      * "Connecting to Rokid Nexus" forever while the hub synced perfectly. Stamping each recipient's
+      * id in is what makes status visible; [registrationMatches] still decides who may receive it.
+      */
+@@ -2787,7 +2794,7 @@
+         }
+         // A registration going away is normal: the hub unbinds dormant plugins, and a
+         // background plugin is expected to push its pin and disconnect. The pin outlives
+-        // the connection — only losing the grant, a TTL, a replacement, or an explicit
++        // the connection Р Р†Р вЂљРІР‚Сњ only losing the grant, a TTL, a replacement, or an explicit
+         // hide clears it. See clearPinForRevokedOwner. Activities intentionally differ:
+         // the final live registration disappearing cleared that owner's activity above.
+         if (reason in setOf("binderDied", "dead callback", "unregister")) {
+@@ -3902,7 +3909,7 @@
+      *
+      * Speech and dictation share one pair of ears: left running, the glasses
+      * record the phone voice into what the wearer is saying. Every path that
+-     * grants the microphone calls this — the plugin-facing lease and the hub's
++     * grants the microphone calls this Р Р†Р вЂљРІР‚Сњ the plugin-facing lease and the hub's
+      * own internal one, which is the one dictation actually uses. Cancelled
+      * speech never resumes; a plugin that still wants it said, says it again.
+      */
+@@ -4311,6 +4318,21 @@
+      * assigns or retires the SPP socket. A parallel connect attempt against a
+      * live RFCOMM link kills it at the stack level, so there must be exactly one.
+      */
++    private fun waitForSppRetry(delayMs: Long) {
++        try {
++            sppRetryWake.tryAcquire(delayMs, TimeUnit.MILLISECONDS)
++        } catch (_: InterruptedException) {
++            Thread.currentThread().interrupt()
++        } finally {
++            sppRetryWake.drainPermits()
++        }
++    }
++
++    private fun wakeSppRetry(reason: String) {
++        log("SPP retry wake reason=$reason")
++        sppRetryWake.release()
++    }
++
+     @SuppressLint("MissingPermission")
+     private fun connectSpp() {
+         if (!sppLoopStarted.compareAndSet(false, true)) return
+@@ -4354,8 +4376,9 @@
+                     }
+                     notifyLinkState()
+                 }
+-                sleepQuietly(backoffMs)
+-                backoffMs = (backoffMs * 2).coerceAtMost(30_000L)
++                waitForSppRetry(backoffMs)
++                val retryCeilingMs = if (glassBtConnected) 2_000L else 30_000L
++                backoffMs = (backoffMs * 2).coerceAtMost(retryCeilingMs)
+             }
+         }, "rokidbus-spp").apply { isDaemon = true }.start()
+     }
+@@ -4524,6 +4547,10 @@
+     }
+ 
+     private fun installGlassesApp() {
++        if (LocalGlassesApkStore(applicationContext).hasAttempt()) {
++            log("latest glasses install blocked: review the local APK attempt first")
++            return
++        }
+         val state = glassesAppInstallState
+         val canInstall = state == GlassesAppInstallState.NotInstalled ||
+             (state == GlassesAppInstallState.Installed &&
+@@ -4547,7 +4574,7 @@
+         if (!isPhoneWifiEnabled()) {
+             transitionGlassesAppState(
+                 GlassesAppInstallEvent.Failed(
+-                    "Turn on Wi-Fi first — the update travels to the glasses over Wi-Fi.",
++                    "Turn on Wi-Fi first Р Р†Р вЂљРІР‚Сњ the update travels to the glasses over Wi-Fi.",
+                     GlassesAppRetry.INSTALL,
+                 ),
+             )
+@@ -4816,6 +4843,89 @@
+         runCatching {
+             getSystemService(WifiManager::class.java)?.isWifiEnabled == true
+         }.getOrDefault(true)
++
++    private fun localGlassesWifiReady(): Boolean = runCatching {
++        getSystemService(WifiManager::class.java)?.isWifiEnabled == true
++    }.getOrDefault(false)
++
++    private fun reviewLocalGlassesApkOnService(
++        selection: LocalGlassesApkSelection,
++        recovery: LocalGlassesApkSelection,
++    ): LocalGlassesInstallApproval = synchronized(glassesAppOperationLock) {
++        check(isCxrUp() && cxrLink != null && localGlassesWifiReady()) {
++            "The existing CXR connection and Wi-Fi must already be available."
++        }
++        check(remoteGlassesVersionName == LocalGlassesApkPolicy.VERSION_NAME) {
++            "The connected glasses must report 1.4.30. Installed versionCode/certificate are not available here."
++        }
++        check(activeGlassesAppOperationId == null) { "Another glasses operation is in progress." }
++        LocalGlassesInstallApproval(selection, recovery, this, localGlassesGeneration.get(),
++            android.os.SystemClock.elapsedRealtime())
++    }
++
++    private fun transferLocalGlassesApkOnService(
++        approval: LocalGlassesInstallApproval,
++        report: (String) -> Unit,
++    ) {
++        val generation = localGlassesGeneration.get()
++        if (!approval.consume(this, generation, android.os.SystemClock.elapsedRealtime())) {
++            report("Confirmation expired, was already used, or the CXR connection changed. Review again.")
++            return
++        }
++        val operationId = synchronized(glassesAppOperationLock) {
++            beginGlassesAppOperation()?.also { activeLocalGlassesOperationId = it }
++        }
++        if (operationId == null) {
++            report("Another glasses operation is in progress. Nothing transferred.")
++            return
++        }
++        fun complete(message: String) {
++            val accepted = synchronized(glassesAppOperationLock) {
++                if (activeLocalGlassesOperationId != operationId) false
++                else {
++                    activeLocalGlassesOperationId = null
++                    finishGlassesAppOperation(operationId)
++                }
++            }
++            if (accepted) report(message)
++        }
++        val transfer = Runnable {
++            runCatching {
++                val store = LocalGlassesApkStore(applicationContext)
++                val apk = store.verify(approval.selection)
++                store.verify(approval.recovery)
++                check(approval.recovery.role == LocalGlassesApkRole.RECOVERY) { "Verified recovery file required." }
++                val link = checkNotNull(cxrLink) { "CXR connection unavailable." }
++                LocalGlassesTransferBoundary.handoff(
++                    checkContext = {
++                        check(isCxrUp() && link === cxrLink && localGlassesWifiReady() &&
++                            remoteGlassesVersionName == LocalGlassesApkPolicy.VERSION_NAME &&
++                            generation == localGlassesGeneration.get() && isGlassesAppOperationActive(operationId) &&
++                            approval.isContextCurrent(this, localGlassesGeneration.get(),
++                                android.os.SystemClock.elapsedRealtime())) {
++                            "Connection/state changed during verification. Nothing transferred."
++                        }
++                    },
++                    reserveAttempt = { store.reserveAttempt(approval.selection) },
++                    transfer = {
++                        link.appUploadAndInstall(apk.absolutePath, object : IGlassAppCbk {
++                            override fun onInstallAppResult(success: Boolean) {
++                                complete("CXR reported success=$success. Check the installed glasses version and behavior. " +
++                                    "The recovery APK is retained. No app was opened and no retry was scheduled.")
++                            }
++                        })
++                    },
++                )
++            }.onFailure {
++                complete("Transfer stopped: " + it.message + ". If an attempt was recorded, its outcome needs " +
++                    "checking on the glasses before any new transfer.")
++            }
++        }
++        try { executor.execute(transfer) }
++        catch (_: java.util.concurrent.RejectedExecutionException) {
++            complete("The phone hub stopped before verification. Nothing transferred.")
++        }
++    }
+ 
+     private fun downloadAndInstallGlassesApp(operationId: Long) {
+         val release = runCatching { resolveLatestGlassesAppRelease() }.getOrElse { failure ->
+@@ -5054,6 +5164,9 @@
+     private fun failActiveGlassesAppOperation(message: String) {
+         val retry = synchronized(glassesAppOperationLock) {
+             if (activeGlassesAppOperationId == null) return
++            // Keep the gate closed while a local CXR result is outstanding.
++            // A disconnect is not evidence that the external install was cancelled.
++            if (activeLocalGlassesOperationId != null) return
+             activeGlassesAppOperationId = null
+             if (glassesAppInstallState == GlassesAppInstallState.Querying) {
+                 GlassesAppRetry.QUERY
+@@ -5548,11 +5661,11 @@
+             // for the same reason as the setup state below: support is a property of the
+             // glasses, not of the link, and both tiers have canonical state plus reconnect
+             // resends. The next announce overwrites them, so swapping in older glasses
+-            // corrects itself. Image support is not kept — an image has no canonical state
++            // corrects itself. Image support is not kept Р Р†Р вЂљРІР‚Сњ an image has no canonical state
+             // to resend, so it must refuse while the link is down.
+             // Keep the last-known setup state across link drops: powered-off glasses must
+             // not re-open the setup step. Only a live announcement may report false.
+-            // The installed version is kept for the same reason — glasses that went quiet
++            // The installed version is kept for the same reason Р Р†Р вЂљРІР‚Сњ glasses that went quiet
+             // did not uninstall their app, and forgetting the version turns the update
+             // check into "Reinstall" for something we know is current. The next announce
+             // overwrites it, so swapping in another unit still corrects itself.
+@@ -6015,6 +6128,30 @@
+             }
+         }
+ 
++        internal fun reviewLocalGlassesApk(
++            selection: LocalGlassesApkSelection,
++            recovery: LocalGlassesApkSelection,
++        ): LocalGlassesInstallApproval =
++            checkNotNull(activeInstance) { "The phone hub is not running; this screen will not start it." }
++                .reviewLocalGlassesApkOnService(selection, recovery)
++
++        internal fun transferLocalGlassesApk(approval: LocalGlassesInstallApproval, report: (String) -> Unit) {
++            val service = activeInstance
++            if (service == null) report("The phone hub stopped. Nothing transferred.")
++            else service.transferLocalGlassesApkOnService(approval, report)
++        }
++
++        internal fun acknowledgeLocalGlassesAttempt(context: android.content.Context) {
++            val service = activeInstance
++            if (service == null) LocalGlassesApkStore(context).acknowledgeAttempt()
++            else synchronized(service.glassesAppOperationLock) {
++                check(service.activeLocalGlassesOperationId == null) {
++                    "CXR has not returned a result. Inspect the glasses; do not start another transfer."
++                }
++                LocalGlassesApkStore(context).acknowledgeAttempt()
++            }
++        }
++
+         fun installGlassesApp(context: android.content.Context) {
+             context.startService(
+                 Intent(context, BusHubService::class.java).setAction(ACTION_INSTALL_GLASSES_APP),
+--- a/phone-hub/src/main/java/com/anezium/rokidbus/phone/HttpProxyPolicy.kt
++++ b/phone-hub/src/main/java/com/anezium/rokidbus/phone/HttpProxyPolicy.kt
+@@ -8,7 +8,10 @@
+     const val MAX_REQUEST_BODY_BYTES = 64 * 1024
+     const val MAX_RESPONSE_BODY_BYTES = 4 * 1024 * 1024L
+ 
+-    private const val ALLOWED_HOST = "api.transitous.org"
++    private val allowedHosts = setOf(
++        "api.transitous.org",
++        "api.openai.com",
++    )
+     private val allowedMethods = setOf("GET", "POST")
+     private val allowedHeaders = linkedMapOf(
+         "accept" to "Accept",
+@@ -16,6 +19,10 @@
+         "if-none-match" to "If-None-Match",
+         "if-modified-since" to "If-Modified-Since",
+         "user-agent" to "User-Agent",
++        "authorization" to "Authorization",
++        "openai-beta" to "OpenAI-Beta",
++        "openai-organization" to "OpenAI-Organization",
++        "openai-project" to "OpenAI-Project",
+     )
+ 
+     data class Request(
+@@ -45,7 +52,9 @@
+         if (uri.rawUserInfo != null) {
+             return Validation.Rejected("USER_INFO_NOT_ALLOWED")
+         }
+-        if (!uri.host.equals(ALLOWED_HOST, ignoreCase = true)) {
++        val normalizedHost = uri.host?.lowercase(Locale.US)
++            ?: return Validation.Rejected("INVALID_URL")
++        if (normalizedHost !in allowedHosts) {
+             return Validation.Rejected("HOST_NOT_ALLOWED")
+         }
+         if (uri.port != -1 && uri.port != 443) {
+--- /dev/null
++++ b/phone-hub/src/main/java/com/anezium/rokidbus/phone/LocalGlassesApkActivity.kt
+@@ -0,0 +1,138 @@
++package com.anezium.rokidbus.phone
++
++import android.app.Activity
++import android.app.AlertDialog
++import android.content.Intent
++import android.os.Bundle
++import android.widget.Button
++import android.widget.EditText
++import android.widget.LinearLayout
++import android.widget.ScrollView
++import android.widget.TextView
++import java.util.concurrent.Executors
++
++/** Non-exported, user-operated diagnostic entry point. Never enables or starts the hub. */
++class LocalGlassesApkActivity : Activity() {
++    private lateinit var status: TextView
++    private lateinit var recoveryHash: EditText
++    private val store by lazy { LocalGlassesApkStore(applicationContext) }
++    private val worker = Executors.newSingleThreadExecutor()
++    private var pending: LocalGlassesApkSelection? = null
++    private var selected: LocalGlassesApkSelection? = null
++    private var dialog: AlertDialog? = null
++    private var busy = false
++    private var resumed = false
++
++    override fun onCreate(savedInstanceState: Bundle?) {
++        super.onCreate(savedInstanceState)
++        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 24, 24, 24) }
++        status = TextView(this).apply {
++            text = "SPP candidate: glasses 1.4.30 / 10430 only. Save a previous signed release before transfer. " +
++                "This is a user-selected recovery file, NOT a copy of the installed glasses APK. " +
++                "Compatibility and recovery still require a device check. No app is opened after transfer."
++        }
++        column.addView(status)
++        recoveryHash = EditText(this).apply {
++            hint = "Previous release SHA-256 from the trusted release record"
++            setSingleLine(true)
++        }
++        column.addView(recoveryHash)
++        fun button(label: String, action: () -> Unit) {
++            column.addView(Button(this).apply { text = label; setOnClickListener { if (!busy) action() } })
++        }
++        button("Choose previous signed APK") {
++            val hash = recoveryHash.text.toString().trim().lowercase()
++            if (!hash.matches(Regex("[0-9a-f]{64}"))) status.text = "Enter the trusted release SHA-256 first."
++            else choose(LocalGlassesApkSelection(LocalGlassesApkRole.RECOVERY, hash))
++        }
++        button("Choose SPP candidate APK") {
++            choose(LocalGlassesApkSelection(LocalGlassesApkRole.CANDIDATE, LocalGlassesApkPolicy.CANDIDATE_SHA))
++        }
++        button("Review selected APK transfer") {
++            selected?.let(::review) ?: run { status.text = "Choose and verify an APK first." }
++        }
++        button("Review saved recovery APK") {
++            background({ store.recovery() }) { review(it) }
++        }
++        button("Acknowledge previous transfer after checking glasses") {
++            dialog = AlertDialog.Builder(this).setMessage(
++                "Only clear this local record after inspecting the glasses. This does not undo or retry an install."
++            ).setNegativeButton("Cancel", null).setPositiveButton("I checked the glasses") { _, _ ->
++                runCatching { BusHubService.acknowledgeLocalGlassesAttempt(applicationContext) }
++                    .onSuccess { status.text = "Local attempt record acknowledged. No transfer started." }
++                    .onFailure { status.text = it.message }
++            }.show()
++        }
++        setContentView(ScrollView(this).apply { addView(column) })
++    }
++
++    private fun choose(selection: LocalGlassesApkSelection) {
++        if (pending != null) return
++        selected = null
++        pending = selection
++        runCatching {
++            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
++                addCategory(Intent.CATEGORY_OPENABLE)
++                type = "application/vnd.android.package-archive"
++                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
++            }, 10430)
++        }.onFailure { pending = null; status.text = "No document picker is available." }
++    }
++
++    @Deprecated("Platform activity result API")
++    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
++        super.onActivityResult(requestCode, resultCode, data)
++        if (requestCode != 10430) return
++        val selection = pending.also { pending = null } ?: return
++        val uri = data?.data
++        if (resultCode != RESULT_OK || uri == null) return
++        background({ store.importSelected(uri, selection); selection }) {
++            selected = it
++            status.text = "Verified ${it.role}: 1.4.30 / 10430\nSHA-256: ${it.sha256}\nNothing transferred."
++        }
++    }
++
++    private fun review(selection: LocalGlassesApkSelection) {
++        background({
++            check(!store.hasAttempt()) { "Inspect the glasses and acknowledge the previous transfer first." }
++            store.verify(selection)
++            store.recovery()
++        }) { recovery ->
++            if (!resumed) return@background
++            val approval = runCatching { BusHubService.reviewLocalGlassesApk(selection, recovery) }
++                .getOrElse { status.text = it.message; return@background }
++            dialog = AlertDialog.Builder(this).setTitle("Transfer ${selection.role} to glasses?")
++                .setMessage("Package: ${LocalGlassesApkPolicy.PACKAGE}\nVersion: 1.4.30 / 10430\n" +
++                    "SHA-256: ${selection.sha256}\n\nSaved recovery SHA-256: ${recovery.sha256}\n" +
++                    "Recovery is a selected historical APK, not an installed-app backup. " +
++                    "Android may reject replacement; its protections remain in force. " +
++                    "An accepted CXR command does not prove the installed version or fix SPP.")
++                .setNegativeButton("Cancel", null)
++                .setPositiveButton("Transfer this APK") { _, _ ->
++                    busy = true
++                    status.text = "Verifying again before CXR transfer..."
++                    BusHubService.transferLocalGlassesApk(approval) { message ->
++                        runOnUiThread { if (!isDestroyed) { busy = false; status.text = message } }
++                    }
++                }.show()
++        }
++    }
++
++    private fun <T> background(work: () -> T, success: (T) -> Unit) {
++        busy = true
++        worker.execute {
++            val result = runCatching(work)
++            runOnUiThread {
++                if (!isDestroyed && !isFinishing) {
++                    busy = false
++                    result.onSuccess(success).onFailure { status.text = it.message ?: "Verification failed." }
++                }
++            }
++        }
++    }
++
++    override fun onResume() { super.onResume(); resumed = true }
++    override fun onPause() { resumed = false; super.onPause() }
++    override fun onStop() { dialog?.dismiss(); dialog = null; super.onStop() }
++    override fun onDestroy() { worker.shutdown(); super.onDestroy() }
++}
+--- /dev/null
++++ b/phone-hub/src/main/java/com/anezium/rokidbus/phone/LocalGlassesApkPolicy.kt
+@@ -0,0 +1,81 @@
++package com.anezium.rokidbus.phone
++
++import java.io.InputStream
++import java.io.OutputStream
++import java.util.concurrent.atomic.AtomicBoolean
++
++internal enum class LocalGlassesApkRole { CANDIDATE, RECOVERY }
++
++internal data class LocalGlassesApkMetadata(
++    val packageName: String,
++    val versionCode: Long,
++    val versionName: String?,
++    val signerDigests: List<String>,
++)
++
++internal data class LocalGlassesApkSelection(val role: LocalGlassesApkRole, val sha256: String)
++
++/** Deliberately limited to the reviewed SPP experiment, not a general installer. */
++internal object LocalGlassesApkPolicy {
++    const val PACKAGE = "com.anezium.rokidbus.glasses"
++    const val VERSION_CODE = 10430L
++    const val VERSION_NAME = "1.4.30"
++    const val SIGNER = "55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097"
++    const val CANDIDATE_SHA = "bffde442763cb71471a41b5d050f8b4a6832612567e3b80748d094f55002de03"
++    const val MAX_BYTES = 64L * 1024 * 1024
++
++    fun validate(metadata: LocalGlassesApkMetadata?, digest: String, selection: LocalGlassesApkSelection) {
++        require(selection.sha256.matches(Regex("[0-9a-f]{64}"))) { "A trusted SHA-256 is required." }
++        require(digest == selection.sha256) { "APK SHA-256 does not match the expected file." }
++        require(metadata != null) { "Android could not verify the APK metadata/signature." }
++        require(metadata.packageName == PACKAGE) { "Only the Nexus glasses package is allowed." }
++        require(metadata.versionCode == VERSION_CODE && metadata.versionName == VERSION_NAME) {
++            "Only version 1.4.30 / 10430 is allowed; no version downgrade is requested."
++        }
++        require(metadata.signerDigests == listOf(SIGNER)) { "The APK must have the single BuildGround release signer." }
++        when (selection.role) {
++            LocalGlassesApkRole.CANDIDATE -> require(digest == CANDIDATE_SHA) { "This is not the reviewed candidate." }
++            LocalGlassesApkRole.RECOVERY -> require(digest != CANDIDATE_SHA) { "Select the previous release, not the candidate." }
++        }
++    }
++
++    fun copyBounded(input: InputStream, output: OutputStream, limit: Long = MAX_BYTES) {
++        var size = 0L
++        val buffer = ByteArray(8192)
++        while (true) {
++            val count = input.read(buffer)
++            if (count < 0) break
++            size += count
++            require(size <= limit) { "APK exceeds the size limit." }
++            output.write(buffer, 0, count)
++        }
++        require(size > 0L) { "The selected file is empty." }
++    }
++}
++
++/** In-memory only. Rotation, process death and service replacement cannot replay a transfer. */
++internal class LocalGlassesInstallApproval(
++    val selection: LocalGlassesApkSelection,
++    val recovery: LocalGlassesApkSelection,
++    private val owner: Any,
++    private val generation: Long,
++    private val issuedAt: Long,
++) {
++    private val consumed = AtomicBoolean(false)
++    fun isContextCurrent(currentOwner: Any, currentGeneration: Long, now: Long): Boolean =
++        currentOwner === owner && currentGeneration == generation &&
++            now >= issuedAt && now - issuedAt <= 120_000L
++
++    fun consume(currentOwner: Any, currentGeneration: Long, now: Long): Boolean =
++        isContextCurrent(currentOwner, currentGeneration, now) && consumed.compareAndSet(false, true)
++}
++
++/** The final check follows persistence too: writing the record may outlive the connection. */
++internal object LocalGlassesTransferBoundary {
++    fun handoff(checkContext: () -> Unit, reserveAttempt: () -> Unit, transfer: () -> Unit) {
++        checkContext()
++        reserveAttempt()
++        checkContext()
++        transfer()
++    }
++}
+--- /dev/null
++++ b/phone-hub/src/main/java/com/anezium/rokidbus/phone/LocalGlassesApkStore.kt
+@@ -0,0 +1,108 @@
++package com.anezium.rokidbus.phone
++
++import android.content.Context
++import android.net.Uri
++import android.util.AtomicFile
++import java.io.File
++import java.io.FileOutputStream
++import java.security.MessageDigest
++
++/** Private, content-addressed copies. No persisted URI grant, provider path or display name. */
++internal class LocalGlassesApkStore(private val context: Context) {
++    private val root = File(context.noBackupFilesDir, "local-glasses-apks").apply {
++        check(isDirectory || mkdirs()) { "Could not create private APK storage." }
++    }
++    private val recoveryRecord = AtomicFile(File(root, "selected-recovery"))
++    private val attemptRecord = AtomicFile(File(root, "transfer-attempt"))
++
++    fun importSelected(uri: Uri, selection: LocalGlassesApkSelection): File = synchronized(lock) {
++        require(uri.scheme == "content") { "Select a file using the Android document picker." }
++        val temporary = File.createTempFile("selected-", ".apk", root)
++        try {
++            context.contentResolver.openInputStream(uri).use { input ->
++                requireNotNull(input) { "The selected document cannot be read." }
++                FileOutputStream(temporary).use { output ->
++                    LocalGlassesApkPolicy.copyBounded(input, output)
++                    output.fd.sync()
++                }
++            }
++            verifyFile(temporary, selection)
++            val target = apk(selection)
++            if (target.exists()) verifyFile(target, selection)
++            else check(temporary.renameTo(target)) { "Could not preserve the verified APK." }
++            if (selection.role == LocalGlassesApkRole.RECOVERY) {
++                write(recoveryRecord, selection.sha256)
++            }
++            target
++        } finally {
++            temporary.delete()
++        }
++    }
++
++    fun verify(selection: LocalGlassesApkSelection): File = synchronized(lock) {
++        apk(selection).also { verifyFile(it, selection) }
++    }
++
++    fun recovery(): LocalGlassesApkSelection = synchronized(lock) {
++        val hash = recoveryRecord.readFully().toString(Charsets.UTF_8)
++        LocalGlassesApkSelection(LocalGlassesApkRole.RECOVERY, hash).also { verify(it) }
++    }
++
++    fun hasAttempt(): Boolean = synchronized(lock) {
++        attemptRecord.baseFile.exists() || File(root, "transfer-attempt.bak").exists() ||
++            File(root, "transfer-attempt.new").exists()
++    }
++
++    /** Persist BEFORE the external call. An uncertain outcome must never be retried automatically. */
++    fun reserveAttempt(selection: LocalGlassesApkSelection) = synchronized(lock) {
++        check(!hasAttempt()) { "Inspect the glasses and acknowledge the previous attempt first." }
++        write(attemptRecord, "${selection.role}\n${selection.sha256}\nOutcome requires checking on glasses.\n")
++    }
++
++    fun acknowledgeAttempt() = synchronized(lock) { attemptRecord.delete() }
++
++    private fun apk(selection: LocalGlassesApkSelection): File {
++        require(selection.sha256.matches(Regex("[0-9a-f]{64}"))) { "Invalid expected SHA-256." }
++        return File(root, "${selection.sha256}.apk")
++    }
++
++    private fun verifyFile(file: File, selection: LocalGlassesApkSelection) {
++        require(file.isFile && file.length() in 1..LocalGlassesApkPolicy.MAX_BYTES) { "Saved APK is missing or invalid." }
++        val digest = MessageDigest.getInstance("SHA-256")
++        file.inputStream().use { input ->
++            val buffer = ByteArray(8192)
++            while (true) {
++                val n = input.read(buffer)
++                if (n < 0) break
++                digest.update(buffer, 0, n)
++            }
++        }
++        val archive = AndroidArtifactPackageInspector(context.packageManager).inspect(file)
++        LocalGlassesApkPolicy.validate(
++            archive?.let {
++                LocalGlassesApkMetadata(it.packageName, it.versionCode, it.versionName,
++                    it.signingCertificates.map { cert -> hex(MessageDigest.getInstance("SHA-256").digest(cert)) })
++            },
++            hex(digest.digest()), selection,
++        )
++    }
++
++    private fun write(file: AtomicFile, value: String) {
++        val output = file.startWrite()
++        try {
++            output.write(value.toByteArray(Charsets.UTF_8))
++            file.finishWrite(output)
++            check(file.readFully().contentEquals(value.toByteArray(Charsets.UTF_8))) {
++                "Could not verify the saved APK/attempt record."
++            }
++        } catch (failure: Throwable) {
++            file.failWrite(output)
++            throw failure
++        }
++    }
++
++    companion object {
++        private val lock = Any()
++        private fun hex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it.toInt() and 255) }
++    }
++}
+--- a/phone-hub/src/main/java/com/anezium/rokidbus/phone/PluginGuardianPolicy.kt
++++ b/phone-hub/src/main/java/com/anezium/rokidbus/phone/PluginGuardianPolicy.kt
+@@ -10,36 +10,21 @@
+ internal class GuardianBindLifetimePolicy(
+     private val lingerMillis: Long = DEFAULT_LINGER_MILLIS,
+ ) {
+-    private var linkUp = false
+-    private var releaseAtMillis: Long? = null
+-
++    /** Approved guardians are owned by the Phone Hub, not by the transient glasses link. */
+     val isLinkUp: Boolean
+-        get() = linkUp
++        get() = true
+ 
+     init {
++        // Retain the constructor contract for source/API compatibility with existing tests/callers.
+         require(lingerMillis > 0L)
+     }
+ 
+-    fun onLinkStateChanged(isUp: Boolean, nowMillis: Long): GuardianLinkDecision {
+-        if (isUp) {
+-            linkUp = true
+-            releaseAtMillis = null
+-            return GuardianLinkDecision.EnsureBound
+-        }
+-        if (!linkUp) return GuardianLinkDecision.None
+-        linkUp = false
+-        releaseAtMillis = nowMillis + lingerMillis
+-        return GuardianLinkDecision.ScheduleRelease(lingerMillis)
+-    }
++    @Suppress("UNUSED_PARAMETER")
++    fun onLinkStateChanged(isUp: Boolean, nowMillis: Long): GuardianLinkDecision =
++        GuardianLinkDecision.EnsureBound
+ 
+-    fun onReleaseTimer(nowMillis: Long): GuardianLinkDecision {
+-        if (linkUp) return GuardianLinkDecision.None
+-        val releaseAt = releaseAtMillis ?: return GuardianLinkDecision.None
+-        val remaining = releaseAt - nowMillis
+-        if (remaining > 0L) return GuardianLinkDecision.ScheduleRelease(remaining)
+-        releaseAtMillis = null
+-        return GuardianLinkDecision.Release
+-    }
++    @Suppress("UNUSED_PARAMETER")
++    fun onReleaseTimer(nowMillis: Long): GuardianLinkDecision = GuardianLinkDecision.None
+ 
+     companion object {
+         const val DEFAULT_LINGER_MILLIS = 30_000L
+--- a/phone-hub/src/main/java/com/anezium/rokidbus/phone/SettingsActivity.kt
++++ b/phone-hub/src/main/java/com/anezium/rokidbus/phone/SettingsActivity.kt
+@@ -206,6 +206,10 @@
+             addView(BusTheme.gap(this@SettingsActivity, 28))
+             addView(NexusUi.sectionRow(this@SettingsActivity, "Maintenance"), NexusUi.block())
+             addView(BusTheme.gap(this@SettingsActivity, 12))
++            addView(actionRow("Local glasses APK test", "Review", false) {
++                startActivity(Intent(this@SettingsActivity, LocalGlassesApkActivity::class.java))
++            }, NexusUi.block())
++            addView(BusTheme.gap(this@SettingsActivity, 10))
+             addView(glassesRepairToggleRow(), NexusUi.block())
+             addView(BusTheme.gap(this@SettingsActivity, 10))
+             addView(glassesRepairNowRow(), NexusUi.block())
+@@ -434,7 +438,7 @@
+                 plainActionRow(
+                     title = "What's new",
+                     danger = false,
+-                    valueView = NexusUi.metaLabel(this@SettingsActivity, "›", NexusUi.INK3),
++                    valueView = NexusUi.metaLabel(this@SettingsActivity, "вЂє", NexusUi.INK3),
+                     onClick = { startActivity(WhatsNewActivity.intent(this@SettingsActivity)) },
+                 ),
+                 NexusUi.block(),
+@@ -594,7 +598,7 @@
+     private fun renderDisplayRow() {
+         val value = displayValue ?: return
+         val auto = PhoneHudPositionStore(this).hudPositionAuto()
+-        value.text = if (auto) "AUTO ›" else "MANUAL ›"
++        value.text = if (auto) "AUTO вЂє" else "MANUAL вЂє"
+     }
+ 
+     private fun glassesRepairToggleRow(): LinearLayout =
+@@ -635,7 +639,7 @@
+         }
+ 
+     private fun glassesRepairNowRow(): LinearLayout {
+-        val value = NexusUi.metaLabel(this, "Repair ›", NexusUi.GREEN)
++        val value = NexusUi.metaLabel(this, "Repair вЂє", NexusUi.GREEN)
+         repairValue = value
+         val status = NexusUi.rowSub(this, "").apply {
+             visibility = View.GONE
+@@ -679,8 +683,8 @@
+             return
+         }
+         repairInFlight = true
+-        repairValue?.text = "Working…"
+-        showRepairStatus("Asking the glasses to check their helper…", autoClear = false)
++        repairValue?.text = "WorkingвЂ¦"
++        showRepairStatus("Asking the glasses to check their helperвЂ¦", autoClear = false)
+         client.request(
+             BusPaths.GLASSES_REPAIR_REQUEST,
+             GlassesRepairContract.requestToJson(),
+@@ -688,7 +692,7 @@
+         ) { result ->
+             if (isDestroyed || isFinishing) return@request
+             repairInFlight = false
+-            repairValue?.text = "Repair ›"
++            repairValue?.text = "Repair вЂє"
+             val message = result.fold(
+                 onSuccess = { payload ->
+                     repairStatusMessage(GlassesRepairContract.resultFromReply(payload))
+@@ -703,7 +707,7 @@
+         GlassesRepairContract.RESULT_REPAIRED ->
+             "Repaired. The glasses have their helper back."
+         GlassesRepairContract.RESULT_ALREADY_HEALTHY ->
+-            "Nothing to repair — the helper is already in place."
++            "Nothing to repair вЂ” the helper is already in place."
+         GlassesRepairContract.RESULT_WIFI_UNAVAILABLE ->
+             "Could not turn on the glasses' Wi-Fi. Wake the glasses and try again."
+         GlassesRepairContract.RESULT_ARM_FAILED ->
+@@ -776,14 +780,14 @@
+         val value = voiceValue ?: return
+         val rate = PhoneTtsSettingsStore(this).speechRate()
+         val label = if (rate == rate.toInt().toFloat()) "${rate.toInt()}x" else "${rate}x"
+-        value.text = "$label ›"
++        value.text = "$label вЂє"
+         value.setTextColor(NexusUi.GREEN)
+     }
+ 
+     private fun renderSpeechRow() {
+         val value = speechValue ?: return
+         val ready = SpeechSettingsStore(this).readiness(HubSecretStore(this)) == SpeechReadiness.READY
+-        value.text = if (ready) "READY ›" else "SET UP ›"
++        value.text = if (ready) "READY вЂє" else "SET UP вЂє"
+         // Every other row here opens in the same bright green, so dimming this one made a
+         // working screen look disabled. Amber is what the rest of the app uses to mean
+         // "this still wants you".
+--- a/phone-hub/src/test/java/com/anezium/rokidbus/phone/HttpProxyPolicyTest.kt
++++ b/phone-hub/src/test/java/com/anezium/rokidbus/phone/HttpProxyPolicyTest.kt
+@@ -17,6 +17,23 @@
+         assertEquals("GET", request.method)
+         assertEquals("api.transitous.org", request.url.host.lowercase())
+         assertFalse(request.followRedirects)
++    }
++
++    @Test
++    fun openAiHostIsAllowedForNetworkBridge() {
++        val validation = validate(
++            url = "https://api.openai.com/v1/models",
++            headers = mapOf("Authorization" to "Bearer bridge-token"),
++        )
++
++        val request = (validation as HttpProxyPolicy.Validation.Allowed).request
++        assertEquals("api.openai.com", request.url.host.lowercase())
++        assertEquals("Bearer bridge-token", request.headers["Authorization"])
++    }
++
++    @Test
++    fun openAiLookalikeHostIsRejected() {
++        assertRejected("HOST_NOT_ALLOWED", url = "https://api.openai.com.example.org/v1/models")
+     }
+ 
+     @Test
+@@ -76,10 +93,17 @@
+ 
+         val headers = (validation as HttpProxyPolicy.Validation.Allowed).request.headers
+         assertEquals(
+-            setOf("Accept", "Content-Type", "If-None-Match", "If-Modified-Since", "User-Agent"),
++            setOf(
++                "Accept",
++                "Content-Type",
++                "If-None-Match",
++                "If-Modified-Since",
++                "User-Agent",
++                "Authorization",
++            ),
+             headers.keys,
+         )
+-        assertFalse(headers.containsKey("Authorization"))
++        assertEquals("secret", headers["Authorization"])
+         assertFalse(headers.containsKey("Cookie"))
+     }
+ 
+--- /dev/null
++++ b/phone-hub/src/test/java/com/anezium/rokidbus/phone/LocalGlassesApkPolicyTest.kt
+@@ -0,0 +1,75 @@
++package com.anezium.rokidbus.phone
++
++import java.io.ByteArrayInputStream
++import java.io.ByteArrayOutputStream
++import java.util.concurrent.CountDownLatch
++import java.util.concurrent.Executors
++import java.util.concurrent.TimeUnit
++import org.junit.Assert.*
++import org.junit.Test
++
++class LocalGlassesApkPolicyTest {
++    private val policy = LocalGlassesApkPolicy
++    private val candidate = LocalGlassesApkSelection(LocalGlassesApkRole.CANDIDATE, policy.CANDIDATE_SHA)
++    private val recovery = LocalGlassesApkSelection(LocalGlassesApkRole.RECOVERY, "a".repeat(64))
++    private val valid = LocalGlassesApkMetadata(policy.PACKAGE, 10430L, "1.4.30", listOf(policy.SIGNER))
++
++    @Test fun acceptsOnlyPinnedCandidateAndSeparatelyHashedSameVersionRecovery() {
++        policy.validate(valid, candidate.sha256, candidate)
++        policy.validate(valid, recovery.sha256, recovery)
++    }
++
++    @Test fun rejectsWrongPackageVersionAndSignerEvenWithMatchingHash() {
++        listOf(null, valid.copy(packageName = "unrelated.app"), valid.copy(versionCode = 10429),
++            valid.copy(versionCode = 10431), valid.copy(versionName = "1.4.31"),
++            valid.copy(signerDigests = emptyList()), valid.copy(signerDigests = listOf("bad")),
++            valid.copy(signerDigests = listOf(policy.SIGNER, policy.SIGNER)))
++            .forEach { metadata -> rejects { policy.validate(metadata, candidate.sha256, candidate) } }
++    }
++
++    @Test fun rejectsTamperUnpinnedCandidateAndCandidateUsedAsRecovery() {
++        rejects { policy.validate(valid, recovery.sha256, candidate) }
++        rejects { policy.validate(valid, recovery.sha256, recovery.copy(role = LocalGlassesApkRole.CANDIDATE)) }
++        rejects { policy.validate(valid, candidate.sha256, candidate.copy(role = LocalGlassesApkRole.RECOVERY)) }
++        rejects { policy.validate(valid, "../x", recovery.copy(sha256 = "../x")) }
++    }
++
++    @Test fun boundedCopyRejectsEmptyAndOversizedStreamsWithoutTrustingProviderSize() {
++        rejects { policy.copyBounded(ByteArrayInputStream(byteArrayOf()), ByteArrayOutputStream(), 4) }
++        val output = ByteArrayOutputStream()
++        rejects { policy.copyBounded(ByteArrayInputStream(ByteArray(5)), output, 4) }
++        assertEquals(0, output.size())
++        policy.copyBounded(ByteArrayInputStream(ByteArray(4)), output, 4)
++        assertEquals(4, output.size())
++    }
++
++    @Test fun approvalExpiresAndRejectsClockRollbackOrNewConnectionOrService() {
++        val owner = Any()
++        fun approval() = LocalGlassesInstallApproval(candidate, recovery, owner, 7, 100)
++        assertFalse(approval().consume(owner, 7, 99))
++        assertFalse(approval().consume(owner, 7, 120101))
++        assertFalse(approval().consume(owner, 8, 101))
++        assertFalse(approval().consume(Any(), 7, 101))
++        assertTrue(approval().consume(owner, 7, 120100))
++        val queued = approval()
++        assertTrue(queued.consume(owner, 7, 101))
++        assertFalse(queued.isContextCurrent(owner, 7, 120101))
++    }
++
++    @Test fun concurrentConfirmationsConsumeOneApprovalOnlyOnce() {
++        val owner = Any()
++        val approval = LocalGlassesInstallApproval(candidate, recovery, owner, 1, 0)
++        val pool = Executors.newFixedThreadPool(8)
++        try {
++            val start = CountDownLatch(1)
++            val results = (1..64).map { pool.submit<Boolean> { start.await(); approval.consume(owner, 1, 1) } }
++            start.countDown()
++            assertEquals(1, results.count { it.get(3, TimeUnit.SECONDS) })
++            assertFalse(approval.consume(owner, 1, 2))
++        } finally { pool.shutdownNow() }
++    }
++
++    private fun rejects(work: () -> Unit) {
++        try { work(); fail("Expected fail-closed rejection") } catch (_: IllegalArgumentException) { }
++    }
++}
+--- /dev/null
++++ b/phone-hub/src/test/java/com/anezium/rokidbus/phone/LocalGlassesTransferBoundaryTest.kt
+@@ -0,0 +1,58 @@
++package com.anezium.rokidbus.phone
++
++import org.junit.Assert.*
++import org.junit.Test
++
++/** Recording callbacks only; never constructs CXRLink or calls an Android installer. */
++class LocalGlassesTransferBoundaryTest {
++    @Test fun verifiesThenRecordsThenRechecksBeforeOneHandoff() {
++        val events = mutableListOf<String>()
++        LocalGlassesTransferBoundary.handoff({ events += "check" }, { events += "record" }, { events += "transfer" })
++        assertEquals(listOf("check", "record", "check", "transfer"), events)
++    }
++
++    @Test fun disconnectedBeforeReservationDoesNotRecordOrTransfer() {
++        var writes = 0; var transfers = 0
++        rejected { LocalGlassesTransferBoundary.handoff({ error("disconnected") }, { writes++ }, { transfers++ }) }
++        assertEquals(0, writes); assertEquals(0, transfers)
++    }
++
++    @Test fun disconnectWhileRecordingRetainsAttemptAndNeverHandsOff() {
++        var connected = true; var recorded = false; var transfers = 0
++        rejected {
++            LocalGlassesTransferBoundary.handoff({ check(connected) },
++                { recorded = true; connected = false }, { transfers++ })
++        }
++        assertTrue(recorded); assertEquals(0, transfers)
++    }
++
++    @Test fun recordingFailureStopsExternalCall() {
++        var transfers = 0
++        rejected { LocalGlassesTransferBoundary.handoff({}, { error("disk failure") }, { transfers++ }) }
++        assertEquals(0, transfers)
++    }
++
++    @Test fun externalFailureHasOneAttemptAndNoRetryOrRecordRemoval() {
++        var records = 0; var transfers = 0
++        rejected { LocalGlassesTransferBoundary.handoff({}, { records++ }, { transfers++; error("unknown outcome") }) }
++        assertEquals(1, records); assertEquals(1, transfers)
++    }
++
++    @Test fun expiryWhileRecordingStopsHandoff() {
++        val owner = Any()
++        val candidate = LocalGlassesApkSelection(LocalGlassesApkRole.CANDIDATE, LocalGlassesApkPolicy.CANDIDATE_SHA)
++        val recovery = LocalGlassesApkSelection(LocalGlassesApkRole.RECOVERY, "a".repeat(64))
++        val approval = LocalGlassesInstallApproval(candidate, recovery, owner, 1, 0)
++        var now = 1L; var transfers = 0
++        assertTrue(approval.consume(owner, 1, now))
++        rejected {
++            LocalGlassesTransferBoundary.handoff({ check(approval.isContextCurrent(owner, 1, now)) },
++                { now = 120001 }, { transfers++ })
++        }
++        assertEquals(0, transfers)
++    }
++
++    private fun rejected(work: () -> Unit) {
++        try { work(); fail("Expected rejection") } catch (_: IllegalStateException) { }
++    }
++}
+--- a/phone-hub/src/test/java/com/anezium/rokidbus/phone/PluginGuardianCoordinatorTest.kt
++++ b/phone-hub/src/test/java/com/anezium/rokidbus/phone/PluginGuardianCoordinatorTest.kt
+@@ -99,7 +99,7 @@
+     }
+ 
+     @Test
+-    fun `link flap cancels linger and stable loss releases after thirty seconds`() {
++    fun `guardian stays bound through long glasses link loss and releases only when coordinator closes`() {
+         val context = RecordingContext()
+         val coordinator = PluginGuardianCoordinator(
+             context = context,
+@@ -108,22 +108,28 @@
+             stoppedFlagReader = { false },
+         )
+ 
+-        coordinator.onLinkStateChanged(true)
+-        idleMain()
++        // Even if the glasses are already down/rebooting when the coordinator starts,
++        // the approved guardian is process-owned and must be bound.
+         coordinator.onLinkStateChanged(false)
+         idleMain()
+-        shadowOf(Looper.getMainLooper()).idleFor(29, TimeUnit.SECONDS)
++        assertEquals(1, context.connections.size)
+         assertEquals(0, context.unbindCount)
+ 
++        shadowOf(Looper.getMainLooper()).idleFor(10, TimeUnit.MINUTES)
++        assertEquals(1, context.connections.size)
++        assertEquals(0, context.unbindCount)
++
++        // Link flaps may reconcile eligibility but must not duplicate or release the binding.
+         coordinator.onLinkStateChanged(true)
+-        idleMain()
+-        shadowOf(Looper.getMainLooper()).idleFor(2, TimeUnit.SECONDS)
+-        assertEquals(0, context.unbindCount)
+-        assertEquals(1, context.connections.size)
+-
+         coordinator.onLinkStateChanged(false)
+         idleMain()
+-        shadowOf(Looper.getMainLooper()).idleFor(30, TimeUnit.SECONDS)
++        shadowOf(Looper.getMainLooper()).idleFor(10, TimeUnit.MINUTES)
++        assertEquals(1, context.connections.size)
++        assertEquals(0, context.unbindCount)
++
++        // Phone Hub shutdown remains the explicit owner boundary.
++        coordinator.close()
++        idleMain()
+         assertEquals(1, context.unbindCount)
+     }
+ 
+--- a/phone-hub/src/test/java/com/anezium/rokidbus/phone/PluginGuardianPolicyTest.kt
++++ b/phone-hub/src/test/java/com/anezium/rokidbus/phone/PluginGuardianPolicyTest.kt
+@@ -1,58 +1,39 @@
+ package com.anezium.rokidbus.phone
+ 
+ import org.junit.Assert.assertEquals
++import org.junit.Assert.assertTrue
+ import org.junit.Test
+ 
+ class PluginGuardianPolicyTest {
+     @Test
+-    fun `initial link down does not start a linger`() {
++    fun `guardian is binding eligible before any glasses link exists`() {
+         val policy = GuardianBindLifetimePolicy()
+ 
+-        assertEquals(GuardianLinkDecision.None, policy.onLinkStateChanged(false, 1_000L))
+-        assertEquals(GuardianLinkDecision.None, policy.onReleaseTimer(31_000L))
++        assertTrue(policy.isLinkUp)
++        assertEquals(GuardianLinkDecision.EnsureBound, policy.onLinkStateChanged(false, 1_000L))
++        assertTrue(policy.isLinkUp)
+     }
+ 
+     @Test
+-    fun `link loss releases only after the awake-uptime linger`() {
++    fun `glasses link loss never schedules or performs guardian release`() {
+         val policy = GuardianBindLifetimePolicy()
+ 
+         assertEquals(GuardianLinkDecision.EnsureBound, policy.onLinkStateChanged(true, 1_000L))
+-        assertEquals(
+-            GuardianLinkDecision.ScheduleRelease(30_000L),
+-            policy.onLinkStateChanged(false, 2_000L),
+-        )
+-        assertEquals(
+-            GuardianLinkDecision.ScheduleRelease(10_000L),
+-            policy.onReleaseTimer(22_000L),
+-        )
+-        assertEquals(GuardianLinkDecision.Release, policy.onReleaseTimer(32_000L))
+-        assertEquals(GuardianLinkDecision.None, policy.onReleaseTimer(62_000L))
++        assertEquals(GuardianLinkDecision.EnsureBound, policy.onLinkStateChanged(false, 2_000L))
++        assertEquals(GuardianLinkDecision.None, policy.onReleaseTimer(32_000L))
++        assertEquals(GuardianLinkDecision.None, policy.onReleaseTimer(3_600_000L))
++        assertTrue(policy.isLinkUp)
+     }
+ 
+     @Test
+-    fun `link flap cancels the pending release`() {
++    fun `repeated link states keep asking coordinator to ensure guardian binding`() {
+         val policy = GuardianBindLifetimePolicy()
+ 
+-        policy.onLinkStateChanged(true, 1_000L)
+-        policy.onLinkStateChanged(false, 2_000L)
+-
++        assertEquals(GuardianLinkDecision.EnsureBound, policy.onLinkStateChanged(false, 1_000L))
++        assertEquals(GuardianLinkDecision.EnsureBound, policy.onLinkStateChanged(false, 2_000L))
+         assertEquals(GuardianLinkDecision.EnsureBound, policy.onLinkStateChanged(true, 3_000L))
+-        assertEquals(GuardianLinkDecision.None, policy.onReleaseTimer(32_000L))
+-        assertEquals(true, policy.isLinkUp)
+-    }
+-
+-    @Test
+-    fun `stable repeated states neither extend the linger nor release early`() {
+-        val policy = GuardianBindLifetimePolicy()
+-
+-        assertEquals(GuardianLinkDecision.EnsureBound, policy.onLinkStateChanged(true, 1_000L))
+-        assertEquals(GuardianLinkDecision.EnsureBound, policy.onLinkStateChanged(true, 2_000L))
+-        assertEquals(
+-            GuardianLinkDecision.ScheduleRelease(30_000L),
+-            policy.onLinkStateChanged(false, 3_000L),
+-        )
+-        assertEquals(GuardianLinkDecision.None, policy.onLinkStateChanged(false, 20_000L))
+-        assertEquals(GuardianLinkDecision.Release, policy.onReleaseTimer(33_000L))
++        assertEquals(GuardianLinkDecision.EnsureBound, policy.onLinkStateChanged(false, 4_000L))
++        assertTrue(policy.isLinkUp)
+     }
+ 
+     @Test
