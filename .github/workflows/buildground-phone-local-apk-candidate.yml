@@ -1,0 +1,187 @@
+name: BuildGround Phone local APK signed candidate
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: buildground-phone-local-apk-candidate
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    if: github.repository == '4108814-ai/BuildGround-Rokid' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+        working-directory: RokidNexus
+    steps:
+      - name: Check out exact Phone baseline
+        uses: actions/checkout@v6
+        with:
+          ref: 060797bbae975e95ca6a22c88378e6fadec58640
+          path: RokidNexus
+          persist-credentials: false
+
+      - name: Check out reviewed patch only
+        uses: actions/checkout@v6
+        with:
+          ref: 14d8606e23175631cde0381ab2d0c5fcc9e98723
+          path: CandidatePatch
+          persist-credentials: false
+          sparse-checkout: .github/candidates/nexus-phone-local-apk.patch
+          sparse-checkout-cone-mode: false
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: bfc3fab18268d6dd4b2c371416189cb19610b631
+          path: CxrGlobal
+          persist-credentials: false
+
+      - name: Verify and apply exact generated Phone candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 060797bbae975e95ca6a22c88378e6fadec58640
+          python - <<'PY'
+          import hashlib, pathlib
+          p = pathlib.Path('../CandidatePatch/.github/candidates/nexus-phone-local-apk.patch')
+          assert hashlib.sha256(p.read_bytes()).hexdigest() == '0283dddcdd8989542313b118075bb653b38609176ff37049e9a999c8a38dca35'
+          PY
+          git apply --check ../CandidatePatch/.github/candidates/nexus-phone-local-apk.patch
+          git apply ../CandidatePatch/.github/candidates/nexus-phone-local-apk.patch
+          python - <<'PY'
+          import hashlib, pathlib, subprocess, xml.etree.ElementTree as ET
+          expected = {
+              "phone-hub/build.gradle.kts": "fde50287f83b83b25c86eadbf98879e85a2fb049180a0840508e2f23370e04ea",
+              "phone-hub/src/main/AndroidManifest.xml": "957526ff227ecaeab31b2e4fa9999abeee4df8c451445313b3167355519d477f",
+              "phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt": "bdc91f575460d4e1bdc76c1d4d5c82b1012efe5ddd93dbc5e88bd1bc9d5709b6",
+              "phone-hub/src/main/java/com/anezium/rokidbus/phone/HttpProxyPolicy.kt": "cf562566e730c1ca139645e07ec8f6655afb9482c3bce7afdc48cbedabd331e5",
+              "phone-hub/src/main/java/com/anezium/rokidbus/phone/LocalGlassesApkActivity.kt": "7e28433641141f533fd81a11baa4d5fb9ae5b79644d62b96f3a25a8711fa99b2",
+              "phone-hub/src/main/java/com/anezium/rokidbus/phone/LocalGlassesApkPolicy.kt": "82133a18f1e2833a020c676ff6d8cab1125fd053b0c0700d89f4ee989f39f34c",
+              "phone-hub/src/main/java/com/anezium/rokidbus/phone/LocalGlassesApkStore.kt": "69ec5a7fd25b3f7781caf72442fce1939937231f44492bb2fbc628570fbf4e30",
+              "phone-hub/src/main/java/com/anezium/rokidbus/phone/PluginGuardianPolicy.kt": "21c7a956116766254ccd05242eca3d05e955b2b4a900f34467c9b63a117e840a",
+              "phone-hub/src/main/java/com/anezium/rokidbus/phone/SettingsActivity.kt": "dbf6140a06498459c6bd0200519596671d4d3ef82652f2215b0c0509f35e27cd",
+              "phone-hub/src/test/java/com/anezium/rokidbus/phone/HttpProxyPolicyTest.kt": "b0501f01f2b2fabb647a0dd1bf73f2d009cc348cdb619c9f983b78b182d59642",
+              "phone-hub/src/test/java/com/anezium/rokidbus/phone/LocalGlassesApkPolicyTest.kt": "b43b30b9572a17a948b7b7d0b781b3810d2e66b5ce57f9fc4494b7a1296a8eb1",
+              "phone-hub/src/test/java/com/anezium/rokidbus/phone/LocalGlassesTransferBoundaryTest.kt": "b0c3e5751983d357bbea081d880ab446562d600b4f7780f4e2360b2aacb458a9",
+              "phone-hub/src/test/java/com/anezium/rokidbus/phone/PluginGuardianCoordinatorTest.kt": "fec575bdc7c0ce2f7f9077a1898f8d2564b95c303334165ce4cd8e454f02e2d5",
+              "phone-hub/src/test/java/com/anezium/rokidbus/phone/PluginGuardianPolicyTest.kt": "f0d77f22982079e2ea0011f6ddef83a161bbcd568e82c8ee1887851182bb1a48"
+          }
+          for name, sha in expected.items():
+              assert hashlib.sha256(pathlib.Path(name).read_bytes().replace(b'\r\n', b'\n')).hexdigest() == sha, name
+          before = ET.fromstring(subprocess.check_output(['git', 'show', 'HEAD:phone-hub/src/main/AndroidManifest.xml']))
+          after = ET.parse('phone-hub/src/main/AndroidManifest.xml').getroot()
+          assert [x.attrib for x in before.findall('uses-permission')] == [x.attrib for x in after.findall('uses-permission')]
+          print('Exact 14-file generated Phone candidate verified; permissions unchanged.')
+          PY
+          grep -F 'applicationId = "com.anezium.rokidbus.phone"' phone-hub/build.gradle.kts
+          grep -F 'versionCode = 10426' phone-hub/build.gradle.kts
+          grep -F 'versionName = "1.4.26"' phone-hub/build.gradle.kts
+          test -z "$(git status --porcelain | awk '{print $2}' | grep -v '^phone-hub/' || true)"
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Use hosted Android SDK with previously accepted licenses
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_HOME"
+          test -f "$ANDROID_HOME/platforms/android-36/android.jar"
+          test -x "$ANDROID_HOME/build-tools/36.0.0/apksigner"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run reviewed tests before decoding any key
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          cat > "$RUNNER_TEMP/candidate-repositories.init.gradle" <<'GRADLE'
+          gradle.settingsEvaluated { settings ->
+              def allowed = ['dl.google.com', 'maven.google.com', 'repo.maven.apache.org', 'repo1.maven.org', 'plugins.gradle.org', 'maven.rokid.com']
+              settings.dependencyResolutionManagement.repositories.removeAll { repository ->
+                  repository.hasProperty('url') && repository.url.scheme != 'file' && !allowed.contains(repository.url.host)
+              }
+              settings.dependencyResolutionManagement.repositories.maven {
+                  url = uri('https://jitpack.io')
+                  content { includeVersion('com.github.Flyfish233', 'spake2-java', '1.0.5') }
+              }
+          }
+          GRADLE
+          ./gradlew --no-daemon --max-workers=2 --init-script "$RUNNER_TEMP/candidate-repositories.init.gradle" :phone-hub:testDebugUnitTest --tests '*LocalGlassesApkPolicyTest' --tests '*LocalGlassesTransferBoundaryTest'
+          python - <<'PY'
+          import pathlib, xml.etree.ElementTree as ET
+          reports = list(pathlib.Path('phone-hub/build/test-results/testDebugUnitTest').glob('TEST-*LocalGlasses*.xml'))
+          assert len(reports) == 2
+          roots = [ET.parse(p).getroot() for p in reports]
+          assert sum(int(x.get('tests')) for x in roots) == 12
+          assert all(int(x.get('failures')) == int(x.get('errors')) == int(x.get('skipped')) == 0 for x in roots)
+          print('All 12 targeted policy/boundary tests passed.')
+          PY
+
+      - name: Build and verify candidate using existing release key
+        env:
+          NEXUS_RELEASE_KEYSTORE_B64: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          NEXUS_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          NEXUS_RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          test -n "$NEXUS_RELEASE_KEYSTORE_B64"
+          test -n "$NEXUS_RELEASE_KEYSTORE_PASSWORD"
+          test -n "$NEXUS_RELEASE_KEY_ALIAS"
+          export NEXUS_RELEASE_KEYSTORE="$RUNNER_TEMP/nexus-release.keystore"
+          umask 077
+          trap 'rm -f "$NEXUS_RELEASE_KEYSTORE"' EXIT
+          printf '%s' "$NEXUS_RELEASE_KEYSTORE_B64" | base64 --decode > "$NEXUS_RELEASE_KEYSTORE"
+          expected='55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097'
+          certificate="$(keytool -list -v -keystore "$NEXUS_RELEASE_KEYSTORE" -storepass:env NEXUS_RELEASE_KEYSTORE_PASSWORD -alias "$NEXUS_RELEASE_KEY_ALIAS")"
+          digest="$(printf '%s\n' "$certificate" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1 | tr -d ':' | tr 'A-F' 'a-f')"
+          test "$digest" = "$expected"
+          chmod +x gradlew
+          ./gradlew --no-daemon --max-workers=2 --init-script "$RUNNER_TEMP/candidate-repositories.init.gradle" :phone-hub:assembleRelease
+          mapfile -t apks < <(find phone-hub/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk')
+          test "${#apks[@]}" -eq 1
+          mkdir -p "$RUNNER_TEMP/phone-local-apk-candidate"
+          artifact="$RUNNER_TEMP/phone-local-apk-candidate/nexus-phone-1.4.26-local-apk-candidate.apk"
+          cp "${apks[0]}" "$artifact"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$artifact" > "$RUNNER_TEMP/phone-local-apk-candidate/signature.txt"
+          signer="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/phone-local-apk-candidate/signature.txt" | tr 'A-F' 'a-f' | tr -d ':[:space:]')"
+          test "$signer" = "$expected"
+          test "$(grep -c 'certificate SHA-256 digest:' "$RUNNER_TEMP/phone-local-apk-candidate/signature.txt")" -eq 1
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$artifact" > "$RUNNER_TEMP/phone-local-apk-candidate/badging.txt"
+          head -n 1 "$RUNNER_TEMP/phone-local-apk-candidate/badging.txt" | grep -F "name='com.anezium.rokidbus.phone'" | grep -F "versionCode='10426'" | grep -F "versionName='1.4.26'"
+          if grep -q '^application-debuggable' "$RUNNER_TEMP/phone-local-apk-candidate/badging.txt"; then exit 1; fi
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c 4 "$artifact"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump permissions "$artifact" > "$RUNNER_TEMP/phone-local-apk-candidate/permissions.txt"
+          python - "$artifact" <<'PY'
+          import pathlib, sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as apk:
+              assert apk.testzip() is None
+              assert not any(pathlib.PurePosixPath(n).suffix.lower() in ('.jks','.keystore','.p12','.pfx','.key') for n in apk.namelist())
+          PY
+          (
+            cd "$RUNNER_TEMP/phone-local-apk-candidate"
+            sha256sum nexus-phone-1.4.26-local-apk-candidate.apk > SHA256SUMS
+            cat SHA256SUMS
+          )
+          printf '%s\n' 'Review candidate only. No device install or Bluetooth validation. Existing-dot Call UNSUPPORTED.' > "$RUNNER_TEMP/phone-local-apk-candidate/README.txt"
+
+      - name: Remove temporary release key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/nexus-release.keystore"
+
+      - name: Upload signed candidate and verification records only
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-phone-1.4.26-local-apk-candidate
+          path: ${{ runner.temp }}/phone-local-apk-candidate/
+          if-no-files-found: error
+          retention-days: 14
