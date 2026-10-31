@@ -1,0 +1,145 @@
+--- a/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppServerManager.kt
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppServerManager.kt
+@@ -19,9 +19,13 @@
+ object SppServerManager {
+     private val started = AtomicBoolean(false)
+     private val executor = Executors.newCachedThreadPool()
+-    private val writeLock = Any()
+-    @Volatile private var socket: BluetoothSocket? = null
+-    @Volatile private var output: OutputStream? = null
++    private class Session(val socket: BluetoothSocket, val output: OutputStream) {
++        val writeLock = Any()
++    }
++    private val sessions = SppSessionOwner<Session>(
++        retireSession = { retired -> runCatching { retired.socket.close() }; Unit },
++        onConnected = { connected -> GlassesHub.onSppConnected(connected) },
++    )
+ 
+     fun ensureStarted(context: Context) {
+         if (!started.compareAndSet(false, true)) {
+@@ -32,19 +36,19 @@
+     }
+ 
+     fun isConnected(): Boolean =
+-        socket?.isConnected == true && output != null
++        sessions.current()?.socket?.isConnected == true
+ 
+     fun send(envelope: BusEnvelope): Boolean {
+-        val out = output ?: return false
++        val session = sessions.current() ?: return false
+         return runCatching {
+-            synchronized(writeLock) {
+-                FrameProtocol.write(out, envelope)
++            synchronized(session.writeLock) {
++                FrameProtocol.write(session.output, envelope)
+             }
+             log("SPP TX ${envelope.path} id=${envelope.id}")
+             true
+         }.getOrElse {
+             logError("SPP TX failed", it)
+-            closeCurrent()
++            closeSession(session)
+             false
+         }
+     }
+@@ -88,11 +92,13 @@
+     }
+ 
+     private fun handleClient(activeSocket: BluetoothSocket) {
++        var session: Session? = null
+         try {
+             activeSocket.use {
+-                socket = it
+-                output = it.outputStream
+-                GlassesHub.onSppConnected(true)
++                val installed = Session(it, it.outputStream)
++                session = installed
++                // Publish and notify in transition order, without holding an I/O lock.
++                sessions.install(installed)
+                 val input = it.inputStream
+                 while (true) {
+                     val envelope = FrameProtocol.read(input) ?: break
+@@ -103,19 +109,14 @@
+         } catch (t: Throwable) {
+             logError("SPP client loop ended", t)
+         } finally {
+-            if (socket === activeSocket) {
+-                socket = null
+-                output = null
+-                GlassesHub.onSppConnected(false)
+-            }
++            session?.let { sessions.clearIfCurrent(it) }
+         }
+     }
+ 
+-    private fun closeCurrent() {
+-        runCatching { socket?.close() }
+-        socket = null
+-        output = null
+-        GlassesHub.onSppConnected(false)
++    private fun closeSession(expected: Session) {
++        // Always close the socket whose write failed, never a replacement session.
++        runCatching { expected.socket.close() }
++        sessions.clearIfCurrent(expected)
+     }
+ 
+     private fun hasBluetoothConnect(context: Context): Boolean =
+--- /dev/null
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppSessionOwner.kt
+@@ -0,0 +1,56 @@
++package com.anezium.rokidbus.glasses
++
++import java.util.concurrent.Executors
++import java.util.concurrent.atomic.AtomicReference
++
++/**
++ * One immutable socket/output pair per connection. Only the transition thread
++ * changes ownership and emits link state. Callbacks run without an I/O lock and
++ * may call clearIfCurrent (which queues work rather than waiting reentrantly).
++ * install is called only by client reader threads, never by the callback.
++ */
++internal class SppSessionOwner<T : Any>(
++    private val retireSession: (T) -> Unit,
++    private val onConnected: (Boolean) -> Unit,
++) : AutoCloseable {
++    private val active = AtomicReference<T?>(null)
++    private val transitions = Executors.newSingleThreadExecutor { task ->
++        Thread(task, "rokidbus-spp-state").apply { isDaemon = true }
++    }
++
++    fun current(): T? = active.get()
++
++    fun install(session: T): T? {
++        val future = transitions.submit<T?> {
++            val retired = active.getAndSet(session)
++            // Retire before a reentrant connected callback can send on replacement.
++            // Socket close must not acquire the writer lock; it unblocks old I/O.
++            if (retired != null) retireSession(retired)
++            onConnected(true)
++            retired
++        }
++        // Once submitted, installation owns session until its outcome is known.
++        // An interrupted reader must not close it while publication is queued.
++        var interrupted = false
++        try {
++            while (true) {
++                try { return future.get() }
++                catch (_: InterruptedException) { interrupted = true }
++            }
++        } finally {
++            if (interrupted) Thread.currentThread().interrupt()
++        }
++    }
++
++    fun clearIfCurrent(expected: T) {
++        transitions.execute {
++            // Atomic identity check: an old reader/writer cannot clear its successor.
++            if (active.compareAndSet(expected, null)) onConnected(false)
++        }
++    }
++
++    /** Test barrier; must not be called by onConnected. */
++    internal fun awaitIdle() { transitions.submit {}.get() }
++
++    override fun close() { transitions.shutdown() }
++}
