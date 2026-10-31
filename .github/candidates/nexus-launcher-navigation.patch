@@ -1,0 +1,195 @@
+--- /dev/null
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherListDelivery.kt
+@@ -0,0 +1,17 @@
++package com.anezium.rokidbus.glasses
++
++import java.util.concurrent.atomic.AtomicBoolean
++
++/** Delivers transport updates on the UI dispatcher only while this view session lives. */
++internal class LauncherListDelivery<T>(
++    private val dispatch: (() -> Unit) -> Unit,
++    private val deliver: (T) -> Unit,
++) : AutoCloseable {
++    private val active = AtomicBoolean(true)
++
++    fun accept(value: T) {
++        dispatch { if (active.get()) deliver(value) }
++    }
++
++    override fun close() { active.set(false) }
++}
+--- /dev/null
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherNavigationDiagnostics.kt
+@@ -0,0 +1,15 @@
++package com.anezium.rokidbus.glasses
++
++import android.view.KeyEvent
++
++/** Local Logcat only; 64 records / five minutes maximum per process. No telemetry. */
++internal object LauncherNavigationDiagnostics {
++    private val trace = LauncherNavigationTrace(::log)
++    fun record(event: KeyEvent, owner: LauncherNavigationTrace.Owner,
++        before: Int = -1, after: Int = -1, count: Int = -1) {
++        val visible = LauncherOverlayRenderer.isShown() ||
++            (MainActivity.isResumed() && !MainActivity.isInteractiveFlowActive())
++        trace.record(visible, event.eventTime, event.keyCode, event.action,
++            event.repeatCount, owner, before, after, count)
++    }
++}
+--- /dev/null
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherNavigationTrace.kt
+@@ -0,0 +1,18 @@
++package com.anezium.rokidbus.glasses
++
++/** Bounded local diagnostic: only launcher navigation codes, never text or payloads. */
++internal class LauncherNavigationTrace(private val sink: (String) -> Unit) {
++    enum class Owner { MAIN, OVERLAY, NOTICE, SURFACE, ACTIVITY, UNCLAIMED }
++    private var firstAt: Long? = null
++    private var remaining = 64
++
++    @Synchronized fun record(visible: Boolean, at: Long, key: Int, action: Int,
++        repeat: Int, owner: Owner, before: Int, after: Int, count: Int) {
++        if (!visible || key !in setOf(4, 19, 20, 21, 22, 23, 66) || action !in 0..1) return
++        val start = firstAt ?: at.also { firstAt = it }
++        if (at < start || at - start > 300_000L || remaining == 0) return
++        remaining--
++        val gesture = when (key) { 19, 21 -> "BACKWARD"; 20, 22 -> "FORWARD"; 4 -> "BACK"; else -> "CONFIRM" }
++        sink("NAV t=$at gesture=$gesture key=$key action=$action repeat=$repeat owner=$owner before=$before after=$after count=$count")
++    }
++}
+--- a/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherOverlayRenderer.kt
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherOverlayRenderer.kt
+@@ -37,6 +37,7 @@
+     private var unsubscribeLauncher: (() -> Unit)? = null
+     private var insetUnsubscribe: (() -> Unit)? = null
+     private var launcherEntries: List<GlassesHub.LauncherEntry> = emptyList()
++    private var launcherListDelivery: LauncherListDelivery<List<GlassesHub.LauncherEntry>>? = null
+     private var selectedIndex = 0
+     private val swipeDedupe = DpadPairDedupe()
+     private val main = Handler(Looper.getMainLooper())
+@@ -88,10 +89,22 @@
+             HudOverlayStack.reassert()
+         }
+         if (unsubscribeLauncher == null) {
++            val delivery = LauncherListDelivery<List<GlassesHub.LauncherEntry>>(
++                dispatch = { work ->
++                    if (Looper.myLooper() == Looper.getMainLooper()) work()
++                    else main.post { work() }
++                },
++                deliver = { entries ->
++                    if (root === currentRoot) {
++                        launcherEntries = entries
++                        selectedIndex = selectedIndex.coerceIn(0, (entries.size - 1).coerceAtLeast(0))
++                        currentRoot.render(launcherEntries, selectedIndex)
++                    }
++                },
++            )
++            launcherListDelivery = delivery
+             unsubscribeLauncher = GlassesHub.observeLauncher { entries ->
+-                launcherEntries = entries
+-                selectedIndex = selectedIndex.coerceIn(0, (entries.size - 1).coerceAtLeast(0))
+-                root?.render(launcherEntries, selectedIndex)
++                delivery.accept(entries)
+             }
+         }
+         currentRoot.render(launcherEntries, selectedIndex)
+@@ -108,6 +121,8 @@
+     }
+ 
+     fun hide() {
++        launcherListDelivery?.close()
++        launcherListDelivery = null
+         unsubscribeLauncher?.invoke()
+         unsubscribeLauncher = null
+         main.removeCallbacks(ringTapExpiry)
+@@ -142,6 +157,16 @@
+     }
+ 
+     fun handleKeyEvent(event: KeyEvent): Boolean {
++        if (root == null) return false
++        val before = selectedIndex
++        try { return handleLauncherKeyEvent(event) }
++        finally {
++            LauncherNavigationDiagnostics.record(event, LauncherNavigationTrace.Owner.OVERLAY,
++                before, selectedIndex, launcherEntries.size)
++        }
++    }
++
++    private fun handleLauncherKeyEvent(event: KeyEvent): Boolean {
+         if (root == null) return false
+         if (event.keyCode == KEYCODE_PROG_BLUE) return false
+         if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount != 0) {
+--- a/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/MainActivity.kt
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/MainActivity.kt
+@@ -129,6 +129,15 @@
+     }
+ 
+     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
++        val before = selectedIndex
++        try { return dispatchLauncherKeyEvent(event) }
++        finally {
++            LauncherNavigationDiagnostics.record(event, LauncherNavigationTrace.Owner.MAIN,
++                before, selectedIndex, launcherEntries.size)
++        }
++    }
++
++    private fun dispatchLauncherKeyEvent(event: KeyEvent): Boolean {
+         if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount != 0) {
+             return super.dispatchKeyEvent(event)
+         }
+--- a/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/RokidBusAccessibilityService.kt
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/RokidBusAccessibilityService.kt
+@@ -160,9 +160,7 @@
+             return handleRingKeyEvent(event)
+         }
+         if (event.keyCode == KEYCODE_PROG_BLUE) return false
+-        // Raw gesture trace: the temple firmware's key bursts keep surprising us
+-        // (duplicated swipe pairs, tap contacts); keep the evidence cheap to grab.
+-        log("key code=${event.keyCode} action=${event.action} repeat=${event.repeatCount} t=${event.eventTime}")
++        // Diagnostic navigation logging is bounded and scoped to the visible Nexus launcher.
+ 
+         if (event.action == KeyEvent.ACTION_UP && consumedDownKeys.remove(event.keyCode)) {
+             return true
+@@ -191,14 +189,35 @@
+                     main.postDelayed(tapExpiry, TripleTapDetector.DEFAULT_WINDOW_MS + 1L)
+                 }
+                 when {
+-                    noticeConsumesBack(event) -> true
+-                    noticeConsumesDirection(event) -> true
+-                    noticeConsumesConfirm(event) -> true
+-                    noticeConsumesBackdropClassification(event) -> true
++                    noticeConsumesBack(event) -> {
++                        LauncherNavigationDiagnostics.record(event, LauncherNavigationTrace.Owner.NOTICE)
++                        true
++                    }
++                    noticeConsumesDirection(event) -> {
++                        LauncherNavigationDiagnostics.record(event, LauncherNavigationTrace.Owner.NOTICE)
++                        true
++                    }
++                    noticeConsumesConfirm(event) -> {
++                        LauncherNavigationDiagnostics.record(event, LauncherNavigationTrace.Owner.NOTICE)
++                        true
++                    }
++                    noticeConsumesBackdropClassification(event) -> {
++                        LauncherNavigationDiagnostics.record(event, LauncherNavigationTrace.Owner.NOTICE)
++                        true
++                    }
+                     LauncherOverlayRenderer.handleKeyEvent(event) -> true
+-                    SurfaceController.handleKeyEvent(event) -> true
+-                    ActivityController.handleKeyEvent(event) -> true
+-                    else -> false
++                    SurfaceController.handleKeyEvent(event) -> {
++                        LauncherNavigationDiagnostics.record(event, LauncherNavigationTrace.Owner.SURFACE)
++                        true
++                    }
++                    ActivityController.handleKeyEvent(event) -> {
++                        LauncherNavigationDiagnostics.record(event, LauncherNavigationTrace.Owner.ACTIVITY)
++                        true
++                    }
++                    else -> {
++                        LauncherNavigationDiagnostics.record(event, LauncherNavigationTrace.Owner.UNCLAIMED)
++                        false
++                    }
+                 }
+             }
+         }
