@@ -29,7 +29,7 @@ jobs:
       - name: Check out reviewed patch only
         uses: actions/checkout@v6
         with:
-          ref: 14d8606e23175631cde0381ab2d0c5fcc9e98723
+          ref: 29bb1873cbe137b88cea3ebae7625ede94b93bfc
           path: CandidatePatch
           persist-credentials: false
           sparse-checkout: .github/candidates/nexus-phone-local-apk.patch
@@ -50,7 +50,7 @@ jobs:
           python - <<'PY'
           import hashlib, pathlib
           p = pathlib.Path('../CandidatePatch/.github/candidates/nexus-phone-local-apk.patch')
-          assert hashlib.sha256(p.read_bytes()).hexdigest() == '0283dddcdd8989542313b118075bb653b38609176ff37049e9a999c8a38dca35'
+          assert hashlib.sha256(p.read_bytes()).hexdigest() == 'ba6b561256d1571254539795d41ca7415598e09cef5cca336fbb5704900f9308'
           PY
           git apply --check ../CandidatePatch/.github/candidates/nexus-phone-local-apk.patch
           git apply ../CandidatePatch/.github/candidates/nexus-phone-local-apk.patch
@@ -59,13 +59,13 @@ jobs:
           expected = {
               "phone-hub/build.gradle.kts": "fde50287f83b83b25c86eadbf98879e85a2fb049180a0840508e2f23370e04ea",
               "phone-hub/src/main/AndroidManifest.xml": "957526ff227ecaeab31b2e4fa9999abeee4df8c451445313b3167355519d477f",
-              "phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt": "bdc91f575460d4e1bdc76c1d4d5c82b1012efe5ddd93dbc5e88bd1bc9d5709b6",
+              "phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt": "43eff11b423d4892703032b675cf6b8959a98e339ba5792daeedb8d2fdc2e6d1",
               "phone-hub/src/main/java/com/anezium/rokidbus/phone/HttpProxyPolicy.kt": "cf562566e730c1ca139645e07ec8f6655afb9482c3bce7afdc48cbedabd331e5",
               "phone-hub/src/main/java/com/anezium/rokidbus/phone/LocalGlassesApkActivity.kt": "7e28433641141f533fd81a11baa4d5fb9ae5b79644d62b96f3a25a8711fa99b2",
               "phone-hub/src/main/java/com/anezium/rokidbus/phone/LocalGlassesApkPolicy.kt": "82133a18f1e2833a020c676ff6d8cab1125fd053b0c0700d89f4ee989f39f34c",
               "phone-hub/src/main/java/com/anezium/rokidbus/phone/LocalGlassesApkStore.kt": "69ec5a7fd25b3f7781caf72442fce1939937231f44492bb2fbc628570fbf4e30",
               "phone-hub/src/main/java/com/anezium/rokidbus/phone/PluginGuardianPolicy.kt": "21c7a956116766254ccd05242eca3d05e955b2b4a900f34467c9b63a117e840a",
-              "phone-hub/src/main/java/com/anezium/rokidbus/phone/SettingsActivity.kt": "dbf6140a06498459c6bd0200519596671d4d3ef82652f2215b0c0509f35e27cd",
+              "phone-hub/src/main/java/com/anezium/rokidbus/phone/SettingsActivity.kt": "98944293e065706b180112a8319a3fc6a0ccad91128c40846d911a56ab803543",
               "phone-hub/src/test/java/com/anezium/rokidbus/phone/HttpProxyPolicyTest.kt": "b0501f01f2b2fabb647a0dd1bf73f2d009cc348cdb619c9f983b78b182d59642",
               "phone-hub/src/test/java/com/anezium/rokidbus/phone/LocalGlassesApkPolicyTest.kt": "b43b30b9572a17a948b7b7d0b781b3810d2e66b5ce57f9fc4494b7a1296a8eb1",
               "phone-hub/src/test/java/com/anezium/rokidbus/phone/LocalGlassesTransferBoundaryTest.kt": "b0c3e5751983d357bbea081d880ab446562d600b4f7780f4e2360b2aacb458a9",
@@ -166,6 +166,13 @@ jobs:
           with zipfile.ZipFile(sys.argv[1]) as apk:
               assert apk.testzip() is None
               assert not any(pathlib.PurePosixPath(n).suffix.lower() in ('.jks','.keystore','.p12','.pfx','.key') for n in apk.namelist())
+              import re
+              dex = b''.join(apk.read(n) for n in apk.namelist() if re.fullmatch(r'classes\d*\.dex', n))
+              expected_text = [" \u00b7 ", " \u203a", "AUTO \u203a", "Asking the glasses to check their helper\u2026", "MANUAL \u203a", "Nothing to repair \u2014 the helper is already in place.", "READY \u203a", "Repair \u203a", "SET UP \u203a", "Turn on Wi-Fi first \u2014 the update travels to the glasses over Wi-Fi.", "Working\u2026", "\u203a"]
+              corrupt_text = [" \u0420\u00a0\u0432\u0402\u2122\u0420\u2019\u0412\u00b7 ", " \u0432\u0402\u0454", "AUTO \u0432\u0402\u0454", "Asking the glasses to check their helper\u0432\u0402\u00a6", "MANUAL \u0432\u0402\u0454", "Nothing to repair \u0432\u0402\u201d the helper is already in place.", "READY \u0432\u0402\u0454", "Repair \u0432\u0402\u0454", "SET UP \u0432\u0402\u0454", "Turn on Wi-Fi first \u0420\u00a0\u0420\u2020\u0420\u00a0\u0432\u0402\u0459\u0420\u0406\u0420\u201a\u0421\u045a the update travels to the glasses over Wi-Fi.", "Working\u0432\u0402\u00a6", "\u0432\u0402\u0454"]
+              assert all(value.encode('utf-8') in dex for value in expected_text), 'Restored UI text absent from APK'
+              assert all(value.encode('utf-8') not in dex for value in corrupt_text), 'Corrupt UI text remains in APK'
+              print('All 12 restored UI literals verified in signed APK; corrupt variants absent.')
           PY
           (
             cd "$RUNNER_TEMP/phone-local-apk-candidate"
