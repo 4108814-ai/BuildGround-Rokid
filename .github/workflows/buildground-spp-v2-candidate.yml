@@ -1,0 +1,169 @@
+name: BuildGround SPP v2 signed candidate
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: buildground-spp-v2-candidate
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    if: github.repository == '4108814-ai/BuildGround-Rokid' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+        working-directory: RokidNexus
+    steps:
+      - name: Check out exact glasses baseline
+        uses: actions/checkout@v6
+        with:
+          ref: 5fc9338668c18f6bdfab5ebdffbf602e57c96e14
+          path: RokidNexus
+          persist-credentials: false
+
+      - name: Check out reviewed patch only
+        uses: actions/checkout@v6
+        with:
+          ref: 72da2c3e4a16dcacfb07aea1d21cca5c3025c87b
+          path: CandidatePatch
+          persist-credentials: false
+          sparse-checkout: .github/candidates/nexus-spp-v2.patch
+          sparse-checkout-cone-mode: false
+
+      - name: Check out CxrGlobal 0.2.3
+        uses: actions/checkout@v6
+        with:
+          repository: Anezium/CxrGlobal
+          ref: bfc3fab18268d6dd4b2c371416189cb19610b631
+          path: CxrGlobal
+          persist-credentials: false
+
+      - name: Reproduce and verify exact generated candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 5fc9338668c18f6bdfab5ebdffbf602e57c96e14
+          python .github/scripts/apply-buildground-lifecycle-1418.py
+          python .github/scripts/apply-buildground-native-recording-1420.py
+          python .github/scripts/apply-buildground-native-recording-1421.py
+          python .github/scripts/apply-buildground-native-recording-1422.py
+          python .github/scripts/apply-buildground-notice-viewport-1423.py
+          python .github/scripts/apply-buildground-notice-wake-1424.py
+          python .github/scripts/apply-buildground-autostart-1425.py
+          python .github/scripts/apply-buildground-autostart-1426.py
+          python .github/scripts/apply-buildground-bootkeeper-1427.py
+          python .github/scripts/apply-buildground-bootkeeper-1428.py
+          python .github/scripts/apply-buildground-spp-keeper-1429.py
+          python .github/scripts/apply-buildground-recorder-wave-1430.py
+          python - <<'PY'
+          import hashlib, pathlib
+          expected = (
+          {
+              "glasses-hub/build.gradle.kts": "5c8c1a77fc389f0cc43b7c8feaf7ada2c83b82e7d9788e13b6de51290e1d5ae1",
+              "glasses-hub/src/main/AndroidManifest.xml": "8d8fecff2207e47e926863c7b4879d9a60338ccbf10cbd2654a2e97cb4bdacd9",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/BootReceiver.kt": "19ab51ace2004efb7e5f9362205410bf7a94351b86bc1a65687475196fce7278",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/BusHubService.kt": "ebf981573c056aa5422328aa4f14ce32985ca61950e520e9a5104518bb942ad4",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/DisplayWakePolicy.kt": "7a217edb3eacfa093ed953a39f0cf85bde768b91bf3369a78ec8cc7d084cb82b",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/GlassesHub.kt": "4ad5287a5f96296f1cb4d6b5ed888cbc23f650669c704c3d8b294532b9c821aa",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/GlassesLifecycleReceiver.kt": "25e345b1c87b065be7a8d20c46ae1494658ae1fc8ab54ac9a6d8e5c93d7c65b3",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/MainActivity.kt": "a2e8ced0ea9444f1b11dbbe1ad47c23bc1613d278ff5410afccd26c59786786f",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/NexusRemoteInputMethodService.kt": "30766460078df21e37e2ed384d5ef0d3611a2b4cff3fbb747e2f96020950f4dc",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/NoticeOverlayRenderer.kt": "af779f65fdf9142e1eca7b702f856e4bb7ccd539882bae8faa8153a0b63daa37",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/RokidBusAccessibilityService.kt": "34fb9e7ebe0abf45963447ff4f3c8d7532d500d30037d92de1c6450d7ba16bbf",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/RokidNativeRecordingController.kt": "a2bd67dbb7d6f87dcf37d554238e3eda1922f7b0b9a05bfffed3b838faf5cb9a",
+              "glasses-hub/src/test/java/com/anezium/rokidbus/glasses/DisplayWakePolicyTest.kt": "a813c2e23e598e771f4ab8d34fbc7fdfeaa37bdb84edfb3aefe2a48905d81a67",
+              "glasses-hub/src/test/java/com/anezium/rokidbus/glasses/NoticeStateMachineTest.kt": "4ea394bfdcd813a98c6cb0fa84ee6c963800f052a55d12be875fca8b2373c3b9",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/TransportWakeReceiver.kt": "00b6ea4fecf7ad31d392d69d0193a38ff88e7384da685caea538b52a029ea91b",
+              "glasses-hub/src/test/java/com/anezium/rokidbus/glasses/TransportWakeSignalTest.kt": "c207bdbab3f787ff98a169fd1a6c6496a76bd17777217614a4bcc848941d88df"
+          }
+          )
+          for name, digest in expected.items():
+              data = pathlib.Path(name).read_bytes().replace(b'\r\n', b'\n')
+              assert hashlib.sha256(data).hexdigest() == digest, name
+          patch = pathlib.Path('../CandidatePatch/.github/candidates/nexus-spp-v2.patch')
+          assert len(patch.read_bytes()) == 5557
+          assert hashlib.sha256(patch.read_bytes()).hexdigest() == 'e63556b475fd7eb04a40f9838f409e6b90f4f3f3e89b8037374a91d8073a4d53'
+          print('Generated 14 tracked edits and 2 added files match reviewed source (LF-normalized).')
+          PY
+          git apply --check ../CandidatePatch/.github/candidates/nexus-spp-v2.patch
+          git apply ../CandidatePatch/.github/candidates/nexus-spp-v2.patch
+          printf '%s\n' \
+            '868d474f3d3c72abca5768971ef7b7f76b80be52cde6add0f1f8fed55420f32f  glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppServerManager.kt' \
+            '48272f77504162a8d00f6ea4f25d184100606dc8e7b1fb6b8ecfb84d11367686  glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppSessionOwner.kt' | sha256sum --check
+          grep -F 'applicationId = "com.anezium.rokidbus.glasses"' glasses-hub/build.gradle.kts
+          grep -F 'versionCode = 10430' glasses-hub/build.gradle.kts
+          grep -F 'versionName = "1.4.30"' glasses-hub/build.gradle.kts
+          test -z "$(git status --porcelain | awk '{print $2}' | grep -v '^glasses-hub/' || true)"
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Use hosted Android SDK with previously accepted licenses
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_HOME"
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' </dev/null
+          test -f "$ANDROID_HOME/platforms/android-36/android.jar"
+          test -x "$ANDROID_HOME/build-tools/36.0.0/apksigner"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build and verify candidate using existing release key
+        env:
+          NEXUS_RELEASE_KEYSTORE_B64: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
+          NEXUS_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_RELEASE_KEYSTORE_PASSWORD }}
+          NEXUS_RELEASE_KEY_ALIAS: ${{ secrets.NEXUS_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          test -n "$NEXUS_RELEASE_KEYSTORE_B64"
+          test -n "$NEXUS_RELEASE_KEYSTORE_PASSWORD"
+          test -n "$NEXUS_RELEASE_KEY_ALIAS"
+          export NEXUS_RELEASE_KEYSTORE="$RUNNER_TEMP/nexus-release.keystore"
+          umask 077
+          trap 'rm -f "$NEXUS_RELEASE_KEYSTORE"' EXIT
+          printf '%s' "$NEXUS_RELEASE_KEYSTORE_B64" | base64 --decode > "$NEXUS_RELEASE_KEYSTORE"
+          expected='55b22185392b8c1f084c3dec58bb0f342ece7102289556ae23cadee6ccec2097'
+          certificate="$(keytool -list -v -keystore "$NEXUS_RELEASE_KEYSTORE" -storepass:env NEXUS_RELEASE_KEYSTORE_PASSWORD -alias "$NEXUS_RELEASE_KEY_ALIAS")"
+          digest="$(printf '%s\n' "$certificate" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1 | tr -d ':' | tr 'A-F' 'a-f')"
+          test "$digest" = "$expected"
+          chmod +x gradlew
+          ./gradlew --no-daemon --max-workers=2 :glasses-hub:assembleRelease
+          mapfile -t apks < <(find glasses-hub/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk')
+          test "${#apks[@]}" -eq 1
+          mkdir -p "$RUNNER_TEMP/spp-v2-candidate"
+          artifact="$RUNNER_TEMP/spp-v2-candidate/nexus-glasses-1.4.30-spp-v2-candidate.apk"
+          cp "${apks[0]}" "$artifact"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$artifact" > "$RUNNER_TEMP/spp-v2-candidate/signature.txt"
+          signer="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/spp-v2-candidate/signature.txt" | tr 'A-F' 'a-f' | tr -d ':[:space:]')"
+          test "$signer" = "$expected"
+          test "$(grep -c 'certificate SHA-256 digest:' "$RUNNER_TEMP/spp-v2-candidate/signature.txt")" -eq 1
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$artifact" > "$RUNNER_TEMP/spp-v2-candidate/badging.txt"
+          head -n 1 "$RUNNER_TEMP/spp-v2-candidate/badging.txt" | grep -F "name='com.anezium.rokidbus.glasses'" | grep -F "versionCode='10430'" | grep -F "versionName='1.4.30'"
+          if grep -q '^application-debuggable' "$RUNNER_TEMP/spp-v2-candidate/badging.txt"; then exit 1; fi
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c 4 "$artifact"
+          (
+            cd "$RUNNER_TEMP/spp-v2-candidate"
+            sha256sum nexus-glasses-1.4.30-spp-v2-candidate.apk > SHA256SUMS
+            cat SHA256SUMS
+          )
+          printf '%s\n' 'Review candidate only. No device install or Bluetooth validation. Existing-dot Call UNSUPPORTED.' > "$RUNNER_TEMP/spp-v2-candidate/README.txt"
+
+      - name: Remove temporary release key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/nexus-release.keystore"
+
+      - name: Upload signed candidate and verification records only
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-glasses-1.4.30-spp-v2-candidate
+          path: ${{ runner.temp }}/spp-v2-candidate/
+          if-no-files-found: error
+          retention-days: 14
