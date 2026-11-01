@@ -43,8 +43,8 @@ with zipfile.ZipFile(apk) as z:
  assert b'Lcom/buildground/ownerregression/' not in dex
  if module=='phone-hub':
   pin=os.environ['GLASSES_SHA'];assert pin.encode() in dex
-  expected_text=[' � ', ' >', 'AUTO >', 'Asking the glasses to check their helper:', 'MANUAL >', 'Nothing to repair - the helper is already in place.', 'READY >', 'Repair >', 'SET UP >', 'Turn on Wi-Fi first - the update travels to the glasses over Wi-Fi.', 'Working:', '>']
-  corrupt_text=[' �\xa0�?T�'�� ', ' �?�', 'AUTO �?�', 'Asking the glasses to check their helper�?�', 'MANUAL �?�', 'Nothing to repair �?" the helper is already in place.', 'READY �?�', 'Repair �?�', 'SET UP �?�', 'Turn on Wi-Fi first �\xa0�Ő\xa0�??�?�'�? the update travels to the glasses over Wi-Fi.', 'Working�?�', '�?�']
+  expected_text=[' · ', ' ›', 'AUTO ›', 'Asking the glasses to check their helper…', 'MANUAL ›', 'Nothing to repair — the helper is already in place.', 'READY ›', 'Repair ›', 'SET UP ›', 'Turn on Wi-Fi first — the update travels to the glasses over Wi-Fi.', 'Working…', '›']
+  corrupt_text=[' Р\xa0вЂ™Р’В· ', ' вЂє', 'AUTO вЂє', 'Asking the glasses to check their helperвЂ¦', 'MANUAL вЂє', 'Nothing to repair вЂ” the helper is already in place.', 'READY вЂє', 'Repair вЂє', 'SET UP вЂє', 'Turn on Wi-Fi first Р\xa0Р†Р\xa0вЂљРІР‚Сњ the update travels to the glasses over Wi-Fi.', 'WorkingвЂ¦', 'вЂє']
   assert all(t.encode('utf-8') in dex for t in expected_text), 'Restored UI text absent'
   assert all(t.encode('utf-8') not in dex for t in corrupt_text), 'Corrupt UI text detected' 
   for s in [b'SPP diagnostics (read only)',b'Read Glasses SPP status',b'SppDiagnosticPending',b'SppClientSessionOwner']:
