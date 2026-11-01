@@ -1,0 +1,94 @@
+{
+  "patch_sha256": "54e6f1f76de0666a10b0e6c7add0cda07c0302b374f20f888615a32cb5ee864e",
+  "patch_bytes": 41375,
+  "files": [
+    {
+      "path": "glasses-hub/src/main/AndroidManifest.xml",
+      "sha256": "7a6c420c5f8284325216f95fb104af4030608f39c913d5e1839aa12455e51c9d",
+      "baseline_sha256": "823dcbe2778141f79d61e9a194bc07d2d12101150e8fea34c249c292d65ebd26"
+    },
+    {
+      "path": "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/BusHubService.kt",
+      "sha256": "b01d9fdc2dc7f5b33b7aaeba753ed5a02ba6aa58ac4a5f69da6e2bac3887ef98",
+      "baseline_sha256": "776ebfa4d69aff689d48c18b4c7fdf01a27e634ecba04f3529f52f4b439a4a1e"
+    },
+    {
+      "path": "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/CxrBusBridge.kt",
+      "sha256": "b07e11fe4b569b17009b6324c92c3bad58418e513f52e68f51365b4556daa0a0",
+      "baseline_sha256": "f1d01bbdc88c53ddcc39ff5b0fc044594b1538d8faab56bdf1d90d0316ba5234"
+    },
+    {
+      "path": "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/GlassesHub.kt",
+      "sha256": "56d6efae4c23505da30d2b6af70b1f60d5f3a7d120f78b8b12ca7cdc1bdf57ba",
+      "baseline_sha256": "b224c3cd97eb4ef5e114905e516ab72ef1e49b84911d6b452a87f671845e81e2"
+    },
+    {
+      "path": "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/GlassesLifecycleReceiver.kt",
+      "sha256": "abfc788b6e9542a472a152c955f36abc93fe5171b1fe583ae18057c481dd7bc5",
+      "baseline_sha256": "602033216cf3a732a7f549517d66a6f74f49344ff27447cd2d131cfe911156bc"
+    },
+    {
+      "path": "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppDiagnosticActivity.kt",
+      "sha256": "c467e8995e90ce2c3e8f94d301de782175c2c85cf3f5cc35e4bf50eb6e0591cc",
+      "baseline_sha256": null
+    },
+    {
+      "path": "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppDiagnosticJournal.kt",
+      "sha256": "9e5e0d68063ec1357bd4b8211722591ee309eac642d7eb32517f199f972dbc34",
+      "baseline_sha256": null
+    },
+    {
+      "path": "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppServerManager.kt",
+      "sha256": "21262e063d3e4a575c14c51e28914b7d5294be8726165dcf3f85b9f4b073ca7e",
+      "baseline_sha256": "868d474f3d3c72abca5768971ef7b7f76b80be52cde6add0f1f8fed55420f32f"
+    },
+    {
+      "path": "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/TransportWakeReceiver.kt",
+      "sha256": "ddc47e6bbab88f0fc3f12094392b1751416adc16bc9b8701dcc17e3ffa1e016c",
+      "baseline_sha256": "58f461dac07aa631d5a56e25086b25b56c5a63a0372b7cad06c52e0b755a3497"
+    },
+    {
+      "path": "phone-hub/src/main/AndroidManifest.xml",
+      "sha256": "814fb5a4cef092a99dff0414e5489ecb54832cd72f19398ebe5e9535d4abf678",
+      "baseline_sha256": "34b6ceea6bda0332e85023ddbef5a99dc1af140ab5a84409594e3f4f1fa24178"
+    },
+    {
+      "path": "phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt",
+      "sha256": "336c789fdb1443ed938ba1dcf445ff8e63d013389dafaa1bd5f4e7e2f3aac2b1",
+      "baseline_sha256": "00e570e987715f73cb4b65860d70609349af5de30c0f95c4d1d24a94b3d2d459"
+    },
+    {
+      "path": "phone-hub/src/main/java/com/anezium/rokidbus/phone/MainActivity.kt",
+      "sha256": "f16189215c48bffb80c6617892a4fc4281bf3b9f62d4c31c6f4bd344510b622e",
+      "baseline_sha256": "885b0d32e805d628a73beca31d409a9c619d4c3c57884e9a55578ca861bf9ceb"
+    },
+    {
+      "path": "phone-hub/src/main/java/com/anezium/rokidbus/phone/SppDiagnosticActivity.kt",
+      "sha256": "5a6000956ea6fb92c8df8227a37fba042a92ad12ca9a729e4a56f79b51fee8a7",
+      "baseline_sha256": null
+    },
+    {
+      "path": "shared/src/main/java/com/anezium/rokidbus/shared/SppDiagnostics.kt",
+      "sha256": "7854881af8e39c3d49415c0d99e1e83621715fabcfdbc2882fd2906db4f049c4",
+      "baseline_sha256": null
+    },
+    {
+      "path": "shared/src/test/java/com/anezium/rokidbus/shared/SppDiagnosticsTest.kt",
+      "sha256": "533b81f6da8151521e8842591c4b5dff8354b09f560fd11d476526cad8ab3824",
+      "baseline_sha256": null
+    }
+  ],
+  "manifests": [
+    {
+      "module": "phone-hub",
+      "permissions_unchanged": true,
+      "build_configuration_unchanged": true
+    },
+    {
+      "module": "glasses-hub",
+      "permissions_unchanged": true,
+      "build_configuration_unchanged": true
+    }
+  ],
+  "session_owner_unchanged": true
+}
