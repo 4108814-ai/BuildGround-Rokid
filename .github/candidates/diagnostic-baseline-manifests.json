@@ -1,0 +1,482 @@
+{
+  "glasses-hub": {
+    "package": "com.anezium.rokidbus.glasses",
+    "apk_sha256": "b81f6f8fb5054fabbe964e6460e3990a6a72032a6524e72f88619759296cd5d5",
+    "fingerprint": {
+      "components": [
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.glasses.CameraActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.glasses.MainActivity",
+          "exported": "(type 0x12)0xffffffff",
+          "permission": null,
+          "filters": [
+            [
+              [
+                "action",
+                "android.intent.action.MAIN"
+              ],
+              [
+                "category",
+                "android.intent.category.LAUNCHER"
+              ]
+            ]
+          ]
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.glasses.SetupEntryActivity",
+          "exported": "(type 0x12)0xffffffff",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.glasses.SurfaceActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "provider",
+          "name": "androidx.startup.InitializationProvider",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "receiver",
+          "name": "androidx.profileinstaller.ProfileInstallReceiver",
+          "exported": "(type 0x12)0xffffffff",
+          "permission": "android.permission.DUMP",
+          "filters": [
+            [
+              [
+                "action",
+                "androidx.profileinstaller.action.BENCHMARK_OPERATION"
+              ]
+            ],
+            [
+              [
+                "action",
+                "androidx.profileinstaller.action.INSTALL_PROFILE"
+              ]
+            ],
+            [
+              [
+                "action",
+                "androidx.profileinstaller.action.SAVE_PROFILE"
+              ]
+            ],
+            [
+              [
+                "action",
+                "androidx.profileinstaller.action.SKIP_FILE"
+              ]
+            ]
+          ]
+        },
+        {
+          "type": "receiver",
+          "name": "com.anezium.rokidbus.glasses.BootReceiver",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": [
+            [
+              [
+                "action",
+                "android.intent.action.BOOT_COMPLETED"
+              ],
+              [
+                "action",
+                "android.intent.action.LOCKED_BOOT_COMPLETED"
+              ],
+              [
+                "action",
+                "android.intent.action.MY_PACKAGE_REPLACED"
+              ],
+              [
+                "action",
+                "android.intent.action.USER_UNLOCKED"
+              ]
+            ]
+          ]
+        },
+        {
+          "type": "receiver",
+          "name": "com.anezium.rokidbus.glasses.CameraOverlayVisibilityReceiver",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "receiver",
+          "name": "com.anezium.rokidbus.glasses.GlassesLifecycleReceiver",
+          "exported": "(type 0x12)0xffffffff",
+          "permission": null,
+          "filters": [
+            [
+              [
+                "action",
+                "com.rokid.sprite.ACTION_LEG_STATUS_CHANGED"
+              ],
+              [
+                "action",
+                "com.rokid.sprite.ACTION_TAKE_STATUS_CHANGED"
+              ]
+            ]
+          ]
+        },
+        {
+          "type": "receiver",
+          "name": "com.anezium.rokidbus.glasses.OpenLauncherReceiver",
+          "exported": "(type 0x12)0xffffffff",
+          "permission": null,
+          "filters": [
+            [
+              [
+                "action",
+                "com.anezium.rokidbus.glasses.action.OPEN_LAUNCHER"
+              ]
+            ]
+          ]
+        },
+        {
+          "type": "receiver",
+          "name": "com.anezium.rokidbus.glasses.SelfArmWirelessBootstrapReceiver",
+          "exported": "(type 0x12)0x0",
+          "permission": "com.anezium.rokidbus.glasses.permission.START_SELFARM_WIRELESS",
+          "filters": [
+            [
+              [
+                "action",
+                "com.anezium.rokidbus.glasses.ACTION_SELFARM_WIRELESS_START"
+              ]
+            ]
+          ]
+        },
+        {
+          "type": "receiver",
+          "name": "com.anezium.rokidbus.glasses.TransportWakeReceiver",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": [
+            [
+              [
+                "action",
+                "android.bluetooth.adapter.action.CONNECTION_STATE_CHANGED"
+              ],
+              [
+                "action",
+                "android.bluetooth.adapter.action.STATE_CHANGED"
+              ],
+              [
+                "action",
+                "android.bluetooth.device.action.ACL_CONNECTED"
+              ],
+              [
+                "action",
+                "android.intent.action.USER_PRESENT"
+              ]
+            ]
+          ]
+        },
+        {
+          "type": "service",
+          "name": "com.anezium.rokidbus.glasses.BusHubService",
+          "exported": "(type 0x12)0xffffffff",
+          "permission": null,
+          "filters": [
+            [
+              [
+                "action",
+                "com.anezium.rokidbus.action.HUB"
+              ]
+            ]
+          ]
+        },
+        {
+          "type": "service",
+          "name": "com.anezium.rokidbus.glasses.NexusRemoteInputMethodService",
+          "exported": "(type 0x12)0xffffffff",
+          "permission": "android.permission.BIND_INPUT_METHOD",
+          "filters": [
+            [
+              [
+                "action",
+                "android.view.InputMethod"
+              ]
+            ]
+          ]
+        },
+        {
+          "type": "service",
+          "name": "com.anezium.rokidbus.glasses.RokidBusAccessibilityService",
+          "exported": "(type 0x12)0x0",
+          "permission": "android.permission.BIND_ACCESSIBILITY_SERVICE",
+          "filters": [
+            [
+              [
+                "action",
+                "android.accessibilityservice.AccessibilityService"
+              ]
+            ]
+          ]
+        }
+      ],
+      "permission_definitions": [
+        {
+          "name": "com.anezium.rokidbus.glasses.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+          "level": "(type 0x11)0x2"
+        },
+        {
+          "name": "com.anezium.rokidbus.glasses.permission.START_SELFARM_WIRELESS",
+          "level": "(type 0x11)0x2"
+        }
+      ]
+    }
+  },
+  "phone-hub": {
+    "package": "com.anezium.rokidbus.phone",
+    "apk_sha256": "6d252b263773f8282fd9bee317a771562edf7dafc8f3d1cdcf7950c5b8f5490c",
+    "fingerprint": {
+      "components": [
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.BusInspectorActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.ConsoleActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.GlassesDisplaySettingsActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.GlassesManualSetupActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.GlassesSetupGuideActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.LocalGlassesApkActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.MainActivity",
+          "exported": "(type 0x12)0xffffffff",
+          "permission": null,
+          "filters": [
+            [
+              [
+                "action",
+                "android.intent.action.MAIN"
+              ],
+              [
+                "category",
+                "android.intent.category.LAUNCHER"
+              ]
+            ]
+          ]
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.NativeAppsActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.PluginPermissionsActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.RemoteInputActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.SettingsActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.SpeechSettingsActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.StoreActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.StorePluginDetailActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.StoreScreenshotViewerActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.StoreVersionHistoryActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.VoiceSettingsActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "activity",
+          "name": "com.anezium.rokidbus.phone.WhatsNewActivity",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "provider",
+          "name": "androidx.startup.InitializationProvider",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "receiver",
+          "name": "androidx.profileinstaller.ProfileInstallReceiver",
+          "exported": "(type 0x12)0xffffffff",
+          "permission": "android.permission.DUMP",
+          "filters": [
+            [
+              [
+                "action",
+                "androidx.profileinstaller.action.BENCHMARK_OPERATION"
+              ]
+            ],
+            [
+              [
+                "action",
+                "androidx.profileinstaller.action.INSTALL_PROFILE"
+              ]
+            ],
+            [
+              [
+                "action",
+                "androidx.profileinstaller.action.SAVE_PROFILE"
+              ]
+            ],
+            [
+              [
+                "action",
+                "androidx.profileinstaller.action.SKIP_FILE"
+              ]
+            ]
+          ]
+        },
+        {
+          "type": "receiver",
+          "name": "com.anezium.rokidbus.phone.HubStartupReceiver",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": [
+            [
+              [
+                "action",
+                "android.intent.action.BOOT_COMPLETED"
+              ],
+              [
+                "action",
+                "android.intent.action.MY_PACKAGE_REPLACED"
+              ]
+            ]
+          ]
+        },
+        {
+          "type": "receiver",
+          "name": "com.anezium.rokidbus.phone.PluginInstallResultReceiver",
+          "exported": "(type 0x12)0x0",
+          "permission": null,
+          "filters": []
+        },
+        {
+          "type": "service",
+          "name": "com.anezium.rokidbus.phone.BusHubService",
+          "exported": "(type 0x12)0xffffffff",
+          "permission": null,
+          "filters": [
+            [
+              [
+                "action",
+                "com.anezium.rokidbus.action.HUB"
+              ]
+            ]
+          ]
+        }
+      ],
+      "permission_definitions": [
+        {
+          "name": "com.anezium.rokidbus.permission.BIND_PLUGIN_GUARDIAN",
+          "level": "(type 0x11)0x2"
+        },
+        {
+          "name": "com.anezium.rokidbus.phone.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+          "level": "(type 0x11)0x2"
+        },
+        {
+          "name": "com.anezium.rokidbus.phone.permission.INTERNAL_CORE_CONTROL",
+          "level": "(type 0x11)0x2"
+        }
+      ]
+    }
+  }
+}
