@@ -29,7 +29,7 @@ jobs:
       - name: Check out reviewed patch only
         uses: actions/checkout@v6
         with:
-          ref: 2569291bfdb08556cb714d2ce66905d19e3b3680
+          ref: 0552dad2d93d2c070a7ffb653c1550d37c15382f
           path: CandidatePatch
           persist-credentials: false
           sparse-checkout: |
@@ -291,7 +291,7 @@ jobs:
               before=ET.parse('../'+module+'-baseline-manifest.xml').getroot();after=ET.parse(Path(module)/'src/main/AndroidManifest.xml').getroot()
               assert [x.attrib for x in before if x.tag.startswith(('uses-permission','permission'))]==[x.attrib for x in after if x.tag.startswith(('uses-permission','permission'))]
               out=Path(module)/'src/main/assets/buildground-spp-diagnostic.json';out.parent.mkdir(parents=True,exist_ok=True)
-              out.write_text(json.dumps({'build_label':'SPP_DIAG_01_20261101','source_commit':'2569291bfdb08556cb714d2ce66905d19e3b3680','patch_sha256':proof['patch_sha256'],'call':'UNSUPPORTED','physical_validation':'NOT_RUN'})+'\n')
+              out.write_text(json.dumps({'build_label':'SPP_DIAG_01_20261101','source_commit':'0552dad2d93d2c070a7ffb653c1550d37c15382f','patch_sha256':proof['patch_sha256'],'call':'UNSUPPORTED','physical_validation':'NOT_RUN'})+'\n')
           PY
 
       - name: Set up JDK 21
