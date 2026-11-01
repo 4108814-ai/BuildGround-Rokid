@@ -29,7 +29,7 @@ jobs:
       - name: Check out reviewed patch only
         uses: actions/checkout@v6
         with:
-          ref: c4dc0fbb494fd855b2c2da1834c8e00830aadadc
+          ref: 12cfa8fd28278f303feca2dae776b3548a80ec83
           path: CandidatePatch
           persist-credentials: false
           sparse-checkout: |
@@ -272,7 +272,7 @@ jobs:
           assert not backup.exists(); target.rename(backup)
           shutil.copytree('../GlassesSource/glasses-hub',target)
           inputs=Path('../CandidatePatch/.github/candidates')
-          for name,digest in {'nexus-spp-diagnostic.patch':'54e6f1f76de0666a10b0e6c7add0cda07c0302b374f20f888615a32cb5ee864e','spp-diagnostic-source-verification.json':'1b8a3729d958b0717016bb41ebb59c8e06acd0ac92262a65260430ad31f659f2','verify-spp-diagnostic-artifact.py':'aeb5c7135ae21e0bad1a9b78a62a92c8632ddf8bc63f4365798397a647fd1da8'}.items():
+          for name,digest in {'nexus-spp-diagnostic.patch':'54e6f1f76de0666a10b0e6c7add0cda07c0302b374f20f888615a32cb5ee864e','spp-diagnostic-source-verification.json':'916f522324de1b2aac8ef01038a5e64f52af20c8bb12e65cd533c4d07b4adf59','verify-spp-diagnostic-artifact.py':'54a6c450efb7fde8cb96e68896837e186d7e37debb40759c1a233fc1454ad6e7'}.items():
               assert hashlib.sha256((inputs/name).read_bytes()).hexdigest()==digest,name
           for module in ['phone-hub','glasses-hub']:
               Path('../'+module+'-baseline-manifest.xml').write_bytes((Path(module)/'src/main/AndroidManifest.xml').read_bytes())
@@ -289,7 +289,7 @@ jobs:
               before=ET.parse('../'+module+'-baseline-manifest.xml').getroot();after=ET.parse(Path(module)/'src/main/AndroidManifest.xml').getroot()
               assert [x.attrib for x in before if x.tag.startswith(('uses-permission','permission'))]==[x.attrib for x in after if x.tag.startswith(('uses-permission','permission'))]
               out=Path(module)/'src/main/assets/buildground-spp-diagnostic.json';out.parent.mkdir(parents=True,exist_ok=True)
-              out.write_text(json.dumps({'build_label':'SPP_DIAG_01_20261101','source_commit':'c4dc0fbb494fd855b2c2da1834c8e00830aadadc','patch_sha256':proof['patch_sha256'],'call':'UNSUPPORTED','physical_validation':'NOT_RUN'})+'\n')
+              out.write_text(json.dumps({'build_label':'SPP_DIAG_01_20261101','source_commit':'12cfa8fd28278f303feca2dae776b3548a80ec83','patch_sha256':proof['patch_sha256'],'call':'UNSUPPORTED','physical_validation':'NOT_RUN'})+'\n')
           PY
 
       - name: Set up JDK 21
