@@ -6,7 +6,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: buildground-phone-cxr-fold-candidate
+  group: buildground-phone-control03-candidate
   cancel-in-progress: false
 
 jobs:
@@ -29,7 +29,7 @@ jobs:
       - name: Check out reviewed patch only
         uses: actions/checkout@v6
         with:
-          ref: 1adfb8aa415ca001ab6c1bf3d12496019001fa05
+          ref: 81e797dd674ac8277897891c33c7570a58f5b9ef
           path: CandidatePatch
           persist-credentials: false
           sparse-checkout: |
@@ -39,6 +39,8 @@ jobs:
             .github/candidates/nexus-phone-cxr-fold.patch
             .github/candidates/CxrFoldRecoveryRegression.kt
             .github/candidates/CxrFoldWakeRegression.kt
+            .github/candidates/nexus-phone-single-owner.patch
+            .github/candidates/CxrOwnerLifecycleRegression.kt
           sparse-checkout-cone-mode: false
 
       - name: Check out CxrGlobal 0.2.3
@@ -101,7 +103,7 @@ jobs:
           assert hashlib.sha256(regression.read_bytes()).hexdigest() == 'e659d329a169c54f56f09d31462f049390798388a8ff6bffdd9c3ed2dedf7e35'
           p = pathlib.Path('phone-hub/src/main/assets/buildground-spp-phone-candidate.json')
           p.parent.mkdir(parents=True,exist_ok=True)
-          p.write_text(json.dumps({'build_label':'SPP-PHONE-20261031-01','source_commit':'1adfb8aa415ca001ab6c1bf3d12496019001fa05','patch_sha256':'b6135691227de68fb420e4352c746439cc36023042533deeb5294ee7dc884cc5','call':'UNSUPPORTED'})+'\n',encoding='utf-8')
+          p.write_text(json.dumps({'build_label':'SPP-PHONE-20261031-01','source_commit':'81e797dd674ac8277897891c33c7570a58f5b9ef','patch_sha256':'b6135691227de68fb420e4352c746439cc36023042533deeb5294ee7dc884cc5','call':'UNSUPPORTED'})+'\n',encoding='utf-8')
           print('Exact Phone SPP ownership source verified; original candidate and permissions preserved.')
           PY
           grep -F 'applicationId = "com.anezium.rokidbus.phone"' phone-hub/build.gradle.kts
@@ -131,11 +133,35 @@ jobs:
           import pathlib,hashlib,json
           checks={'phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt':'87278986e646a1309bc14b50a9693057d2d7e6ae159725c24b281b744582285b','../CxrGlobal/lib/src/main/java/com/example/cxrglobal/CXRLink.kt':'f566d016b54b56db1f5deeaf503466f267a2887c83e0c08e2a6bbc057e0fab00','phone-hub/src/main/java/com/anezium/rokidbus/phone/SppClientSessionOwner.kt':'87b88ccc4bf052f18db9cc6fc2418c47b7bc46e401f0be8bb436999b24a9b61d'}
           for name,digest in checks.items(): assert hashlib.sha256(pathlib.Path(name).read_bytes().replace(b'\r\n',b'\n')).hexdigest()==digest,name
-          label={'build_label':'CXR-FOLD-20261101-01','source_commit':'1adfb8aa415ca001ab6c1bf3d12496019001fa05','fold_patch_sha256':'a831e04ad85b8f6621d5c4ab0ac5eee8968f2fca0a0a457a62196f6022172fa9','spp_patch_sha256':'b6135691227de68fb420e4352c746439cc36023042533deeb5294ee7dc884cc5','call':'UNSUPPORTED'}
+          label={'build_label':'CONTROL-FIX-03-20261101','source_commit':'81e797dd674ac8277897891c33c7570a58f5b9ef','fold_patch_sha256':'a831e04ad85b8f6621d5c4ab0ac5eee8968f2fca0a0a457a62196f6022172fa9','spp_patch_sha256':'b6135691227de68fb420e4352c746439cc36023042533deeb5294ee7dc884cc5','call':'UNSUPPORTED'}
           pathlib.Path('phone-hub/src/main/assets/buildground-spp-phone-candidate.json').write_text(json.dumps(label)+'\n',encoding='utf-8')
           print('Exact Phone and CXR fold patches verified; session ownership preserved.')
           PY
           test "$(git -C ../CxrGlobal diff --name-only)" = lib/src/main/java/com/example/cxrglobal/CXRLink.kt
+
+      - name: Verify and apply single-owner independent Control recovery
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import pathlib,hashlib
+          base=pathlib.Path('../CandidatePatch/.github/candidates')
+          for name,digest in {'nexus-phone-single-owner.patch':'183291fd7d710ead8dcc491c23ee9bfb4608a4fb4e1989fe5a032b2d39964524','CxrOwnerLifecycleRegression.kt':'25a5b1f9bed7e43e0077087c41b9cc0b1b7c75fcad00c22d08230567b0184799'}.items():
+              assert hashlib.sha256((base/name).read_bytes()).hexdigest()==digest,name
+          names=[line for line in (base/'nexus-phone-single-owner.patch').read_text().splitlines() if line.startswith('+++ ')]
+          assert names==['+++ b/CxrGlobal/lib/src/main/java/com/example/cxrglobal/CXRLink.kt','+++ b/CxrGlobal/lib/src/main/java/com/example/cxrglobal/CxrBindingOwner.kt','+++ b/phone/phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt','+++ b/phone/phone-hub/src/main/java/com/anezium/rokidbus/phone/CxrRecoveryPolicy.kt']
+          PY
+          git apply -p2 --check --include='phone-hub/src/main/java/com/anezium/rokidbus/phone/*' ../CandidatePatch/.github/candidates/nexus-phone-single-owner.patch
+          git apply -p2 --include='phone-hub/src/main/java/com/anezium/rokidbus/phone/*' ../CandidatePatch/.github/candidates/nexus-phone-single-owner.patch
+          git -C ../CxrGlobal apply -p2 --check --include='lib/src/main/java/com/example/cxrglobal/*' ../CandidatePatch/.github/candidates/nexus-phone-single-owner.patch
+          git -C ../CxrGlobal apply -p2 --include='lib/src/main/java/com/example/cxrglobal/*' ../CandidatePatch/.github/candidates/nexus-phone-single-owner.patch
+          python - <<'PY'
+          import pathlib,hashlib,json
+          checks={'phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt':'00e570e987715f73cb4b65860d70609349af5de30c0f95c4d1d24a94b3d2d459','phone-hub/src/main/java/com/anezium/rokidbus/phone/CxrRecoveryPolicy.kt':'ff20446d25c38f4827371cdd8d6a69f1751cfbefbf901493906edaeeb279cd45','../CxrGlobal/lib/src/main/java/com/example/cxrglobal/CXRLink.kt':'ed8d5a1905ad12eac1c2c26b33acfd865a83af13f10a90a337a9f891a54b6a73','../CxrGlobal/lib/src/main/java/com/example/cxrglobal/CxrBindingOwner.kt':'03324828c4d102acd420edd1b5d988bad2a53c4378b88faa152b4b2b82768338','phone-hub/src/main/java/com/anezium/rokidbus/phone/SppClientSessionOwner.kt':'87b88ccc4bf052f18db9cc6fc2418c47b7bc46e401f0be8bb436999b24a9b61d'}
+          for name,digest in checks.items():assert hashlib.sha256(pathlib.Path(name).read_bytes().replace(b'\r\n',b'\n')).hexdigest()==digest,name
+          label={'build_label':'CONTROL-FIX-03-20261101','source_commit':'81e797dd674ac8277897891c33c7570a58f5b9ef','owner_patch_sha256':'183291fd7d710ead8dcc491c23ee9bfb4608a4fb4e1989fe5a032b2d39964524','fold_patch_sha256':'a831e04ad85b8f6621d5c4ab0ac5eee8968f2fca0a0a457a62196f6022172fa9','spp_patch_sha256':'b6135691227de68fb420e4352c746439cc36023042533deeb5294ee7dc884cc5','call':'UNSUPPORTED'}
+          pathlib.Path('phone-hub/src/main/assets/buildground-spp-phone-candidate.json').write_text(json.dumps(label)+'\n',encoding='utf-8')
+          print('Exact single owner and independent Control source verified; SPP ownership preserved.')
+          PY
 
       - name: Set up JDK 21
         uses: actions/setup-java@v5
@@ -165,18 +191,22 @@ jobs:
               @org.junit.Test fun sevenChecks() { main() }
           }
           KOTLIN
-          cp ../CandidatePatch/.github/candidates/CxrFoldRecoveryRegression.kt "$destination/CxrFoldRecoveryRegression.kt"
-          cp ../CandidatePatch/.github/candidates/CxrFoldWakeRegression.kt "$destination/CxrFoldWakeRegression.kt"
-          cat > "$destination/CxrFoldRecoveryRegressionTest.kt" <<'KOTLIN'
+          cp ../CandidatePatch/.github/candidates/CxrOwnerLifecycleRegression.kt "$destination/CxrOwnerLifecycleRegression.kt"
+          python - <<'PY'
+          from pathlib import Path
+          destination=Path('phone-hub/src/test/java/com/anezium/rokidbus/phone')
+          # Relocate implementation-identical helper copies into the test module. Production
+          # helpers stay internal to their own modules; no duplicate release FQCN is created.
+          for source,name in [('../CxrGlobal/lib/src/main/java/com/example/cxrglobal/CxrBindingOwner.kt','OwnerRegressionBinding.kt'),('phone-hub/src/main/java/com/anezium/rokidbus/phone/CxrRecoveryPolicy.kt','OwnerRegressionPolicy.kt')]:
+              text=Path(source).read_text(encoding='utf-8')
+              first,rest=text.split('\n',1)
+              assert first in ['package com.example.cxrglobal','package com.anezium.rokidbus.phone']
+              (destination/name).write_text('package com.buildground.ownerregression\n'+rest,encoding='utf-8')
+          PY
+          cat > "$destination/CxrOwnerLifecycleRegressionTest.kt" <<'KOTLIN'
           package com.anezium.rokidbus.phone
-          class CxrFoldRecoveryRegressionTest {
-              @org.junit.Test fun sixteenChecks() { com.buildground.foldregression.main() }
-          }
-          KOTLIN
-          cat > "$destination/CxrFoldWakeRegressionTest.kt" <<'KOTLIN'
-          package com.anezium.rokidbus.phone
-          class CxrFoldWakeRegressionTest {
-              @org.junit.Test fun sixChecks() { com.buildground.wakeregression.main() }
+          class CxrOwnerLifecycleRegressionTest {
+              @org.junit.Test fun nineteenChecks() { com.buildground.ownerregression.main() }
           }
           KOTLIN
           cat > "$RUNNER_TEMP/candidate-repositories.init.gradle" <<'GRADLE'
@@ -191,7 +221,7 @@ jobs:
               }
           }
           GRADLE
-          ./gradlew --no-daemon --max-workers=2 --init-script "$RUNNER_TEMP/candidate-repositories.init.gradle" :phone-hub:testDebugUnitTest --tests '*LocalGlassesApkPolicyTest' --tests '*LocalGlassesTransferBoundaryTest' --tests '*SppPhoneOwnershipRegressionTest' --tests '*CxrFoldRecoveryRegressionTest' --tests '*CxrFoldWakeRegressionTest'
+          ./gradlew --no-daemon --max-workers=2 --init-script "$RUNNER_TEMP/candidate-repositories.init.gradle" :phone-hub:testDebugUnitTest --tests '*LocalGlassesApkPolicyTest' --tests '*LocalGlassesTransferBoundaryTest' --tests '*SppPhoneOwnershipRegressionTest' --tests '*CxrOwnerLifecycleRegressionTest'
           python - <<'PY'
           import pathlib, xml.etree.ElementTree as ET
           reports = list(pathlib.Path('phone-hub/build/test-results/testDebugUnitTest').glob('TEST-*LocalGlasses*.xml'))
@@ -202,11 +232,10 @@ jobs:
           spp = ET.parse('phone-hub/build/test-results/testDebugUnitTest/TEST-com.anezium.rokidbus.phone.SppPhoneOwnershipRegressionTest.xml').getroot()
           assert spp.get('failures') == '0' and spp.get('errors') == '0'
           assert (spp.findtext('system-out') or '').count('PASS ') == 7
-          for name,count in [('CxrFoldRecoveryRegressionTest',16),('CxrFoldWakeRegressionTest',6)]:
-              item=ET.parse('phone-hub/build/test-results/testDebugUnitTest/TEST-com.anezium.rokidbus.phone.'+name+'.xml').getroot()
-              assert all(int(item.get(k,'0'))==0 for k in ['failures','errors','skipped'])
-              assert (item.findtext('system-out') or '').count('PASS ')==count
-          print('All 41 checks passed: 12 policy/boundary, 7 SPP ownership, 16 CXR lifecycle, 6 wake edges.')
+          owner=ET.parse('phone-hub/build/test-results/testDebugUnitTest/TEST-com.anezium.rokidbus.phone.CxrOwnerLifecycleRegressionTest.xml').getroot()
+          assert all(int(owner.get(k,'0'))==0 for k in ['failures','errors','skipped'])
+          assert (owner.findtext('system-out') or '').count('PASS ')==19
+          print('All 38 checks passed: 12 policy/boundary, 7 SPP ownership, 19 single-owner lifecycle checks.')
           PY
 
       - name: Build and verify candidate using existing release key
@@ -231,22 +260,21 @@ jobs:
           ./gradlew --no-daemon --max-workers=2 --init-script "$RUNNER_TEMP/candidate-repositories.init.gradle" :phone-hub:assembleRelease
           mapfile -t apks < <(find phone-hub/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk')
           test "${#apks[@]}" -eq 1
-          mkdir -p "$RUNNER_TEMP/phone-cxr-fold-candidate"
-          artifact="$RUNNER_TEMP/phone-cxr-fold-candidate/nexus-phone-1.4.26-cxr-fold-20261101-candidate.apk"
+          mkdir -p "$RUNNER_TEMP/phone-control03-candidate"
+          artifact="$RUNNER_TEMP/phone-control03-candidate/NEXUS_PHONE_03_CONTROL_FIX_2026-11-01.apk"
           cp "${apks[0]}" "$artifact"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$artifact" > "$RUNNER_TEMP/phone-cxr-fold-candidate/signature.txt"
-          signer="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/phone-cxr-fold-candidate/signature.txt" | tr 'A-F' 'a-f' | tr -d ':[:space:]')"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$artifact" > "$RUNNER_TEMP/phone-control03-candidate/signature.txt"
+          signer="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/phone-control03-candidate/signature.txt" | tr 'A-F' 'a-f' | tr -d ':[:space:]')"
           test "$signer" = "$expected"
-          test "$(grep -c 'certificate SHA-256 digest:' "$RUNNER_TEMP/phone-cxr-fold-candidate/signature.txt")" -eq 1
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$artifact" > "$RUNNER_TEMP/phone-cxr-fold-candidate/badging.txt"
-          head -n 1 "$RUNNER_TEMP/phone-cxr-fold-candidate/badging.txt" | grep -F "name='com.anezium.rokidbus.phone'" | grep -F "versionCode='10426'" | grep -F "versionName='1.4.26'"
-          if grep -q '^application-debuggable' "$RUNNER_TEMP/phone-cxr-fold-candidate/badging.txt"; then exit 1; fi
+          test "$(grep -c 'certificate SHA-256 digest:' "$RUNNER_TEMP/phone-control03-candidate/signature.txt")" -eq 1
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$artifact" > "$RUNNER_TEMP/phone-control03-candidate/badging.txt"
+          head -n 1 "$RUNNER_TEMP/phone-control03-candidate/badging.txt" | grep -F "name='com.anezium.rokidbus.phone'" | grep -F "versionCode='10426'" | grep -F "versionName='1.4.26'"
+          if grep -q '^application-debuggable' "$RUNNER_TEMP/phone-control03-candidate/badging.txt"; then exit 1; fi
           "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c 4 "$artifact"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump permissions "$artifact" > "$RUNNER_TEMP/phone-cxr-fold-candidate/permissions.txt"
-          cp phone-hub/build/test-results/testDebugUnitTest/TEST-com.anezium.rokidbus.phone.SppPhoneOwnershipRegressionTest.xml "$RUNNER_TEMP/phone-cxr-fold-candidate/spp-regression.xml"
-          cp phone-hub/build/test-results/testDebugUnitTest/TEST-*LocalGlasses*.xml "$RUNNER_TEMP/phone-cxr-fold-candidate/"
-          cp phone-hub/build/test-results/testDebugUnitTest/TEST-com.anezium.rokidbus.phone.CxrFoldRecoveryRegressionTest.xml "$RUNNER_TEMP/phone-cxr-fold-candidate/cxr-fold-regression.xml"
-          cp phone-hub/build/test-results/testDebugUnitTest/TEST-com.anezium.rokidbus.phone.CxrFoldWakeRegressionTest.xml "$RUNNER_TEMP/phone-cxr-fold-candidate/cxr-wake-regression.xml"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump permissions "$artifact" > "$RUNNER_TEMP/phone-control03-candidate/permissions.txt"
+          cp phone-hub/build/test-results/testDebugUnitTest/TEST-com.anezium.rokidbus.phone.SppPhoneOwnershipRegressionTest.xml "$RUNNER_TEMP/phone-control03-candidate/spp-regression.xml"
+          cp phone-hub/build/test-results/testDebugUnitTest/TEST-*LocalGlasses*.xml "$RUNNER_TEMP/phone-control03-candidate/"
+          cp phone-hub/build/test-results/testDebugUnitTest/TEST-com.anezium.rokidbus.phone.CxrOwnerLifecycleRegressionTest.xml "$RUNNER_TEMP/phone-control03-candidate/control-owner-regression.xml"
           python - "$artifact" <<'PY'
           import pathlib, sys, zipfile
           with zipfile.ZipFile(sys.argv[1]) as apk:
@@ -254,10 +282,13 @@ jobs:
               assert not any(pathlib.PurePosixPath(n).suffix.lower() in ('.jks','.keystore','.p12','.pfx','.key') for n in apk.namelist())
               import re, json
               label = json.loads(apk.read('assets/buildground-spp-phone-candidate.json'))
-              assert label['build_label'] == 'CXR-FOLD-20261101-01' and label['fold_patch_sha256'] == 'a831e04ad85b8f6621d5c4ab0ac5eee8968f2fca0a0a457a62196f6022172fa9' and label['call'] == 'UNSUPPORTED'
+              assert label['build_label'] == 'CONTROL-FIX-03-20261101' and label['fold_patch_sha256'] == 'a831e04ad85b8f6621d5c4ab0ac5eee8968f2fca0a0a457a62196f6022172fa9' and label['call'] == 'UNSUPPORTED'
               dex = b''.join(apk.read(n) for n in apk.namelist() if re.fullmatch(r'classes\d*\.dex', n))
               assert b'Lcom/anezium/rokidbus/phone/SppClientSessionOwner;' in dex
-              assert b'refreshDeviceConnection' in dex and b'requestCxrRecoveryForSppRetry' in dex and b'glasses_worn' in dex
+              assert label['owner_patch_sha256']=='183291fd7d710ead8dcc491c23ee9bfb4608a4fb4e1989fe5a032b2d39964524'
+              for symbol in [b'refreshDeviceConnection',b'startCxrRecovery',b'hasActiveBinding',b'CxrBindingOwner',b'CxrRecoveryPolicy',b'glasses_worn']:assert symbol in dex,symbol
+              assert b'requestCxrRecoveryForSppRetry' not in dex and b'bindingPendingSinceMs' not in dex
+              assert b'Lcom/buildground/ownerregression/' not in dex
               expected_text = [" \u00b7 ", " \u203a", "AUTO \u203a", "Asking the glasses to check their helper\u2026", "MANUAL \u203a", "Nothing to repair \u2014 the helper is already in place.", "READY \u203a", "Repair \u203a", "SET UP \u203a", "Turn on Wi-Fi first \u2014 the update travels to the glasses over Wi-Fi.", "Working\u2026", "\u203a"]
               corrupt_text = [" \u0420\u00a0\u0432\u0402\u2122\u0420\u2019\u0412\u00b7 ", " \u0432\u0402\u0454", "AUTO \u0432\u0402\u0454", "Asking the glasses to check their helper\u0432\u0402\u00a6", "MANUAL \u0432\u0402\u0454", "Nothing to repair \u0432\u0402\u201d the helper is already in place.", "READY \u0432\u0402\u0454", "Repair \u0432\u0402\u0454", "SET UP \u0432\u0402\u0454", "Turn on Wi-Fi first \u0420\u00a0\u0420\u2020\u0420\u00a0\u0432\u0402\u0459\u0420\u0406\u0420\u201a\u0421\u045a the update travels to the glasses over Wi-Fi.", "Working\u0432\u0402\u00a6", "\u0432\u0402\u0454"]
               assert all(value.encode('utf-8') in dex for value in expected_text), 'Restored UI text absent from APK'
@@ -265,11 +296,11 @@ jobs:
               print('All 12 restored UI literals verified in signed APK; corrupt variants absent.')
           PY
           (
-            cd "$RUNNER_TEMP/phone-cxr-fold-candidate"
-            sha256sum nexus-phone-1.4.26-cxr-fold-20261101-candidate.apk > SHA256SUMS
+            cd "$RUNNER_TEMP/phone-control03-candidate"
+            sha256sum NEXUS_PHONE_03_CONTROL_FIX_2026-11-01.apk > SHA256SUMS
             cat SHA256SUMS
           )
-          printf '%s\n' 'CXR-FOLD-20261101-01: Phone CXR binding/status recovery plus previous session-ownership fix, Android version 1.4.26/10426 unchanged. No device install or Bluetooth validation. Existing-dot Call UNSUPPORTED.' > "$RUNNER_TEMP/phone-cxr-fold-candidate/README.txt"
+          printf '%s\n' 'CONTROL-FIX-03-20261101: Phone single-owner independent Control recovery, prior SPP ownership preserved; initial-Control acceptance only, no fold claim; Android version 1.4.26/10426 unchanged. No device install or Bluetooth validation. Existing-dot Call UNSUPPORTED.' > "$RUNNER_TEMP/phone-control03-candidate/README.txt"
 
       - name: Remove temporary release key
         if: always()
@@ -278,8 +309,9 @@ jobs:
       - name: Upload signed candidate and verification records only
         uses: actions/upload-artifact@v4
         with:
-          name: nexus-phone-1.4.26-cxr-fold-candidate
-          path: ${{ runner.temp }}/phone-cxr-fold-candidate/
+          name: nexus-phone-03-control-fix-candidate
+          path: ${{ runner.temp }}/phone-control03-candidate/
           if-no-files-found: error
           retention-days: 14
+
 
