@@ -1,4 +1,4 @@
-name: BuildGround Phone local APK signed candidate
+name: BuildGround SPP diagnostic signed pair
 on:
   workflow_dispatch:
 
@@ -6,7 +6,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: buildground-phone-control03-candidate
+  group: buildground-spp-diagnostic-pair
   cancel-in-progress: false
 
 jobs:
@@ -29,7 +29,7 @@ jobs:
       - name: Check out reviewed patch only
         uses: actions/checkout@v6
         with:
-          ref: 81e797dd674ac8277897891c33c7570a58f5b9ef
+          ref: c4dc0fbb494fd855b2c2da1834c8e00830aadadc
           path: CandidatePatch
           persist-credentials: false
           sparse-checkout: |
@@ -41,6 +41,9 @@ jobs:
             .github/candidates/CxrFoldWakeRegression.kt
             .github/candidates/nexus-phone-single-owner.patch
             .github/candidates/CxrOwnerLifecycleRegression.kt
+            .github/candidates/nexus-spp-diagnostic.patch
+            .github/candidates/verify-spp-diagnostic-artifact.py
+            .github/candidates/spp-diagnostic-source-verification.json
           sparse-checkout-cone-mode: false
 
       - name: Check out CxrGlobal 0.2.3
@@ -50,6 +53,25 @@ jobs:
           ref: bfc3fab18268d6dd4b2c371416189cb19610b631
           path: CxrGlobal
           persist-credentials: false
+
+      - name: Check out pinned generated Glasses source
+        uses: actions/checkout@v6
+        with:
+          ref: 5fc9338668c18f6bdfab5ebdffbf602e57c96e14
+          path: GlassesSource
+          persist-credentials: false
+
+      - name: Check out reviewed Glasses SPP NAV inputs
+        uses: actions/checkout@v6
+        with:
+          ref: 6f84ccdec3d20ee8e3444666c54e64eaedd50960
+          path: GlassesPatch
+          persist-credentials: false
+          sparse-checkout: |
+            .github/candidates/nexus-spp-v2.patch
+            .github/candidates/nexus-launcher-navigation.patch
+            .github/candidates/LauncherRegression.kt
+          sparse-checkout-cone-mode: false
 
       - name: Verify and apply exact generated Phone candidate
         run: |
@@ -163,6 +185,113 @@ jobs:
           print('Exact single owner and independent Control source verified; SPP ownership preserved.')
           PY
 
+      - name: Reproduce and verify exact generated candidate
+        working-directory: GlassesSource
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 5fc9338668c18f6bdfab5ebdffbf602e57c96e14
+          python .github/scripts/apply-buildground-lifecycle-1418.py
+          python .github/scripts/apply-buildground-native-recording-1420.py
+          python .github/scripts/apply-buildground-native-recording-1421.py
+          python .github/scripts/apply-buildground-native-recording-1422.py
+          python .github/scripts/apply-buildground-notice-viewport-1423.py
+          python .github/scripts/apply-buildground-notice-wake-1424.py
+          python .github/scripts/apply-buildground-autostart-1425.py
+          python .github/scripts/apply-buildground-autostart-1426.py
+          python .github/scripts/apply-buildground-bootkeeper-1427.py
+          python .github/scripts/apply-buildground-bootkeeper-1428.py
+          python .github/scripts/apply-buildground-spp-keeper-1429.py
+          python .github/scripts/apply-buildground-recorder-wave-1430.py
+          python - <<'PY'
+          import hashlib, pathlib
+          expected = (
+          {
+              "glasses-hub/build.gradle.kts": "5c8c1a77fc389f0cc43b7c8feaf7ada2c83b82e7d9788e13b6de51290e1d5ae1",
+              "glasses-hub/src/main/AndroidManifest.xml": "8d8fecff2207e47e926863c7b4879d9a60338ccbf10cbd2654a2e97cb4bdacd9",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/BootReceiver.kt": "19ab51ace2004efb7e5f9362205410bf7a94351b86bc1a65687475196fce7278",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/BusHubService.kt": "ebf981573c056aa5422328aa4f14ce32985ca61950e520e9a5104518bb942ad4",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/DisplayWakePolicy.kt": "7a217edb3eacfa093ed953a39f0cf85bde768b91bf3369a78ec8cc7d084cb82b",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/GlassesHub.kt": "4ad5287a5f96296f1cb4d6b5ed888cbc23f650669c704c3d8b294532b9c821aa",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/GlassesLifecycleReceiver.kt": "25e345b1c87b065be7a8d20c46ae1494658ae1fc8ab54ac9a6d8e5c93d7c65b3",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/MainActivity.kt": "a2e8ced0ea9444f1b11dbbe1ad47c23bc1613d278ff5410afccd26c59786786f",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/NexusRemoteInputMethodService.kt": "30766460078df21e37e2ed384d5ef0d3611a2b4cff3fbb747e2f96020950f4dc",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/NoticeOverlayRenderer.kt": "af779f65fdf9142e1eca7b702f856e4bb7ccd539882bae8faa8153a0b63daa37",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/RokidBusAccessibilityService.kt": "34fb9e7ebe0abf45963447ff4f3c8d7532d500d30037d92de1c6450d7ba16bbf",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/RokidNativeRecordingController.kt": "a2bd67dbb7d6f87dcf37d554238e3eda1922f7b0b9a05bfffed3b838faf5cb9a",
+              "glasses-hub/src/test/java/com/anezium/rokidbus/glasses/DisplayWakePolicyTest.kt": "a813c2e23e598e771f4ab8d34fbc7fdfeaa37bdb84edfb3aefe2a48905d81a67",
+              "glasses-hub/src/test/java/com/anezium/rokidbus/glasses/NoticeStateMachineTest.kt": "4ea394bfdcd813a98c6cb0fa84ee6c963800f052a55d12be875fca8b2373c3b9",
+              "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/TransportWakeReceiver.kt": "00b6ea4fecf7ad31d392d69d0193a38ff88e7384da685caea538b52a029ea91b",
+              "glasses-hub/src/test/java/com/anezium/rokidbus/glasses/TransportWakeSignalTest.kt": "c207bdbab3f787ff98a169fd1a6c6496a76bd17777217614a4bcc848941d88df"
+          }
+          )
+          for name, digest in expected.items():
+              data = pathlib.Path(name).read_bytes().replace(b'\r\n', b'\n')
+              assert hashlib.sha256(data).hexdigest() == digest, name
+          patch = pathlib.Path('../GlassesPatch/.github/candidates/nexus-spp-v2.patch')
+          assert len(patch.read_bytes()) == 5557
+          assert hashlib.sha256(patch.read_bytes()).hexdigest() == 'e63556b475fd7eb04a40f9838f409e6b90f4f3f3e89b8037374a91d8073a4d53'
+          print('Generated 14 tracked edits and 2 added files match reviewed source (LF-normalized).')
+          PY
+          git apply --check ../GlassesPatch/.github/candidates/nexus-spp-v2.patch
+          git apply ../GlassesPatch/.github/candidates/nexus-spp-v2.patch
+          printf '%s\n' \
+            '868d474f3d3c72abca5768971ef7b7f76b80be52cde6add0f1f8fed55420f32f  glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppServerManager.kt' \
+            '48272f77504162a8d00f6ea4f25d184100606dc8e7b1fb6b8ecfb84d11367686  glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppSessionOwner.kt' | sha256sum --check
+          python - <<'PY'
+          import hashlib, pathlib
+          patch = pathlib.Path('../GlassesPatch/.github/candidates/nexus-launcher-navigation.patch')
+          assert hashlib.sha256(patch.read_bytes()).hexdigest() == '2a25030ecaa5ef977de738f02ce2d82c3e7a59b748a431ff77c9e3e739841a0f'
+          PY
+          git apply --check ../GlassesPatch/.github/candidates/nexus-launcher-navigation.patch
+          git apply ../GlassesPatch/.github/candidates/nexus-launcher-navigation.patch
+          python - <<'PY'
+          import hashlib, pathlib, json
+          expected = {"glasses-hub/src/main/java/com/anezium/rokidbus/glasses/MainActivity.kt":"af63ca7ddf5a98ac548d8dd11d2cc77c16a336654afb3838f47f88fb7e1df8c4","glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherOverlayRenderer.kt":"4a56c9847f4f3f47704fe8b9147c2c1961c0fbb8b119515f5c8270840558df04","glasses-hub/src/main/java/com/anezium/rokidbus/glasses/RokidBusAccessibilityService.kt":"76c798653253a36abbc4e72af0849cb1ec18493e35b3bde88b329d179744f515","glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherListDelivery.kt":"0d41c01a8f4d08f36b4224143728b39b05eb76a851c738f61d782d81ac1872ce","glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherNavigationTrace.kt":"02a0ee8fb8ddc0c1183e2620ee9b656093256ec81df0add28a476d925c0b87e8","glasses-hub/src/main/java/com/anezium/rokidbus/glasses/LauncherNavigationDiagnostics.kt":"c60973c04db3a82e7a22a8583b140f12a877c37248f3e07705f0dc8c11567288"}
+          for name, digest in expected.items():
+              assert hashlib.sha256(pathlib.Path(name).read_bytes().replace(b'\r\n', b'\n')).hexdigest() == digest, name
+          regression = pathlib.Path('../GlassesPatch/.github/candidates/LauncherRegression.kt')
+          assert hashlib.sha256(regression.read_bytes()).hexdigest() == '308aed340c0991d11d65ec6ef35002628ada0b0b6361d26ef741e9b06bdfb2d7'
+          out = pathlib.Path('glasses-hub/src/main/assets/buildground-candidate.json')
+          out.parent.mkdir(parents=True, exist_ok=True)
+          out.write_text(json.dumps({'build_label':'NAV-20261031-01','source_commit':'6f84ccdec3d20ee8e3444666c54e64eaedd50960','navigation_patch_sha256':'2a25030ecaa5ef977de738f02ce2d82c3e7a59b748a431ff77c9e3e739841a0f','call':'UNSUPPORTED'}) + '\n', encoding='utf-8')
+          print('SPP v2 and generated runtime preserved; six navigation source hashes verified.')
+          PY
+          grep -F 'applicationId = "com.anezium.rokidbus.glasses"' glasses-hub/build.gradle.kts
+          grep -F 'versionCode = 10430' glasses-hub/build.gradle.kts
+          grep -F 'versionName = "1.4.30"' glasses-hub/build.gradle.kts
+          test -z "$(git status --porcelain | awk '{print $2}' | grep -v '^glasses-hub/' || true)"
+
+      - name: Apply exact bounded diagnostic patch
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import shutil,os,hashlib,json,xml.etree.ElementTree as ET
+          root=Path.cwd().resolve(); target=root/'glasses-hub'; assert target.parent==root
+          backup=Path(os.environ['RUNNER_TEMP'])/'unused-phone-baseline-glasses-module'
+          assert not backup.exists(); target.rename(backup)
+          shutil.copytree('../GlassesSource/glasses-hub',target)
+          inputs=Path('../CandidatePatch/.github/candidates')
+          for name,digest in {'nexus-spp-diagnostic.patch':'54e6f1f76de0666a10b0e6c7add0cda07c0302b374f20f888615a32cb5ee864e','spp-diagnostic-source-verification.json':'1b8a3729d958b0717016bb41ebb59c8e06acd0ac92262a65260430ad31f659f2','verify-spp-diagnostic-artifact.py':'aeb5c7135ae21e0bad1a9b78a62a92c8632ddf8bc63f4365798397a647fd1da8'}.items():
+              assert hashlib.sha256((inputs/name).read_bytes()).hexdigest()==digest,name
+          for module in ['phone-hub','glasses-hub']:
+              Path('../'+module+'-baseline-manifest.xml').write_bytes((Path(module)/'src/main/AndroidManifest.xml').read_bytes())
+          PY
+          git apply --check ../CandidatePatch/.github/candidates/nexus-spp-diagnostic.patch
+          git apply ../CandidatePatch/.github/candidates/nexus-spp-diagnostic.patch
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json,xml.etree.ElementTree as ET
+          proof=json.loads(Path('../CandidatePatch/.github/candidates/spp-diagnostic-source-verification.json').read_text())
+          for row in proof['files']:
+              assert hashlib.sha256(Path(row['path']).read_bytes().replace(b'\r\n',b'\n')).hexdigest()==row['sha256'],row['path']
+          for module in ['phone-hub','glasses-hub']:
+              before=ET.parse('../'+module+'-baseline-manifest.xml').getroot();after=ET.parse(Path(module)/'src/main/AndroidManifest.xml').getroot()
+              assert [x.attrib for x in before if x.tag.startswith(('uses-permission','permission'))]==[x.attrib for x in after if x.tag.startswith(('uses-permission','permission'))]
+              out=Path(module)/'src/main/assets/buildground-spp-diagnostic.json';out.parent.mkdir(parents=True,exist_ok=True)
+              out.write_text(json.dumps({'build_label':'SPP_DIAG_01_20261101','source_commit':'c4dc0fbb494fd855b2c2da1834c8e00830aadadc','patch_sha256':proof['patch_sha256'],'call':'UNSUPPORTED','physical_validation':'NOT_RUN'})+'\n')
+          PY
+
       - name: Set up JDK 21
         uses: actions/setup-java@v5
         with:
@@ -238,6 +367,38 @@ jobs:
           print('All 38 checks passed: 12 policy/boundary, 7 SPP ownership, 19 single-owner lifecycle checks.')
           PY
 
+      - name: Verify ten navigation regression checks before signing
+        run: |
+          set -euo pipefail
+          destination=glasses-hub/src/test/java/com/anezium/rokidbus/glasses
+          cp ../GlassesPatch/.github/candidates/LauncherRegression.kt "$destination/LauncherRegression.kt"
+          cat > "$destination/LauncherNavigationRegressionTest.kt" <<'KOTLIN'
+          package com.anezium.rokidbus.glasses
+          class LauncherNavigationRegressionTest {
+              @org.junit.Test fun tenChecks() { main() }
+          }
+          KOTLIN
+          chmod +x gradlew
+          ./gradlew --no-daemon --max-workers=2 --init-script "$RUNNER_TEMP/candidate-repositories.init.gradle" :glasses-hub:testDebugUnitTest --tests com.anezium.rokidbus.glasses.LauncherNavigationRegressionTest
+          python - <<'PY'
+          import pathlib, xml.etree.ElementTree as ET
+          file = pathlib.Path('glasses-hub/build/test-results/testDebugUnitTest/TEST-com.anezium.rokidbus.glasses.LauncherNavigationRegressionTest.xml')
+          root = ET.parse(file).getroot()
+          assert root.get('failures') == '0' and root.get('errors') == '0'
+          assert (root.findtext('system-out') or '').count('PASS ') == 10
+          print('10 navigation regression checks PASS')
+          PY
+
+      - name: Run fifteen diagnostic contract tests before signing
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --max-workers=2 --init-script "$RUNNER_TEMP/candidate-repositories.init.gradle" :shared:testDebugUnitTest --tests com.anezium.rokidbus.shared.SppDiagnosticsTest
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          r=ET.parse('shared/build/test-results/testDebugUnitTest/TEST-com.anezium.rokidbus.shared.SppDiagnosticsTest.xml').getroot()
+          assert r.get('tests')=='15' and all(r.get(k)=='0' for k in ['failures','errors','skipped'])
+          PY
+
       - name: Build and verify candidate using existing release key
         env:
           NEXUS_RELEASE_KEYSTORE_B64: ${{ secrets.NEXUS_RELEASE_KEYSTORE_B64 }}
@@ -257,50 +418,34 @@ jobs:
           digest="$(printf '%s\n' "$certificate" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1 | tr -d ':' | tr 'A-F' 'a-f')"
           test "$digest" = "$expected"
           chmod +x gradlew
+          mkdir -p "$RUNNER_TEMP/spp-diagnostic-pair"
+          export PAIR_OUT="$RUNNER_TEMP/spp-diagnostic-pair"
+          ./gradlew --no-daemon --max-workers=2 --init-script "$RUNNER_TEMP/candidate-repositories.init.gradle" :glasses-hub:assembleRelease
+          mapfile -t apks < <(find glasses-hub/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk')
+          test "${#apks[@]}" -eq 1
+          cp "${apks[0]}" "$PAIR_OUT/NEXUS_GLASSES_SPP_DIAGNOSTIC_2026-11-01.apk"
+          python ../CandidatePatch/.github/candidates/verify-spp-diagnostic-artifact.py glasses-hub "$PAIR_OUT/NEXUS_GLASSES_SPP_DIAGNOSTIC_2026-11-01.apk" "$PAIR_OUT"
+          export GLASSES_SHA="$(sha256sum "$PAIR_OUT/NEXUS_GLASSES_SPP_DIAGNOSTIC_2026-11-01.apk" | cut -d' ' -f1)"
+          python - <<'PY'
+          from pathlib import Path
+          import os,re,hashlib,json
+          p=Path('phone-hub/src/main/java/com/anezium/rokidbus/phone/LocalGlassesApkPolicy.kt')
+          s=p.read_text();old='bffde442763cb71471a41b5d050f8b4a6832612567e3b80748d094f55002de03';new=os.environ['GLASSES_SHA']
+          assert re.fullmatch('[0-9a-f]{64}',new) and s.count(old)==1
+          before=hashlib.sha256(p.read_bytes()).hexdigest()
+          p.write_text(s.replace(old,new))
+          receipt={'glasses_signed_sha256':new,'policy_before_sha256':before,'policy_after_sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'change':'exact CANDIDATE_SHA only; package/version/signer/recovery unchanged'}
+          Path(os.environ['PAIR_OUT'],'phone-picker-pin.json').write_text(json.dumps(receipt,indent=2)+'\n')
+          PY
+          ./gradlew --no-daemon --max-workers=2 --init-script "$RUNNER_TEMP/candidate-repositories.init.gradle" :phone-hub:testDebugUnitTest --tests '*LocalGlassesApkPolicyTest'
           ./gradlew --no-daemon --max-workers=2 --init-script "$RUNNER_TEMP/candidate-repositories.init.gradle" :phone-hub:assembleRelease
           mapfile -t apks < <(find phone-hub/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk')
           test "${#apks[@]}" -eq 1
-          mkdir -p "$RUNNER_TEMP/phone-control03-candidate"
-          artifact="$RUNNER_TEMP/phone-control03-candidate/NEXUS_PHONE_03_CONTROL_FIX_2026-11-01.apk"
-          cp "${apks[0]}" "$artifact"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$artifact" > "$RUNNER_TEMP/phone-control03-candidate/signature.txt"
-          signer="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/phone-control03-candidate/signature.txt" | tr 'A-F' 'a-f' | tr -d ':[:space:]')"
-          test "$signer" = "$expected"
-          test "$(grep -c 'certificate SHA-256 digest:' "$RUNNER_TEMP/phone-control03-candidate/signature.txt")" -eq 1
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$artifact" > "$RUNNER_TEMP/phone-control03-candidate/badging.txt"
-          head -n 1 "$RUNNER_TEMP/phone-control03-candidate/badging.txt" | grep -F "name='com.anezium.rokidbus.phone'" | grep -F "versionCode='10426'" | grep -F "versionName='1.4.26'"
-          if grep -q '^application-debuggable' "$RUNNER_TEMP/phone-control03-candidate/badging.txt"; then exit 1; fi
-          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c 4 "$artifact"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump permissions "$artifact" > "$RUNNER_TEMP/phone-control03-candidate/permissions.txt"
-          cp phone-hub/build/test-results/testDebugUnitTest/TEST-com.anezium.rokidbus.phone.SppPhoneOwnershipRegressionTest.xml "$RUNNER_TEMP/phone-control03-candidate/spp-regression.xml"
-          cp phone-hub/build/test-results/testDebugUnitTest/TEST-*LocalGlasses*.xml "$RUNNER_TEMP/phone-control03-candidate/"
-          cp phone-hub/build/test-results/testDebugUnitTest/TEST-com.anezium.rokidbus.phone.CxrOwnerLifecycleRegressionTest.xml "$RUNNER_TEMP/phone-control03-candidate/control-owner-regression.xml"
-          python - "$artifact" <<'PY'
-          import pathlib, sys, zipfile
-          with zipfile.ZipFile(sys.argv[1]) as apk:
-              assert apk.testzip() is None
-              assert not any(pathlib.PurePosixPath(n).suffix.lower() in ('.jks','.keystore','.p12','.pfx','.key') for n in apk.namelist())
-              import re, json
-              label = json.loads(apk.read('assets/buildground-spp-phone-candidate.json'))
-              assert label['build_label'] == 'CONTROL-FIX-03-20261101' and label['fold_patch_sha256'] == 'a831e04ad85b8f6621d5c4ab0ac5eee8968f2fca0a0a457a62196f6022172fa9' and label['call'] == 'UNSUPPORTED'
-              dex = b''.join(apk.read(n) for n in apk.namelist() if re.fullmatch(r'classes\d*\.dex', n))
-              assert b'Lcom/anezium/rokidbus/phone/SppClientSessionOwner;' in dex
-              assert label['owner_patch_sha256']=='183291fd7d710ead8dcc491c23ee9bfb4608a4fb4e1989fe5a032b2d39964524'
-              for symbol in [b'refreshDeviceConnection',b'startCxrRecovery',b'hasActiveBinding',b'CxrBindingOwner',b'CxrRecoveryPolicy',b'glasses_worn']:assert symbol in dex,symbol
-              assert b'requestCxrRecoveryForSppRetry' not in dex and b'bindingPendingSinceMs' not in dex
-              assert b'Lcom/buildground/ownerregression/' not in dex
-              expected_text = [" \u00b7 ", " \u203a", "AUTO \u203a", "Asking the glasses to check their helper\u2026", "MANUAL \u203a", "Nothing to repair \u2014 the helper is already in place.", "READY \u203a", "Repair \u203a", "SET UP \u203a", "Turn on Wi-Fi first \u2014 the update travels to the glasses over Wi-Fi.", "Working\u2026", "\u203a"]
-              corrupt_text = [" \u0420\u00a0\u0432\u0402\u2122\u0420\u2019\u0412\u00b7 ", " \u0432\u0402\u0454", "AUTO \u0432\u0402\u0454", "Asking the glasses to check their helper\u0432\u0402\u00a6", "MANUAL \u0432\u0402\u0454", "Nothing to repair \u0432\u0402\u201d the helper is already in place.", "READY \u0432\u0402\u0454", "Repair \u0432\u0402\u0454", "SET UP \u0432\u0402\u0454", "Turn on Wi-Fi first \u0420\u00a0\u0420\u2020\u0420\u00a0\u0432\u0402\u0459\u0420\u0406\u0420\u201a\u0421\u045a the update travels to the glasses over Wi-Fi.", "Working\u0432\u0402\u00a6", "\u0432\u0402\u0454"]
-              assert all(value.encode('utf-8') in dex for value in expected_text), 'Restored UI text absent from APK'
-              assert all(value.encode('utf-8') not in dex for value in corrupt_text), 'Corrupt UI text remains in APK'
-              print('All 12 restored UI literals verified in signed APK; corrupt variants absent.')
-          PY
-          (
-            cd "$RUNNER_TEMP/phone-control03-candidate"
-            sha256sum NEXUS_PHONE_03_CONTROL_FIX_2026-11-01.apk > SHA256SUMS
-            cat SHA256SUMS
-          )
-          printf '%s\n' 'CONTROL-FIX-03-20261101: Phone single-owner independent Control recovery, prior SPP ownership preserved; initial-Control acceptance only, no fold claim; Android version 1.4.26/10426 unchanged. No device install or Bluetooth validation. Existing-dot Call UNSUPPORTED.' > "$RUNNER_TEMP/phone-control03-candidate/README.txt"
+          cp "${apks[0]}" "$PAIR_OUT/NEXUS_PHONE_04_SPP_DIAGNOSTIC_2026-11-01.apk"
+          python ../CandidatePatch/.github/candidates/verify-spp-diagnostic-artifact.py phone-hub "$PAIR_OUT/NEXUS_PHONE_04_SPP_DIAGNOSTIC_2026-11-01.apk" "$PAIR_OUT"
+          cp ../CandidatePatch/.github/candidates/spp-diagnostic-source-verification.json "$PAIR_OUT/"
+          (cd "$PAIR_OUT" && sha256sum *.apk > SHA256SUMS)
+          printf '%s\n' 'SPP DIAGNOSTIC ONLY. Install nothing until Glasses baseline/recovery compatibility is checked. No physical PASS. Phone04 picker accepts exactly the Glasses APK in this pair. Existing-dot Call UNSUPPORTED. Do not uninstall/delete data or change security settings. Rollback files remain separately preserved.' > "$PAIR_OUT/README.txt"
 
       - name: Remove temporary release key
         if: always()
@@ -309,9 +454,7 @@ jobs:
       - name: Upload signed candidate and verification records only
         uses: actions/upload-artifact@v4
         with:
-          name: nexus-phone-03-control-fix-candidate
-          path: ${{ runner.temp }}/phone-control03-candidate/
+          name: nexus-spp-diagnostic-pair-20261101
+          path: ${{ runner.temp }}/spp-diagnostic-pair/
           if-no-files-found: error
           retention-days: 14
-
-
