@@ -1,0 +1,817 @@
+--- a/glasses-hub/src/main/AndroidManifest.xml
++++ b/glasses-hub/src/main/AndroidManifest.xml
+@@ -53,6 +53,12 @@
+         android:supportsRtl="true"
+         android:theme="@style/Theme.RokidBus.Glasses">
+ 
++        <activity android:name=".SppDiagnosticActivity" android:exported="true" android:label="Nexus SPP diagnostics">
++            <intent-filter>
++                <action android:name="android.intent.action.MAIN" />
++                <category android:name="android.intent.category.LAUNCHER" />
++            </intent-filter>
++        </activity>
+         <activity
+             android:name=".MainActivity"
+             android:exported="true"
+--- a/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/BusHubService.kt
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/BusHubService.kt
+@@ -1,4 +1,6 @@
+ package com.anezium.rokidbus.glasses
++
++import com.anezium.rokidbus.shared.SppDiagnostics
+ 
+ import android.app.Notification
+ import android.app.NotificationChannel
+@@ -36,11 +38,16 @@
+ 
+     override fun onCreate() {
+         super.onCreate()
+-        ensureForeground()
++        SppDiagnosticJournal.initialize(applicationContext)
++        SppDiagnosticJournal.record(SppDiagnostics.Event.SERVICE_CREATE)
++        try { ensureForeground() }
++        catch (t: Throwable) { SppDiagnosticJournal.record(SppDiagnostics.Event.FOREGROUND_ERROR, error = t); throw t }
++        SppDiagnosticJournal.record(SppDiagnostics.Event.FOREGROUND_READY)
+         startWhenUnlocked("service_create")
+     }
+ 
+     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
++        SppDiagnosticJournal.record(SppDiagnostics.Event.SERVICE_START)
+         startWhenUnlocked("service_start")
+         return START_STICKY
+     }
+@@ -53,6 +60,7 @@
+     }
+ 
+     override fun onDestroy() {
++        SppDiagnosticJournal.record(SppDiagnostics.Event.SERVICE_DESTROY)
+         mainHandler.removeCallbacks(unlockRetry)
+         super.onDestroy()
+     }
+@@ -62,6 +70,7 @@
+         if (isUserUnlocked()) {
+             startCore(reason)
+         } else {
++            SppDiagnosticJournal.record(SppDiagnostics.Event.CORE_WAIT_UNLOCK)
+             log("BusHubService waiting for Android user unlock reason=$reason")
+             mainHandler.postDelayed(unlockRetry, UNLOCK_RETRY_MS)
+         }
+--- a/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/CxrBusBridge.kt
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/CxrBusBridge.kt
+@@ -1,4 +1,6 @@
+ package com.anezium.rokidbus.glasses
++
++import com.anezium.rokidbus.shared.SppDiagnostics
+ 
+ import android.content.Context
+ import android.os.Handler
+@@ -14,6 +16,9 @@
+     private val main = Handler(Looper.getMainLooper())
+     private var bridge: CXRServiceBridge? = null
+     @Volatile private var connected = false
++    private var lastDiagnosticAt = -10_000L
++    private val diagnosticReplyPending = java.util.concurrent.atomic.AtomicBoolean()
++    private val diagnosticSender = java.util.concurrent.Executors.newSingleThreadExecutor()
+ 
+     fun start(context: Context) {
+         if (bridge != null) {
+@@ -30,7 +35,7 @@
+ 
+     fun isUp(): Boolean = connected
+ 
+-    fun send(envelope: BusEnvelope): Boolean =
++    fun send(envelope: BusEnvelope, diagnosticOnly: Boolean = false): Boolean =
+         runCatching {
+             val json = FrameProtocol.toJson(envelope).toString()
+             val result = bridge?.sendMessage(
+@@ -39,7 +44,7 @@
+             )
+             log("CXR-S TX ${envelope.path} id=${envelope.id} result=$result")
+             if (result != null && result >= 0) {
+-                markConnected()
++                if (!diagnosticOnly) markConnected()
+                 true
+             } else {
+                 false
+@@ -92,6 +97,23 @@
+                 .onFailure { logError("CXR-S JSON parse failed", it) }
+                 .getOrNull() ?: return
+             main.post {
++                if (envelope.path.startsWith(SppDiagnostics.PREFIX)) {
++                    // CXR-only request. Never mark link up, start/rearm the core, or use SPP.
++                    val nonce = envelope.payload.optString("nonce")
++                    val now = android.os.SystemClock.elapsedRealtime()
++                    if (envelope.path == SppDiagnostics.REQUEST && envelope.binary == null &&
++                        envelope.payload.keys().asSequence().toSet() == setOf("nonce") && SppDiagnostics.validToken(nonce) &&
++                        now - lastDiagnosticAt >= 2_000 && diagnosticReplyPending.compareAndSet(false, true)) {
++                        lastDiagnosticAt = now
++                        val reply = BusEnvelope(path = SppDiagnostics.RESULT,
++                            payload = SppDiagnosticJournal.snapshot(nonce))
++                        diagnosticSender.execute {
++                            try { send(reply, diagnosticOnly = true) }
++                            finally { diagnosticReplyPending.set(false) }
++                        }
++                    }
++                    return@post
++                }
+                 markConnected()
+                 GlassesHub.onRemoteEnvelope(envelope)
+             }
+--- a/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/GlassesHub.kt
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/GlassesHub.kt
+@@ -1,4 +1,6 @@
+ package com.anezium.rokidbus.glasses
++
++import com.anezium.rokidbus.shared.SppDiagnostics
+ 
+ import android.content.Context
+ import android.content.Intent
+@@ -181,6 +183,8 @@
+     }
+ 
+     fun start(context: Context) {
++        SppDiagnosticJournal.initialize(context.applicationContext)
++        SppDiagnosticJournal.record(SppDiagnostics.Event.CORE_REQUEST)
+         val applicationContext = context.applicationContext
+         appContext = applicationContext
+         RemoteInputImeProvisioner.ensureConfigured(applicationContext)
+@@ -198,6 +202,7 @@
+             }
+         }
+         if (started.compareAndSet(false, true)) {
++            SppDiagnosticJournal.record(SppDiagnostics.Event.CORE_STARTED)
+             log("Glasses hub starting")
+             wirelessAdbExecutor.execute {
+                 WirelessAdbController.restorePairingExpiry(applicationContext)
+@@ -255,6 +260,7 @@
+     }
+ 
+     fun onRemoteEnvelope(envelope: BusEnvelope) {
++        if (envelope.path.startsWith(SppDiagnostics.PREFIX)) return
+         log("remote RX ${envelope.path} id=${envelope.id}")
+         if (envelope.path == RemoteInputContract.COMMAND_PATH ||
+             envelope.path == RemoteNavigationContract.REQUEST_PATH
+--- a/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/GlassesLifecycleReceiver.kt
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/GlassesLifecycleReceiver.kt
+@@ -1,4 +1,6 @@
+ package com.anezium.rokidbus.glasses
++
++import com.anezium.rokidbus.shared.SppDiagnostics
+ 
+ import android.content.BroadcastReceiver
+ import android.content.Context
+@@ -28,6 +30,13 @@
+         }
+ 
+         val appContext = context.applicationContext
++        SppDiagnosticJournal.initialize(appContext)
++        val diagnosticEvent = if (intent.action == GlassesLifecycleSignal.ACTION_LEG_STATUS) {
++            when (state) { "1" -> SppDiagnostics.Event.UNFOLDED; "0" -> SppDiagnostics.Event.FOLDED; else -> SppDiagnostics.Event.FOLD_UNKNOWN }
++        } else {
++            when (state) { "1" -> SppDiagnostics.Event.WORN; "0" -> SppDiagnostics.Event.REMOVED; else -> SppDiagnostics.Event.WEAR_UNKNOWN }
++        }
++        SppDiagnosticJournal.record(diagnosticEvent)
+         log("Glasses lifecycle transport edge action=${intent.action} state=${state ?: "none"} reason=${reason ?: "transport_edge"}")
+         runCatching { BusHubService.ensureRunning(appContext) }
+             .onFailure { error ->
+--- /dev/null
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppDiagnosticActivity.kt
+@@ -0,0 +1,35 @@
++package com.anezium.rokidbus.glasses
++
++import android.app.Activity
++import android.os.Bundle
++import android.widget.ScrollView
++import android.widget.TextView
++
++/** Fallback only: foregrounding can unfreeze/recreate this process. No transport/core call. */
++class SppDiagnosticActivity : Activity() {
++    override fun onCreate(savedInstanceState: Bundle?) {
++        super.onCreate(savedInstanceState)
++        SppDiagnosticJournal.initialize(applicationContext)
++        val frozen = SppDiagnosticJournal.snapshot("00000000000000000000000000000000")
++        SppDiagnosticJournal.record(com.anezium.rokidbus.shared.SppDiagnostics.Event.DIAGNOSTIC_OPEN)
++        val rows = frozen.getJSONArray("rows")
++        val summary = buildString {
++            append("Build ").append(frozen.getString("build")).append(" / ").append(frozen.getString("version"))
++            append("\nEpoch ").append(frozen.getString("epoch").takeLast(8))
++            append("\nLast listener stage (not a health probe): ").append(frozen.getString("listenerStage"))
++            append(" / generation ").append(frozen.getLong("listenerGeneration"))
++            append("\nMemory/persisted revision: ").append(frozen.getLong("revision")).append("/").append(frozen.getLong("persisted"))
++            append(" / gaps ").append(frozen.getLong("gaps"))
++            for (i in maxOf(0, rows.length() - 8) until rows.length()) {
++                val row = rows.getJSONObject(i)
++                append("\n").append(row.getString("epoch").takeLast(8)).append(" ")
++                    .append(row.getString("event")).append(" g").append(row.getLong("generation"))
++                    .append(" ").append(row.getString("error"))
++            }
++        }
++        setContentView(ScrollView(this).apply { addView(TextView(this@SppDiagnosticActivity).apply {
++            textSize = 14f
++            text = "SPP DIAG 01 - READ ONLY\nOpening this screen can start/unfreeze the process. Prior events may be unflushed. No repair performed.\n" + summary
++        }) })
++    }
++}
+--- /dev/null
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppDiagnosticJournal.kt
+@@ -0,0 +1,84 @@
++package com.anezium.rokidbus.glasses
++
++import android.content.Context
++import android.os.SystemClock
++import com.anezium.rokidbus.shared.SppDiagnostics
++import com.anezium.rokidbus.shared.SppDiagnosticRing
++import org.json.JSONArray
++import org.json.JSONObject
++import java.util.UUID
++import java.util.concurrent.Executors
++import java.util.concurrent.atomic.AtomicBoolean
++
++/** Bounded private journal. No disk/SDK calls run on listener/session transition threads. */
++internal object SppDiagnosticJournal {
++    private val epoch = UUID.randomUUID().toString().replace("-", "")
++    private val writer = Executors.newSingleThreadScheduledExecutor()
++    private val pending = AtomicBoolean()
++    @Volatile private var ring: SppDiagnosticRing? = null
++    private var prefs: android.content.SharedPreferences? = null
++    @Volatile private var persisted = -1L
++    @Volatile private var persistenceFailed = false
++    private data class Listener(val stage: String, val generation: Long, val at: Long)
++    @Volatile private var listener = Listener("UNKNOWN", 0, 0)
++    @Synchronized fun initialize(context: Context) {
++        if (ring != null) return
++        // Non-secret bounded data only; device-protected app-private storage also works before unlock.
++        prefs = runCatching { context.createDeviceProtectedStorageContext().getSharedPreferences("spp_diagnostic_v1", Context.MODE_PRIVATE) }.getOrNull()
++        val old = runCatching {
++            val raw = prefs?.getString("rows", "[]") ?: "[]"
++            require(raw.length <= SppDiagnostics.MAX_BYTES)
++            SppDiagnostics.decode(JSONArray(raw), System.currentTimeMillis())
++        }.getOrElse { persistenceFailed = true; emptyList() }
++        ring = SppDiagnosticRing(epoch, System::currentTimeMillis, SystemClock::elapsedRealtime, old)
++        record(SppDiagnostics.Event.PROCESS)
++        writer.scheduleWithFixedDelay({ persist() }, 60, 60, java.util.concurrent.TimeUnit.SECONDS)
++    }
++    fun record(event: SppDiagnostics.Event, generation: Long = 0, error: Throwable? = null) {
++        val r = ring ?: return
++        val category = when (error) {
++            null -> SppDiagnostics.Error.NONE
++            is SecurityException -> SppDiagnostics.Error.SECURITY
++            is java.io.IOException -> SppDiagnostics.Error.IO
++            is InterruptedException -> SppDiagnostics.Error.INTERRUPTED
++            else -> SppDiagnostics.Error.OTHER
++        }
++        if (event in setOf(SppDiagnostics.Event.LISTEN_BEGIN, SppDiagnostics.Event.LISTEN_READY,
++                SppDiagnostics.Event.ACCEPT_WAIT, SppDiagnostics.Event.ACCEPTED,
++                SppDiagnostics.Event.LISTEN_ERROR, SppDiagnostics.Event.LISTEN_CLOSED, SppDiagnostics.Event.LISTENER_THREAD_END)) {
++            listener = Listener(event.name, generation, System.currentTimeMillis())
++        }
++        r.record(event, generation, category)
++        persist()
++    }
++    private fun persist() {
++        if (!pending.compareAndSet(false, true)) return
++        writer.execute {
++            val s = ring?.snapshot()
++            try {
++                if (s != null) {
++                    val ok = prefs?.edit()?.putString("rows", SppDiagnostics.encode(s.first).toString())?.commit() == true
++                    persistenceFailed = !ok
++                    if (ok) persisted = s.second
++                }
++            } catch (_: Exception) { persistenceFailed = true }
++            finally {
++                pending.set(false)
++                // One coalesced task, never a queue of writes for every transport event.
++                if (s != null && ring?.snapshot()?.second != s.second) persist()
++            }
++        }
++    }
++    fun snapshot(nonce: String): JSONObject {
++        require(SppDiagnostics.validToken(nonce))
++        val s = ring?.snapshot() ?: Triple(emptyList(), 0L, 0L)
++        val observed = listener
++        return JSONObject().put("nonce", nonce).put("capturedAt", System.currentTimeMillis()).put("build", SppDiagnostics.BUILD)
++            .put("version", BuildConfig.VERSION_NAME).put("code", BuildConfig.VERSION_CODE)
++            .put("epoch", epoch).put("revision", s.second).put("persisted", persisted)
++            .put("gaps", s.third + if (persistenceFailed) 1 else 0)
++            .put("listenerStage", observed.stage).put("listenerGeneration", observed.generation)
++            .put("listenerAt", observed.at)
++            .put("rows", SppDiagnostics.encode(s.first))
++    }
++}
+--- a/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppServerManager.kt
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppServerManager.kt
+@@ -1,4 +1,6 @@
+ package com.anezium.rokidbus.glasses
++
++import com.anezium.rokidbus.shared.SppDiagnostics
+ 
+ import android.Manifest
+ import android.annotation.SuppressLint
+@@ -18,6 +20,7 @@
+ 
+ object SppServerManager {
+     private val started = AtomicBoolean(false)
++    private val diagnosticGeneration = java.util.concurrent.atomic.AtomicLong()
+     private val executor = Executors.newCachedThreadPool()
+     private class Session(val socket: BluetoothSocket, val output: OutputStream) {
+         val writeLock = Any()
+@@ -28,11 +31,16 @@
+     )
+ 
+     fun ensureStarted(context: Context) {
++        SppDiagnosticJournal.record(SppDiagnostics.Event.START_REQUEST)
+         if (!started.compareAndSet(false, true)) {
++            SppDiagnosticJournal.record(SppDiagnostics.Event.ALREADY_STARTED)
+             log("SPP server already running or starting")
+             return
+         }
+-        executor.execute { acceptLoop(context.applicationContext) }
++        executor.execute {
++            try { acceptLoop(context.applicationContext) }
++            finally { SppDiagnosticJournal.record(SppDiagnostics.Event.LISTENER_THREAD_END, diagnosticGeneration.get()) }
++        }
+     }
+ 
+     fun isConnected(): Boolean =
+@@ -48,6 +56,7 @@
+             true
+         }.getOrElse {
+             logError("SPP TX failed", it)
++            SppDiagnosticJournal.record(SppDiagnostics.Event.WRITE_ERROR, error = it)
+             closeSession(session)
+             false
+         }
+@@ -57,6 +66,7 @@
+     private fun acceptLoop(context: Context) {
+         while (started.get()) {
+             var serverSocket: BluetoothServerSocket? = null
++            val generation = diagnosticGeneration.incrementAndGet()
+             try {
+                 if (!hasBluetoothConnect(context)) {
+                     logError("Missing BLUETOOTH_CONNECT; grant before hardware test")
+@@ -69,37 +79,46 @@
+                     Thread.sleep(5_000)
+                     continue
+                 }
++                SppDiagnosticJournal.record(SppDiagnostics.Event.LISTEN_BEGIN, generation)
+                 serverSocket = adapter.listenUsingInsecureRfcommWithServiceRecord(
+                     BusConstants.SERVICE_NAME,
+                     BusConstants.SPP_UUID,
+                 )
++                SppDiagnosticJournal.record(SppDiagnostics.Event.LISTEN_READY, generation)
+                 log("SPP server listening name=${BusConstants.SERVICE_NAME}")
+                 while (started.get()) {
++                    SppDiagnosticJournal.record(SppDiagnostics.Event.ACCEPT_WAIT, generation)
+                     val accepted = serverSocket.accept()
++                    SppDiagnosticJournal.record(SppDiagnostics.Event.ACCEPTED, generation)
+                     log("SPP client accepted")
+-                    executor.execute { handleClient(accepted) }
++                    executor.execute { handleClient(accepted, generation) }
+                 }
+             } catch (t: Throwable) {
++                SppDiagnosticJournal.record(SppDiagnostics.Event.LISTEN_ERROR, generation, t)
+                 logError("SPP accept loop failed; restarting", t)
+                 sleepQuietly(2_000)
+             } finally {
+                 try {
+                     serverSocket?.close()
++                    SppDiagnosticJournal.record(SppDiagnostics.Event.LISTEN_CLOSED, generation)
+                 } catch (_: IOException) {
+                 }
+             }
+         }
+     }
+ 
+-    private fun handleClient(activeSocket: BluetoothSocket) {
++    private fun handleClient(activeSocket: BluetoothSocket, generation: Long) {
+         var session: Session? = null
+         try {
+             activeSocket.use {
+                 val installed = Session(it, it.outputStream)
+                 session = installed
+                 // Publish and notify in transition order, without holding an I/O lock.
++                SppDiagnosticJournal.record(SppDiagnostics.Event.INSTALL_BEGIN, generation)
+                 sessions.install(installed)
++                SppDiagnosticJournal.record(SppDiagnostics.Event.INSTALL_END, generation)
+                 val input = it.inputStream
++                SppDiagnosticJournal.record(SppDiagnostics.Event.SESSION_READY, generation)
+                 while (true) {
+                     val envelope = FrameProtocol.read(input) ?: break
+                     log("SPP RX ${envelope.path} id=${envelope.id} payloadBytes=${envelope.payload.toString().length} binaryBytes=${envelope.binary?.size ?: 0}")
+@@ -107,8 +126,10 @@
+                 }
+             }
+         } catch (t: Throwable) {
++            SppDiagnosticJournal.record(SppDiagnostics.Event.SESSION_ERROR, generation, t)
+             logError("SPP client loop ended", t)
+         } finally {
++            SppDiagnosticJournal.record(SppDiagnostics.Event.SESSION_END, generation)
+             session?.let { sessions.clearIfCurrent(it) }
+         }
+     }
+--- a/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/TransportWakeReceiver.kt
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/TransportWakeReceiver.kt
+@@ -1,4 +1,6 @@
+ package com.anezium.rokidbus.glasses
++
++import com.anezium.rokidbus.shared.SppDiagnostics
+ 
+ import android.bluetooth.BluetoothAdapter
+ import android.bluetooth.BluetoothDevice
+@@ -33,6 +35,8 @@
+         ) ?: return
+ 
+         val appContext = context.applicationContext
++        SppDiagnosticJournal.initialize(appContext)
++        SppDiagnosticJournal.record(SppDiagnostics.Event.TRANSPORT_WAKE)
+         log("Transport wake reason=$reason; ensuring Nexus foreground core")
+         runCatching { BusHubService.ensureRunning(appContext) }
+             .onFailure { error ->
+--- a/phone-hub/src/main/AndroidManifest.xml
++++ b/phone-hub/src/main/AndroidManifest.xml
+@@ -61,6 +61,8 @@
+                 <category android:name="android.intent.category.LAUNCHER" />
+             </intent-filter>
+         </activity>
++
++        <activity android:name=".SppDiagnosticActivity" android:exported="false" />
+ 
+         <activity
+             android:name=".StoreActivity"
+--- a/phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt
++++ b/phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt
+@@ -1,4 +1,6 @@
+ package com.anezium.rokidbus.phone
++
++import com.anezium.rokidbus.shared.SppDiagnostics
+ 
+ import android.Manifest
+ import android.annotation.SuppressLint
+@@ -660,6 +662,10 @@
+                 log("CXR RX undecodable: ${payload.size} bytes")
+                 return
+             }
++            if (envelope.path.startsWith(SppDiagnostics.PREFIX)) {
++                diagnosticHandler.post { acceptSppDiagnostic(envelope) }
++                return
++            }
+             log("CXR RX ${envelope.path} id=${envelope.id}")
+             routeRemote(envelope)
+         }
+@@ -994,6 +1000,7 @@
+     }
+ 
+     override fun onDestroy() {
++        finishSppDiagnostic("Hub stopped; no retry performed.")
+         stopCxrRecovery()
+         stopPeriodicUpdateChecks()
+         pinHandler.removeCallbacks(pinExpiryTick)
+@@ -1042,6 +1049,7 @@
+         deliverLocal(envelope)
+ 
+     private fun routeLocal(envelope: BusEnvelope, senderUid: Int) {
++        if (envelope.path.startsWith(SppDiagnostics.PREFIX)) return // No plugin/Binder diagnostic access.
+         val sender = resolveSender(senderUid)
+         if (isGlassesControlRequest(envelope.path)) {
+             val strictlyHubOwned = isStrictlyHubOwnedGlassesPath(envelope.path)
+@@ -1324,6 +1332,7 @@
+     }
+ 
+     private fun routeRemote(envelope: BusEnvelope) {
++        if (envelope.path.startsWith(SppDiagnostics.PREFIX)) return // No SPP fallback or forwarding.
+         if (envelope.path == "/hub/probe") {
+             recordRemoteRoute(envelope, PluginBusJournal.Verdict.OK)
+             log("hub probe received from glasses")
+@@ -4435,20 +4444,29 @@
+                 var current: BluetoothSocket? = null
+                 var currentSession: SppSession? = null
+                 try {
++                    diagnosticPhoneRing.record(SppDiagnostics.Event.CONNECT_BEGIN)
+                     log("SPP connecting to bonded glasses")
+                     current = device.createInsecureRfcommSocketToServiceRecord(BusConstants.SPP_UUID)
++                    diagnosticPhoneRing.record(SppDiagnostics.Event.SOCKET_CREATED)
+                     current.connect()
++                    diagnosticPhoneRing.record(SppDiagnostics.Event.CONNECT_END)
+                     val installed = SppSession(current, current.outputStream)
++                    diagnosticPhoneRing.record(SppDiagnostics.Event.OUTPUT_READY)
+                     currentSession = installed
++                    diagnosticPhoneRing.record(SppDiagnostics.Event.CLIENT_INSTALL_BEGIN)
+                     sppSessions.install(installed)
++                    diagnosticPhoneRing.record(SppDiagnostics.Event.CLIENT_INSTALL_END)
+                     backoffMs = 1_000L
+                     log("SPP connected")
+                     notifyLinkState()
++                    diagnosticPhoneRing.record(SppDiagnostics.Event.CLIENT_READ)
+                     readSppLoop(current)
+                     log("SPP link closed")
+                 } catch (t: Throwable) {
++                    diagnosticPhoneRing.record(SppDiagnostics.Event.CLIENT_ERROR, error = SppDiagnostics.category(t))
+                     log("SPP connect failed: ${t.javaClass.simpleName}; retrying in ${backoffMs}ms")
+                 } finally {
++                    diagnosticPhoneRing.record(SppDiagnostics.Event.CLIENT_END)
+                     val retired = currentSession
+                     if (retired != null) sppSessions.retire(retired)
+                     else runCatching { current?.close() }
+@@ -6061,7 +6079,69 @@
+         }
+     }
+ 
++    private val diagnosticPhoneRing = com.anezium.rokidbus.shared.SppDiagnosticRing(
++        java.util.UUID.randomUUID().toString().replace("-", ""), System::currentTimeMillis, SystemClock::elapsedRealtime)
++    private val diagnosticHandler = Handler(Looper.getMainLooper())
++    @Volatile private var diagnosticNonce: String? = null
++    private val diagnosticPending = com.anezium.rokidbus.shared.SppDiagnosticPending()
++    private val diagnosticSending = java.util.concurrent.atomic.AtomicBoolean()
++    private var diagnosticReport: ((String) -> Unit)? = null
++    private val diagnosticTimeout = Runnable { finishSppDiagnostic("No CXR reply in 4 seconds. This does not prove the Glasses process stopped. No restart performed.") }
++
++    private fun startSppDiagnostic(report: (String) -> Unit) {
++        val nonce = java.util.UUID.randomUUID().toString().replace("-", "")
++        if (diagnosticSending.get() || !diagnosticPending.begin(nonce, SystemClock.elapsedRealtime())) {
++            report("Busy/cooldown. No second request sent."); return
++        }
++        diagnosticNonce = nonce
++        diagnosticReport = report
++        diagnosticHandler.postDelayed(diagnosticTimeout, 4_000)
++        executor.execute {
++            // Direct CXR primitive, deliberately not sendRemote or writeSpp.
++            if (activeInstance !== this || !diagnosticPending.matches(nonce, SystemClock.elapsedRealtime())) return@execute
++            diagnosticSending.set(true)
++            val sent = try { sendCxr(BusEnvelope(path = SppDiagnostics.REQUEST,
++                payload = JSONObject().put("nonce", nonce))) }
++                finally { diagnosticSending.set(false) }
++            if (!sent) diagnosticHandler.post {
++                if (diagnosticNonce == nonce) finishSppDiagnostic("CXR send failed. No fallback/retry performed.")
++            }
++        }
++    }
++
++    private fun acceptSppDiagnostic(envelope: BusEnvelope) {
++        val nonce = diagnosticNonce ?: return
++        if (envelope.path != SppDiagnostics.RESULT || envelope.binary != null ||
++            !diagnosticPending.matches(envelope.payload.optString("nonce"), SystemClock.elapsedRealtime())) return
++        val safe = runCatching { SppDiagnostics.validate(envelope.payload, nonce) }.getOrNull()
++        finishSppDiagnostic(safe?.toString(2) ?: "Invalid diagnostic reply rejected.")
++    }
++
++    private fun finishSppDiagnostic(message: String) {
++        diagnosticHandler.removeCallbacks(diagnosticTimeout)
++        diagnosticNonce = null
++        diagnosticPending.clear()
++        val report = diagnosticReport
++        diagnosticReport = null
++        val ownVersion = runCatching {
++            val info = packageManager.getPackageInfo(packageName, 0)
++            val code = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
++            "${info.versionName}/$code"
++        }.getOrDefault("unknown")
++        report?.invoke("Phone $ownVersion ${SppDiagnostics.BUILD}\n" +
++            "Phone connect stages (memory only):\n" + SppDiagnostics.encode(diagnosticPhoneRing.snapshot().first).toString(2) +
++            "\nGlasses CXR result:\n" + message)
++    }
++
+     companion object {
++        internal fun requestSppDiagnostic(report: (String) -> Unit) {
++            val service = activeInstance
++            if (service == null) report("Hub is not running. This screen will not start it.")
++            else service.diagnosticHandler.post {
++                if (activeInstance === service) service.startSppDiagnostic(report)
++                else report("Hub changed. No request sent.")
++            }
++        }
+         @Volatile private var activeInstance: BusHubService? = null
+         private val lastGlassesSetupUserIntentAtMillis = AtomicLong(0L)
+ 
+--- a/phone-hub/src/main/java/com/anezium/rokidbus/phone/MainActivity.kt
++++ b/phone-hub/src/main/java/com/anezium/rokidbus/phone/MainActivity.kt
+@@ -194,6 +194,10 @@
+             addView(updateSection, NexusUi.block())
+             addView(setupProgressSection, NexusUi.block())
+             addView(setupSection, NexusUi.block())
++            addView(Button(this@MainActivity).apply {
++                text = "SPP diagnostics (read only)"
++                setOnClickListener { startActivity(Intent(this@MainActivity, SppDiagnosticActivity::class.java)) }
++            }, NexusUi.block())
+             addView(coreControlsSection, NexusUi.block())
+             addView(pluginSection, NexusUi.block())
+         }
+--- /dev/null
++++ b/phone-hub/src/main/java/com/anezium/rokidbus/phone/SppDiagnosticActivity.kt
+@@ -0,0 +1,27 @@
++package com.anezium.rokidbus.phone
++
++import android.app.Activity
++import android.os.Bundle
++import android.widget.Button
++import android.widget.LinearLayout
++import android.widget.ScrollView
++import android.widget.TextView
++
++class SppDiagnosticActivity : Activity() {
++    private var live = true
++    override fun onCreate(savedInstanceState: Bundle?) {
++        super.onCreate(savedInstanceState)
++        val output = TextView(this).apply { text = "One CXR-only snapshot. Does not start, repair or install anything. No reply is inconclusive."; setTextIsSelectable(true) }
++        val button = Button(this).apply { text = "Read Glasses SPP status" }
++        button.setOnClickListener {
++            button.isEnabled = false
++            BusHubService.requestSppDiagnostic { result ->
++                if (live) { output.text = result; button.isEnabled = true }
++            }
++        }
++        setContentView(ScrollView(this).apply { addView(LinearLayout(this@SppDiagnosticActivity).apply {
++            orientation = LinearLayout.VERTICAL; setPadding(16,16,16,16); addView(button); addView(output)
++        }) })
++    }
++    override fun onDestroy() { live = false; super.onDestroy() }
++}
+--- /dev/null
++++ b/shared/src/main/java/com/anezium/rokidbus/shared/SppDiagnostics.kt
+@@ -0,0 +1,107 @@
++package com.anezium.rokidbus.shared
++
++import org.json.JSONArray
++import org.json.JSONObject
++
++/** Fixed vocabulary only: no caller-supplied event details or exception messages. */
++object SppDiagnostics {
++    const val PREFIX = "/core/spp-diagnostic/"
++    const val REQUEST = PREFIX + "request"
++    const val RESULT = PREFIX + "result"
++    const val LIMIT = 64
++    const val MAX_BYTES = 24 * 1024
++    const val TTL = 5 * 60_000L
++    const val BUILD = "SPP_DIAG_01_20261101"
++    enum class Event {
++        PROCESS, DIAGNOSTIC_OPEN, SERVICE_CREATE, FOREGROUND_READY, FOREGROUND_ERROR, SERVICE_START, SERVICE_DESTROY,
++        CORE_REQUEST, CORE_STARTED, CORE_WAIT_UNLOCK, FOLDED, UNFOLDED, FOLD_UNKNOWN, WORN, REMOVED, WEAR_UNKNOWN, TRANSPORT_WAKE, START_REQUEST,
++        ALREADY_STARTED, LISTEN_BEGIN, LISTEN_READY, ACCEPT_WAIT, ACCEPTED,
++        LISTEN_ERROR, LISTEN_CLOSED, LISTENER_THREAD_END, INSTALL_BEGIN, INSTALL_END, SESSION_READY,
++        SESSION_END, SESSION_ERROR, WRITE_ERROR, CONNECT_BEGIN, SOCKET_CREATED, CONNECT_END,
++        OUTPUT_READY, CLIENT_INSTALL_BEGIN, CLIENT_INSTALL_END, CLIENT_READ, CLIENT_ERROR, CLIENT_END
++    }
++    enum class Error { NONE, IO, SECURITY, INTERRUPTED, OTHER }
++    fun category(error: Throwable?): Error = when (error) {
++        null -> Error.NONE
++        is SecurityException -> Error.SECURITY
++        is java.io.IOException -> Error.IO
++        is InterruptedException -> Error.INTERRUPTED
++        else -> Error.OTHER
++    }
++    data class Row(val epoch: String, val seq: Long, val at: Long, val mono: Long,
++        val event: Event, val generation: Long, val error: Error)
++    fun validToken(s: String) = s.matches(Regex("[a-f0-9]{32}"))
++    fun encode(rows: List<Row>): JSONArray = JSONArray().apply {
++        rows.forEach { r -> put(JSONObject().put("epoch", r.epoch).put("seq", r.seq)
++            .put("at", r.at).put("mono", r.mono).put("event", r.event.name)
++            .put("generation", r.generation).put("error", r.error.name)) }
++    }
++    fun decode(a: JSONArray, now: Long): List<Row> {
++        require(a.length() <= LIMIT && a.toString().toByteArray(Charsets.UTF_8).size <= MAX_BYTES)
++        return (0 until a.length()).mapNotNull { i ->
++            val r = a.getJSONObject(i)
++            require(r.keys().asSequence().toSet() == setOf("epoch", "seq", "at", "mono", "event", "generation", "error"))
++            val row = Row(r.getString("epoch"), r.getLong("seq"), r.getLong("at"),
++                r.getLong("mono"), Event.valueOf(r.getString("event")),
++                r.getLong("generation"), Error.valueOf(r.getString("error")))
++            require(validToken(row.epoch) && row.seq >= 0 && row.at >= 0 && row.mono >= 0 && row.generation >= 0)
++            row.takeIf { it.at <= now && now - it.at <= TTL }
++        }
++    }
++    /** Reject unknown fields, arbitrary text and oversized data before any display or storage. */
++    fun validate(payload: JSONObject, nonce: String): JSONObject {
++        require(payload.toString().toByteArray(Charsets.UTF_8).size <= MAX_BYTES)
++        require(payload.keys().asSequence().toSet() == setOf("nonce", "capturedAt", "build", "version", "code", "epoch", "revision", "persisted", "gaps", "listenerStage", "listenerGeneration", "listenerAt", "rows"))
++        require(validToken(nonce) && payload.getString("nonce") == nonce)
++        require(payload.getString("build") == BUILD)
++        require(payload.getString("version").matches(Regex("[0-9.]{1,24}")))
++        require(payload.getLong("code") > 0 && validToken(payload.getString("epoch")))
++        require(payload.getLong("revision") >= 0 && payload.getLong("persisted") >= -1 && payload.getLong("gaps") >= 0)
++        require(payload.getString("listenerStage") in setOf("UNKNOWN", "LISTEN_BEGIN", "LISTEN_READY", "ACCEPT_WAIT", "ACCEPTED", "LISTEN_ERROR", "LISTEN_CLOSED", "LISTENER_THREAD_END"))
++        require(payload.getLong("listenerGeneration") >= 0 && payload.getLong("listenerAt") >= 0)
++        val capturedAt = payload.getLong("capturedAt")
++        require(capturedAt >= 0 && payload.getLong("persisted") <= payload.getLong("revision"))
++        val rows = decode(payload.getJSONArray("rows"), capturedAt)
++        return JSONObject(payload.toString()).put("rows", encode(rows))
++    }
++}
++
++/** Short synchronized memory operations only. Persistence and transport stay outside this lock. */
++class SppDiagnosticRing(private val epoch: String, private val wall: () -> Long,
++    private val mono: () -> Long, restored: List<SppDiagnostics.Row> = emptyList()) {
++    private val rows = ArrayDeque(restored.takeLast(SppDiagnostics.LIMIT))
++    private var sequence = 0L
++    var revision = 0L; private set
++    var gaps = 0L; private set
++    init { require(SppDiagnostics.validToken(epoch)) }
++    @Synchronized fun record(event: SppDiagnostics.Event, generation: Long = 0,
++        error: SppDiagnostics.Error = SppDiagnostics.Error.NONE) {
++        trim()
++        if (rows.size == SppDiagnostics.LIMIT) { rows.removeFirst(); gaps++ }
++        rows.addLast(SppDiagnostics.Row(epoch, ++sequence, wall(), mono(), event, generation, error))
++        revision++
++    }
++    @Synchronized fun snapshot(): Triple<List<SppDiagnostics.Row>, Long, Long> {
++        trim(); return Triple(rows.toList(), revision, gaps)
++    }
++    private fun trim() {
++        val now = wall()
++        val kept = rows.filter { it.at <= now && now - it.at <= SppDiagnostics.TTL }
++        if (kept.size != rows.size) { gaps += rows.size - kept.size; rows.clear(); rows.addAll(kept); revision++ }
++    }
++}
++
++/** One explicit request. Correlation expires even when the UI/main loop was suspended. */
++class SppDiagnosticPending {
++    private var nonce: String? = null
++    private var deadline = 0L
++    private var lastStart = -10_000L
++    @Synchronized fun begin(token: String, now: Long): Boolean {
++        require(SppDiagnostics.validToken(token))
++        if (nonce != null || now - lastStart < 5_000) return false
++        nonce = token; lastStart = now; deadline = now + 4_000
++        return true
++    }
++    @Synchronized fun matches(token: String, now: Long): Boolean = nonce == token && now < deadline
++    @Synchronized fun clear() { nonce = null }
++}
+--- /dev/null
++++ b/shared/src/test/java/com/anezium/rokidbus/shared/SppDiagnosticsTest.kt
+@@ -0,0 +1,76 @@
++package com.anezium.rokidbus.shared
++
++import org.json.JSONArray
++import org.json.JSONObject
++import org.junit.Assert.*
++import org.junit.Test
++import java.util.concurrent.CountDownLatch
++import java.util.concurrent.Executors
++import java.util.concurrent.TimeUnit
++
++class SppDiagnosticsTest {
++    private val token = "a".repeat(32)
++    private val other = "b".repeat(32)
++    private fun payload() = JSONObject().put("nonce", token).put("capturedAt",1001).put("build", SppDiagnostics.BUILD)
++        .put("version", "1.4.30").put("code",10430).put("epoch",token)
++        .put("revision",1).put("persisted",0).put("gaps",0)
++        .put("listenerStage","ACCEPT_WAIT").put("listenerGeneration",1).put("listenerAt",1000)
++        .put("rows", SppDiagnostics.encode(listOf(SppDiagnostics.Row(token,1,1000,20,SppDiagnostics.Event.ACCEPT_WAIT,1,SppDiagnostics.Error.NONE))))
++    private fun rejected(block: () -> Unit) { try { block(); fail("accepted") } catch (_: IllegalArgumentException) {} }
++    @Test fun boundedRing() {
++        val ring = SppDiagnosticRing(token,{1000},{20})
++        repeat(1000) { ring.record(SppDiagnostics.Event.ACCEPT_WAIT, 1) }
++        assertEquals(64,ring.snapshot().first.size); assertEquals(936L,ring.snapshot().third)
++        assertEquals(1000L,ring.snapshot().first.last().seq)
++    }
++    @Test fun expiresWithoutNewEvents() {
++        var now=1000L; val ring=SppDiagnosticRing(token,{now},{20})
++        ring.record(SppDiagnostics.Event.PROCESS); now += SppDiagnostics.TTL+1
++        assertTrue(ring.snapshot().first.isEmpty()); assertTrue(ring.snapshot().second>1)
++    }
++    @Test fun clockRollbackDropsFutureRows() {
++        var now=1000L; val ring=SppDiagnosticRing(token,{now},{20})
++        ring.record(SppDiagnostics.Event.PROCESS); now=999
++        assertTrue(ring.snapshot().first.isEmpty())
++    }
++    @Test fun preservesPriorEpochSeparately() {
++        val old=SppDiagnostics.Row(other,1,1000,1,SppDiagnostics.Event.ACCEPT_WAIT,7,SppDiagnostics.Error.NONE)
++        val ring=SppDiagnosticRing(token,{1000},{2},listOf(old));ring.record(SppDiagnostics.Event.PROCESS)
++        assertEquals(listOf(other,token),ring.snapshot().first.map{it.epoch})
++    }
++    @Test fun concurrentRecordsHaveUniqueSequence() {
++        val ring=SppDiagnosticRing(token,{1000},{20});val pool=Executors.newFixedThreadPool(4)
++        try { val done=CountDownLatch(4); repeat(4){pool.execute{repeat(100){ring.record(SppDiagnostics.Event.INSTALL_BEGIN)};done.countDown()}}
++            assertTrue(done.await(5,TimeUnit.SECONDS));assertEquals(400L,ring.snapshot().second)
++            val seq=ring.snapshot().first.map{it.seq};assertEquals(seq.size,seq.toSet().size)
++        } finally {pool.shutdownNow()}
++    }
++    @Test fun strictRoundTrip() {assertEquals("ACCEPT_WAIT",SppDiagnostics.validate(payload(),token).getString("listenerStage"))}
++    @Test fun rejectsArbitraryFields() {rejected{SppDiagnostics.validate(payload().put("address","private"),token)}}
++    @Test fun rejectsArbitraryEventText() {
++        val p=payload();p.getJSONArray("rows").getJSONObject(0).put("event","message text")
++        rejected{SppDiagnostics.validate(p,token)}
++    }
++    @Test fun rejectsWrongNonce() {rejected{SppDiagnostics.validate(payload(),other)}}
++    @Test fun rejectsUnknownBuild() {rejected{SppDiagnostics.validate(payload().put("build","unknown"),token)}}
++    @Test fun rejectsOversizedData() {rejected{SppDiagnostics.validate(payload().put("extra","x".repeat(25000)),token)}}
++    @Test fun rejectsTooManyRecords() {
++        val p=payload();val row=p.getJSONArray("rows").getJSONObject(0);p.put("rows",JSONArray().apply{repeat(65){put(row)}})
++        rejected{SppDiagnostics.validate(p,token)}
++    }
++    @Test fun requestExpiresEvenWithDelayedMainCallback() {
++        val p=SppDiagnosticPending();assertTrue(p.begin(token,1000));assertTrue(p.matches(token,4999))
++        assertFalse(p.matches(token,5000));assertFalse(p.matches(other,1001));p.clear();assertFalse(p.matches(token,1001))
++    }
++    @Test fun duplicateAndOldReplyCannotMatchNewRequest() {
++        val p=SppDiagnosticPending();assertTrue(p.begin(token,1000));assertFalse(p.begin(other,1001))
++        p.clear();assertFalse(p.begin(other,4000));assertTrue(p.begin(other,6000))
++        assertFalse(p.matches(token,6001));assertTrue(p.matches(other,6001))
++    }
++    @Test fun onlyOneConcurrentRequest() {
++        val p=SppDiagnosticPending();val pool=Executors.newFixedThreadPool(4)
++        try {val results=(0..7).map{pool.submit<Boolean>{p.begin(token,1000)}}.map{it.get()}
++            assertEquals(1,results.count{it})
++        }finally{pool.shutdownNow()}
++    }
++}
