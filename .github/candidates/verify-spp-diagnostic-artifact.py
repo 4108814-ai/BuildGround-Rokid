@@ -21,7 +21,19 @@ ns='{http://schemas.android.com/apk/res/android}'
 source=ET.parse(Path(module)/'src/main/AndroidManifest.xml').getroot()
 expected={e.attrib[ns+'name'] for e in source if e.tag.startswith('uses-permission')}
 actual=set(re.findall(r"uses-permission(?:-sdk-\d+)?: name='([^']+)'",permissions))
-assert actual==expected,(actual-expected,expected-actual)
+# This signature permission already exists in both verified baseline APKs (AndroidX).
+# Keep the final merged-APK allowlist exact rather than permitting arbitrary additions.
+dynamic=package+'.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'
+assert actual==expected|{dynamic},(actual-(expected|{dynamic}),(expected|{dynamic})-actual)
+tree=run('aapt','dump','xmltree',apk,'AndroidManifest.xml')
+blocks=re.findall(r'^    E: permission .*?(?=^    E:|\Z)',tree,re.M|re.S)
+owned=[block for block in blocks if '"'+dynamic+'"' in block]
+assert len(owned)==1 and re.search(r'android:protectionLevel[^\n]*=\(type 0x11\)0x2(?:\s|$)',owned[0]), 'Existing AndroidX permission must stay signature-only'
+(out/(module+'-manifest-tree.txt')).write_text(tree)
+from diagnostic_apk_manifest_guard import verify_snapshot
+baselines=json.loads(Path(__file__).with_name('diagnostic-baseline-manifests.json').read_text())
+# Allow only the existing merged components plus the one reviewed diagnostic activity.
+verify_snapshot(tree,package,baselines[module]['fingerprint'],True)
 with zipfile.ZipFile(apk) as z:
  assert z.testzip() is None
  assert not any(Path(n).suffix.lower() in ['.jks','.keystore','.p12','.pfx','.key'] for n in z.namelist())
@@ -31,6 +43,10 @@ with zipfile.ZipFile(apk) as z:
  assert b'Lcom/buildground/ownerregression/' not in dex
  if module=='phone-hub':
   pin=os.environ['GLASSES_SHA'];assert pin.encode() in dex
+  expected_text=[' � ', ' >', 'AUTO >', 'Asking the glasses to check their helper:', 'MANUAL >', 'Nothing to repair - the helper is already in place.', 'READY >', 'Repair >', 'SET UP >', 'Turn on Wi-Fi first - the update travels to the glasses over Wi-Fi.', 'Working:', '>']
+  corrupt_text=[' �\xa0�?T�'�� ', ' �?�', 'AUTO �?�', 'Asking the glasses to check their helper�?�', 'MANUAL �?�', 'Nothing to repair �?" the helper is already in place.', 'READY �?�', 'Repair �?�', 'SET UP �?�', 'Turn on Wi-Fi first �\xa0�Ő\xa0�??�?�'�? the update travels to the glasses over Wi-Fi.', 'Working�?�', '�?�']
+  assert all(t.encode('utf-8') in dex for t in expected_text), 'Restored UI text absent'
+  assert all(t.encode('utf-8') not in dex for t in corrupt_text), 'Corrupt UI text detected' 
   for s in [b'SPP diagnostics (read only)',b'Read Glasses SPP status',b'SppDiagnosticPending',b'SppClientSessionOwner']:
    assert s in dex,s
  else:
