@@ -436,6 +436,52 @@
       ]
     },
     {
+      "id": "line-messages",
+      "kind": "nexus-plugin",
+      "name": "LINE Messages",
+      "category": "Communication",
+      "summary": "Read and answer LINE conversations on the glasses, photos included, sealed end to end.",
+      "description": "LINE on Rokid Glasses: your conversations and groups as pages on the lens, replies by voice or from the phone keyboard, and photos taken with the glasses camera sent into the chat. Everything you send is end-to-end encrypted with Letter Sealing. Sign-in happens on the phone. An unofficial client, not made or endorsed by LY Corporation; LINE may restrict accounts that use third-party clients.",
+      "author": "Anezium",
+      "sourceUrl": "https://github.com/Anezium/Rokid-Nexus",
+      "publishedAt": "2026-11-08T23:41:06Z",
+      "iconAsset": "line-messages-icon.png",
+      "screenshotAssets": [],
+      "listing": {
+        "descriptionMarkdown": "## About\n\nLINE on the glasses. Open LINE Messages from Applications, pick a conversation or a group, and read its latest messages in one scrolling column. Photo and sticker thumbnails show in their bubbles; sealed photos are decrypted and authenticated on the phone.\n\n## Replying\n\nDictate with the glasses microphone or type from the phone keyboard. Nothing is sent before you tap Send on the lens, and the result says the message was handed to LINE, never that it was read. A send LINE refuses keeps your draft.\n\n## Photos\n\nTap **Photo** in a conversation to take a picture with the glasses, check it on a full-page preview, then Send, Retake or Cancel. The photo and its preview leave the phone sealed with Letter Sealing; the key travels only inside the sealed message.\n\n## Signing in\n\nOn the phone, open the plugin from Nexus > Plugins: email and password, then the PIN LINE shows. **Copy PIN** puts it on the clipboard, marked sensitive, and the screen clears it again once the sign-in is over. The email and password are used only to authenticate with LINE; the password is masked and never saved.\n\n## Encryption\n\nConversations without a Letter Sealing key cannot be written to from the glasses: the plugin refuses rather than send plaintext. An ambiguous send is kept, never retried on its own. Nothing runs in the background: LINE connects only while its page is open on the glasses.\n\n## Unofficial\n\nLINE Messages is not made or endorsed by LY Corporation. LINE may sign the device out or restrict an account that uses third-party clients; the plugin says so before you sign in. Needs both Nexus hubs at 2.4.0 or newer.\n"
+      },
+      "releases": [
+        {
+          "version": "0.1.0",
+          "date": "2026-11-08T23:41:06Z",
+          "notes": "\n\n\nFirst release. Needs **both hubs at Nexus 2.4.0**: older hubs still read and\nsend, but a refused send shows as unconfirmed instead of staying editable.\n\n- **LINE on the glasses.** Your conversations, groups included, as launcher\n  pages: open one and read its latest messages in one scrolling column. Photo\n  and sticker thumbnails show in their bubbles; sealed photos are decrypted and\n  authenticated on the phone.\n- **Reply from the glasses.** Dictate or type in the conversation's composer.\n  Nothing is sent before you tap Send, and the result says the message was\n  handed to LINE, never that it was read. A send LINE refuses keeps your draft.\n- **Photos.** Take a picture from a conversation with the **Photo** button,\n  check it on a full-page preview, then Send, Retake or Cancel. The photo and\n  its preview leave the phone sealed with Letter Sealing; the key travels only\n  inside the sealed message, never beside it.\n- **Sign in on the phone.** Email and password, then the PIN LINE shows: a\n  **Copy PIN** button puts it on the clipboard, marked sensitive, and the\n  screen clears it again, the next time it is in front, once the sign-in is\n  over. The email and password are used only to authenticate with LINE; the\n  password is masked and never saved.\n- **Letter Sealing required.** Conversations without an encryption key cannot be\n  written to from the glasses; the plugin says so instead of sending plaintext.\n  An ambiguous send is kept, never retried on its own.\n- **LINE's own mark.** The LINE bubble, not a generic chat glyph: stroked on the\n  glasses launcher and notification cards, filled for the Android app icon and\n  the Nexus plugin list.\n- **Nothing in the background.** LINE connects only while its glasses page is\n  open, and again when you come back.\n- **Unofficial client.** LINE Messages is not made or endorsed by LY\n  Corporation. LINE may sign the device out or restrict an account that uses\n  third-party clients; the plugin says so before you sign in.\n\nNot covered by this version: direct chats were verified for reading only, the\nsealed send was exercised in a group; Keep Memo is not listed; unsend and\ntoken expiry were not tested.\n\nLINE Messages is licensed under the Apache License 2.0, like the rest of Rokid\nNexus; the embedded engine's MIT-licensed dependencies are listed in the\nplugin's Open-source licenses screen.\n\n### Artifact\n\n- File: `line-messages-phone-release.apk`\n- SHA-256: `bdc633dbd750b983dba0073264012e85df9187fc68107a0ea25c3e8770fe31ac`\n"
+        }
+      ],
+      "nexus": {
+        "pluginId": "line-messages",
+        "apiVersion": 3,
+        "capabilities": [
+          "surfaces",
+          "stt",
+          "camera"
+        ],
+        "launchable": false,
+        "settingsActivity": "com.anezium.rokidbus.plugin.line.LineSettingsActivity",
+        "minHostVersionCode": 20400
+      },
+      "artifact": {
+        "target": "phone",
+        "url": "https://github.com/Anezium/Rokid-Nexus/releases/download/line-messages-v0.1.0/line-messages-phone-release.apk",
+        "sha256": "bdc633dbd750b983dba0073264012e85df9187fc68107a0ea25c3e8770fe31ac",
+        "signerSha256": "f5e938e2e79b0526b31e40d36c8c19098450c1636b7e14a306681b4effddf81c",
+        "sizeBytes": 23453179,
+        "packageName": "com.anezium.rokidbus.plugin.line",
+        "versionCode": 1,
+        "versionName": "0.1.0"
+      },
+      "iconUrl": "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/icons/line-messages-icon.png"
+    },
+    {
       "id": "lume",
       "kind": "nexus-plugin",
       "name": "Lume",
@@ -650,6 +696,57 @@
       "screenshotUrls": [
         "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/screenshots/media-1-nowplaying.png"
       ]
+    },
+    {
+      "id": "meta-messages",
+      "kind": "nexus-plugin",
+      "name": "Meta Messages",
+      "category": "Communication",
+      "summary": "Read and answer WhatsApp, Instagram and Messenger conversations on the glasses.",
+      "description": "WhatsApp, Instagram and Messenger on Rokid Glasses: pick a service and a conversation, read its latest messages, reply by voice or typing, and send a photo taken with the glasses. Sign-in happens on the phone. Unofficial clients, not made or endorsed by Meta; Meta may restrict accounts that use third-party apps.",
+      "author": "Anezium",
+      "sourceUrl": "https://github.com/Anezium/Rokid-Nexus",
+      "publishedAt": "2026-11-08T23:41:06Z",
+      "iconAsset": "meta-messages-icon-2.png",
+      "nexus": {
+        "pluginId": "meta-messages",
+        "apiVersion": 3,
+        "capabilities": [
+          "surfaces",
+          "stt",
+          "camera"
+        ],
+        "launchable": false,
+        "settingsActivity": "com.anezium.rokidbus.plugin.meta.MetaMessagesActivity",
+        "minHostVersionCode": 20200
+      },
+      "screenshotAssets": [],
+      "listing": {
+        "descriptionMarkdown": "## About\n\nWhatsApp, Instagram and Messenger in one plugin. On the glasses, pick a service, then a conversation, and read its latest messages in one scrolling column. Older messages load when a conversation shows fewer than you asked for: 10, 30 or 50, set in the phone settings.\n\n## Replying\n\nDictate or type an answer in the conversation's composer. Nothing is sent before you tap Send, and the result says the message was handed to the service, never that it was read.\n\n## Photos\n\nTap **Photo** in any conversation to take a picture with the glasses, check it on a full-page preview, then Send, Retake or Cancel. Photos, reels and posts you receive show as thumbnails in their bubbles.\n\n## Signing in\n\nEverything happens on the phone. WhatsApp links as a companion device with a pairing code. Instagram and Messenger sign in with your account; passwords are masked and never leave the phone.\n\n## In the background\n\nNothing. A service connects only while its glasses page is open, and again when you come back. A sign-in or pairing left waiting gets up to three minutes to finish after you leave its screen.\n\n## Unofficial clients\n\nMeta Messages is not made or endorsed by Meta. It embeds the open-source whatsmeow and mautrix-meta engines. Meta may sign the device out, or restrict or ban an account that uses third-party apps, and the plugin says so before you sign in.\n\nMessenger's end-to-end encrypted chats are listed but cannot be answered yet.\n\n## Needs\n\n**Rokid Nexus 2.2.0 or newer on both phone and glasses.** The Store checks the phone hub. If the glasses hub is older, conversations still open, without photos, thumbnails or service icons.\n\n*Show on your glasses*, *Speech to text* and *Camera* in Nexus → Settings → Plugin access.\n\n## License\n\nAGPL-3.0, as the embedded engines require. The source is in the Rokid Nexus repository under `plugins/meta`."
+      },
+      "artifact": {
+        "target": "phone",
+        "url": "https://github.com/Anezium/Rokid-Nexus/releases/download/meta-messages-v0.1.1/meta-messages-phone-release.apk",
+        "sha256": "82c23321427abae4e915e0e34ad2906502efc09c7fdbaa059fd984f04f90ffb5",
+        "signerSha256": "f5e938e2e79b0526b31e40d36c8c19098450c1636b7e14a306681b4effddf81c",
+        "sizeBytes": 34033227,
+        "packageName": "com.anezium.rokidbus.plugin.metamessages",
+        "versionCode": 2,
+        "versionName": "0.1.1"
+      },
+      "releases": [
+        {
+          "version": "0.1.1",
+          "date": "2026-11-08T23:41:06Z",
+          "notes": "\n\n\n- **Meta's own mark.** The plugin now shows the Meta infinity instead of the\n  generic chat glyph: as one green stroke on the glasses launcher and in\n  notification cards, and as the filled mark for the Android app icon and the\n  Nexus plugin list. The APK had no icon of its own before.\n\n### Artifact\n\n- File: `meta-messages-phone-release.apk`\n- SHA-256: `82c23321427abae4e915e0e34ad2906502efc09c7fdbaa059fd984f04f90ffb5`\n"
+        },
+        {
+          "version": "0.1.0",
+          "date": "2026-11-08T01:42:27Z",
+          "notes": "\nFirst release. Needs **both hubs at Nexus 2.2.0** for photos, thumbnails and\nservice icons; older hubs show conversations as text.\n\n- **WhatsApp, Instagram and Messenger on the glasses.** Pick a service, then a\n  conversation, and read its latest messages in one scrolling column. Older\n  messages load when a conversation shows fewer than you asked for (10, 30 or 50\n  in the phone settings).\n- **Reply from the glasses.** Dictate or type an answer in the conversation's\n  composer. Nothing is sent before you tap Send; the result says the message was\n  handed to the service, never that it was read.\n- **Photos.** Take a picture from any conversation with the **Photo** button,\n  check it on a full-page preview, then Send, Retake or Cancel. Photos, reels and\n  posts you receive show as thumbnails in their bubbles, and photos you send from\n  WhatsApp carry their own preview.\n- **Sign in on the phone.** WhatsApp links as a companion device with a pairing\n  code. Instagram and Messenger sign in with your account on the phone; passwords\n  are masked and never leave it.\n- **Nothing in the background.** A service connects only while its glasses page\n  is open, and again when you come back. A sign-in or pairing left waiting gets\n  up to three minutes to finish after you leave its screen.\n- **Unofficial clients.** Meta Messages is not made or endorsed by Meta. Meta may\n  sign the device out, or restrict or ban an account that uses third-party apps.\n  The plugin says so before you sign in.\n\nMessenger's end-to-end encrypted chats are listed but cannot be answered yet.\nWhatsApp shows thumbnails for photos received from this version on; older\nmessages keep their caption.\n\nMeta Messages is licensed under the AGPL-3.0, as the engines it embeds require;\nthe other Nexus components keep their own licenses.\n\n### Artifact\n\n- File: `meta-messages-phone-release.apk`\n- SHA-256: `345aefb53f9dac34bfc646211b60cc72ac94710dd59ac845d2e530d114e54a81`\n"
+        }
+      ],
+      "iconUrl": "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/icons/meta-messages-icon-2.png"
     },
     {
       "id": "nav",
@@ -947,11 +1044,11 @@
       "kind": "nexus-plugin",
       "name": "Relay",
       "category": "Communication",
-      "summary": "Phone messages on your glasses, answered out loud.",
-      "description": "Nexus 2.0 opens exact conversations inside the launcher, with phone typing, glasses dictation and a separate explicit Send. Removed notifications leave promoted cards while remaining in bounded history. Older hubs keep the classic Relay experience.",
+      "summary": "Relay phone notifications, confirm Assistant replies, and approve conversation reading.",
+      "description": "Forward selected Android notifications to your glasses and keep a local in-memory conversation inbox. Assistant can use separately approved Skills to find replyable threads and prepare replies; it sends only after you tap Send on the exact recipient-and-text preview. Additional default-off approvals let Assistant read or summarize captured conversations. Requested text is shared with Assistant's chosen AI provider. This is captured notification history, not the messaging app's full archive. Reapprove Relay after updating, then choose the operations you allow.",
       "author": "Anezium",
       "sourceUrl": "https://github.com/Anezium/Rokid-Nexus",
-      "publishedAt": "2026-10-31T15:32:37Z",
+      "publishedAt": "2026-11-07T10:06:05Z",
       "iconAsset": "relay-icon.png",
       "nexus": {
         "pluginId": "relay",
@@ -970,19 +1067,29 @@
         "relay-2-inbox.png"
       ],
       "listing": {
-        "descriptionMarkdown": "## 1.4.0 — Nexus 2.0\n\nNexus 2.0 opens exact conversations inside the launcher, with phone typing, glasses dictation and a separate explicit Send. Removed notifications leave promoted cards while remaining in bounded history. Older hubs keep the classic Relay experience.\n\nUpdate both Nexus hubs for the new launcher features.\n\n## About\n\nA message you can reply to reaches the glasses as it arrives, and lights the display if it was dark. You read it where you are already looking, answer out loud, and the phone stays in your pocket.\n\n## Reading\n\nEach message keeps its sender beside it, so a group conversation reads as a conversation rather than a wall of text. A long thread turns pages instead of stopping at eight lines.\n\n*Message display time* in the plugin's settings is a number you type, 2 to 45 seconds, and *Longer for long messages* adds reading time per character on top for threads that need it.\n\n## Privacy\n\nIn public or in a meeting, *Hide message text on the glasses* keeps the band to the sender's name and a Show chip — the words appear only when you tap for them, and Reply stays one tap away. *Hide previews in the inbox* does the same for the Messages list. While the band is hidden, read-aloud names the sender only.\n\n## Answering\n\nSpeak your reply and it sends itself after a few seconds, counted down on the chip you are looking at — cancellable for its whole length, and never sent before you have seen what it heard. If the glasses went dark or lost the link, the clock stops and waits for you.\n\nPrefer to type? Tap *Type* once dictation has started, or turn on *Reply by typing* in the plugin's settings to skip dictation altogether. With Rokid Nexus 1.4.13 the notice itself becomes the reply field: what you type appears under the message as you type it, and the phone keyboard opens on its own, then closes when you send. A keyboard paired to the glasses works too. Enter sends it through the same steps.\n\n## Messages you missed\n\nOne you let go, or one that arrived while you were in another plugin, is in **Messages** in the Nexus menu: every conversation waiting on you, newest first, read and answered the same way. The list updates while you are looking at it.\n\n## Hearing it instead\n\nTurn on *Read notifications aloud* and the glasses speak the message as it arrives — the whole message, in the voice and at the speed you already chose in your Rokid assistant settings. It is produced on the glasses, so it works with the phone in your pocket and nothing leaves the device. Off by default.\n\n## What it relays\n\nBy default, anything with a reply box, from any app, with nothing to tick first. In *Source apps* you can set each app to Off, Messages only, or All notifications. All also brings alerts you can only read: they show in the band and in Messages, without Reply. Ongoing notifications and group summaries stay on the phone.\n\n## What it keeps\n\nNothing. Messages live in memory while the plugin runs, are never written to disk, and never appear in a log. Revoke notification access and what it captured goes with it.\n\n## Needs\n\nRokid Nexus 1.4.11 or newer on both phone and glasses; 1.4.13 to type inside the notice.\n\nNotification access on the phone, plus *Show on your glasses*, *Speech to text* and *Text to speech* in Nexus → Settings → Plugin access."
+        "descriptionMarkdown": "## Reply fixes in 1.4.2\n\nUpdate **Relay 1.4.2 and the glasses hub 2.0.4** for the complete fix. Your own identifiable reply echoes are filtered before display and read-aloud. Answered threads leave the launcher and Notifications. While a reply screen stays open, you can send consecutive replies without waiting for a new message. Leaving it ends the retained reply action. No new approval is required for this patch.\n\n## Assistant access in 1.4.1\n\nUse **Assistant 1.5.2** with both Nexus hubs supporting Skills (1.7.0 or newer). This update adds a Skills catalog: approve Relay again, then allow each desired Assistant operation in **Nexus Plugin access**. Existing notification and inbox features continue without using Assistant.\n\nReply discovery returns names, app and age without message text. Drafting returns a provider-authored preview; Assistant waits for your **Send** before dispatching it. A source notification still needs its reply action. No new conversations are started, no delivery receipt is claimed, and uncertain sends are not retried automatically.\n\nThe new reading approvals start disabled: **Find conversations Assistant can read** and **Share conversation text with Assistant's AI**. Enabling them allows the requested captured text to reach Assistant's configured AI provider. Assistant is instructed to use them only when you explicitly ask to consult messages. It can read a latest message or the retained thread, including your replies.\n\nRetained text can remain after a source notification disappears. After a successful reply, an already open reply screen keeps its action for consecutive replies until that screen closes or its visibility lease ends. Otherwise source removal ends reply authority. The source-app policy, Relay's enabled state, notification access, redaction and hidden previews still apply. Reading neither marks messages as read nor sends anything. Older app history may be missing; this does not retrieve the app's archive. Switching a source app Off or Relay off clears the corresponding retained content.\n\nA real Telegram reply and fictional conversation-reading flows were tested on the glasses. Other messaging apps still need their own device qualification.\n\n## About\n\nA message you can reply to reaches the glasses as it arrives, and lights the display if it was dark. You read it where you are already looking, answer out loud, and the phone stays in your pocket.\n\n## Reading\n\nEach message keeps its sender beside it, so a group conversation reads as a conversation rather than a wall of text. A long thread turns pages instead of stopping at eight lines.\n\n*Message display time* in the plugin's settings is a number you type, 2 to 45 seconds, and *Longer for long messages* adds reading time per character on top for threads that need it.\n\n## Privacy\n\nIn public or in a meeting, *Hide message text on the glasses* keeps the band to the sender's name and a Show chip — the words appear only when you tap for them, and Reply stays one tap away. *Hide previews in the inbox* does the same for the Messages list. While the band is hidden, read-aloud names the sender only.\n\n## Answering\n\nSpeak your reply and it sends itself after a few seconds, counted down on the chip you are looking at — cancellable for its whole length, and never sent before you have seen what it heard. If the glasses went dark or lost the link, the clock stops and waits for you.\n\nPrefer to type? Tap *Type* once dictation has started, or turn on *Reply by typing* in the plugin's settings to skip dictation altogether. With Rokid Nexus 1.4.13 the notice itself becomes the reply field: what you type appears under the message as you type it, and the phone keyboard opens on its own, then closes when you send. A keyboard paired to the glasses works too. Enter sends it through the same steps.\n\n## Messages you missed\n\nOne you let go, or one that arrived while you were in another plugin, is in **Messages** in the Nexus menu: every conversation waiting on you, newest first, read and answered the same way. The list updates while you are looking at it.\n\n## Hearing it instead\n\nTurn on *Read notifications aloud* and the glasses speak the message as it arrives — the whole message, in the voice and at the speed you already chose in your Rokid assistant settings. It is produced on the glasses, so it works with the phone in your pocket and nothing leaves the device. Off by default.\n\n## What it relays\n\nBy default, anything with a reply box, from any app, with nothing to tick first. In *Source apps* you can set each app to Off, Messages only, or All notifications. All also brings alerts you can only read: they show in the band and in Messages, without Reply. Ongoing notifications and group summaries stay on the phone.\n\n## What it keeps\n\nNothing. Messages live in memory while the plugin runs, are never written to disk, and never appear in a log. Revoke notification access and what it captured goes with it.\n\n## Needs\n\nRokid Nexus 1.4.11 or newer on both phone and glasses; 1.4.13 to type inside the notice.\n\nNotification access on the phone, plus *Show on your glasses*, *Speech to text* and *Text to speech* in Nexus → Settings → Plugin access."
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/Anezium/Rokid-Nexus/releases/download/relay-v1.4.0/relay-phone-release.apk",
-        "sha256": "9e776ccbf7da5cbbfa54c99621c7250be6ebee10d4511265e4286e0bb028c937",
+        "url": "https://github.com/Anezium/Rokid-Nexus/releases/download/relay-v1.4.2/relay-phone-release.apk",
+        "sha256": "e0699c87d6ff3d11ffad286be8fd579d854e4407473e4c035851c9db8c2a8c39",
         "signerSha256": "f5e938e2e79b0526b31e40d36c8c19098450c1636b7e14a306681b4effddf81c",
-        "sizeBytes": 6459696,
+        "sizeBytes": 6505549,
         "packageName": "com.anezium.rokidbus.plugin.relay",
-        "versionCode": 15,
-        "versionName": "1.4.0"
+        "versionCode": 17,
+        "versionName": "1.4.2"
       },
       "releases": [
+        {
+          "version": "1.4.2",
+          "date": "2026-11-07T10:06:05Z",
+          "notes": "\nUpdate Relay and the **glasses hub to Nexus 2.0.4** for the complete fix. Phone\nhubs 2.0.0 to 2.0.3 remain compatible; no new permission or approval is needed.\n\n- Suppress outbound reply echoes before display and read-aloud using\n  MessagingStyle authorship or the same thread's matching remote-input history.\n  Admit ambiguous text matches and bound per-thread echo markers to two minutes.\n- Remove answered threads from the Nexus launcher's Relay list and Notifications\n  history. Consecutive replies remain available only while the reply page stays\n  open; leaving it drops the action until a new incoming notification arrives.\n- Defer clearing the phone notification until that reply screen closes. Actual\n  intent cancellation, access loss and session expiry still end reply authority.\n- Keep Assistant's send confirmation intact while dismissing an answered thread;\n  delayed dismissal and cancellation never act on a newer arrival.\n\n\n### Artifact\n\n- File: `relay-phone-release.apk`\n- SHA-256: `e0699c87d6ff3d11ffad286be8fd579d854e4407473e4c035851c9db8c2a8c39`\n"
+        },
+        {
+          "version": "1.4.1",
+          "date": "2026-11-05T11:58:32Z",
+          "notes": "\n- Offer separately approved Skills for Assistant to find replyable conversations,\n  draft a reply, and hand off that draft after the wearer's Send.\n- Add separate, default-off approvals to find readable conversations and share the\n  requested captured text with Assistant's AI provider. Reading supports the latest\n  received message or the retained thread, including our replies, with pagination.\n  Hidden text and disallowed apps remain unavailable; reading never marks as read\n  or sends. Captured notifications may omit older history from the messaging app.\n- Keep Assistant's confirmation visible when another message arrives from Relay.\n- This update returns Relay to Pending approval. Approve Relay again, then enable\n  only the Assistant operations you want to allow in Plugin access.\n\n\n### Artifact\n\n- File: `relay-phone-release.apk`\n- SHA-256: `e3b4e306a3146c02cb309c16b0ca9d3662eb817186d9d905d0237828333ccb10`\n"
+        },
         {
           "version": "1.4.0",
           "date": "2026-10-31T15:32:37Z",
@@ -1517,17 +1624,22 @@
       "kind": "nexus-plugin",
       "name": "Zap",
       "category": "Communication",
-      "summary": "Your WhatsApp chats on the glasses: read, hear again, answer and start chats by voice.",
+      "summary": "Your WhatsApp chats on the glasses: read, play voice messages, answer and start chats by voice.",
       "description": "WhatsApp on Rokid Glasses: your chats newest first, whole messages, hear them again, reply or start a chat by voice, send a photo taken with the glasses, react with an emoji. Optional AI summary with your own key. Messages stay encrypted on the phone.",
       "author": "Marcus de Magalhães (alema.io)",
-      "sourceUrl": "https://github.com/marcusalemao/Zap/tree/zap-v0.15.2",
+      "sourceUrl": "https://github.com/marcusalemao/Zap/tree/zap-v0.15.3",
       "publishedAt": "2026-10-28T18:52:56Z",
       "iconAsset": "zap.png",
       "screenshotAssets": [],
       "listing": {
-        "descriptionMarkdown": "## About\n\nWhatsApp on your Rokid Glasses, made for everyday use: your chats as a list, the newest on top, each message whole. Hear a message again, reply or start a new chat by voice, send a photo you just took with the glasses, and react with an emoji. Portuguese and English.\n\n## Answering\n\nReply is always there, even after the phone's notification is gone: Zap uses WhatsApp's own reply while it lasts, otherwise it opens the chat with your text typed in. Nothing is sent before you see the text and tap Send. An optional accessibility helper presses WhatsApp's Send button for you, only when the box holds exactly what you confirmed, so the phone can stay in your pocket. A Quick Settings tile pauses it (for banking apps).\n\n## Optional AI summary\n\nWhen you open a chat with many new messages or several voice notes in a row, Zap can show a short summary with one-tap next steps: a ready reply, add to calendar, remind me to reply. Off by default. It uses your own key (Gemini, OpenAI or OpenRouter); the open chat goes straight to the provider you chose. Nothing goes through servers of ours. The Nexus Assistant can also ask Zap through Skills (\"what did I miss on WhatsApp?\").\n\n## Privacy\n\nMessages are rebuilt from WhatsApp's notifications and kept only on the phone, encrypted with an Android Keystore key, for 1, 7 or 30 days. Zap uses the internet only when you turn the AI summary on.\n\n## Needs\n\nRokid Nexus 1.7 or newer, Android 11+, WhatsApp or WhatsApp Business. Notification access on the phone. Optional: the accessibility helper, Contacts, Photos, Calendar.\n\nPublic beta, made by one person. Feedback: zap@alema.io · https://z.alema.io"
+        "descriptionMarkdown": "## About\n\nWhatsApp on your Rokid Glasses, made for everyday use: your chats as a list, the newest on top, each message whole. Play WhatsApp voice messages on the glasses, in the sender's own voice, as many times as you like (never on the phone's speaker). Hear a message read aloud, reply or start a new chat by voice, send a photo you just took with the glasses, and react with an emoji. Portuguese and English.\n\n## Answering\n\nReply is always there, even after the phone's notification is gone: Zap uses WhatsApp's own reply while it lasts, otherwise it opens the chat with your text typed in. Nothing is sent before you see the text and tap Send. An optional accessibility helper presses WhatsApp's Send button for you, only when the box holds exactly what you confirmed, so the phone can stay in your pocket. A Quick Settings tile pauses it (for banking apps).\n\n## Optional AI summary\n\nWhen you open a chat with many new messages or several voice notes in a row, Zap can show a short summary with one-tap next steps: a ready reply, add to calendar, remind me to reply. On by default, and it only runs once you save your own key. With a Gemini key it also listens to the voice notes. It uses your own key (Gemini, OpenAI or OpenRouter); the open chat goes straight to the provider you chose. Nothing goes through servers of ours. The Nexus Assistant can also ask Zap through Skills (\"what did I miss on WhatsApp?\").\n\n## Privacy\n\nMessages are rebuilt from WhatsApp's notifications and kept only on the phone, encrypted with an Android Keystore key, for 1, 7 or 30 days. Zap uses the internet only when the AI summary is enabled and you have saved your own key.\n\n## Needs\n\nRokid Nexus 1.7 or newer, Android 11+, WhatsApp or WhatsApp Business. Notification access on the phone. Optional: the accessibility helper, Contacts, Photos, Calendar.\n\nPublic beta, made by one person. Feedback: zap@alema.io · https://z.alema.io"
       },
       "releases": [
+        {
+          "version": "0.15.3",
+          "date": "2026-11-05T03:51:26Z",
+          "notes": "- Built for Rokid Nexus 2.0 (SDK 0.24). Tested on the phone; not yet on Nexus 2.0 glasses.\n- AI summary on by default (it runs only once you save your own key); the saved key shows masked.\n- Setup help with pictures in Portuguese and English: accessibility, the banking-app notice and trusted devices (Extend Unlock), with buttons for Samsung and other Android phones.\n- Feedback from inside the app, and a Ko-fi link.\n- Explanations are no longer cut off; choice buttons are all the same size."
+        },
         {
           "version": "0.15.2",
           "date": "2026-10-29T00:21:03Z",
@@ -1555,12 +1667,12 @@
       },
       "artifact": {
         "target": "phone",
-        "url": "https://github.com/marcusalemao/Zap/releases/download/zap-v0.15.2/zap-phone-release.apk",
+        "url": "https://github.com/marcusalemao/Zap/releases/download/zap-v0.15.3/zap-phone-release.apk",
         "packageName": "io.alema.zap",
-        "sha256": "bd61a404a46e95d9c6309e596258f2959280d7ee0c1b12ec99f3f1bd85611b09",
-        "sizeBytes": 6176325,
-        "versionCode": 42,
-        "versionName": "0.15.2",
+        "sha256": "39fec65b92b7edb081b4f502fd5de2807bb2a7d1bb7250a0e0d16ef7669b65c2",
+        "sizeBytes": 7671909,
+        "versionCode": 43,
+        "versionName": "0.15.3",
         "signerSha256": "f64344da8b0ff0a8d8c9ae3aaa0511f72eb14c4d49e59179a0310fb58cff9058"
       },
       "iconUrl": "https://raw.githubusercontent.com/Anezium/RokidBrew-Registry/main/assets/icons/zap.png"
