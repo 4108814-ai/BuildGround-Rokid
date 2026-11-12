@@ -1,0 +1,289 @@
+--- a/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppServerManager.kt
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppServerManager.kt
+@@ -115,12 +115,16 @@
+                 session = installed
+                 // Publish and notify in transition order, without holding an I/O lock.
+                 SppDiagnosticJournal.record(SppDiagnostics.Event.INSTALL_BEGIN, generation)
+-                sessions.install(installed)
++                if (!sessions.install(installed)) {
++                    log("SPP client rejected: session owner stopped or retirement capacity busy")
++                    return
++                }
+                 SppDiagnosticJournal.record(SppDiagnostics.Event.INSTALL_END, generation)
+                 val input = it.inputStream
+                 SppDiagnosticJournal.record(SppDiagnostics.Event.SESSION_READY, generation)
+                 while (true) {
+                     val envelope = FrameProtocol.read(input) ?: break
++                    if (!sessions.isCurrent(installed)) return
+                     log("SPP RX ${envelope.path} id=${envelope.id} payloadBytes=${envelope.payload.toString().length} binaryBytes=${envelope.binary?.size ?: 0}")
+                     GlassesHub.onRemoteEnvelope(envelope)
+                 }
+--- a/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppSessionOwner.kt
++++ b/glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppSessionOwner.kt
+@@ -1,56 +1,83 @@
+ package com.anezium.rokidbus.glasses
+ 
+ import java.util.concurrent.Executors
++import java.util.concurrent.Semaphore
+ import java.util.concurrent.atomic.AtomicReference
+ 
+-/**
+- * One immutable socket/output pair per connection. Only the transition thread
+- * changes ownership and emits link state. Callbacks run without an I/O lock and
+- * may call clearIfCurrent (which queues work rather than waiting reentrantly).
+- * install is called only by client reader threads, never by the callback.
+- */
++/** Ownership never waits for native close or a Binder/transport callback. */
+ internal class SppSessionOwner<T : Any>(
+     private val retireSession: (T) -> Unit,
+     private val onConnected: (Boolean) -> Unit,
+ ) : AutoCloseable {
++    private val lock = Any()
+     private val active = AtomicReference<T?>(null)
+-    private val transitions = Executors.newSingleThreadExecutor { task ->
+-        Thread(task, "rokidbus-spp-state").apply { isDaemon = true }
++    private var closed = false
++    private var revision = 0L
++    private var notificationPending = false
++    private val retirementSlots = Semaphore(2)
++    private val retirement = Executors.newFixedThreadPool(2) { task ->
++        Thread(task, "rokidbus-spp-retire").apply { isDaemon = true }
++    }
++    private val notifications = Executors.newSingleThreadExecutor { task ->
++        Thread(task, "rokidbus-spp-notify").apply { isDaemon = true }
+     }
+ 
+     fun current(): T? = active.get()
++    fun isCurrent(session: T): Boolean = active.get() === session
+ 
+-    fun install(session: T): T? {
+-        val future = transitions.submit<T?> {
+-            val retired = active.getAndSet(session)
+-            // Retire before a reentrant connected callback can send on replacement.
+-            // Socket close must not acquire the writer lock; it unblocks old I/O.
+-            if (retired != null) retireSession(retired)
+-            onConnected(true)
+-            retired
++    /** Rejected input remains the caller's responsibility. Capacity is bounded if close hangs. */
++    fun install(session: T): Boolean = synchronized(lock) {
++        if (closed) return@synchronized false
++        val previous = active.get()
++        if (previous === session) return@synchronized true
++        if (previous != null && !retirementSlots.tryAcquire()) return@synchronized false
++        active.set(session)
++        revision++
++        if (previous != null) retirement.execute {
++            try { runCatching { retireSession(previous) } }
++            finally { retirementSlots.release() }
+         }
+-        // Once submitted, installation owns session until its outcome is known.
+-        // An interrupted reader must not close it while publication is queued.
+-        var interrupted = false
+-        try {
++        scheduleNotification()
++        true
++    }
++
++    fun clearIfCurrent(expected: T): Boolean = synchronized(lock) {
++        if (!active.compareAndSet(expected, null)) return@synchronized false
++        revision++
++        scheduleNotification()
++        true
++    }
++
++    /** Called under lock; the worker invokes user code after releasing it. */
++    private fun scheduleNotification() {
++        if (notificationPending) return
++        notificationPending = true
++        notifications.execute {
+             while (true) {
+-                try { return future.get() }
+-                catch (_: InterruptedException) { interrupted = true }
++                val state = synchronized(lock) { revision to (active.get() != null) }
++                runCatching { onConnected(state.second) }
++                synchronized(lock) {
++                    if (revision == state.first) {
++                        notificationPending = false
++                        return@execute
++                    }
++                }
+             }
+-        } finally {
+-            if (interrupted) Thread.currentThread().interrupt()
+         }
+     }
+ 
+-    fun clearIfCurrent(expected: T) {
+-        transitions.execute {
+-            // Atomic identity check: an old reader/writer cannot clear its successor.
+-            if (active.compareAndSet(expected, null)) onConnected(false)
+-        }
++    /** Test barrier for notifications only; native close completion is deliberately independent. */
++    internal fun awaitIdle() { notifications.submit {}.get() }
++
++    override fun close() = synchronized(lock) {
++        if (closed) return@synchronized
++        closed = true
++        val previous = active.getAndSet(null)
++        revision++
++        // At most one final close is queued after the bounded retirements. Never block stop.
++        if (previous != null) retirement.execute { runCatching { retireSession(previous) } }
++        scheduleNotification()
++        retirement.shutdown()
++        notifications.shutdown()
+     }
+-
+-    /** Test barrier; must not be called by onConnected. */
+-    internal fun awaitIdle() { transitions.submit {}.get() }
+-
+-    override fun close() { transitions.shutdown() }
+ }
+--- a/phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt
++++ b/phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt
+@@ -877,6 +877,7 @@
+             phoneBatteryReporter?.setEnabled(enabled)
+         }
+         hubEnabled = prefs().getBoolean(PREF_ENABLED, true)
++        sppSessions.setEnabled(hubEnabled)
+         if (hubEnabled) {
+             if (!canRunHub(this)) {
+                 startupBlockedByBluetoothPermission = true
+@@ -900,6 +901,7 @@
+             if (intent?.action == ACTION_STOP) {
+                 prefs().edit().putBoolean(PREF_ENABLED, false).apply()
+                 hubEnabled = false
++                sppSessions.setEnabled(false)
+             }
+             log("BusHubService command skipped: BLUETOOTH_CONNECT permission not granted")
+             stopSelf(startId)
+@@ -964,6 +966,7 @@
+     private fun enableHub() {
+         prefs().edit().putBoolean(PREF_ENABLED, true).apply()
+         hubEnabled = true
++        sppSessions.setEnabled(true)
+         if (canRunHub(this)) {
+             startForegroundWithType()
+             startCxrRecovery()
+@@ -977,6 +980,7 @@
+         stopCxrRecovery()
+         prefs().edit().putBoolean(PREF_ENABLED, false).apply()
+         hubEnabled = false
++        sppSessions.setEnabled(false)
+         if (::speechSessionManager.isInitialized) speechSessionManager.cancel()
+         stopAudioLease(InternalAudioStopReason.HUB_STOPPED)
+         clearAllActivitiesForHubStop()
+@@ -1008,6 +1012,7 @@
+         activityHandler.removeCallbacks(activityExpiryTick)
+         clearAllActivitiesForHubStop()
+         sppLoopStop = true
++        sppSessions.stopAccepting()
+         if (::speechSessionManager.isInitialized) speechSessionManager.close()
+         stopAudioLease(InternalAudioStopReason.HUB_STOPPED)
+         snapshotCaptureJob?.cancel()
+@@ -4435,6 +4440,11 @@
+                     sleepQuietly(5_000L)
+                     continue
+                 }
++                val attempt = sppSessions.beginAttempt()
++                if (attempt == null) {
++                    sleepQuietly(750L)
++                    continue
++                }
+                 val device = pickBondedDevice()
+                 if (device == null) {
+                     log("No bonded glasses device found; SPP loop waiting")
+@@ -4454,13 +4464,13 @@
+                     diagnosticPhoneRing.record(SppDiagnostics.Event.OUTPUT_READY)
+                     currentSession = installed
+                     diagnosticPhoneRing.record(SppDiagnostics.Event.CLIENT_INSTALL_BEGIN)
+-                    sppSessions.install(installed)
++                    if (!sppSessions.install(installed, attempt)) continue
+                     diagnosticPhoneRing.record(SppDiagnostics.Event.CLIENT_INSTALL_END)
+                     backoffMs = 1_000L
+                     log("SPP connected")
+                     notifyLinkState()
+                     diagnosticPhoneRing.record(SppDiagnostics.Event.CLIENT_READ)
+-                    readSppLoop(current)
++                    readSppLoop(installed)
+                     log("SPP link closed")
+                 } catch (t: Throwable) {
+                     diagnosticPhoneRing.record(SppDiagnostics.Event.CLIENT_ERROR, error = SppDiagnostics.category(t))
+@@ -4479,10 +4489,11 @@
+         }, "rokidbus-spp").apply { isDaemon = true }.start()
+     }
+ 
+-    private fun readSppLoop(activeSocket: BluetoothSocket) {
+-        val input = activeSocket.inputStream
++    private fun readSppLoop(session: SppSession) {
++        val input = session.socket.inputStream
+         while (true) {
+             val envelope = FrameProtocol.read(input) ?: return
++            if (!sppSessions.isCurrent(session)) return
+             log("SPP RX ${envelope.path} id=${envelope.id}")
+             routeRemote(envelope)
+         }
+--- a/phone-hub/src/main/java/com/anezium/rokidbus/phone/SppClientSessionOwner.kt
++++ b/phone-hub/src/main/java/com/anezium/rokidbus/phone/SppClientSessionOwner.kt
+@@ -2,15 +2,28 @@
+ 
+ import java.util.concurrent.atomic.AtomicReference
+ 
+-/** Publishes a whole connection and retires only the session held by the failing operation. */
++/** Session identity plus a lifecycle fence for connects that return after stop/restart. */
+ internal class SppClientSessionOwner<T : Any>(private val close: (T) -> Unit) {
++    private val lock = Any()
+     private val active = AtomicReference<T?>(null)
++    private var generation = 0L
++    private var enabled = true
++    private var stopped = false
+ 
+     fun current(): T? = active.get()
++    fun isCurrent(session: T): Boolean = active.get() === session
++    fun beginAttempt(): Long? = synchronized(lock) {
++        generation.takeIf { enabled && !stopped }
++    }
+ 
+-    fun install(session: T) {
+-        val previous = active.getAndSet(session)
++    /** False means no ownership transfer; caller closes its rejected socket in finally. */
++    fun install(session: T, attempt: Long? = beginAttempt()): Boolean {
++        val previous = synchronized(lock) {
++            if (!enabled || stopped || attempt == null || generation != attempt) return false
++            active.getAndSet(session)
++        }
+         if (previous != null && previous !== session) close(previous)
++        return true
+     }
+ 
+     fun retire(expected: T): Boolean {
+@@ -20,6 +33,29 @@
+     }
+ 
+     fun clearCurrent() {
+-        active.getAndSet(null)?.let(close)
++        val previous = synchronized(lock) { generation++; active.getAndSet(null) }
++        previous?.let(close)
++    }
++
++    /** Fence new publication immediately; the caller retains its normal cleanup order. */
++    fun setEnabled(value: Boolean) {
++        synchronized(lock) {
++            if (stopped || enabled == value) return
++            enabled = value
++            generation++
++        }
++    }
++
++    fun stopAccepting() {
++        synchronized(lock) {
++            if (stopped) return
++            stopped = true
++            generation++
++        }
++    }
++
++    fun shutdown() {
++        stopAccepting()
++        clearCurrent()
+     }
+ }

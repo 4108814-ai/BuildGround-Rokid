@@ -1,0 +1,32 @@
+{
+  "sha256": "0f405f9f4abd096ce5d5f6b0a465185c2b4eb5e38bb13e78845a1c2b008a3162",
+  "files": {
+    "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppServerManager.kt": {
+      "before": "21262e063d3e4a575c14c51e28914b7d5294be8726165dcf3f85b9f4b073ca7e",
+      "after": "e5794c51e7054069a8996554a6117e6a40d3bc422c27232bcf2bd095b5a3d358"
+    },
+    "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppSessionOwner.kt": {
+      "before": "48272f77504162a8d00f6ea4f25d184100606dc8e7b1fb6b8ecfb84d11367686",
+      "after": "de4347946055d32e78cc23bc8cc96de53aab1676cc76b41deb75f2b2d64d82de"
+    },
+    "phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt": {
+      "before": "336c789fdb1443ed938ba1dcf445ff8e63d013389dafaa1bd5f4e7e2f3aac2b1",
+      "after": "1b0de1b64542517afd0e8f1370e10c597e1e3a6f1391e5fda5a59195450a4067"
+    },
+    "phone-hub/src/main/java/com/anezium/rokidbus/phone/SppClientSessionOwner.kt": {
+      "before": "87b88ccc4bf052f18db9cc6fc2418c47b7bc46e401f0be8bb436999b24a9b61d",
+      "after": "659ffd7fb259ea5b7ba3d31c6c66a4738c9896873de44972d8635f694ce1be0e"
+    }
+  },
+  "source_differences_from_saved_diagnostic_project": [
+    "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppServerManager.kt",
+    "glasses-hub/src/main/java/com/anezium/rokidbus/glasses/SppSessionOwner.kt",
+    "phone-hub/src/main/java/com/anezium/rokidbus/phone/BusHubService.kt",
+    "phone-hub/src/main/java/com/anezium/rokidbus/phone/LocalGlassesApkPolicy.kt",
+    "phone-hub/src/main/java/com/anezium/rokidbus/phone/SppClientSessionOwner.kt"
+  ],
+  "picker_policy_note": "Reconstructed exact signed Phone04 hash pin from its CI receipt; excluded from new patch.",
+  "original_head_and_tracked_status_unchanged": true,
+  "non_ascii_lines_unchanged": true,
+  "manifests_build_scripts_permissions_unchanged": true
+}
